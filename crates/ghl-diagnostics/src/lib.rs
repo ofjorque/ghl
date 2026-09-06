@@ -141,3 +141,4 @@ mod tests {
         assert!(rendered.contains("[Compute Error C0102]"));
     }
 }
+

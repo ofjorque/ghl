@@ -9,3 +9,4 @@ impl HirModule {
         Self { name: name.into() }
     }
 }
+

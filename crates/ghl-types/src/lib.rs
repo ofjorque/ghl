@@ -86,3 +86,4 @@ mod tests {
         assert_eq!(observed.na_reason(), None);
     }
 }
+
