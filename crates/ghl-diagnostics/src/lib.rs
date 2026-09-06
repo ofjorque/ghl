@@ -1,10 +1,26 @@
 //! Diagnostic reporting engine for GHL (Generalized Hypothesis Language).
 //!
-//! Provides the dual error classification:
+//! Provides the dual error classification and Cockpit Deck telemetry integration:
 //! - `[Compute Error Cxxxx]` with expressive computer-glitch Kaomojis (e.g. `(ノ°□°)ノ`)
 //! - `[Statistical Error Sxxxx]` with observant feline Kaomojis (e.g. `ฅ(ﾐΦ ﻌ Φﾐ)ฅ`)
 //! - `[Statistical Warning SWxxxx]` with cautionary feline Kaomojis (e.g. `(ФωФ)`)
 //! - Success / Hints with faithful canine Haru Kaomojis (e.g. `(U・ᴥ・U)`)
+//!
+//! Fully integrates with Cockpit Deck v0.5.0:
+//! - `RenderCaps` capability detection and degradation matrix (ANSI, Unicode, Width, NO_COLOR)
+//! - `SymbolRegistry` semantic codes and badges
+//! - `CockpitPanel` width-clipped terminal cards
+//! - `Sparkline` 8-level inline data distributions
+
+pub mod caps;
+pub mod panel;
+pub mod registry;
+pub mod sparkline;
+
+pub use caps::RenderCaps;
+pub use panel::CockpitPanel;
+pub use registry::{SemanticCode, SymbolEntry, SymbolRegistry};
+pub use sparkline::Sparkline;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSeverity {
@@ -23,6 +39,16 @@ impl DiagnosticSeverity {
             Self::StatisticalWarning => "(ФωФ)",
             Self::Info => "(=^･ω･^=)",
             Self::Success => "(U・ᴥ・U)",
+        }
+    }
+
+    pub fn ascii_fallback(&self) -> &'static str {
+        match self {
+            Self::ComputeError => "[COMP-ERR]",
+            Self::StatisticalError => "[STAT-ERR]",
+            Self::StatisticalWarning => "[STAT-WARN]",
+            Self::Info => "[NOTE]",
+            Self::Success => "[SUCCESS]",
         }
     }
 
@@ -109,17 +135,42 @@ impl Diagnostic {
         matches!(self.severity, DiagnosticSeverity::StatisticalWarning)
     }
 
+    /// Render diagnostic using default environment capabilities.
     pub fn render(&self) -> String {
-        let mut out = String::new();
-        let kaomoji = self.severity.kaomoji();
-        let prefix = self.severity.prefix();
+        self.render_with_caps(&RenderCaps::detect())
+    }
 
-        out.push_str(&format!("{kaomoji} [{prefix} {}]: {}\n", self.code, self.message));
+    /// Render diagnostic with explicit terminal capabilities (Unicode vs ASCII, Color vs NO_COLOR).
+    pub fn render_with_caps(&self, caps: &RenderCaps) -> String {
+        let mut out = String::new();
+        let kaomoji = if caps.unicode_enabled {
+            self.severity.kaomoji()
+        } else {
+            self.severity.ascii_fallback()
+        };
+        let prefix = self.severity.prefix();
+        let header = format!("{kaomoji} [{prefix} {}]: {}", self.code, self.message);
+
+        let styled_header = match self.severity {
+            DiagnosticSeverity::ComputeError | DiagnosticSeverity::StatisticalError => {
+                caps.red(&caps.bold(&header))
+            }
+            DiagnosticSeverity::StatisticalWarning => caps.yellow(&caps.bold(&header)),
+            DiagnosticSeverity::Info => caps.cyan(&header),
+            DiagnosticSeverity::Success => caps.green(&caps.bold(&header)),
+        };
+
+        out.push_str(&format!("{styled_header}\n"));
+
+        let tree_corner = if caps.unicode_enabled { "┌─" } else { "+-" };
+
         if let Some(loc) = &self.location {
-            out.push_str(&format!("  ┌─ {}:{}:{}\n", loc.file, loc.line, loc.column));
+            let loc_str = format!("  {tree_corner} {}:{}:{}", loc.file, loc.line, loc.column);
+            out.push_str(&format!("{}\n", caps.dim(&loc_str)));
         }
         if let Some(help) = &self.help {
-            out.push_str(&format!("  = Help: {}\n", help));
+            let help_str = format!("  = Help: {help}");
+            out.push_str(&format!("{}\n", caps.dim(&help_str)));
         }
         out
     }
@@ -135,7 +186,7 @@ mod tests {
             .with_location("model.gh", 42, 10)
             .with_help("Consider Ridge regularization or dropping collinear predictors.");
 
-        let rendered = diag.render();
+        let rendered = diag.render_with_caps(&RenderCaps::rich_terminal(80));
         assert!(rendered.contains("ฅ(ﾐΦ ﻌ Φﾐ)ฅ"));
         assert!(rendered.contains("[Statistical Error S0301]"));
         assert!(rendered.contains("model.gh:42:10"));
@@ -147,9 +198,20 @@ mod tests {
             .with_location("main.gh", 12, 5)
             .with_help("Explicitly convert to expected type.");
 
-        let rendered = diag.render();
+        let rendered = diag.render_with_caps(&RenderCaps::rich_terminal(80));
         assert!(rendered.contains("(ノ°□°)ノ"));
         assert!(rendered.contains("[Compute Error C0102]"));
     }
-}
 
+    #[test]
+    fn test_ascii_degradation_render() {
+        let diag = Diagnostic::statistical_warning("SW0301", "Multicollinearity detected")
+            .with_location("analysis.gh", 15, 3)
+            .with_help("VIF > 10. Consider dropping correlated columns.");
+
+        let rendered = diag.render_with_caps(&RenderCaps::ascii_plain(80));
+        assert!(rendered.contains("[STAT-WARN]"));
+        assert!(rendered.contains("+- analysis.gh:15:3"));
+        assert!(!rendered.contains("\x1b["));
+    }
+}

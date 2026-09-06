@@ -107,3 +107,4 @@ NEKO adopta los códigos estandarizados de GHL:
 * **`[Statistical Error S0201]`**: Grados de libertad insuficientes ($N \le p$).
 * **`[Statistical Warning SW0005]`**: Muestra pequeña ($N < 5$), advirtiendo que los errores asintóticos pueden estar subestimados.
 * **`[Statistical Warning SW0301]`**: Multicolinealidad severa ($VIF > 10.0$), señalando qué predictores tienen inflación de varianza.
+

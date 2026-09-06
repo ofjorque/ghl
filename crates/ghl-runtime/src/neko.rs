@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
-use ghl_diagnostics::Diagnostic;
+use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps, Sparkline};
 use crate::matrix::MatrixOps;
 use crate::value::Value;
 
@@ -515,24 +515,34 @@ impl FittedModel {
             )),
         }
     }
-}
 
-impl fmt::Display for FittedModel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "================================================================================")?;
-        writeln!(f, "NEKO Statistical Model Summary (=^･ω･^=)")?;
-        writeln!(f, "Formula: {} ~ {}", self.blueprint.response, self.blueprint.terms.join(" + "))?;
-        if self.dropped_n > 0 {
-            writeln!(f, "Observations: {} valid ({} dropped due to NA)", self.n_obs, self.dropped_n)?;
+    /// Renders the model fit as a structured Cockpit Deck terminal card.
+    pub fn render_cockpit(&self, caps: &RenderCaps) -> String {
+        let mut panel = CockpitPanel::new("NEKO Model Fit");
+        let badge = if caps.unicode_enabled { "(U・ᴥ・U) CONVERGED" } else { "[CONVERGED]" };
+        panel.with_badge(badge);
+
+        panel.add_kv("Formula", format!("{} ~ {}", self.blueprint.response, self.blueprint.terms.join(" + ")));
+
+        let obs_text = if self.dropped_n > 0 {
+            format!("{} valid ({} dropped due to NA)", self.n_obs, self.dropped_n)
         } else {
-            writeln!(f, "Observations: {} valid", self.n_obs)?;
-        }
-        writeln!(f, "Residual Standard Error: {:.4} on {} degrees of freedom", self.residual_se, self.df_resid)?;
-        writeln!(f, "Multiple R-squared: {:.4}, Adjusted R-squared: {:.4}", self.r_squared, self.adj_r_squared)?;
-        writeln!(f, "F-statistic: {:.2} on {} and {} DF", self.f_stat, self.blueprint.terms.len(), self.df_resid)?;
-        writeln!(f, "--------------------------------------------------------------------------------")?;
-        writeln!(f, "{:<16} {:>12} {:>12} {:>10} {:>10}  Signif", "Term", "Estimate", "Std. Error", "t-value", "p-value")?;
-        writeln!(f, "{:<16} {:>12} {:>12} {:>10} {:>10}  ------", "----------------", "------------", "------------", "----------", "----------")?;
+            format!("{} valid", self.n_obs)
+        };
+        panel.add_kv("Observations", obs_text);
+
+        let spark = Sparkline::render(&self.residuals, Some(16), caps);
+        let min_res = self.residuals.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_res = self.residuals.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        panel.add_kv("Residuals", format!("{spark}  (min: {:.3}, max: +{:.3})", min_res, max_res));
+
+        panel.add_kv("Goodness of Fit", format!("R² = {:.4} | Adj R² = {:.4} | F = {:.2}", self.r_squared, self.adj_r_squared, self.f_stat));
+        panel.add_kv("Criteria", format!("AIC = {:.2} | BIC = {:.2} | Res SE = {:.4} on {} DF", self.aic, self.bic, self.residual_se, self.df_resid));
+
+        panel.add_divider();
+
+        panel.add_line(format!("{:<16} {:>10} {:>10} {:>9} {:>9}  {:^6}", "Term", "Estimate", "Std.Err", "t-stat", "p-val", "Signif"));
+        panel.add_line(format!("{:<16} {:>10} {:>10} {:>9} {:>9}  {:^6}", "----------------", "----------", "----------", "---------", "---------", "------"));
 
         for i in 0..self.blueprint.term_names.len() {
             let term = &self.blueprint.term_names[i];
@@ -552,29 +562,33 @@ impl fmt::Display for FittedModel {
                 " "
             };
 
-            writeln!(
-                f,
-                "{:<16} {:>12.4} {:>12.4} {:>10.2} {:>10.4}  {:^6}",
+            panel.add_line(format!(
+                "{:<16} {:>10.4} {:>10.4} {:>9.2} {:>9.4}  {:^6}",
                 term, est, se, t, p, stars
-            )?;
+            ));
         }
 
-        writeln!(f, "---")?;
-        writeln!(f, "Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1")?;
+        panel.add_divider();
+        panel.add_line(caps.dim("Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1"));
 
         if !self.warnings.is_empty() {
-            writeln!(f, "--------------------------------------------------------------------------------")?;
-            writeln!(f, "Diagnostic Warnings:")?;
+            panel.add_divider();
+            panel.add_line(caps.yellow(&caps.bold("Diagnostic Warnings:")));
             for w in &self.warnings {
-                writeln!(f, "{}", w.render())?;
+                panel.add_line(w.render_with_caps(caps));
             }
         } else {
-            writeln!(f, "--------------------------------------------------------------------------------")?;
-            writeln!(f, "(U・ᴥ・U) Haru verified all assumptions. No severe multicollinearity detected.")?;
+            panel.add_divider();
+            panel.add_line(format!("{} Haru verified all assumptions. No severe multicollinearity.", caps.green("(U・ᴥ・U)")));
         }
 
-        writeln!(f, "================================================================================")?;
-        Ok(())
+        panel.render(caps)
+    }
+}
+
+impl fmt::Display for FittedModel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.render_cockpit(&RenderCaps::detect()))
     }
 }
 
