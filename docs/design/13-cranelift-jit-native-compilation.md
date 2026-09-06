@@ -103,3 +103,4 @@ Y durante la ejecución interactiva:
 ```text
 [1/3 PARSE] ✔  [2/3 TYPECHECK] ✔  [3/3 CRANELIFT JIT ▶ (2 functions compiled in 0.85ms)]
 ```
+

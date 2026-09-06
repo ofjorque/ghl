@@ -41,15 +41,11 @@ Examples:
 "#);
 }
 
-fn run_repl(caps: &RenderCaps) {
-    print_banner(caps);
-    println!("Interactive shell ready. Type :quit to exit. (=^･ω･^=)\n");
+mod repl;
 
-    let sample_diag = Diagnostic::statistical_warning(
-        "SW001",
-        "Interactive session initialized with default PRNG seed (Xoshiro256++)",
-    );
-    println!("{}", sample_diag.render_with_caps(caps));
+fn run_repl(caps: &RenderCaps) {
+    let mut session = repl::ReplSession::new(caps.clone());
+    session.start();
 }
 
 fn main() {
