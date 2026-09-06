@@ -1,0 +1,11 @@
+[package]
+name = "ghl-codegen"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "JIT and AOT code generation engine for GHL using Cranelift"
+
+[dependencies]
+ghl-ir = { path = "../ghl-ir" }
+ghl-diagnostics = { path = "../ghl-diagnostics" }

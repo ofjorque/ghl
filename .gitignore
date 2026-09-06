@@ -1,0 +1,19 @@
+# Rust / Cargo build artifacts
+/target/
+**/*.rs.bk
+
+# IDE and Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Test coverage & profiling
+*.profraw
+*.profdata
+lcov.info

@@ -1,0 +1,11 @@
+[package]
+name = "ghl-ir"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Intermediate Representations (HIR & MIR) for GHL"
+
+[dependencies]
+ghl-syntax = { path = "../ghl-syntax" }
+ghl-types = { path = "../ghl-types" }

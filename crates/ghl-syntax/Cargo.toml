@@ -1,0 +1,10 @@
+[package]
+name = "ghl-syntax"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Lexer, AST and Parser for GHL"
+
+[dependencies]
+ghl-diagnostics = { path = "../ghl-diagnostics" }

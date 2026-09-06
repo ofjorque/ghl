@@ -1,0 +1,9 @@
+[package]
+name = "ghl-diagnostics"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Diagnostic formatting and Kaomoji error reporting engine for GHL"
+
+[dependencies]

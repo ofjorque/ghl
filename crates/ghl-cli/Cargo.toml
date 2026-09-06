@@ -1,0 +1,17 @@
+[package]
+name = "ghl-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Command-line interface and interactive shell for GHL"
+
+[[bin]]
+name = "ghl"
+path = "src/main.rs"
+
+[dependencies]
+ghl-syntax = { path = "../ghl-syntax" }
+ghl-diagnostics = { path = "../ghl-diagnostics" }
+ghl-types = { path = "../ghl-types" }
+ghl-runtime = { path = "../ghl-runtime" }

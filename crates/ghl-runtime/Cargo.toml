@@ -1,0 +1,11 @@
+[package]
+name = "ghl-runtime"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "High-performance statistical runtime, memory arenas, and linear algebra for GHL"
+
+[dependencies]
+ghl-types = { path = "../ghl-types" }
+ghl-diagnostics = { path = "../ghl-diagnostics" }
