@@ -200,6 +200,88 @@ impl TypeEnv {
             false,
         );
 
+        // NEKO Statistical Modeling Verbs
+        env.insert(
+            "fit".into(),
+            Type::Function {
+                params: vec![Type::Formula, Type::Any],
+                ret: Box::new(Type::ModelFit),
+            },
+            false,
+        );
+        env.insert(
+            "ols".into(),
+            Type::Function {
+                params: vec![Type::Formula, Type::Any],
+                ret: Box::new(Type::ModelFit),
+            },
+            false,
+        );
+        env.insert(
+            "summary".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
+            "tidy".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+        env.insert(
+            "glance".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+        env.insert(
+            "augment".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::Any],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+        env.insert(
+            "residuals".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Vector(Box::new(Type::F64))),
+            },
+            false,
+        );
+        env.insert(
+            "predict".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::Any],
+                ret: Box::new(Type::Vector(Box::new(Type::F64))),
+            },
+            false,
+        );
+        env.insert(
+            "coef".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Vector(Box::new(Type::F64))),
+            },
+            false,
+        );
+        env.insert(
+            "vcov".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Matrix(Box::new(Type::F64))),
+            },
+            false,
+        );
+
         env
     }
 

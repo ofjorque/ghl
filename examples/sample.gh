@@ -8,9 +8,9 @@ fn solve_ols(x: Matrix[f64], y: Vector[f64]) -> Vector[f64] {
 }
 
 let df = dataframe {
-    id: [1, 2, 3, 4],
-    response: [10.5, 20.0, NA, 35.8],
-    sensor: [101.2, 104.5, NA:SensorDropout, 108.9]
+    id: [1, 2, 3, 4, 5, 6],
+    response: [10.5, 20.0, NA, 35.8, 48.2, 59.7],
+    sensor: [101.2, 104.5, NA:SensorDropout, 108.9, 112.4, 115.8]
 };
 
 let cov_matrix = mat [
@@ -39,4 +39,16 @@ println(model);
 
 println("(=^･ω･^=) Observation Status:", observation_status);
 println("(U・ᴥ・U) OLS Solved Coefficients (cov_matrix \\ [1.5, 2.5]):", beta);
+
+println("");
+println("(=^･ω･^=) Fitting Statistical Model with NEKO Framework...");
+let fitted_ols = fit(model, df);
+summary(fitted_ols);
+
+println("(=^･ω･^=) NEKO Tidy Parameter Estimates (tidy):");
+println(tidy(fitted_ols));
+
+println("(U・ᴥ・U) NEKO Augmented Observations (augment):");
+println(augment(fitted_ols, df));
+
 

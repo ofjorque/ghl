@@ -4,6 +4,7 @@ use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::{Expr, BinaryOp};
 use ghl_types::ContrastScheme;
 use crate::env::RuntimeEnv;
+use crate::neko::FittedModel;
 
 pub type NativeFunction = fn(Vec<Value>) -> Result<Value, Diagnostic>;
 
@@ -45,6 +46,8 @@ pub enum Value {
         response: String,
         terms: Vec<String>,
     },
+    /// Fitted statistical model under NEKO framework
+    ModelFit(Box<FittedModel>),
     Closure {
         params: Vec<String>,
         body: Expr,
@@ -109,6 +112,7 @@ impl Value {
             Value::ColPredicate { .. } => "ColPredicate",
             Value::Factor { .. } => "Factor",
             Value::Formula { .. } => "Formula",
+            Value::ModelFit(_) => "ModelFit",
             Value::Closure { .. } => "Function",
             Value::NativeFn(_) => "NativeFunction",
         }
@@ -146,6 +150,7 @@ impl PartialEq for Value {
                 Value::Formula { response: r1, terms: t1 },
                 Value::Formula { response: r2, terms: t2 },
             ) => r1 == r2 && t1 == t2,
+            (Value::ModelFit(m1), Value::ModelFit(m2)) => m1 == m2,
             _ => false,
         }
     }
@@ -235,6 +240,7 @@ impl fmt::Display for Value {
             Value::Formula { response, terms } => {
                 write!(f, "{} ~ {}", response, terms.join(" + "))
             }
+            Value::ModelFit(m) => write!(f, "{}", m),
             Value::Closure { params, .. } => {
                 write!(f, "fn({}) -> <closure>", params.join(", "))
             }

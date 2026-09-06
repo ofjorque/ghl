@@ -7,10 +7,12 @@ pub mod value;
 pub mod matrix;
 pub mod env;
 pub mod eval;
+pub mod neko;
 
 pub use value::Value;
 pub use env::RuntimeEnv;
 pub use eval::Interpreter;
+pub use neko::{Blueprint, FittedModel, RowDisposition, VcovKind};
 
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::Program;
@@ -181,6 +183,166 @@ mod tests {
             assert_eq!(ids[2], Value::I64(4));
         } else {
             panic!("Expected DataFrame result");
+        }
+    }
+
+    #[test]
+    fn test_neko_ols_fit_and_projections() {
+        // True model: y = 5.0 + 2.0*x1 - 1.0*x2
+        // Observations:
+        // x1 = [1, 2, 3, 4, 5, 6]
+        // x2 = [2, 1, 4, 3, 6, 5]
+        // y  = [5 + 2*1 - 2 = 5,
+        //       5 + 2*2 - 1 = 8,
+        //       5 + 2*3 - 4 = 7,
+        //       5 + 2*4 - 3 = 10,
+        //       5 + 2*5 - 6 = 9,
+        //       5 + 2*6 - 5 = 12]
+        let code = r#"
+            let df = dataframe {
+                x1: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                x2: [2.0, 1.0, 4.0, 3.0, 6.0, 5.0],
+                y:  [5.0, 8.0, 7.0, 10.0, 9.0, 12.0]
+            };
+
+            let model = fit(y ~ x1 + x2, df);
+            let tidied = tidy(model);
+            let glanced = glance(model);
+            let coefficients = coef(model);
+            let pred = predict(model, df);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        // Verify coefficients
+        let coef_val = interp.env.get("coefficients").expect("coef exists");
+        if let Value::Vector(coefs) = coef_val {
+            assert_eq!(coefs.len(), 3);
+            let b0 = coefs[0].as_f64().unwrap();
+            let b1 = coefs[1].as_f64().unwrap();
+            let b2 = coefs[2].as_f64().unwrap();
+            assert!((b0 - 5.0).abs() < 1e-6, "b0 should be 5.0, got {}", b0);
+            assert!((b1 - 2.0).abs() < 1e-6, "b1 should be 2.0, got {}", b1);
+            assert!((b2 - -1.0).abs() < 1e-6, "b2 should be -1.0, got {}", b2);
+        } else {
+            panic!("Expected Vector for coef");
+        }
+
+        // Verify tidy table
+        let tidy_val = interp.env.get("tidied").expect("tidy exists");
+        if let Value::DataFrame { columns, data } = tidy_val {
+            assert_eq!(columns, vec!["term", "estimate", "std_error", "statistic", "p_value"]);
+            let terms = data.get("term").unwrap();
+            assert_eq!(terms.len(), 3);
+            assert_eq!(terms[0], Value::String("(Intercept)".into()));
+            assert_eq!(terms[1], Value::String("x1".into()));
+            assert_eq!(terms[2], Value::String("x2".into()));
+        } else {
+            panic!("Expected DataFrame for tidy");
+        }
+
+        // Verify glance table
+        let glance_val = interp.env.get("glanced").expect("glance exists");
+        if let Value::DataFrame { columns, data } = glance_val {
+            assert!(columns.contains(&"r_squared".to_string()));
+            let r2 = data.get("r_squared").unwrap()[0].as_f64().unwrap();
+            assert!((r2 - 1.0).abs() < 1e-6, "R2 must be 1.0 for perfect linear fit");
+        } else {
+            panic!("Expected DataFrame for glance");
+        }
+
+        // Verify predictions
+        let pred_val = interp.env.get("pred").expect("pred exists");
+        if let Value::Vector(preds) = pred_val {
+            assert_eq!(preds.len(), 6);
+            assert!((preds[0].as_f64().unwrap() - 5.0).abs() < 1e-6);
+            assert!((preds[1].as_f64().unwrap() - 8.0).abs() < 1e-6);
+        } else {
+            panic!("Expected Vector for predict");
+        }
+    }
+
+    #[test]
+    fn test_neko_na_disposition_in_augment() {
+        let code = r#"
+            let df = dataframe {
+                x: [1.0, 2.0, NA:SensorDropout, 4.0, 5.0, 6.0],
+                y: [2.0, 4.0, 6.0, 8.0, 10.0, 12.0]
+            };
+
+            let model = fit(y ~ x, df);
+            let eval_df = augment(model, df);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let eval_val = interp.env.get("eval_df").expect("eval_df exists");
+        if let Value::DataFrame { columns, data } = eval_val {
+            assert!(columns.contains(&".fitted".to_string()));
+            assert!(columns.contains(&".used_in_fit".to_string()));
+            assert!(columns.contains(&".na_reason".to_string()));
+
+            let used = data.get(".used_in_fit").unwrap();
+            let reasons = data.get(".na_reason").unwrap();
+
+            // Row 0 (valid)
+            assert_eq!(used[0], Value::Bool(true));
+            assert_eq!(reasons[0], Value::String("none".into()));
+
+            // Row 2 (NA:SensorDropout)
+            assert_eq!(used[2], Value::Bool(false));
+            assert_eq!(reasons[2], Value::String("SensorDropout".into()));
+        } else {
+            panic!("Expected DataFrame for augment");
+        }
+    }
+
+    #[test]
+    fn test_neko_singular_matrix_emits_s0101() {
+        // Collinear predictors: x2 = 2 * x1
+        let code = r#"
+            let df = dataframe {
+                x1: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                x2: [2.0, 4.0, 6.0, 8.0, 10.0, 12.0],
+                y:  [3.0, 5.0, 7.0, 9.0, 11.0, 13.0]
+            };
+
+            let model = fit(y ~ x1 + x2, df);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let res = interp.eval_program(&program);
+
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert_eq!(err.code, "S0101");
+    }
+
+    #[test]
+    fn test_neko_vcov_hc3() {
+        let code = r#"
+            let df = dataframe {
+                x: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                y: [2.1, 3.9, 6.2, 7.8, 10.1, 12.0]
+            };
+
+            let model = fit(y ~ x, df);
+            let v_hc3 = vcov(model, "HC3");
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let vcov_val = interp.env.get("v_hc3").expect("v_hc3 exists");
+        if let Value::Matrix { rows, cols, data } = vcov_val {
+            assert_eq!(rows, 2);
+            assert_eq!(cols, 2);
+            assert!(data[0] > 0.0); // Var(Intercept) > 0
+            assert!(data[3] > 0.0); // Var(x) > 0
+        } else {
+            panic!("Expected Matrix for vcov");
         }
     }
 }

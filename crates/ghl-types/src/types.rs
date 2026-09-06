@@ -29,6 +29,8 @@ pub enum Type {
     },
     /// Statistical modeling formula (response ~ predictors).
     Formula,
+    /// Fitted statistical model (NEKO framework).
+    ModelFit,
     /// First-class function type.
     Function {
         params: Vec<Type>,
@@ -133,6 +135,7 @@ impl Type {
                     contrast: ContrastScheme::Treatment,
                 },
                 "Formula" | "formula" => Type::Formula,
+                "ModelFit" | "modelfit" => Type::ModelFit,
                 "()" | "unit" | "void" => Type::Unit,
                 _ => Type::Any,
             },
@@ -194,6 +197,7 @@ impl fmt::Display for Type {
                 }
             }
             Type::Formula => write!(f, "Formula"),
+            Type::ModelFit => write!(f, "ModelFit"),
             Type::Function { params, ret } => {
                 write!(f, "fn(")?;
                 for (i, p) in params.iter().enumerate() {

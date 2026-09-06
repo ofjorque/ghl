@@ -37,14 +37,14 @@ impl DiagnosticSeverity {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceLocation {
     pub file: String,
     pub line: usize,
     pub column: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
     pub code: String,
