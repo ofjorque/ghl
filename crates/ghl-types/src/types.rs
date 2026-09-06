@@ -31,6 +31,8 @@ pub enum Type {
     Formula,
     /// Fitted statistical model (NEKO framework).
     ModelFit,
+    /// Grammar of Graphics statistical plot.
+    Plot,
     /// First-class function type.
     Function {
         params: Vec<Type>,
@@ -136,6 +138,7 @@ impl Type {
                 },
                 "Formula" | "formula" => Type::Formula,
                 "ModelFit" | "modelfit" => Type::ModelFit,
+                "Plot" | "plot" => Type::Plot,
                 "()" | "unit" | "void" => Type::Unit,
                 _ => Type::Any,
             },
@@ -198,6 +201,7 @@ impl fmt::Display for Type {
             }
             Type::Formula => write!(f, "Formula"),
             Type::ModelFit => write!(f, "ModelFit"),
+            Type::Plot => write!(f, "Plot"),
             Type::Function { params, ret } => {
                 write!(f, "fn(")?;
                 for (i, p) in params.iter().enumerate() {

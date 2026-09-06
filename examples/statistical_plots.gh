@@ -1,0 +1,37 @@
+// GHL (Generalized Hypothesis Language) - Grammar of Graphics Showcase (RFC 09)
+// Demonstrates Wilkinson's Grammar of Graphics pipelines (|>) for statistical visualization in Cockpit Deck.
+
+println("(=^･ω･^=) Initializing Cockpit Deck Statistical Graphics Showcase...\n");
+
+let df = dataframe {
+    id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    sensor: [10.2, 14.8, 19.5, 25.1, 31.0, 36.8, 41.2, 47.9, 53.4, 59.8],
+    response: [24.5, 31.0, 42.8, 51.2, 63.4, 75.1, 82.9, 97.4, 108.2, 121.5]
+};
+
+// 1. Declarative Grammar of Graphics Pipeline: Scatter + OLS Trend Line
+println("(U・ᴥ・U) 1. Grammar of Graphics Pipeline (geom_point + geom_smooth):");
+let p1 = df |> plot(aes(col("sensor"), col("response")))
+            |> geom_point()
+            |> geom_smooth()
+            |> labs("Sensor vs Response with OLS Trend Line");
+show(p1);
+
+// 2. Frequency Distribution Histogram (8-level Unicode blocks)
+println("(=^･ω･^=) 2. Frequency Distribution Histogram (geom_histogram):");
+let sample_data = [
+    12.0, 14.5, 15.2, 15.8, 16.1, 16.9, 18.2, 18.5, 19.1, 19.8,
+    20.2, 20.9, 21.5, 21.8, 22.4, 23.1, 24.5, 25.8, 28.2, 31.0
+];
+let h = sample_data |> hist();
+show(h);
+
+// 3. Tukey Box-and-Whisker Plot with Outlier Detection
+println("(U・ᴥ・U) 3. Tukey Box-and-Whisker Plot (geom_boxplot):");
+let observations = [
+    15.0, 18.2, 19.5, 21.0, 22.4, 23.8, 24.5, 25.1, 26.8, 28.0, 29.5, 52.0
+];
+let b = observations |> boxplot();
+show(b);
+
+println("(=^･ω･^=) Statistical graphics successfully rendered by Haru & Gojo!");

@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
-use ghl_diagnostics::{CockpitTable, RenderCaps, TableAlignment, TableColumn, Diagnostic};
+use ghl_diagnostics::{
+    CockpitTable, RenderCaps, TableAlignment, TableColumn, Diagnostic,
+    AestheticMap, GeomLayer, PlotSpec,
+};
 use ghl_syntax::ast::{Expr, BinaryOp};
 use ghl_types::ContrastScheme;
 use crate::env::RuntimeEnv;
@@ -48,6 +51,10 @@ pub enum Value {
     },
     /// Fitted statistical model under NEKO framework
     ModelFit(Box<FittedModel>),
+    /// Grammar of Graphics statistical plot
+    Plot(Box<PlotSpec>),
+    Aesthetic(AestheticMap),
+    Geom(GeomLayer),
     Closure {
         params: Vec<String>,
         body: Expr,
@@ -113,6 +120,9 @@ impl Value {
             Value::Factor { .. } => "Factor",
             Value::Formula { .. } => "Formula",
             Value::ModelFit(_) => "ModelFit",
+            Value::Plot(_) => "Plot",
+            Value::Aesthetic(_) => "Aesthetic",
+            Value::Geom(_) => "Geom",
             Value::Closure { .. } => "Function",
             Value::NativeFn(_) => "NativeFunction",
         }
@@ -151,6 +161,9 @@ impl PartialEq for Value {
                 Value::Formula { response: r2, terms: t2 },
             ) => r1 == r2 && t1 == t2,
             (Value::ModelFit(m1), Value::ModelFit(m2)) => m1 == m2,
+            (Value::Plot(p1), Value::Plot(p2)) => p1 == p2,
+            (Value::Aesthetic(a1), Value::Aesthetic(a2)) => a1 == a2,
+            (Value::Geom(g1), Value::Geom(g2)) => g1 == g2,
             _ => false,
         }
     }
@@ -359,6 +372,18 @@ impl Value {
                 format!("{} ~ {}", response, terms.join(" + "))
             }
             Value::ModelFit(m) => m.render_cockpit(caps),
+            Value::Plot(p) => p.render(caps),
+            Value::Aesthetic(a) => {
+                let mut parts = vec![format!("x: \"{}\"", a.x)];
+                if let Some(ref y) = a.y {
+                    parts.push(format!("y: \"{}\"", y));
+                }
+                if let Some(ref c) = a.color {
+                    parts.push(format!("color: \"{}\"", c));
+                }
+                format!("aes({})", parts.join(", "))
+            }
+            Value::Geom(g) => format!("{:?}", g.kind),
             Value::Closure { params, .. } => {
                 format!("fn({}) -> <closure>", params.join(", "))
             }

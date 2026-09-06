@@ -1,0 +1,684 @@
+//! Grammar of Graphics & Terminal Visualization Engine for GHL Cockpit Deck.
+//!
+//! Implements RFC 09:
+//! - Scatter plots (`geom_point`)
+//! - Regression trend lines (`geom_smooth`)
+//! - Histograms (`geom_histogram`) with 8-level vertical blocks
+//! - Box-and-whisker plots (`geom_boxplot`) with Tukey fences and outlier markers
+//! - Bar charts (`geom_bar`) for categorical frequencies
+//! - Full RenderCaps support (Unicode vs ASCII, ANSI colors vs NO_COLOR)
+
+use crate::caps::RenderCaps;
+use crate::panel::visual_width;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AestheticMap {
+    pub x: String,
+    pub y: Option<String>,
+    pub color: Option<String>,
+}
+
+impl AestheticMap {
+    pub fn new(x: impl Into<String>) -> Self {
+        Self {
+            x: x.into(),
+            y: None,
+            color: None,
+        }
+    }
+
+    pub fn with_y(mut self, y: impl Into<String>) -> Self {
+        self.y = Some(y.into());
+        self
+    }
+
+    pub fn with_color(mut self, color: impl Into<String>) -> Self {
+        self.color = Some(color.into());
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GeomKind {
+    Point { glyph: Option<char> },
+    Line,
+    Smooth,
+    Histogram { bins: usize },
+    Boxplot,
+    Bar,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeomLayer {
+    pub kind: GeomKind,
+}
+
+impl GeomLayer {
+    pub fn point() -> Self {
+        Self {
+            kind: GeomKind::Point { glyph: None },
+        }
+    }
+
+    pub fn line() -> Self {
+        Self {
+            kind: GeomKind::Line,
+        }
+    }
+
+    pub fn smooth() -> Self {
+        Self {
+            kind: GeomKind::Smooth,
+        }
+    }
+
+    pub fn histogram(bins: usize) -> Self {
+        Self {
+            kind: GeomKind::Histogram { bins },
+        }
+    }
+
+    pub fn boxplot() -> Self {
+        Self {
+            kind: GeomKind::Boxplot,
+        }
+    }
+
+    pub fn bar() -> Self {
+        Self {
+            kind: GeomKind::Bar,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlotLabels {
+    pub title: Option<String>,
+    pub subtitle: Option<String>,
+    pub x_label: Option<String>,
+    pub y_label: Option<String>,
+    pub caption: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlotSpec {
+    pub mapping: Option<AestheticMap>,
+    pub layers: Vec<GeomLayer>,
+    pub labels: PlotLabels,
+    pub x_data: Vec<f64>,
+    pub y_data: Vec<f64>,
+    pub categories: Vec<String>,
+    pub width: usize,
+    pub height: usize,
+}
+
+impl PlotSpec {
+    pub fn new() -> Self {
+        Self {
+            mapping: None,
+            layers: Vec::new(),
+            labels: PlotLabels::default(),
+            x_data: Vec::new(),
+            y_data: Vec::new(),
+            categories: Vec::new(),
+            width: 58,
+            height: 12,
+        }
+    }
+
+    pub fn with_mapping(mut self, map: AestheticMap) -> Self {
+        self.mapping = Some(map);
+        self
+    }
+
+    pub fn add_layer(mut self, layer: GeomLayer) -> Self {
+        self.layers.push(layer);
+        self
+    }
+
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.labels.title = Some(title.into());
+        self
+    }
+
+    pub fn with_labels(mut self, title: Option<String>, x: Option<String>, y: Option<String>) -> Self {
+        self.labels.title = title;
+        self.labels.x_label = x;
+        self.labels.y_label = y;
+        self
+    }
+
+    pub fn with_xy_data(mut self, x: Vec<f64>, y: Vec<f64>) -> Self {
+        self.x_data = x;
+        self.y_data = y;
+        self
+    }
+
+    pub fn with_x_data(mut self, x: Vec<f64>) -> Self {
+        self.x_data = x;
+        self
+    }
+
+    pub fn with_categories(mut self, cats: Vec<String>) -> Self {
+        self.categories = cats;
+        self
+    }
+
+    /// Renders the plot into a complete Cockpit Deck terminal card.
+    pub fn render(&self, caps: &RenderCaps) -> String {
+        // Determine primary plot type from layers
+        let is_hist = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Histogram { .. }));
+        let is_box = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Boxplot));
+        let is_bar = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Bar));
+
+        if is_hist {
+            let bins = self.layers.iter().find_map(|l| match l.kind {
+                GeomKind::Histogram { bins } => Some(bins),
+                _ => None,
+            }).unwrap_or(8);
+            self.render_histogram(bins, caps)
+        } else if is_box {
+            self.render_boxplot(caps)
+        } else if is_bar {
+            self.render_bar(caps)
+        } else {
+            // Default: 2D Cartesian (scatter / line / smooth)
+            self.render_scatter(caps)
+        }
+    }
+
+    fn render_scatter(&self, caps: &RenderCaps) -> String {
+        let (tl, tr, bl, br, hz, vt, sep_l, sep_r) = if caps.unicode_enabled {
+            ('╭', '╮', '╰', '╯', '─', '│', '├', '┤')
+        } else {
+            ('+', '+', '+', '+', '-', '|', '+', '+')
+        };
+
+        let card_width = 72.min(caps.width);
+        let plot_w = card_width.saturating_sub(18).max(20);
+        let plot_h = self.height.max(8);
+
+        let n_points = self.x_data.len().min(self.y_data.len());
+        if n_points == 0 {
+            return format!("{tl}{}{tr}\n{vt} (Empty scatter data) {vt}\n{bl}{}{br}",
+                hz.to_string().repeat(card_width - 2),
+                hz.to_string().repeat(card_width - 2)
+            );
+        }
+
+        // Bounding box
+        let min_x = self.x_data.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_x = self.x_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let min_y = self.y_data.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_y = self.y_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+
+        let span_x = if (max_x - min_x).abs() < 1e-9 { 1.0 } else { max_x - min_x };
+        let span_y = if (max_y - min_y).abs() < 1e-9 { 1.0 } else { max_y - min_y };
+
+        // Grid canvas
+        let mut grid = vec![vec![' '; plot_w]; plot_h];
+
+        // Linear regression fit if geom_smooth is present
+        let has_smooth = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Smooth));
+        if has_smooth && n_points >= 2 {
+            let mean_x = self.x_data.iter().sum::<f64>() / n_points as f64;
+            let mean_y = self.y_data.iter().sum::<f64>() / n_points as f64;
+            let mut num = 0.0;
+            let mut den = 0.0;
+            for i in 0..n_points {
+                let dx = self.x_data[i] - mean_x;
+                num += dx * (self.y_data[i] - mean_y);
+                den += dx * dx;
+            }
+            if den.abs() > 1e-9 {
+                let slope = num / den;
+                let intercept = mean_y - slope * mean_x;
+
+                for c in 0..plot_w {
+                    let cur_x = min_x + (c as f64 / (plot_w - 1) as f64) * span_x;
+                    let cur_y = intercept + slope * cur_x;
+                    let norm_y = ((cur_y - min_y) / span_y).clamp(0.0, 1.0);
+                    let row = ((1.0 - norm_y) * (plot_h - 1) as f64).round() as usize;
+                    if row < plot_h {
+                        grid[row][c] = if caps.unicode_enabled { '·' } else { '.' };
+                    }
+                }
+            }
+        }
+
+        // Plot points
+        let point_glyph = if caps.unicode_enabled { '●' } else { '*' };
+        for i in 0..n_points {
+            let px = ((self.x_data[i] - min_x) / span_x).clamp(0.0, 1.0);
+            let py = ((self.y_data[i] - min_y) / span_y).clamp(0.0, 1.0);
+
+            let c = (px * (plot_w - 1) as f64).round() as usize;
+            let r = ((1.0 - py) * (plot_h - 1) as f64).round() as usize;
+
+            if r < plot_h && c < plot_w {
+                grid[r][c] = point_glyph;
+            }
+        }
+
+        // Build output card
+        let title = self.labels.title.clone().unwrap_or_else(|| "Scatter Plot".into());
+        let badge = if caps.unicode_enabled { "(U・ᴥ・U) READY" } else { "[READY]" };
+
+        let mut out = String::new();
+        // Top border
+        let header_inner = format!(" {title} ");
+        let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6);
+        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
+
+        // Y label if any
+        if let Some(ref yl) = self.labels.y_label {
+            let y_header = format!("{yl} ▲");
+            let y_pad = card_width.saturating_sub(visual_width(&y_header) + 4);
+            out.push_str(&format!("{vt} {}{}{vt}\n", caps.bold(&y_header), " ".repeat(y_pad)));
+        }
+
+        // Grid lines with Y axis labels
+        for r in 0..plot_h {
+            let y_val = max_y - (r as f64 / (plot_h - 1) as f64) * span_y;
+            let y_label = if r == 0 || r == plot_h / 2 || r == plot_h - 1 {
+                format!("{:>7.1}", y_val)
+            } else {
+                "       ".to_string()
+            };
+
+            let tick = if caps.unicode_enabled {
+                if r == plot_h - 1 { "┼" } else { "┤" }
+            } else {
+                if r == plot_h - 1 { "+" } else { "|" }
+            };
+
+            let mut row_chars = String::with_capacity(plot_w);
+            for &ch in &grid[r] {
+                if ch == point_glyph {
+                    row_chars.push_str(&caps.cyan(&ch.to_string()));
+                } else if ch == '·' || ch == '.' {
+                    row_chars.push_str(&caps.yellow(&ch.to_string()));
+                } else {
+                    row_chars.push(ch);
+                }
+            }
+
+            let inner_content = format!(" {} {tick} {row_chars}", caps.dim(&y_label));
+            let vlen = visual_width(&inner_content);
+            let pad = " ".repeat(card_width.saturating_sub(vlen + 2));
+            out.push_str(&format!("{vt}{inner_content}{pad}{vt}\n"));
+        }
+
+        // Bottom X axis
+        let x_axis_line = if caps.unicode_enabled {
+            format!("         └{}", "─".repeat(plot_w + 1))
+        } else {
+            format!("         +{}", "-".repeat(plot_w + 1))
+        };
+        let pad_axis = " ".repeat(card_width.saturating_sub(visual_width(&x_axis_line) + 2));
+        out.push_str(&format!("{vt}{}{pad_axis}{vt}\n", caps.dim(&x_axis_line)));
+
+        // X labels
+        let x_min_str = format!("{:<7.1}", min_x);
+        let x_max_str = format!("{:>7.1}", max_x);
+        let x_spaces = plot_w.saturating_sub(14);
+        let x_tick_labels = format!("          {x_min_str}{}{x_max_str}", " ".repeat(x_spaces));
+        let pad_x = " ".repeat(card_width.saturating_sub(visual_width(&x_tick_labels) + 2));
+        out.push_str(&format!("{vt}{}{pad_x}{vt}\n", caps.dim(&x_tick_labels)));
+
+        // X title if any
+        if let Some(ref xl) = self.labels.x_label {
+            let xl_str = format!("► {xl}");
+            let xl_left_pad = (card_width.saturating_sub(visual_width(&xl_str) + 2)) / 2;
+            let xl_right_pad = card_width.saturating_sub(visual_width(&xl_str) + 2 + xl_left_pad);
+            out.push_str(&format!("{vt}{}{}{}{vt}\n", " ".repeat(xl_left_pad), caps.bold(&xl_str), " ".repeat(xl_right_pad)));
+        }
+
+        // Footer telemetry
+        let footer_div = format!("{sep_l}{}{sep_r}", hz.to_string().repeat(card_width - 2));
+        out.push_str(&caps.dim(&format!("{footer_div}\n")));
+
+        let tele_text = if caps.unicode_enabled {
+            format!("(U・ᴥ・U) Haru rendered {} data points with OLS trend line", n_points)
+        } else {
+            format!("[Haru] Rendered {} data points with OLS trend line", n_points)
+        };
+        let pad_tele = " ".repeat(card_width.saturating_sub(visual_width(&tele_text) + 4));
+        out.push_str(&format!("{vt} {}{pad_tele} {vt}\n", caps.green(&tele_text)));
+
+        // Bottom border
+        out.push_str(&caps.dim(&format!("{bl}{}{br}\n", hz.to_string().repeat(card_width - 2))));
+
+        out
+    }
+
+    fn render_histogram(&self, num_bins: usize, caps: &RenderCaps) -> String {
+        let (tl, tr, bl, br, hz, vt, sep_l, sep_r) = if caps.unicode_enabled {
+            ('╭', '╮', '╰', '╯', '─', '│', '├', '┤')
+        } else {
+            ('+', '+', '+', '+', '-', '|', '+', '+')
+        };
+
+        let card_width = 72.min(caps.width);
+        let n = self.x_data.len();
+        if n == 0 {
+            return "Empty data for histogram".to_string();
+        }
+
+        let bins_count = num_bins.clamp(4, 16);
+        let min_x = self.x_data.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_x = self.x_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let span = if (max_x - min_x).abs() < 1e-9 { 1.0 } else { max_x - min_x };
+        let bin_width = span / bins_count as f64;
+
+        let mut counts = vec![0usize; bins_count];
+        for &x in &self.x_data {
+            let idx = (((x - min_x) / span) * bins_count as f64).floor() as usize;
+            let idx = idx.min(bins_count - 1);
+            counts[idx] += 1;
+        }
+
+        let max_count = *counts.iter().max().unwrap_or(&1).max(&1);
+        let hist_height = 8usize;
+
+        // Unicode 8-level blocks: ' ', ' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'
+        let blocks = [' ', ' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+        let mut out = String::new();
+        let title = self.labels.title.clone().unwrap_or_else(|| "Frequency Distribution (Histogram)".into());
+        let badge = if caps.unicode_enabled { "(=^･ω･^=) NEKO" } else { "[NEKO]" };
+
+        let pad_top = card_width.saturating_sub(visual_width(&title) + visual_width(badge) + 8);
+        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
+
+        for h in (0..hist_height).rev() {
+            let row_val = ((h + 1) as f64 / hist_height as f64) * max_count as f64;
+            let label = if h == hist_height - 1 || h == hist_height / 2 || h == 0 {
+                format!("{:>5.0}", row_val)
+            } else {
+                "     ".to_string()
+            };
+
+            let tick = if caps.unicode_enabled { "┤" } else { "|" };
+            let mut bar_line = String::new();
+
+            for &c in &counts {
+                let col_height_fraction = (c as f64 / max_count as f64) * hist_height as f64;
+                let full_bars = col_height_fraction.floor() as usize;
+                let rem = col_height_fraction - full_bars as f64;
+
+                let ch = if h < full_bars {
+                    if caps.unicode_enabled { '█' } else { '#' }
+                } else if h == full_bars && rem > 0.0 {
+                    if caps.unicode_enabled {
+                        let block_idx = (rem * 8.0).round() as usize;
+                        blocks[block_idx.clamp(1, 8)]
+                    } else {
+                        ':'
+                    }
+                } else {
+                    ' '
+                };
+
+                bar_line.push_str(&format!("  {ch} "));
+            }
+
+            let inner = format!(" {} {tick} {}", caps.dim(&label), caps.cyan(&bar_line));
+            let vlen = visual_width(&inner);
+            let pad = " ".repeat(card_width.saturating_sub(vlen + 2));
+            out.push_str(&format!("{vt}{inner}{pad}{vt}\n"));
+        }
+
+        // Bottom axis line
+        let bot_axis = if caps.unicode_enabled {
+            format!("       └{}", "───┬".repeat(bins_count))
+        } else {
+            format!("       +{}", "---+".repeat(bins_count))
+        };
+        let pad_ax = " ".repeat(card_width.saturating_sub(visual_width(&bot_axis) + 2));
+        out.push_str(&format!("{vt}{}{pad_ax}{vt}\n", caps.dim(&bot_axis)));
+
+        // Range labels
+        let min_s = format!("{:<6.1}", min_x);
+        let max_s = format!("{:>6.1}", max_x);
+        let mid_s = format!("{:^6.1}", min_x + span / 2.0);
+        let span_pad = (bins_count * 4).saturating_sub(18);
+        let range_labels = format!("        {min_s}{mid_s}{}{max_s}", " ".repeat(span_pad));
+        let pad_r = " ".repeat(card_width.saturating_sub(visual_width(&range_labels) + 2));
+        out.push_str(&format!("{vt}{}{pad_r}{vt}\n", caps.dim(&range_labels)));
+
+        // Telemetry
+        let div = format!("{sep_l}{}{sep_r}", hz.to_string().repeat(card_width - 2));
+        out.push_str(&caps.dim(&format!("{div}\n")));
+        let tele = format!("Observations: {} | Bins: {} | Width: {:.2} | Max Count: {}", n, bins_count, bin_width, max_count);
+        let pad_t = " ".repeat(card_width.saturating_sub(visual_width(&tele) + 4));
+        out.push_str(&format!("{vt} {}{pad_t} {vt}\n", caps.dim(&tele)));
+
+        out.push_str(&caps.dim(&format!("{bl}{}{br}\n", hz.to_string().repeat(card_width - 2))));
+        out
+    }
+
+    fn render_boxplot(&self, caps: &RenderCaps) -> String {
+        let (tl, tr, bl, br, hz, vt, sep_l, sep_r) = if caps.unicode_enabled {
+            ('╭', '╮', '╰', '╯', '─', '│', '├', '┤')
+        } else {
+            ('+', '+', '+', '+', '-', '|', '+', '+')
+        };
+
+        let card_width = 72.min(caps.width);
+        let n = self.x_data.len();
+        if n < 4 {
+            return "At least 4 observations required for boxplot".to_string();
+        }
+
+        let mut sorted = self.x_data.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        let min_v = sorted[0];
+        let max_v = sorted[n - 1];
+        let q1 = sorted[n / 4];
+        let median = sorted[n / 2];
+        let q3 = sorted[(3 * n) / 4];
+        let iqr = q3 - q1;
+        let lower_fence = (q1 - 1.5 * iqr).max(min_v);
+        let upper_fence = (q3 + 1.5 * iqr).min(max_v);
+
+        let outliers: Vec<f64> = sorted.iter().copied().filter(|&x| x < lower_fence || x > upper_fence).collect();
+
+        // 1D horizontal bar mapping
+        let bar_width = card_width.saturating_sub(20).max(24);
+        let span = if (max_v - min_v).abs() < 1e-9 { 1.0 } else { max_v - min_v };
+
+        let map_col = |v: f64| -> usize {
+            let frac = ((v - min_v) / span).clamp(0.0, 1.0);
+            (frac * (bar_width - 1) as f64).round() as usize
+        };
+
+        let col_lf = map_col(lower_fence);
+        let col_q1 = map_col(q1);
+        let col_med = map_col(median);
+        let col_q3 = map_col(q3);
+        let col_uf = map_col(upper_fence);
+
+        let mut bar = vec![' '; bar_width];
+        // Lower whisker
+        for c in col_lf..col_q1 {
+            bar[c] = if caps.unicode_enabled { '─' } else { '-' };
+        }
+        bar[col_lf] = if caps.unicode_enabled { '├' } else { '|' };
+
+        // Box
+        for c in col_q1..=col_q3 {
+            bar[c] = ' ';
+        }
+        bar[col_q1] = '[';
+        bar[col_med] = if caps.unicode_enabled { '│' } else { '|' };
+        bar[col_q3] = ']';
+
+        // Upper whisker
+        for c in (col_q3 + 1)..=col_uf {
+            bar[c] = if caps.unicode_enabled { '─' } else { '-' };
+        }
+        bar[col_uf] = if caps.unicode_enabled { '┤' } else { '|' };
+
+        // Outliers
+        for &o in &outliers {
+            let co = map_col(o);
+            if co < bar_width {
+                bar[co] = '*';
+            }
+        }
+
+        let bar_str: String = bar.into_iter().collect();
+
+        let mut out = String::new();
+        let title = self.labels.title.clone().unwrap_or_else(|| "Tukey Box-and-Whisker Plot".into());
+        let badge = if caps.unicode_enabled { "(U・ᴥ・U) QUANTILES" } else { "[QUANTILES]" };
+
+        let pad_top = card_width.saturating_sub(visual_width(&title) + visual_width(badge) + 8);
+        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
+
+        let box_line = format!("    {}", caps.cyan(&bar_str));
+        let pad_box = " ".repeat(card_width.saturating_sub(visual_width(&box_line) + 2));
+        out.push_str(&format!("{vt}{box_line}{pad_box}{vt}\n"));
+
+        // Axis underneath box
+        let min_s = format!("{:<7.1}", min_v);
+        let max_s = format!("{:>7.1}", max_v);
+        let med_s = format!("{:^7.1}", median);
+        let axis_pad = bar_width.saturating_sub(21);
+        let axis_labels = format!("    {min_s}{med_s}{}{max_s}", " ".repeat(axis_pad));
+        let pad_ax = " ".repeat(card_width.saturating_sub(visual_width(&axis_labels) + 2));
+        out.push_str(&format!("{vt}{}{pad_ax}{vt}\n", caps.dim(&axis_labels)));
+
+        // Statistical summary table
+        let div = format!("{sep_l}{}{sep_r}", hz.to_string().repeat(card_width - 2));
+        out.push_str(&caps.dim(&format!("{div}\n")));
+
+        let s1 = format!("Min: {:.2} | Q1: {:.2} | Median: {:.2} | Mean: {:.2}",
+            min_v, q1, median, self.x_data.iter().sum::<f64>() / n as f64
+        );
+        let pad_s1 = " ".repeat(card_width.saturating_sub(visual_width(&s1) + 4));
+        out.push_str(&format!("{vt} {}{pad_s1} {vt}\n", caps.bold(&s1)));
+
+        let s2 = format!("Q3: {:.2} | Max: {:.2} | IQR: {:.2} | Outliers: {}",
+            q3, max_v, iqr, outliers.len()
+        );
+        let pad_s2 = " ".repeat(card_width.saturating_sub(visual_width(&s2) + 4));
+        out.push_str(&format!("{vt} {}{pad_s2} {vt}\n", caps.dim(&s2)));
+
+        out.push_str(&caps.dim(&format!("{bl}{}{br}\n", hz.to_string().repeat(card_width - 2))));
+        out
+    }
+
+    fn render_bar(&self, caps: &RenderCaps) -> String {
+        let (tl, tr, bl, br, hz, vt, sep_l, sep_r) = if caps.unicode_enabled {
+            ('╭', '╮', '╰', '╯', '─', '│', '├', '┤')
+        } else {
+            ('+', '+', '+', '+', '-', '|', '+', '+')
+        };
+
+        let card_width = 72.min(caps.width);
+        if self.categories.is_empty() {
+            return "No categories to display in bar chart".to_string();
+        }
+
+        // Count category occurrences
+        let mut counts_map: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        for cat in &self.categories {
+            *counts_map.entry(cat.clone()).or_insert(0) += 1;
+        }
+
+        let max_cat_len = counts_map.keys().map(|k| visual_width(k)).max().unwrap_or(8).min(16);
+        let max_count = *counts_map.values().max().unwrap_or(&1).max(&1);
+        let max_bar_len = card_width.saturating_sub(max_cat_len + 16).max(10);
+
+        let mut out = String::new();
+        let title = self.labels.title.clone().unwrap_or_else(|| "Category Frequencies (Bar Chart)".into());
+        let badge = if caps.unicode_enabled { "(=^･ω･^=) STATS" } else { "[STATS]" };
+
+        let pad_top = card_width.saturating_sub(visual_width(&title) + visual_width(badge) + 8);
+        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
+
+        for (cat, count) in &counts_map {
+            let bar_len = ((count * max_bar_len) / max_count).max(1);
+            let bar_ch = if caps.unicode_enabled { "█" } else { "#" };
+            let bar_str = bar_ch.repeat(bar_len);
+
+            let pad_cat = " ".repeat(max_cat_len.saturating_sub(visual_width(cat)));
+            let row_line = format!(" {pad_cat}{} {} {} ({count})", caps.bold(cat), caps.dim("│"), caps.cyan(&bar_str));
+            let pad_row = " ".repeat(card_width.saturating_sub(visual_width(&row_line) + 2));
+            out.push_str(&format!("{vt}{row_line}{pad_row}{vt}\n"));
+        }
+
+        let div = format!("{sep_l}{}{sep_r}", hz.to_string().repeat(card_width - 2));
+        out.push_str(&caps.dim(&format!("{div}\n")));
+
+        let tele = format!("Total Categories: {} | Total Observations: {}", counts_map.len(), self.categories.len());
+        let pad_t = " ".repeat(card_width.saturating_sub(visual_width(&tele) + 4));
+        out.push_str(&format!("{vt} {}{pad_t} {vt}\n", caps.dim(&tele)));
+
+        out.push_str(&caps.dim(&format!("{bl}{}{br}\n", hz.to_string().repeat(card_width - 2))));
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_scatter_plot_render() {
+        let caps = RenderCaps::rich_terminal(72);
+        let plot = PlotSpec::new()
+            .with_title("Test Scatter")
+            .with_xy_data(vec![1.0, 2.0, 3.0, 4.0], vec![10.0, 20.0, 30.0, 40.0])
+            .add_layer(GeomLayer::point())
+            .add_layer(GeomLayer::smooth());
+
+        let rendered = plot.render(&caps);
+        assert!(rendered.contains("Test Scatter"));
+        assert!(rendered.contains("●"));
+        assert!(rendered.contains("Haru rendered 4 data points"));
+    }
+
+    #[test]
+    fn test_histogram_render() {
+        let caps = RenderCaps::rich_terminal(72);
+        let plot = PlotSpec::new()
+            .with_title("Test Histogram")
+            .with_x_data(vec![1.0, 1.2, 1.3, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0])
+            .add_layer(GeomLayer::histogram(6));
+
+        let rendered = plot.render(&caps);
+        assert!(rendered.contains("Test Histogram"));
+        assert!(rendered.contains("Observations: 9"));
+    }
+
+    #[test]
+    fn test_boxplot_render() {
+        let caps = RenderCaps::rich_terminal(72);
+        let plot = PlotSpec::new()
+            .with_title("Test Boxplot")
+            .with_x_data(vec![10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 100.0])
+            .add_layer(GeomLayer::boxplot());
+
+        let rendered = plot.render(&caps);
+        assert!(rendered.contains("Test Boxplot"));
+        assert!(rendered.contains("Median:"));
+        assert!(rendered.contains("Outliers: 1"));
+    }
+
+    #[test]
+    fn test_bar_chart_render() {
+        let caps = RenderCaps::rich_terminal(72);
+        let plot = PlotSpec::new()
+            .with_title("Test Bar")
+            .with_categories(vec!["A".into(), "B".into(), "A".into(), "C".into(), "A".into()])
+            .add_layer(GeomLayer::bar());
+
+        let rendered = plot.render(&caps);
+        assert!(rendered.contains("Test Bar"));
+        assert!(rendered.contains("Total Categories: 3"));
+    }
+}

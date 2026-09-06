@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use ghl_diagnostics::Diagnostic;
+use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
 use crate::value::Value;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -85,6 +85,22 @@ impl RuntimeEnv {
         env.set("residuals".into(), Value::NativeFn(native_residuals));
         env.set("coef".into(), Value::NativeFn(native_coef));
         env.set("vcov".into(), Value::NativeFn(native_vcov));
+
+        // Grammar of Graphics (RFC 09) Verbs
+        env.set("plot".into(), Value::NativeFn(native_plot));
+        env.set("aes".into(), Value::NativeFn(native_aes));
+        env.set("geom_point".into(), Value::NativeFn(native_geom_point));
+        env.set("geom_line".into(), Value::NativeFn(native_geom_line));
+        env.set("geom_smooth".into(), Value::NativeFn(native_geom_smooth));
+        env.set("geom_histogram".into(), Value::NativeFn(native_geom_histogram));
+        env.set("geom_boxplot".into(), Value::NativeFn(native_geom_boxplot));
+        env.set("geom_bar".into(), Value::NativeFn(native_geom_bar));
+        env.set("labs".into(), Value::NativeFn(native_labs));
+        env.set("show".into(), Value::NativeFn(native_show));
+        env.set("scatter".into(), Value::NativeFn(native_scatter));
+        env.set("hist".into(), Value::NativeFn(native_hist));
+        env.set("histogram".into(), Value::NativeFn(native_hist));
+        env.set("boxplot".into(), Value::NativeFn(native_boxplot));
 
         env
     }
@@ -573,5 +589,211 @@ fn native_vcov(args: Vec<Value>) -> Result<Value, Diagnostic> {
             format!("`vcov()` requires a ModelFit, found `{}`", other.type_name()),
         )),
     }
+}
+
+// =========================================================================
+// Grammar of Graphics (std::plot - RFC 09) Native Functions
+// =========================================================================
+
+fn native_aes(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let extract_name = |v: &Value| -> String {
+        match v {
+            Value::ColRef(s) => s.clone(),
+            Value::String(s) => s.clone(),
+            other => format!("{other}"),
+        }
+    };
+
+    let x = args.first().map(extract_name).ok_or_else(|| {
+        Diagnostic::compute_error("C0301", "`aes()` requires at least an `x` aesthetic")
+    })?;
+
+    let y = args.get(1).map(extract_name);
+    let color = args.get(2).map(extract_name);
+
+    Ok(Value::Aesthetic(AestheticMap { x, y, color }))
+}
+
+fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.is_empty() {
+        return Ok(Value::Plot(Box::new(PlotSpec::new())));
+    }
+
+    let first = &args[0];
+    match first {
+        Value::DataFrame { columns: _, data } => {
+            let mut plot_spec = PlotSpec::new();
+
+            if let Some(Value::Aesthetic(aes)) = args.get(1) {
+                plot_spec = plot_spec.with_mapping(aes.clone());
+                if let Some(col_data) = data.get(&aes.x) {
+                    let xs: Vec<f64> = col_data.iter().filter_map(|v| v.as_f64()).collect();
+                    plot_spec = plot_spec.with_x_data(xs);
+                }
+                if let Some(ref y_name) = aes.y {
+                    if let Some(col_data) = data.get(y_name) {
+                        let ys: Vec<f64> = col_data.iter().filter_map(|v| v.as_f64()).collect();
+                        plot_spec.y_data = ys;
+                    }
+                    plot_spec.labels.y_label = Some(y_name.clone());
+                    plot_spec.labels.title = Some(format!("Plot: {} vs {}", y_name, aes.x));
+                } else {
+                    plot_spec.labels.title = Some(format!("Distribution of {}", aes.x));
+                }
+                plot_spec.labels.x_label = Some(aes.x.clone());
+            } else if let Some(x_arg) = args.get(1) {
+                let x_name = match x_arg {
+                    Value::ColRef(s) | Value::String(s) => s.clone(),
+                    other => format!("{other}"),
+                };
+                if let Some(col_data) = data.get(&x_name) {
+                    let xs: Vec<f64> = col_data.iter().filter_map(|v| v.as_f64()).collect();
+                    plot_spec = plot_spec.with_x_data(xs);
+                }
+                plot_spec.labels.x_label = Some(x_name.clone());
+
+                if let Some(y_arg) = args.get(2) {
+                    let y_name = match y_arg {
+                        Value::ColRef(s) | Value::String(s) => s.clone(),
+                        other => format!("{other}"),
+                    };
+                    if let Some(col_data) = data.get(&y_name) {
+                        let ys: Vec<f64> = col_data.iter().filter_map(|v| v.as_f64()).collect();
+                        plot_spec.y_data = ys;
+                    }
+                    plot_spec.labels.y_label = Some(y_name.clone());
+                    plot_spec.labels.title = Some(format!("Plot: {} vs {}", y_name, x_name));
+                } else {
+                    plot_spec.labels.title = Some(format!("Distribution of {}", x_name));
+                }
+            }
+            Ok(Value::Plot(Box::new(plot_spec)))
+        }
+        Value::Vector(items) => {
+            let mut plot_spec = PlotSpec::new();
+            let xs: Vec<f64> = items.iter().filter_map(|v| v.as_f64()).collect();
+            plot_spec = plot_spec.with_x_data(xs);
+
+            if let Some(Value::Vector(y_items)) = args.get(1) {
+                let ys: Vec<f64> = y_items.iter().filter_map(|v| v.as_f64()).collect();
+                plot_spec.y_data = ys;
+                plot_spec.labels.title = Some("Scatter Plot (Y vs X)".into());
+            } else {
+                plot_spec.labels.title = Some("Vector Distribution".into());
+            }
+            Ok(Value::Plot(Box::new(plot_spec)))
+        }
+        Value::Plot(p) => Ok(Value::Plot(p.clone())),
+        other => Err(Diagnostic::compute_error(
+            "C0302",
+            format!("Cannot create plot from `{}`", other.type_name()),
+        )),
+    }
+}
+
+fn native_geom_point(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut p = match args.first() {
+        Some(Value::Plot(plot)) => (**plot).clone(),
+        _ => PlotSpec::new(),
+    };
+    p = p.add_layer(GeomLayer::point());
+    Ok(Value::Plot(Box::new(p)))
+}
+
+fn native_geom_line(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut p = match args.first() {
+        Some(Value::Plot(plot)) => (**plot).clone(),
+        _ => PlotSpec::new(),
+    };
+    p = p.add_layer(GeomLayer::line());
+    Ok(Value::Plot(Box::new(p)))
+}
+
+fn native_geom_smooth(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut p = match args.first() {
+        Some(Value::Plot(plot)) => (**plot).clone(),
+        _ => PlotSpec::new(),
+    };
+    p = p.add_layer(GeomLayer::smooth());
+    Ok(Value::Plot(Box::new(p)))
+}
+
+fn native_geom_histogram(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut p = match args.first() {
+        Some(Value::Plot(plot)) => (**plot).clone(),
+        _ => PlotSpec::new(),
+    };
+    let bins = args.get(1).and_then(|v| v.as_i64()).unwrap_or(8) as usize;
+    p = p.add_layer(GeomLayer::histogram(bins));
+    Ok(Value::Plot(Box::new(p)))
+}
+
+fn native_geom_boxplot(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut p = match args.first() {
+        Some(Value::Plot(plot)) => (**plot).clone(),
+        _ => PlotSpec::new(),
+    };
+    p = p.add_layer(GeomLayer::boxplot());
+    Ok(Value::Plot(Box::new(p)))
+}
+
+fn native_geom_bar(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut p = match args.first() {
+        Some(Value::Plot(plot)) => (**plot).clone(),
+        _ => PlotSpec::new(),
+    };
+    p = p.add_layer(GeomLayer::bar());
+    Ok(Value::Plot(Box::new(p)))
+}
+
+fn native_labs(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut p = match args.first() {
+        Some(Value::Plot(plot)) => (**plot).clone(),
+        _ => return Err(Diagnostic::compute_error("C0303", "`labs()` requires a Plot as first argument")),
+    };
+
+    if let Some(title) = args.get(1).and_then(|v| v.as_str()) {
+        p.labels.title = Some(title.to_string());
+    }
+    if let Some(x_lab) = args.get(2).and_then(|v| v.as_str()) {
+        p.labels.x_label = Some(x_lab.to_string());
+    }
+    if let Some(y_lab) = args.get(3).and_then(|v| v.as_str()) {
+        p.labels.y_label = Some(y_lab.to_string());
+    }
+
+    Ok(Value::Plot(Box::new(p)))
+}
+
+fn native_show(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let target = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0305", "`show()` requires a Plot or Value to render")
+    })?;
+
+    let caps = RenderCaps::detect();
+    match target {
+        Value::Plot(p) => {
+            println!("{}\n", p.render(&caps));
+        }
+        other => {
+            println!("{}\n", other.render_styled(&caps));
+        }
+    }
+    Ok(Value::Unit)
+}
+
+fn native_scatter(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let plot_val = native_plot(args)?;
+    native_geom_point(vec![plot_val])
+}
+
+fn native_hist(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let plot_val = native_plot(args)?;
+    native_geom_histogram(vec![plot_val])
+}
+
+fn native_boxplot(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let plot_val = native_plot(args)?;
+    native_geom_boxplot(vec![plot_val])
 }
 

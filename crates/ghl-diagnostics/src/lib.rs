@@ -14,12 +14,14 @@
 
 pub mod caps;
 pub mod panel;
+pub mod plot;
 pub mod registry;
 pub mod sparkline;
 pub mod table;
 
 pub use caps::RenderCaps;
 pub use panel::CockpitPanel;
+pub use plot::{AestheticMap, GeomKind, GeomLayer, PlotLabels, PlotSpec};
 pub use registry::{SemanticCode, SymbolEntry, SymbolRegistry};
 pub use sparkline::Sparkline;
 pub use table::{CockpitTable, TableAlignment, TableColumn};

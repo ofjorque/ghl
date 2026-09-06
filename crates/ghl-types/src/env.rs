@@ -282,6 +282,120 @@ impl TypeEnv {
             false,
         );
 
+        // Grammar of Graphics (RFC 09) Verbs
+        env.insert(
+            "plot".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "aes".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Any),
+            },
+            false,
+        );
+        env.insert(
+            "geom_point".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "geom_line".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "geom_smooth".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "geom_histogram".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "geom_boxplot".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "geom_bar".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "labs".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "show".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
+            "scatter".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "hist".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "histogram".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "boxplot".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+
         env
     }
 

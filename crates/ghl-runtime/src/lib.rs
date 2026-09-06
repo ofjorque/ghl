@@ -345,5 +345,42 @@ mod tests {
             panic!("Expected Matrix for vcov");
         }
     }
+
+    #[test]
+    fn test_grammar_of_graphics_pipeline() {
+        let code = r#"
+            let df = dataframe {
+                dose: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                response: [10.5, 20.0, 31.2, 39.8, 51.0, 60.5]
+            };
+
+            let p = df |> plot(aes(col("dose"), col("response")))
+                       |> geom_point()
+                       |> geom_smooth()
+                       |> labs("Dose-Response Fit");
+
+            let h = [1.0, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0] |> hist();
+            let b = [10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 100.0] |> boxplot();
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let p_val = interp.env.get("p").expect("p exists");
+        if let Value::Plot(spec) = p_val {
+            assert_eq!(spec.layers.len(), 2);
+            assert_eq!(spec.x_data.len(), 6);
+            assert_eq!(spec.y_data.len(), 6);
+            assert_eq!(spec.labels.title.as_deref(), Some("Dose-Response Fit"));
+        } else {
+            panic!("Expected Plot for p");
+        }
+
+        let h_val = interp.env.get("h").expect("h exists");
+        assert!(matches!(h_val, Value::Plot(_)));
+
+        let b_val = interp.env.get("b").expect("b exists");
+        assert!(matches!(b_val, Value::Plot(_)));
+    }
 }
 

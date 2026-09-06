@@ -264,7 +264,7 @@ impl ReplSession {
 
                     if is_expr {
                         match &final_val {
-                            Value::DataFrame { .. } | Value::ModelFit(_) | Value::Matrix { .. } => {
+                            Value::DataFrame { .. } | Value::ModelFit(_) | Value::Matrix { .. } | Value::Plot(_) => {
                                 println!("{}\n", final_val.render_styled(&self.caps));
                             }
                             _ => {
