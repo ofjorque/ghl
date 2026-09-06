@@ -98,6 +98,17 @@ impl Diagnostic {
         self
     }
 
+    pub fn is_error(&self) -> bool {
+        matches!(
+            self.severity,
+            DiagnosticSeverity::ComputeError | DiagnosticSeverity::StatisticalError
+        )
+    }
+
+    pub fn is_warning(&self) -> bool {
+        matches!(self.severity, DiagnosticSeverity::StatisticalWarning)
+    }
+
     pub fn render(&self) -> String {
         let mut out = String::new();
         let kaomoji = self.severity.kaomoji();

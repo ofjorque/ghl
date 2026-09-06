@@ -75,7 +75,19 @@ fn main() {
                     match ghl_syntax::parse(&content) {
                         Ok(program) => {
                             println!("(=^･ω･^=) Gojo verified syntax successfully for `{}`!", file);
-                            println!("(U・ᴥ・U) Haru parsed {} top-level statements with zero errors.", program.statements.len());
+                            println!("(U・ᴥ・U) Haru parsed {} top-level statements.", program.statements.len());
+
+                            match ghl_types::check(&program, file) {
+                                Ok(_) => {
+                                    println!("(U・ᴥ・U) Haru verified all types and statistical semantics with zero errors!");
+                                }
+                                Err(diags) => {
+                                    for diag in diags {
+                                        eprintln!("{}", diag.render());
+                                    }
+                                    std::process::exit(1);
+                                }
+                            }
                         }
                         Err(errors) => {
                             for err_msg in errors {

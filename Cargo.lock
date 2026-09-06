@@ -99,6 +99,7 @@ name = "ghl-types"
 version = "0.1.0"
 dependencies = [
  "ghl-diagnostics",
+ "ghl-syntax",
 ]
 
 [[package]]
