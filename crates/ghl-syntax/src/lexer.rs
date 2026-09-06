@@ -1,10 +1,24 @@
 use logos::Logos;
 
+fn skip_block_comment(lex: &mut logos::Lexer<Token>) -> logos::Skip {
+    match lex.remainder().find("*/") {
+        Some(pos) => {
+            lex.bump(pos + 2);
+            logos::Skip
+        }
+        None => {
+            lex.bump(lex.remainder().len());
+            logos::Skip
+        }
+    }
+}
+
 #[derive(Logos, Debug, Clone, PartialEq, Eq, Hash)]
 #[logos(skip r"[ \t\n\r\f]+")] // Skip whitespace
 #[logos(skip r"//[^\n]*")]     // Skip line comments
-#[logos(skip r"/\*([^*]|\*[^/])*\*/")] // Skip block comments
 pub enum Token {
+    #[regex(r"/\*", skip_block_comment)]
+    BlockComment,
     // Keywords: Declarations
     #[token("fn")]
     Fn,
@@ -121,7 +135,7 @@ pub enum Token {
     DotSlash,
 
     // Linear Algebra & Arithmetic Operators
-    #[token(r"\")]
+    #[token("\\")]
     Backslash,
     #[token("+")]
     Plus,
@@ -270,6 +284,34 @@ mod tests {
                 Token::DotStar,
                 Token::Ident("Y".into()),
                 Token::RParen,
+                Token::Semicolon,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_lex_block_comments() {
+        let src = r#"
+            let a = 10; /* this is a block comment
+            spanning multiple lines */ let b = 20;
+        "#;
+        let tokens: Vec<Token> = lex(src)
+            .into_iter()
+            .map(|(r, _)| r.unwrap())
+            .collect();
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Let,
+                Token::Ident("a".into()),
+                Token::Eq,
+                Token::IntLit(10),
+                Token::Semicolon,
+                Token::Let,
+                Token::Ident("b".into()),
+                Token::Eq,
+                Token::IntLit(20),
                 Token::Semicolon,
             ]
         );

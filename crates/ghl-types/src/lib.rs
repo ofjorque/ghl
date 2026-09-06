@@ -20,7 +20,10 @@ pub enum GhlValue<T> {
 
 impl<T> GhlValue<T> {
     pub fn is_na(&self) -> bool {
-        matches!(self, Self::NA(_))
+        match self {
+            Self::NA(_) => true,
+            _ => false,
+        }
     }
 
     pub fn na_reason(&self) -> Option<&NAReason> {
