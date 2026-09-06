@@ -16,11 +16,13 @@ pub mod caps;
 pub mod panel;
 pub mod registry;
 pub mod sparkline;
+pub mod table;
 
 pub use caps::RenderCaps;
 pub use panel::CockpitPanel;
 pub use registry::{SemanticCode, SymbolEntry, SymbolRegistry};
 pub use sparkline::Sparkline;
+pub use table::{CockpitTable, TableAlignment, TableColumn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSeverity {

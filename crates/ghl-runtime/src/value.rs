@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
-use ghl_diagnostics::Diagnostic;
+use ghl_diagnostics::{CockpitTable, RenderCaps, TableAlignment, TableColumn, Diagnostic};
 use ghl_syntax::ast::{Expr, BinaryOp};
 use ghl_types::ContrastScheme;
 use crate::env::RuntimeEnv;
@@ -156,39 +156,137 @@ impl PartialEq for Value {
     }
 }
 
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Value {
+    /// Render the value with modern terminal styling, respecting RenderCaps (Unicode vs ASCII, Color vs Plain).
+    pub fn render_styled(&self, caps: &RenderCaps) -> String {
         match self {
-            Value::I64(n) => write!(f, "{}", n),
-            Value::F64(x) => write!(f, "{}", x),
-            Value::Bool(b) => write!(f, "{}", b),
-            Value::String(s) => write!(f, "\"{}\"", s),
-            Value::Unit => write!(f, "()"),
-            Value::NA(None) => write!(f, "NA"),
-            Value::NA(Some(r)) => write!(f, "NA:{}", r),
-            Value::Vector(items) => {
-                write!(f, "[")?;
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", item)?;
+            Value::I64(n) => {
+                if caps.color_enabled {
+                    caps.cyan(&n.to_string())
+                } else {
+                    n.to_string()
                 }
-                write!(f, "]")
+            }
+            Value::F64(x) => {
+                let s = if x.fract() == 0.0 && x.abs() < 1e12 {
+                    format!("{:.1}", x)
+                } else {
+                    format!("{:.4}", x).trim_end_matches('0').trim_end_matches('.').to_string()
+                };
+                if caps.color_enabled {
+                    caps.cyan(&s)
+                } else {
+                    s
+                }
+            }
+            Value::Bool(b) => {
+                if caps.color_enabled {
+                    caps.magenta(&b.to_string())
+                } else {
+                    b.to_string()
+                }
+            }
+            Value::String(s) => {
+                let formatted = format!("\"{}\"", s);
+                if caps.color_enabled {
+                    caps.green(&formatted)
+                } else {
+                    formatted
+                }
+            }
+            Value::Unit => "()".to_string(),
+            Value::NA(None) => {
+                if caps.color_enabled {
+                    caps.yellow("NA")
+                } else {
+                    "NA".to_string()
+                }
+            }
+            Value::NA(Some(r)) => {
+                let s = format!("NA:{}", r);
+                if caps.color_enabled {
+                    caps.yellow(&s)
+                } else {
+                    s
+                }
+            }
+            Value::Vector(items) => {
+                let ty = if items.is_empty() {
+                    "empty"
+                } else {
+                    let first_ty = items[0].type_name();
+                    let homogeneous = items.iter().all(|it| it.type_name() == first_ty);
+                    if homogeneous { first_ty } else { "any" }
+                };
+
+                let n = items.len();
+                let header = format!("Vector[{}] (n={}): ", ty, n);
+
+                if n <= 10 {
+                    let rendered_items: Vec<String> = items.iter().map(|it| it.render_styled(caps)).collect();
+                    format!("{}[{}]", header, rendered_items.join(", "))
+                } else {
+                    let head: Vec<String> = items[..5].iter().map(|it| it.render_styled(caps)).collect();
+                    let tail: Vec<String> = items[(n - 3)..].iter().map(|it| it.render_styled(caps)).collect();
+                    let omitted = n - 8;
+                    let ell = if caps.unicode_enabled { "…" } else { "..." };
+                    let ell_styled = caps.dim(&format!("{} ({} omitted) {}", ell, omitted, ell));
+                    format!("{}[{}, {}, {}]", header, head.join(", "), ell_styled, tail.join(", "))
+                }
             }
             Value::Matrix { rows, cols, data } => {
-                writeln!(f, "Matrix[{}x{}]:", rows, cols)?;
-                for r in 0..*rows {
-                    write!(f, "  [ ")?;
-                    for c in 0..*cols {
-                        if c > 0 {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "{:>6.2}", data[r * cols + c])?;
-                    }
-                    writeln!(f, " ]")?;
+                if *rows == 0 || *cols == 0 {
+                    let mult = if caps.unicode_enabled { "×" } else { "x" };
+                    return format!("Matrix[f64] (0 {} 0): []", mult);
                 }
-                Ok(())
+
+                let mult = if caps.unicode_enabled { "×" } else { "x" };
+                let mut out = format!("Matrix[f64] ({} {} {}):\n", rows, mult, cols);
+
+                // Format numbers with clean decimal precision
+                let mut formatted_cells: Vec<String> = Vec::with_capacity(rows * cols);
+                let mut col_max_w: Vec<usize> = vec![0; *cols];
+
+                for r in 0..*rows {
+                    for c in 0..*cols {
+                        let val = data[r * cols + c];
+                        let s = format!("{val:>7.3}");
+                        col_max_w[c] = col_max_w[c].max(s.chars().count());
+                        formatted_cells.push(s);
+                    }
+                }
+
+                for r in 0..*rows {
+                    let (open_b, close_b) = if caps.unicode_enabled {
+                        if *rows == 1 {
+                            ("[", "]")
+                        } else if r == 0 {
+                            ("⎡", "⎤")
+                        } else if r == rows - 1 {
+                            ("⎣", "⎦")
+                        } else {
+                            ("⎢", "⎥")
+                        }
+                    } else {
+                        ("[", "]")
+                    };
+
+                    out.push_str(" ");
+                    out.push_str(&caps.dim(open_b));
+                    for c in 0..*cols {
+                        let s = &formatted_cells[r * cols + c];
+                        let pad = " ".repeat(col_max_w[c].saturating_sub(s.chars().count()));
+                        out.push_str("  ");
+                        out.push_str(&pad);
+                        out.push_str(s);
+                    }
+                    out.push_str("  ");
+                    out.push_str(&caps.dim(close_b));
+                    if r + 1 < *rows {
+                        out.push('\n');
+                    }
+                }
+                out
             }
             Value::DataFrame { columns, data } => {
                 let num_rows = columns
@@ -196,31 +294,52 @@ impl fmt::Display for Value {
                     .and_then(|c| data.get(c))
                     .map(|v| v.len())
                     .unwrap_or(0);
-                writeln!(f, "DataFrame ({} rows x {} cols):", num_rows, columns.len())?;
+
+                let mut table = CockpitTable::new();
                 for col in columns {
-                    write!(f, "{:>12} ", col)?;
+                    let col_data = data.get(col);
+                    let detected_ty = col_data
+                        .and_then(|v| v.iter().find(|it| !it.is_na()))
+                        .map(|it| it.type_name())
+                        .unwrap_or("any");
+
+                    let align = match detected_ty {
+                        "i64" | "f64" => TableAlignment::Right,
+                        _ => TableAlignment::Left,
+                    };
+
+                    table.add_column(
+                        TableColumn::new(col.clone())
+                            .with_type(detected_ty)
+                            .with_alignment(align),
+                    );
                 }
-                writeln!(f)?;
-                for _ in columns {
-                    write!(f, "{:>12} ", "------------")?;
-                }
-                writeln!(f)?;
+
                 for r in 0..num_rows {
+                    let mut row_cells = Vec::with_capacity(columns.len());
                     for col in columns {
                         if let Some(col_data) = data.get(col) {
                             if let Some(val) = col_data.get(r) {
-                                write!(f, "{:>12} ", format!("{}", val))?;
+                                row_cells.push(match val {
+                                    Value::String(s) => s.clone(),
+                                    Value::F64(f) => format!("{f:>7.2}"),
+                                    Value::I64(n) => n.to_string(),
+                                    Value::NA(None) => "NA".to_string(),
+                                    Value::NA(Some(reason)) => format!("NA:{}", reason),
+                                    other => format!("{other}"),
+                                });
                             } else {
-                                write!(f, "{:>12} ", "NA")?;
+                                row_cells.push("NA".to_string());
                             }
                         }
                     }
-                    writeln!(f)?;
+                    table.add_row(row_cells);
                 }
-                Ok(())
+
+                table.render(caps)
             }
-            Value::ColRef(c) => write!(f, "col(\"{}\")", c),
-            Value::ColPredicate { col, op, rhs } => write!(f, "col(\"{}\") {:?} {}", col, op, rhs),
+            Value::ColRef(c) => format!("col(\"{}\")", c),
+            Value::ColPredicate { col, op, rhs } => format!("col(\"{}\") {:?} {}", col, op, rhs),
             Value::Factor {
                 levels,
                 indices,
@@ -228,8 +347,7 @@ impl fmt::Display for Value {
                 contrast,
             } => {
                 let kind = if *ordered { "OrderedFactor" } else { "Factor" };
-                write!(
-                    f,
+                format!(
                     "{}[n={}, levels={:?}, contrast={:?}]",
                     kind,
                     indices.len(),
@@ -238,13 +356,20 @@ impl fmt::Display for Value {
                 )
             }
             Value::Formula { response, terms } => {
-                write!(f, "{} ~ {}", response, terms.join(" + "))
+                format!("{} ~ {}", response, terms.join(" + "))
             }
-            Value::ModelFit(m) => write!(f, "{}", m),
+            Value::ModelFit(m) => m.render_cockpit(caps),
             Value::Closure { params, .. } => {
-                write!(f, "fn({}) -> <closure>", params.join(", "))
+                format!("fn({}) -> <closure>", params.join(", "))
             }
-            Value::NativeFn(_) => write!(f, "<native_fn>"),
+            Value::NativeFn(_) => "<native_fn>".to_string(),
         }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let caps = RenderCaps::detect();
+        write!(f, "{}", self.render_styled(&caps))
     }
 }

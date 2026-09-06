@@ -1,9 +1,9 @@
-//! Interactive REPL for GHL with persistent environment, Cockpit Deck cards, and session commands.
-
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps};
 use ghl_runtime::{Interpreter, Value};
 use ghl_types::TypeEnv;
+use rustyline::error::ReadlineError;
+use rustyline::DefaultEditor;
 
 pub struct ReplSession {
     pub interpreter: Interpreter,
@@ -25,39 +25,67 @@ impl ReplSession {
     pub fn start(&mut self) {
         self.print_welcome();
 
-        let stdin = io::stdin();
-        let mut reader = stdin.lock();
-        let mut buffer = String::new();
+        let history_path = std::env::var("HOME")
+            .ok()
+            .map(|h| std::path::PathBuf::from(h).join(".ghl_history"));
+
+        let mut rl = match DefaultEditor::new() {
+            Ok(mut editor) => {
+                if let Some(ref p) = history_path {
+                    let _ = editor.load_history(p);
+                }
+                Some(editor)
+            }
+            Err(_) => None,
+        };
+
         let mut multi_line_accum = String::new();
 
         loop {
-            // Prompt
-            if multi_line_accum.is_empty() {
-                let prompt = format!("ghl{}> ", self.caps.cyan("(=^･ω･^=)"));
-                print!("{}", prompt);
+            let prompt = if multi_line_accum.is_empty() {
+                format!("ghl{}> ", self.caps.cyan("(=^･ω･^=)"))
             } else {
-                let cont_prompt = format!("   {} ", self.caps.dim("..."));
-                print!("{}", cont_prompt);
-            }
-            io::stdout().flush().unwrap_or(());
+                format!("   {} ", self.caps.dim("..."))
+            };
 
-            buffer.clear();
-            match reader.read_line(&mut buffer) {
-                Ok(0) => break, // EOF (Ctrl+D)
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("Error reading input: {e}");
-                    break;
+            let line = if let Some(ref mut editor) = rl {
+                match editor.readline(&prompt) {
+                    Ok(l) => l,
+                    Err(ReadlineError::Interrupted) => {
+                        println!("^C");
+                        multi_line_accum.clear();
+                        continue;
+                    }
+                    Err(ReadlineError::Eof) => break,
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        break;
+                    }
+                }
+            } else {
+                print!("{}", prompt);
+                io::stdout().flush().unwrap_or(());
+                let mut buf = String::new();
+                match io::stdin().read_line(&mut buf) {
+                    Ok(0) => break,
+                    Ok(_) => buf,
+                    Err(e) => {
+                        eprintln!("Error reading input: {e}");
+                        break;
+                    }
                 }
             };
 
-            let trimmed = buffer.trim();
-            if trimmed.is_empty() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() && multi_line_accum.is_empty() {
                 continue;
             }
 
             // Handle REPL commands (e.g. :quit, :help, :vars)
             if multi_line_accum.is_empty() && trimmed.starts_with(':') {
+                if let Some(ref mut editor) = rl {
+                    let _ = editor.add_history_entry(trimmed);
+                }
                 if self.handle_command(trimmed) {
                     break; // :quit was issued
                 }
@@ -75,7 +103,15 @@ impl ReplSession {
             let code_to_eval = multi_line_accum.trim().to_string();
             multi_line_accum.clear();
 
+            if let Some(ref mut editor) = rl {
+                let _ = editor.add_history_entry(code_to_eval.as_str());
+            }
+
             self.eval_input(&code_to_eval);
+        }
+
+        if let (Some(mut editor), Some(ref p)) = (rl, history_path) {
+            let _ = editor.save_history(p);
         }
 
         self.print_goodbye();
@@ -228,12 +264,12 @@ impl ReplSession {
 
                     if is_expr {
                         match &final_val {
-                            Value::DataFrame { .. } | Value::ModelFit(_) => {
-                                println!("{}\n", final_val);
+                            Value::DataFrame { .. } | Value::ModelFit(_) | Value::Matrix { .. } => {
+                                println!("{}\n", final_val.render_styled(&self.caps));
                             }
                             _ => {
-                                let val_str = format!("{final_val}");
-                                println!("{} {}\n", self.caps.cyan("=>"), self.caps.bold(&val_str));
+                                let val_str = final_val.render_styled(&self.caps);
+                                println!("{} {}\n", self.caps.cyan("=>"), val_str);
                             }
                         }
                     }
