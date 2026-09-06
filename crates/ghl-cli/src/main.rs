@@ -70,7 +70,29 @@ fn main() {
                 std::process::exit(1);
             }
             let file = &args[2];
-            println!("(=^･ω･^=) Gojo is checking syntax and statistical validity for: {}", file);
+            match std::fs::read_to_string(file) {
+                Ok(content) => {
+                    match ghl_syntax::parse(&content) {
+                        Ok(program) => {
+                            println!("(=^･ω･^=) Gojo verified syntax successfully for `{}`!", file);
+                            println!("(U・ᴥ・U) Haru parsed {} top-level statements with zero errors.", program.statements.len());
+                        }
+                        Err(errors) => {
+                            for err_msg in errors {
+                                let err = Diagnostic::compute_error("C0100", err_msg)
+                                    .with_location(file, 1, 1);
+                                eprintln!("{}", err.render());
+                            }
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(io_err) => {
+                    let err = Diagnostic::compute_error("C0004", format!("Failed to read file `{}`: {}", file, io_err));
+                    eprintln!("{}", err.render());
+                    std::process::exit(1);
+                }
+            }
         }
         "help" | "-h" | "--help" => print_help(),
         other => {
