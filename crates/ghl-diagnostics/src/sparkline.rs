@@ -121,3 +121,4 @@ mod tests {
         assert_eq!(spark.chars().count(), 10);
     }
 }
+

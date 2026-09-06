@@ -1,12 +1,7 @@
 //! High-level and Mid-level Intermediate Representation for GHL.
 
-pub struct HirModule {
-    pub name: String,
-}
+pub mod hir;
+pub mod lower;
 
-impl HirModule {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
-    }
-}
-
+pub use hir::*;
+pub use lower::{lower_ast, LoweringContext};

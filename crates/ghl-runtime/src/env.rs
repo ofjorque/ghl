@@ -4,7 +4,7 @@ use crate::value::Value;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeEnv {
-    scopes: Vec<HashMap<String, Value>>,
+    pub scopes: Vec<HashMap<String, Value>>,
 }
 
 impl RuntimeEnv {

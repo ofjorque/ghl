@@ -165,3 +165,4 @@ mod tests {
         assert_eq!(SemanticCode::ExecSuccess.glyph(&plain), "[SUCCESS]");
     }
 }
+

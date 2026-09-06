@@ -120,3 +120,4 @@ Convierte una serie numérica en una micro-gráfica inline de 8 alturas:
    El método `render_cockpit` se invoca automáticamente al imprimir modelos estadísticos, mostrando parámetros, significancia y sparkline de residuos en un solo bloque autocontenido.
 4. **`ghl repl`**:
    Presenta el banner Cockpit Deck interactivo con la versión del runtime y las capacidades activas del entorno.
+

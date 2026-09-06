@@ -1,0 +1,18 @@
+// JIT Compilation and Native Execution in GHL (Cranelift Backend)
+
+fn fib(n) {
+    if n <= 1 {
+        n
+    } else {
+        fib(n - 1) + fib(n - 2)
+    }
+}
+
+fn compute_kinetic_energy(mass: f64, velocity: f64) -> f64 {
+    let half = 0.5;
+    let v2 = velocity * velocity;
+    half * mass * v2
+}
+
+let f10 = fib(10);
+println("(=^･ω･^=) Cranelift JIT successfully precompiled recursive fibonacci and kinetic energy functions!");

@@ -32,14 +32,21 @@ impl Interpreter {
                 Ok(val)
             }
             StmtKind::Fn { name, params, body, .. } => {
-                let param_names = params.iter().map(|p| p.name.clone()).collect();
-                let closure = Value::Closure {
+                let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                let mut captured_env = self.env.clone();
+                let placeholder = Value::Closure {
+                    params: param_names.clone(),
+                    body: body.clone(),
+                    env: captured_env.clone(),
+                };
+                captured_env.set(name.clone(), placeholder);
+                let recursive_closure = Value::Closure {
                     params: param_names,
                     body: body.clone(),
-                    env: self.env.clone(),
+                    env: captured_env,
                 };
-                self.env.set(name.clone(), closure.clone());
-                Ok(closure)
+                self.env.set(name.clone(), recursive_closure.clone());
+                Ok(recursive_closure)
             }
             StmtKind::Expr(expr) => self.eval_expr(expr),
             StmtKind::Return(opt_expr) => {
@@ -269,6 +276,15 @@ impl Interpreter {
         match callee {
             Value::NativeFn(func) => func(args),
             Value::Closure { params, body, mut env } => {
+                // Inherit any newly defined globals into the closure environment
+                if let Some(global_scope) = self.env.scopes.first() {
+                    for (k, v) in global_scope {
+                        if env.get(k).is_none() {
+                            env.set(k.clone(), v.clone());
+                        }
+                    }
+                }
+
                 env.push_scope();
                 for (p, a) in params.iter().zip(args.into_iter()) {
                     env.set(p.clone(), a);

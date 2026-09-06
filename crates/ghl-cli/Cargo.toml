@@ -15,4 +15,6 @@ ghl-syntax = { path = "../ghl-syntax" }
 ghl-diagnostics = { path = "../ghl-diagnostics" }
 ghl-types = { path = "../ghl-types" }
 ghl-runtime = { path = "../ghl-runtime" }
+ghl-ir = { path = "../ghl-ir" }
+ghl-codegen = { path = "../ghl-codegen" }
 

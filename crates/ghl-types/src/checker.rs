@@ -70,28 +70,40 @@ impl TypeChecker {
                 ret_ty,
                 body,
             } => {
-                let mut param_types = Vec::new();
-                self.env.push_scope();
+                let expected_ret = ret_ty
+                    .as_ref()
+                    .map(Type::from_annotation)
+                    .unwrap_or(Type::Any);
 
+                let mut param_types = Vec::new();
                 for p in params {
                     let p_ty = p
                         .ty
                         .as_ref()
                         .map(Type::from_annotation)
                         .unwrap_or(Type::Any);
-                    param_types.push(p_ty.clone());
-                    self.env.insert(p.name.clone(), p_ty, false);
+                    param_types.push(p_ty);
+                }
+
+                // Register function signature before checking body to support recursive calls
+                self.env.insert(
+                    name.clone(),
+                    Type::Function {
+                        params: param_types.clone(),
+                        ret: Box::new(expected_ret.clone()),
+                    },
+                    false,
+                );
+
+                self.env.push_scope();
+                for (p, p_ty) in params.iter().zip(&param_types) {
+                    self.env.insert(p.name.clone(), p_ty.clone(), false);
                 }
 
                 let body_ty = self.check_expr(body);
                 self.env.pop_scope();
 
-                let expected_ret = ret_ty
-                    .as_ref()
-                    .map(Type::from_annotation)
-                    .unwrap_or(Type::Unit);
-
-                if body_ty.unify(&expected_ret).is_none() && expected_ret != Type::Unit {
+                if body_ty.unify(&expected_ret).is_none() && expected_ret != Type::Unit && expected_ret != Type::Any {
                     self.diagnostics.push(
                         Diagnostic::compute_error(
                             "C0102",
@@ -104,15 +116,6 @@ impl TypeChecker {
                         .with_help("Adjust the function body or declared return type so they agree."),
                     );
                 }
-
-                self.env.insert(
-                    name.clone(),
-                    Type::Function {
-                        params: param_types,
-                        ret: Box::new(expected_ret),
-                    },
-                    false,
-                );
             }
 
             StmtKind::Expr(expr) => {
