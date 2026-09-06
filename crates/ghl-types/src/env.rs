@@ -364,6 +364,14 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "save".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::String],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
             "scatter".into(),
             Type::Function {
                 params: vec![Type::Any],

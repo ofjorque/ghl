@@ -97,6 +97,7 @@ impl RuntimeEnv {
         env.set("geom_bar".into(), Value::NativeFn(native_geom_bar));
         env.set("labs".into(), Value::NativeFn(native_labs));
         env.set("show".into(), Value::NativeFn(native_show));
+        env.set("save".into(), Value::NativeFn(native_save));
         env.set("scatter".into(), Value::NativeFn(native_scatter));
         env.set("hist".into(), Value::NativeFn(native_hist));
         env.set("histogram".into(), Value::NativeFn(native_hist));
@@ -795,5 +796,32 @@ fn native_hist(args: Vec<Value>) -> Result<Value, Diagnostic> {
 fn native_boxplot(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let plot_val = native_plot(args)?;
     native_geom_boxplot(vec![plot_val])
+}
+
+fn native_save(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let plot_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0310", "`save()` requires a Plot as first argument")
+    })?;
+
+    let path_val = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| {
+        Diagnostic::compute_error(
+            "C0311",
+            "`save()` requires a destination file path string as second argument (e.g. `save(p, \"output.png\")`)"
+        )
+    })?;
+
+    match plot_val {
+        Value::Plot(p) => {
+            p.save_file(path_val).map_err(|e| {
+                Diagnostic::compute_error("C0312", format!("Failed to export plot to `{path_val}`: {e}"))
+            })?;
+            println!("(U・ᴥ・U) Haru successfully exported plot to `{}`", path_val);
+            Ok(Value::Unit)
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0310",
+            format!("`save()` requires a Plot, found `{}`", other.type_name()),
+        )),
+    }
 }
 

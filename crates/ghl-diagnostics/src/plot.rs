@@ -8,6 +8,8 @@
 //! - Bar charts (`geom_bar`) for categorical frequencies
 //! - Full RenderCaps support (Unicode vs ASCII, ANSI colors vs NO_COLOR)
 
+use std::path::Path;
+use plotters::prelude::*;
 use crate::caps::RenderCaps;
 use crate::panel::visual_width;
 
@@ -162,6 +164,185 @@ impl PlotSpec {
     pub fn with_categories(mut self, cats: Vec<String>) -> Self {
         self.categories = cats;
         self
+    }
+
+    /// Exports the plot to a publication-ready raster (PNG) or vector (SVG) image file via plotters.
+    pub fn save_file(&self, path: &str) -> Result<(), String> {
+        self.save_file_with_size(path, 800, 600)
+    }
+
+    /// Exports the plot with custom pixel dimensions (width x height).
+    pub fn save_file_with_size(&self, path: &str, width: u32, height: u32) -> Result<(), String> {
+        let path_ref = Path::new(path);
+        if let Some(parent) = path_ref.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directories: {e}"))?;
+            }
+        }
+
+        let ext = path_ref
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_lowercase())
+            .unwrap_or_else(|| "png".to_string());
+
+        if ext == "svg" {
+            let root = SVGBackend::new(path, (width, height)).into_drawing_area();
+            self.draw_chart(&root)?;
+            root.present().map_err(|e| format!("Failed to write SVG: {e}"))?;
+        } else {
+            let root = BitMapBackend::new(path, (width, height)).into_drawing_area();
+            self.draw_chart(&root)?;
+            root.present().map_err(|e| format!("Failed to write bitmap: {e}"))?;
+        }
+
+        Ok(())
+    }
+
+    fn draw_chart<DB: DrawingBackend>(&self, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
+        root.fill(&WHITE).map_err(|e| format!("{e}"))?;
+
+        let is_hist = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Histogram { .. }));
+
+        if is_hist {
+            self.draw_plotters_histogram(root)?;
+        } else {
+            self.draw_plotters_scatter(root)?;
+        }
+
+        Ok(())
+    }
+
+    fn draw_plotters_scatter<DB: DrawingBackend>(&self, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
+        let n_points = self.x_data.len().min(self.y_data.len());
+        if n_points == 0 {
+            return Err("Cannot plot empty scatter data".to_string());
+        }
+
+        let min_x = self.x_data.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_x = self.x_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let min_y = self.y_data.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_y = self.y_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+
+        let pad_x = if (max_x - min_x).abs() < 1e-6 { 1.0 } else { (max_x - min_x) * 0.08 };
+        let pad_y = if (max_y - min_y).abs() < 1e-6 { 1.0 } else { (max_y - min_y) * 0.08 };
+
+        let x_range = (min_x - pad_x)..(max_x + pad_x);
+        let y_range = (min_y - pad_y)..(max_y + pad_y);
+
+        let title = self.labels.title.as_deref().unwrap_or("Scatter Plot");
+        let x_label = self.labels.x_label.as_deref().unwrap_or("x");
+        let y_label = self.labels.y_label.as_deref().unwrap_or("y");
+
+        let mut chart = ChartBuilder::on(root)
+            .caption(title, ("sans-serif", 24).into_font().color(&BLACK))
+            .margin(20)
+            .x_label_area_size(40)
+            .y_label_area_size(50)
+            .build_cartesian_2d(x_range, y_range)
+            .map_err(|e| format!("Chart build error: {e}"))?;
+
+        chart
+            .configure_mesh()
+            .x_desc(x_label)
+            .y_desc(y_label)
+            .axis_desc_style(("sans-serif", 16).into_font().color(&BLACK))
+            .label_style(("sans-serif", 12).into_font().color(&BLACK))
+            .draw()
+            .map_err(|e| format!("Mesh draw error: {e}"))?;
+
+        // Draw scatter points
+        let points_data: Vec<(f64, f64)> = self.x_data.iter().copied().zip(self.y_data.iter().copied()).collect();
+        chart
+            .draw_series(points_data.iter().map(|&(x, y)| {
+                Circle::new((x, y), 5, RGBColor(79, 110, 242).filled())
+            }))
+            .map_err(|e| format!("Points draw error: {e}"))?;
+
+        // Draw OLS smooth line if requested
+        let has_smooth = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Smooth));
+        if has_smooth && n_points >= 2 {
+            let mean_x = self.x_data.iter().sum::<f64>() / n_points as f64;
+            let mean_y = self.y_data.iter().sum::<f64>() / n_points as f64;
+            let mut num = 0.0;
+            let mut den = 0.0;
+            for i in 0..n_points {
+                let dx = self.x_data[i] - mean_x;
+                num += dx * (self.y_data[i] - mean_y);
+                den += dx * dx;
+            }
+            if den.abs() > 1e-9 {
+                let slope = num / den;
+                let intercept = mean_y - slope * mean_x;
+
+                let line_pts = vec![
+                    (min_x, intercept + slope * min_x),
+                    (max_x, intercept + slope * max_x),
+                ];
+                chart
+                    .draw_series(LineSeries::new(line_pts, &RGBColor(224, 100, 50)).point_size(2))
+                    .map_err(|e| format!("Line draw error: {e}"))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn draw_plotters_histogram<DB: DrawingBackend>(&self, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
+        let n = self.x_data.len();
+        if n == 0 {
+            return Err("Cannot plot empty histogram data".to_string());
+        }
+
+        let bins_count = self.layers.iter().find_map(|l| match l.kind {
+            GeomKind::Histogram { bins } => Some(bins),
+            _ => None,
+        }).unwrap_or(8).clamp(4, 30);
+
+        let min_x = self.x_data.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_x = self.x_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let span = if (max_x - min_x).abs() < 1e-9 { 1.0 } else { max_x - min_x };
+        let bin_width = span / bins_count as f64;
+
+        let mut counts = vec![0u32; bins_count];
+        for &x in &self.x_data {
+            let idx = (((x - min_x) / span) * bins_count as f64).floor() as usize;
+            let idx = idx.min(bins_count - 1);
+            counts[idx] += 1;
+        }
+
+        let max_count = *counts.iter().max().unwrap_or(&1);
+
+        let title = self.labels.title.as_deref().unwrap_or("Histogram");
+        let x_label = self.labels.x_label.as_deref().unwrap_or("Value");
+
+        let mut chart = ChartBuilder::on(root)
+            .caption(title, ("sans-serif", 24).into_font().color(&BLACK))
+            .margin(20)
+            .x_label_area_size(40)
+            .y_label_area_size(50)
+            .build_cartesian_2d(min_x..(max_x + bin_width * 0.1), 0u32..(max_count + 1))
+            .map_err(|e| format!("Chart build error: {e}"))?;
+
+        chart
+            .configure_mesh()
+            .x_desc(x_label)
+            .y_desc("Frequency")
+            .axis_desc_style(("sans-serif", 16).into_font().color(&BLACK))
+            .label_style(("sans-serif", 12).into_font().color(&BLACK))
+            .draw()
+            .map_err(|e| format!("Mesh draw error: {e}"))?;
+
+        for (i, &count) in counts.iter().enumerate() {
+            let x0 = min_x + i as f64 * bin_width;
+            let x1 = x0 + bin_width;
+            let style = RGBColor(66, 133, 244).filled();
+            chart
+                .draw_series(std::iter::once(Rectangle::new([(x0, 0), (x1, count)], style)))
+                .map_err(|e| format!("Histogram bar draw error: {e}"))?;
+        }
+
+        Ok(())
     }
 
     /// Renders the plot into a complete Cockpit Deck terminal card.
@@ -680,5 +861,26 @@ mod tests {
         let rendered = plot.render(&caps);
         assert!(rendered.contains("Test Bar"));
         assert!(rendered.contains("Total Categories: 3"));
+    }
+
+    #[test]
+    fn test_plotters_export_png_and_svg() {
+        let plot = PlotSpec::new()
+            .with_title("Plotters Verification")
+            .with_xy_data(vec![1.0, 2.0, 3.0, 4.0], vec![10.0, 20.0, 30.0, 40.0])
+            .add_layer(GeomLayer::point())
+            .add_layer(GeomLayer::smooth());
+
+        let temp_dir = std::env::temp_dir();
+        let png_path = temp_dir.join("ghl_test_plot.png");
+        let svg_path = temp_dir.join("ghl_test_plot.svg");
+
+        assert!(plot.save_file(png_path.to_str().unwrap()).is_ok());
+        assert!(png_path.exists());
+        let _ = std::fs::remove_file(png_path);
+
+        assert!(plot.save_file(svg_path.to_str().unwrap()).is_ok());
+        assert!(svg_path.exists());
+        let _ = std::fs::remove_file(svg_path);
     }
 }

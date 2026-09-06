@@ -34,4 +34,10 @@ let observations = [
 let b = observations |> boxplot();
 show(b);
 
-println("(=^･ω･^=) Statistical graphics successfully rendered by Haru & Gojo!");
+// 4. Export to Publication-Quality Files via Plotters (PNG & SVG)
+println("(=^･ω･^=) 4. Exporting High-Resolution Raster (PNG) & Vector (SVG) Figures via Plotters:");
+p1 |> save("target/scatter_ols.png");
+h  |> save("target/histogram.svg");
+
+println("\n(=^･ω･^=) Statistical graphics successfully rendered by Haru & Gojo!");
+
