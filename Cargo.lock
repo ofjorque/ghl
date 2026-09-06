@@ -82,6 +82,7 @@ name = "ghl-runtime"
 version = "0.1.0"
 dependencies = [
  "ghl-diagnostics",
+ "ghl-syntax",
  "ghl-types",
 ]
 

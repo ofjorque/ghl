@@ -175,7 +175,8 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                     },
                     span,
                 )
-            });
+            })
+            .boxed();
 
         // If expression: if cond block (else (block | expr))?
         let if_expr = just(Token::If)
@@ -241,7 +242,8 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .or(lambda)
             .or(block)
             .or(if_expr)
-            .or(match_expr);
+            .or(match_expr)
+            .boxed();
 
         // Function call: atom ( arg1, arg2 )
         let call = atom
@@ -348,10 +350,42 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 )
             });
 
-        // Pipe operator: |>
-        let pipe = comparison
+        // Logical AND: &&
+        let logical_and = comparison
             .clone()
-            .then(just(Token::Pipe).ignore_then(comparison).repeated())
+            .then(just(Token::AndAnd).to(BinaryOp::And).then(comparison).repeated())
+            .foldl(|lhs, (op, rhs)| {
+                let span = lhs.span.start..rhs.span.end;
+                Expr::new(
+                    ExprKind::Binary {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    },
+                    span,
+                )
+            });
+
+        // Logical OR: ||
+        let logical_or = logical_and
+            .clone()
+            .then(just(Token::OrOr).to(BinaryOp::Or).then(logical_and).repeated())
+            .foldl(|lhs, (op, rhs)| {
+                let span = lhs.span.start..rhs.span.end;
+                Expr::new(
+                    ExprKind::Binary {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    },
+                    span,
+                )
+            });
+
+        // Pipe operator: |>
+        let pipe = logical_or
+            .clone()
+            .then(just(Token::Pipe).ignore_then(logical_or).repeated())
             .foldl(|expr, target| {
                 let span = expr.span.start..target.span.end;
                 Expr::new(
@@ -361,7 +395,8 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                     },
                     span,
                 )
-            });
+            })
+            .boxed();
 
         // Modeling formula operator: ~
         let formula = pipe
@@ -376,7 +411,8 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                     },
                     span,
                 )
-            });
+            })
+            .boxed();
 
         formula
     })

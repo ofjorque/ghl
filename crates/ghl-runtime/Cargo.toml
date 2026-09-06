@@ -7,6 +7,7 @@ license.workspace = true
 description = "High-performance statistical runtime, memory arenas, and linear algebra for GHL"
 
 [dependencies]
+ghl-syntax = { path = "../ghl-syntax" }
 ghl-types = { path = "../ghl-types" }
 ghl-diagnostics = { path = "../ghl-diagnostics" }
 

@@ -182,6 +182,24 @@ impl TypeEnv {
             false,
         );
 
+        // Print helpers
+        env.insert(
+            "println".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
+            "print".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+
         env
     }
 

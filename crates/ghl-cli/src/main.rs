@@ -59,8 +59,48 @@ fn main() {
                 std::process::exit(1);
             }
             let file = &args[2];
-            println!("(U・ᴥ・U) Haru is preparing to run: {}", file);
-            // Runtime invocation hook
+            match std::fs::read_to_string(file) {
+                Ok(content) => {
+                    match ghl_syntax::parse(&content) {
+                        Ok(program) => {
+                            // 1. Semantic and type validation
+                            if let Err(diags) = ghl_types::check(&program, file) {
+                                for diag in diags {
+                                    eprintln!("{}", diag.render());
+                                }
+                                std::process::exit(1);
+                            }
+
+                            // 2. High-performance execution runtime
+                            let mut interpreter = ghl_runtime::Interpreter::new();
+                            match interpreter.eval_program(&program) {
+                                Ok(final_val) => {
+                                    if !matches!(final_val, ghl_runtime::Value::Unit) {
+                                        println!("{}", final_val);
+                                    }
+                                }
+                                Err(err) => {
+                                    eprintln!("{}", err.render());
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                        Err(errors) => {
+                            for err_msg in errors {
+                                let err = Diagnostic::compute_error("C0100", err_msg)
+                                    .with_location(file, 1, 1);
+                                eprintln!("{}", err.render());
+                            }
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(io_err) => {
+                    let err = Diagnostic::compute_error("C0004", format!("Failed to read file `{}`: {}", file, io_err));
+                    eprintln!("{}", err.render());
+                    std::process::exit(1);
+                }
+            }
         }
         "check" => {
             if args.len() < 3 {

@@ -28,3 +28,15 @@ let observation_status = match df {
 
 let cleaned = df |> filter(col("id") > 1);
 let model = response ~ sensor + id;
+
+let beta = solve_ols(cov_matrix, [1.5, 2.5]);
+
+println("(=^･ω･^=) Gojo's Cleaned DataFrame (filtered id > 1):");
+println(cleaned);
+
+println("(U・ᴥ・U) Haru's Statistical Formula Specification:");
+println(model);
+
+println("(=^･ω･^=) Observation Status:", observation_status);
+println("(U・ᴥ・U) OLS Solved Coefficients (cov_matrix \\ [1.5, 2.5]):", beta);
+
