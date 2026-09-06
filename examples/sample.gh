@@ -1,5 +1,30 @@
-// Sample GHL script demonstrating pipelines, NAs and formulas
-let raw_data = [1.2, 3.4, NA, NA:SensorDropout, 5.8];
-let cleaned = raw_data |> filter(col("x") > 2.0);
-let formula_spec = y ~ x1 + x2;
+// GHL (Generalized Hypothesis Language) Showcase Script
+// Demonstrating functions, first-class statistical data structures,
+// pattern matching with reasoned NAs, pipelines and formulas.
 
+fn solve_ols(x: Matrix[f64], y: Vector[f64]) -> Vector[f64] {
+    let xt = x;
+    xt \ y
+}
+
+let df = dataframe {
+    id: [1, 2, 3, 4],
+    response: [10.5, 20.0, NA, 35.8],
+    sensor: [101.2, 104.5, NA:SensorDropout, 108.9]
+};
+
+let cov_matrix = mat [
+    1.0, 0.4 ;
+    0.4, 1.0
+];
+
+let scale = \x -> x * 2.0;
+
+let observation_status = match df {
+    NA => "Missing observation",
+    NA:SensorDropout => "Hardware sensor failure",
+    _ => "Valid data"
+};
+
+let cleaned = df |> filter(col("id") > 1);
+let model = response ~ sensor + id;

@@ -11,6 +11,37 @@ pub enum Literal {
     NA(Option<String>), // None = plain NA, Some("NoResponse") = semantic NA
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeAnnotation {
+    Simple(String),
+    Generic(String, Vec<TypeAnnotation>),
+}
+
+impl std::fmt::Display for TypeAnnotation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Simple(s) => write!(f, "{}", s),
+            Self::Generic(name, args) => {
+                write!(f, "{}[", name)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", arg)?;
+                }
+                write!(f, "]")
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnParam {
+    pub name: String,
+    pub ty: Option<TypeAnnotation>,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
@@ -38,6 +69,23 @@ pub enum BinaryOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    Wildcard, // _
+    Lit(Literal),
+    Ident(String),
+    NA,
+    NAReason(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub guard: Option<Expr>,
+    pub body: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Lit(Literal),
     Ident(String),
@@ -56,7 +104,10 @@ pub enum ExprKind {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
-    Block(Vec<Stmt>),
+    Block {
+        stmts: Vec<Stmt>,
+        expr: Option<Box<Expr>>,
+    },
     Formula {
         response: Box<Expr>,
         terms: Vec<Expr>,
@@ -65,6 +116,18 @@ pub enum ExprKind {
         cond: Box<Expr>,
         then_branch: Box<Expr>,
         else_branch: Option<Box<Expr>>,
+    },
+    Match {
+        expr: Box<Expr>,
+        arms: Vec<MatchArm>,
+    },
+    DataFrameLit(Vec<(String, Expr)>),
+    MatrixLit {
+        rows: Vec<Vec<Expr>>,
+    },
+    Lambda {
+        params: Vec<String>,
+        body: Box<Expr>,
     },
     VectorLit(Vec<Expr>),
     Placeholder, // _
@@ -87,8 +150,14 @@ pub enum StmtKind {
     Let {
         name: String,
         is_mut: bool,
-        ty: Option<String>,
+        ty: Option<TypeAnnotation>,
         init: Expr,
+    },
+    Fn {
+        name: String,
+        params: Vec<FnParam>,
+        ret_ty: Option<TypeAnnotation>,
+        body: Expr,
     },
     Expr(Expr),
     Return(Option<Expr>),
