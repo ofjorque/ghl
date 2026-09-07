@@ -663,6 +663,47 @@ mod tests {
     }
 
     #[test]
+    fn test_na_reason_accessors_survive_filter() {
+        // RFC 02 sect2.5: reasons exist so missing-data-analysis code can consume them
+        // via ordinary GHL values, not just internally.
+        let code = r#"
+            let df = dataframe {
+                keep:  [1, 1, 0, 1],
+                score: [10.0, NA:SensorDropout, 30.0, NA:LowBattery]
+            };
+
+            let plain_reason = na_reason(NA);
+            let noted_reason = na_reason(NA:NoResponse);
+
+            let reasons_before = df |> na_reasons(score);
+            let filtered = df |> filter(keep > 0);
+            let reasons_after = filtered |> na_reasons(score);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(interp.env.get("plain_reason"), Some(Value::NA(None)));
+        assert_eq!(interp.env.get("noted_reason"), Some(Value::String("NoResponse".into())));
+
+        let before = interp.env.get("reasons_before").expect("reasons_before");
+        if let Value::Vector(vals) = before {
+            assert_eq!(vals, vec![Value::NA(None), Value::String("SensorDropout".into()), Value::NA(None), Value::String("LowBattery".into())]);
+        } else {
+            panic!("Expected Vector for na_reasons()");
+        }
+
+        // Row index 2 (score=30.0, no reason) is the one dropped by `filter(keep > 0)`;
+        // the LowBattery reason at the old row 3 must reindex to the new row 2.
+        let after = interp.env.get("reasons_after").expect("reasons_after");
+        if let Value::Vector(vals) = after {
+            assert_eq!(vals, vec![Value::NA(None), Value::String("SensorDropout".into()), Value::String("LowBattery".into())]);
+        } else {
+            panic!("Expected Vector for na_reasons()");
+        }
+    }
+
+    #[test]
     fn test_math_and_string_helpers() {
         let code = r#"
             let rounded = round(3.14159, 2);

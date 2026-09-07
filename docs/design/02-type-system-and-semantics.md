@@ -92,9 +92,21 @@ mean(data, skip_na: true) // Returns: 15.0
 ```
 
 ### 2.5. Representación en Memoria Columnar (Arrow Native con Zero-Overhead)
+
+> **Nota de implementación (2026-09-07):** una versión anterior de esta sección
+> especificaba un diccionario columnar `u8` para los motivos. Se descartó a propósito:
+> el objetivo de los motivos de NA es que otros paquetes de análisis de datos perdidos
+> puedan consumirlos, y para eso lo que importa es que sean **livianos, simples y
+> fáciles de exponer** — no la codificación de memoria más compacta posible. Un
+> diccionario `u8` agrega encoding/decoding y sincronización sin necesidad real. El
+> diseño de abajo es el que implementa `crates/ghl-runtime/src/na_reasons.rs`.
+
 Para no penalizar el rendimiento ni la compatibilidad con Apache Arrow:
-1. **Representación Estándar (Sin Motivo):** Cuando una columna solo contiene datos observados y `NA` genéricos, se utiliza únicamente el **bitmask de validez de 1 bit de Apache Arrow** (coste cero adicional).
-2. **Representación Semántica (Con Motivos):** Si la columna incluye motivos heterogéneos (`NA:Reason`), GHL asocia un **diccionario columnar auxiliar de motivos** (1 byte `u8` por índice nulo). Los registros SIMD operan sobre el vector numérico ignorando los nulos con máscara binaria, y los motivos solo se consultan cuando el código solicita `.na_reason()`.
+1. **Representación Estándar (Sin Motivo):** Cuando una columna solo contiene datos observados y `NA` genéricos, se utiliza únicamente el **bitmask de validez de 1 bit de Apache Arrow** (coste cero adicional) — GHL nunca aparta memoria para motivos si ninguna celda los tiene.
+2. **Representación Semántica (Con Motivos):** Si el DataFrame incluye motivos (`NA:Reason`), GHL mantiene una tabla lateral liviana de strings UTF-8 planos, indexada por `(columna, fila)` — sin diccionario, sin codificación, un `String` por motivo registrado. Se reindexa automáticamente junto con cualquier verbo que reordene o filtre filas (`filter`, `arrange`, `slice`, `sample_n`, `distinct`) y se descarta explícitamente en verbos que colapsan filas (`group_by`/`summarize`, donde "qué motivo gana" no está definido) o que no tienen una fila de origen clara (`inner_join`/`left_join`).
+3. **Exposición al lenguaje:** los motivos no son solo un detalle interno — existen justamente para que herramientas de análisis de datos perdidos (propias o de terceros) puedan consultarlos como datos GHL comunes:
+   - `na_reason(x)` — motivo de un valor individual (`Some(reason)` → `Value::String`, `None` → `NA`), coincide con `x.na_reason()` de la sección 2.2.
+   - `na_reasons(df, col)` — un `Vector` del mismo largo que la columna, con el motivo en cada fila que lo tiene y `NA` en el resto; se puede usar con cualquier verbo existente (`filter`, `count`, `group_by`) sin una API de consulta nueva.
 
 ---
 

@@ -151,6 +151,8 @@ impl RuntimeEnv {
 
         // Column / row-selection helpers
         env.set("pull".into(),        Value::NativeFn(native_pull));
+        env.set("na_reason".into(),   Value::NativeFn(native_na_reason));
+        env.set("na_reasons".into(),  Value::NativeFn(native_na_reasons));
         env.set("fill_na".into(),     Value::NativeFn(native_fill_na));
         env.set("fill_na_all".into(), Value::NativeFn(native_fill_na_all));
         env.set("glimpse".into(),     Value::NativeFn(native_glimpse));
@@ -721,6 +723,25 @@ fn native_pull(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Diagnostic::compute_error("C0201", "`pull()` requires a column name")
     })?;
     crate::io::df_pull(df, &col)
+}
+
+/// `na_reason(x)` — the recorded reason for a single NA value, or `NA` if `x` isn't NA
+/// or has no reason attached. Mirrors RFC 02 §2.2's `x.na_reason()`.
+fn native_na_reason(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`na_reason()` requires 1 argument"))?;
+    match v.na_reason() {
+        Some(reason) => Ok(Value::String(reason.to_string())),
+        None => Ok(Value::NA(None)),
+    }
+}
+
+/// `na_reasons(df, col)` — the recorded reasons for a whole column, aligned by row.
+fn native_na_reasons(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let df = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`na_reasons()` requires a DataFrame"))?;
+    let col = args.get(1).and_then(col_name_of).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`na_reasons()` requires a column name")
+    })?;
+    crate::io::df_na_reasons(df, &col)
 }
 
 fn native_fill_na(args: Vec<Value>) -> Result<Value, Diagnostic> {

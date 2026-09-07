@@ -65,16 +65,21 @@ Bloquea todo lo demás: el diseño de `Value::DataFrame` / `Value::Matrix` depen
     `pull_column_as_values(frame, na_reasons, col)` (extracción: columna de polars →
     `Vec<Value>`, reconstruyendo `NA:razon` donde exista). 7 tests cubriendo round-trip
     por tipo, ensanche `i64`+`f64` → `f64`, columnas enteramente NA, y columna inexistente.
-  - **Nota:** `Value::DataFrame` todavía tiene su forma vieja
-    (`{ columns: Vec<String>, data: HashMap<String, Vec<Value>> }`) — esta capa está
-    lista pero no reemplaza nada todavía. Enchufarla (cambiar la variante + reescribir
-    los ~30 `df_*` de `io.rs` contra `polars::DataFrame`) es el primer punto de Fase 1,
-    deliberadamente separado para no mezclar "¿la conversión es correcta?" con "¿la
-    migración completa no rompió nada?" en un mismo cambio.
+  - **Actualización:** ya enchufada — ver Fase 1 abajo, `Value::DataFrame` es
+    `{ frame: polars::DataFrame, na_reasons: NaReasonTable }` desde el commit `d711827`.
   - **Matrix:** sigue pendiente pero casi gratis — `Value::Matrix { rows, cols, data: Vec<f64> }`
     ya es compatible con `faer::Mat<f64>` (buffer contiguo), la conversión es un wrap directo.
-- [ ] Si el side-channel de NA termina divergiendo de lo que describe RFC 03/09,
-      actualizar esas RFCs para que documenten el diseño real.
+- [x] **Divergencia con el RFC — resuelta (2026-09-07).** La cita original ("RFC 03/09")
+      estaba mal — lo que especifica el diseño de motivos de NA es **RFC 02 §2.5**, y sí
+      divergía: el RFC pedía un diccionario columnar `u8` por índice nulo; se implementó
+      un `HashMap<(col, row), String>` de strings planos. Decisión: mantener el `HashMap`
+      (RFC 02 §2.5 actualizado para documentarlo) — el objetivo real de los motivos es
+      que paquetes externos de análisis de datos perdidos los puedan consumir, y para eso
+      importa que sea liviano/simple/exponible, no la codificación más compacta posible.
+      Se cerró el hueco real que esto exponía: **nada del lenguaje podía leer `na_reasons`
+      todavía** — se agregaron `na_reason(x)` (motivo de un valor) y `na_reasons(df, col)`
+      (`Vector` de motivos alineado a la columna, usable con cualquier verbo existente:
+      `filter`, `count`, `group_by`, sin API de consulta nueva).
 
 ## Fase 1 — Motor columnar + Joins (`benchmarks/suites/02`)
 Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto de la Fase de datos.

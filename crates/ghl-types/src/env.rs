@@ -565,6 +565,7 @@ impl TypeEnv {
             "ungroup", "first", "last", "n_distinct", "count", "coalesce", "desc",
             "pull", "fill_na", "fill_na_all", "glimpse", "slice_min", "slice_max",
             "sample_n", "sample_frac", "inner_join", "left_join",
+            "na_reason", "na_reasons",
         ] {
             env.insert(
                 name.into(),

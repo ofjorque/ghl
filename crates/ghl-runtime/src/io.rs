@@ -663,6 +663,28 @@ pub fn df_pull(df: &Value, col: &str) -> Result<Value, Diagnostic> {
     Ok(Value::Vector(values))
 }
 
+/// `na_reasons(df, col)` — a `Vector` the same length as `col`, with the recorded
+/// reason (`Value::String`) at each row that has one and `Value::NA(None)` elsewhere.
+/// The point of this verb (RFC 02 §2.5): the reason side-channel isn't just internal
+/// bookkeeping — it exists so missing-data-analysis code (GHL's own or third-party) can
+/// consume it like any other column, with the verbs that already exist.
+pub fn df_na_reasons(df: &Value, col: &str) -> Result<Value, Diagnostic> {
+    let (frame, na_reasons) = as_dataframe(df, "na_reasons")?;
+    if frame.column(col).is_err() {
+        return Err(Diagnostic::statistical_error(
+            "S0201",
+            format!("Column `{}` not found in DataFrame for `na_reasons()`", col),
+        ));
+    }
+    let values = (0..frame.height())
+        .map(|row| match na_reasons.get(col, row) {
+            Some(reason) => Value::String(reason.to_string()),
+            None => Value::NA(None),
+        })
+        .collect();
+    Ok(Value::Vector(values))
+}
+
 /// `fill_na(df, col, default)` — replace `NA` in one column with a constant.
 pub fn df_fill_na(df: &Value, col: &str, default: &Value) -> Result<Value, Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "fill_na")?;
