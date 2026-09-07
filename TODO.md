@@ -35,17 +35,27 @@ Bloquea todo lo demás: el diseño de `Value::DataFrame` / `Value::Matrix` depen
 > `.group_by(keys).agg([...])` de polars y envolver el resultado en `Value::DataFrame`),
 > no el parser, el AST, ni `col_ctx` en `eval.rs`/`checker.rs`.
 
-- [ ] Agregar a `Cargo.toml` de `ghl-runtime`: `polars-core` (o `polars` con features
-      mínimas — trae `arrow2` internamente, incluye lectores de CSV multi-hilo y
-      Parquet), `faer`, `rayon`, `statrs`, `rand_distr`, `rand`, `rand_xoshiro`, `bumpalo`.
-- [ ] **Spike #1 (bloqueante antes de tocar `io.rs`):** medir latencia de construir +
-      operar sobre un `polars::DataFrame` chico (10-100k filas) para confirmar que no
-      mete overhead que rompa las metas de arranque de Suite 04. Si el spike muestra
-      un problema real (poco probable), recién ahí reconsiderar un camino separado para
-      DataFrames chicos — no antes, no por hipótesis.
-- [ ] **Spike #2:** prototipo mínimo del side-channel de NA con razón (ver abajo) sobre
-      una sola operación (`filter`) antes de aplicarlo a los ~30 verbos.
-- [ ] Diseño de la capa de conversión en los bordes:
+- [x] Agregar a `Cargo.toml` de `ghl-runtime`: `polars-core` 0.55.2, `faer` 0.24.4,
+      `rayon` 1.12.0, `statrs` 0.19.1, `rand_distr` 0.6.0, `rand` 0.10.2,
+      `rand_xoshiro` 0.8.1, `bumpalo` 3.20.3. Todas resuelven sin conflicto de versión
+      real: `rand`/`rand_xoshiro`/`rand_distr`/`statrs` coinciden en la línea
+      `rand_core 0.10.x` (verificado en `Cargo.lock`), así que un mismo
+      `Xoshiro256PlusPlus` sirve tanto para `rand_distr` como para `statrs`.
+- [x] **Spike #1 — resultado: GO.** `crates/ghl-runtime/examples/spike_polars_latency.rs`
+      (`cargo run --release --example spike_polars_latency -p ghl-runtime`). Construir +
+      filtrar + `group_by().mean()` sobre un `polars::DataFrame`:
+      10 filas ≈ 40µs · 1.000 filas ≈ 71µs · **100.000 filas ≈ 1.64ms** (construcción
+      896µs + filter 144µs + group_by/mean 601µs). Muy por debajo del presupuesto de
+      <25ms de punta a punta de Suite 04 (Prueba C) — **no hace falta un camino
+      separado para DataFrames chicos, Opción A queda confirmada a todas las escalas.**
+- [x] **Spike #2 — resultado: GO.** `crates/ghl-runtime/tests/spike_na_reason.rs`
+      (`cargo test -p ghl-runtime --test spike_na_reason`, 3/3 passing). Confirma que el
+      side-channel de razones de NA (ver diseño abajo) reindexa correctamente tras un
+      `filter`: la razón de una fila que sobrevive se reasigna a su nueva posición: la
+      razón de una fila descartada desaparece sin filtrarse a la fila equivocada; un
+      filtro no-op deja la tabla de razones intacta.
+- [ ] Diseño de la capa de conversión en los bordes (mecanismo de NA validado por el
+      Spike #2 arriba; falta la implementación real de construcción/extracción):
   - **DataFrame:** `Value::DataFrame(polars::DataFrame)` reemplaza
     `{ columns: Vec<String>, data: HashMap<String, Vec<Value>> }`. Conversión `Value` ⇄
     polars solo en bordes reales: literales `dataframe { ... }` (construye Series desde

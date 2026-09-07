@@ -10,4 +10,12 @@ description = "High-performance statistical runtime, memory arenas, and linear a
 ghl-syntax = { path = "../ghl-syntax" }
 ghl-types = { path = "../ghl-types" }
 ghl-diagnostics = { path = "../ghl-diagnostics" }
+polars-core = "0.55.2"
+faer = "0.24.4"
+rayon = "1.12.0"
+statrs = "0.19.1"
+rand_distr = "0.6.0"
+rand = "0.10.2"
+rand_xoshiro = "0.8.1"
+bumpalo = "3.20.3"
 
