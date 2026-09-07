@@ -426,5 +426,106 @@ mod tests {
         let _ = std::fs::remove_file(in_path);
         let _ = std::fs::remove_file(out_path);
     }
+
+    #[test]
+    fn test_dataframe_tidyverse_pipeline() {
+        // Full Tidyverse-style DataFrame pipeline:
+        //   mutate -> arrange -> rename -> drop -> distinct -> nrow/ncol/colnames -> slice
+        let code = r#"
+            let df = dataframe {
+                id:     [1, 2, 3, 4, 5, 2, 3],
+                dose:   [1.0, 2.0, 3.0, 4.0, 5.0, 2.0, 3.0],
+                group:  ["A", "B", "A", "B", "A", "B", "A"]
+            };
+
+            // mutate: add a derived column (dose squared)
+            let dose_sq = [1.0, 4.0, 9.0, 16.0, 25.0, 4.0, 9.0];
+            let df2 = df |> mutate("dose2", dose_sq);
+
+            // arrange: sort ascending by dose descending
+            let df_sorted = df |> arrange("dose", "desc");
+
+            // rename: rename group -> cohort
+            let df_renamed = df |> rename("group", "cohort");
+
+            // drop: remove id column
+            let df_dropped = df |> drop(["id"]);
+
+            // distinct: remove duplicate rows (id 2 and 3 appear twice)
+            let df_unique = df |> distinct();
+
+            // nrow / ncol / colnames
+            let n_rows     = df |> nrow();
+            let n_cols     = df |> ncol();
+            let col_names  = df |> colnames();
+
+            // slice: rows 1..3 (0-based, exclusive end)
+            let sliced = df |> slice(1, 4);
+        "#;
+
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        // mutate added a 4th column
+        let df2 = interp.env.get("df2").expect("df2");
+        if let Value::DataFrame { columns, data } = &df2 {
+            assert_eq!(columns.len(), 4);
+            assert!(columns.contains(&"dose2".to_string()));
+            let d2 = data.get("dose2").unwrap();
+            assert_eq!(d2[0], Value::F64(1.0));
+            assert_eq!(d2[1], Value::F64(4.0));
+        } else { panic!("Expected df2 to be DataFrame"); }
+
+        // arrange sorted descending: first dose should be 5.0
+        let df_s = interp.env.get("df_sorted").expect("df_sorted");
+        if let Value::DataFrame { data, .. } = &df_s {
+            let doses = data.get("dose").unwrap();
+            assert_eq!(doses[0], Value::F64(5.0));
+            assert_eq!(doses[1], Value::F64(4.0));
+        } else { panic!("Expected df_sorted to be DataFrame"); }
+
+        // rename: cohort present, group absent
+        let df_r = interp.env.get("df_renamed").expect("df_renamed");
+        if let Value::DataFrame { columns, data } = &df_r {
+            assert!(columns.contains(&"cohort".to_string()));
+            assert!(!columns.contains(&"group".to_string()));
+            assert!(data.contains_key("cohort"));
+        } else { panic!("Expected df_renamed to be DataFrame"); }
+
+        // drop: id column removed
+        let df_d = interp.env.get("df_dropped").expect("df_dropped");
+        if let Value::DataFrame { columns, .. } = &df_d {
+            assert!(!columns.contains(&"id".to_string()));
+            assert!(columns.contains(&"dose".to_string()));
+        } else { panic!("Expected df_dropped to be DataFrame"); }
+
+        // distinct: 7 rows -> 5 unique (rows with id=2 and id=3 have exact duplicates)
+        let df_u = interp.env.get("df_unique").expect("df_unique");
+        if let Value::DataFrame { columns, data } = &df_u {
+            let n = data.get(&columns[0]).map(|v| v.len()).unwrap_or(0);
+            assert_eq!(n, 5, "Expected 5 distinct rows, got {n}");
+        } else { panic!("Expected df_unique to be DataFrame"); }
+
+        // nrow = 7, ncol = 3
+        assert_eq!(interp.env.get("n_rows"), Some(Value::I64(7)));
+        assert_eq!(interp.env.get("n_cols"), Some(Value::I64(3)));
+
+        // colnames = ["id", "dose", "group"]
+        let col_names_val = interp.env.get("col_names").expect("col_names");
+        if let Value::Vector(names) = col_names_val {
+            assert_eq!(names.len(), 3);
+            assert_eq!(names[0], Value::String("id".into()));
+        } else { panic!("Expected col_names to be Vector"); }
+
+        // slice(1, 4) = rows 1,2,3 — second id should be 2
+        let sliced_val = interp.env.get("sliced").expect("sliced");
+        if let Value::DataFrame { data, .. } = &sliced_val {
+            let ids = data.get("id").unwrap();
+            assert_eq!(ids.len(), 3);
+            assert_eq!(ids[0], Value::I64(2));
+            assert_eq!(ids[2], Value::I64(4));
+        } else { panic!("Expected sliced to be DataFrame"); }
+    }
 }
 

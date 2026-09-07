@@ -486,6 +486,80 @@ impl TypeEnv {
             false,
         );
 
+        // Extended DataFrame Wrangling Verbs
+        env.insert(
+            "mutate".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::String, Type::Any],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+        env.insert(
+            "arrange".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::String],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+        env.insert(
+            "rename".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::String, Type::String],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+        env.insert(
+            "drop".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+        env.insert(
+            "distinct".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+        env.insert(
+            "nrow".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::I64),
+            },
+            false,
+        );
+        env.insert(
+            "ncol".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::I64),
+            },
+            false,
+        );
+        env.insert(
+            "colnames".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Vector(Box::new(Type::String))),
+            },
+            false,
+        );
+        env.insert(
+            "slice".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::I64, Type::I64],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+
         env
     }
 

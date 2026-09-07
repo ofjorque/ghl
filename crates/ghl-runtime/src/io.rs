@@ -224,7 +224,8 @@ pub fn write_csv_file(df: &Value, path: &str, delim: Option<char>) -> Result<(),
 }
 
 // =========================================================================
-// 3. DataFrame Wrangling Verbs (`select`, `head`, `tail`)
+// 3. DataFrame Wrangling Verbs (select, head, tail, mutate, arrange,
+//    rename, drop, distinct, nrow, ncol, colnames, slice)
 // =========================================================================
 
 pub fn df_select(df: &Value, cols_to_keep: &[String]) -> Result<Value, Diagnostic> {
@@ -299,6 +300,303 @@ pub fn df_tail(df: &Value, n: usize) -> Result<Value, Diagnostic> {
         other => Err(Diagnostic::compute_error(
             "C0201",
             format!("`tail()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `mutate(df, "new_col", values_vector)` — add or replace a column with pre-computed values.
+///
+/// Pipe-friendly: `df |> mutate("log_dose", log_vals)`
+pub fn df_mutate(df: &Value, col_name: &str, new_values: Vec<Value>) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            let num_rows = columns.first()
+                .and_then(|c| data.get(c))
+                .map(|v| v.len())
+                .unwrap_or(0);
+
+            if !new_values.is_empty() && new_values.len() != num_rows && num_rows > 0 {
+                return Err(Diagnostic::compute_error(
+                    "C0205",
+                    format!(
+                        "`mutate()`: column `{}` has {} values, but DataFrame has {} rows",
+                        col_name, new_values.len(), num_rows
+                    ),
+                ));
+            }
+
+            let mut new_columns = columns.clone();
+            let mut new_data = data.clone();
+
+            if !new_data.contains_key(col_name) {
+                new_columns.push(col_name.to_string());
+            }
+            new_data.insert(col_name.to_string(), new_values);
+
+            Ok(Value::DataFrame {
+                columns: new_columns,
+                data: new_data,
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`mutate()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `arrange(df, "col")` / `arrange(df, "col", "desc")` — sort rows by column.
+pub fn df_arrange(df: &Value, col_name: &str, descending: bool) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            let sort_col = data.get(col_name).ok_or_else(|| {
+                Diagnostic::statistical_error(
+                    "S0201",
+                    format!("Column `{}` not found in DataFrame for `arrange()`", col_name),
+                )
+            })?;
+
+            let num_rows = sort_col.len();
+            let mut indices: Vec<usize> = (0..num_rows).collect();
+
+            indices.sort_by(|&a, &b| {
+                let va = sort_col.get(a);
+                let vb = sort_col.get(b);
+                let ord = match (va, vb) {
+                    (Some(Value::I64(x)), Some(Value::I64(y))) => x.cmp(y),
+                    (Some(Value::F64(x)), Some(Value::F64(y))) => {
+                        x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    (Some(Value::I64(x)), Some(Value::F64(y))) => {
+                        (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    (Some(Value::F64(x)), Some(Value::I64(y))) => {
+                        x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    (Some(Value::String(x)), Some(Value::String(y))) => x.cmp(y),
+                    (Some(Value::Bool(x)), Some(Value::Bool(y))) => x.cmp(y),
+                    _ => std::cmp::Ordering::Equal,
+                };
+                if descending { ord.reverse() } else { ord }
+            });
+
+            let mut new_data = HashMap::new();
+            for col in columns {
+                if let Some(col_vals) = data.get(col) {
+                    let sorted: Vec<Value> = indices.iter()
+                        .filter_map(|&i| col_vals.get(i))
+                        .cloned()
+                        .collect();
+                    new_data.insert(col.clone(), sorted);
+                }
+            }
+
+            Ok(Value::DataFrame {
+                columns: columns.clone(),
+                data: new_data,
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`arrange()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `rename(df, "old_name", "new_name")` — rename a column non-destructively.
+pub fn df_rename(df: &Value, old_name: &str, new_name: &str) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            if !data.contains_key(old_name) {
+                return Err(Diagnostic::statistical_error(
+                    "S0201",
+                    format!("Column `{}` not found in DataFrame for `rename()`", old_name),
+                ));
+            }
+            if data.contains_key(new_name) {
+                return Err(Diagnostic::compute_error(
+                    "C0206",
+                    format!("`rename()`: target column `{}` already exists", new_name),
+                ));
+            }
+
+            let new_columns: Vec<String> = columns.iter()
+                .map(|c| if c == old_name { new_name.to_string() } else { c.clone() })
+                .collect();
+
+            let mut new_data = HashMap::new();
+            for (k, v) in data {
+                let key = if k == old_name { new_name.to_string() } else { k.clone() };
+                new_data.insert(key, v.clone());
+            }
+
+            Ok(Value::DataFrame {
+                columns: new_columns,
+                data: new_data,
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`rename()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `drop(df, ["col_a", "col_b"])` — remove columns from the DataFrame.
+pub fn df_drop(df: &Value, cols_to_drop: &[String]) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            let drop_set: std::collections::HashSet<&str> =
+                cols_to_drop.iter().map(|s| s.as_str()).collect();
+
+            let new_columns: Vec<String> = columns.iter()
+                .filter(|c| !drop_set.contains(c.as_str()))
+                .cloned()
+                .collect();
+
+            let new_data: HashMap<String, Vec<Value>> = data.iter()
+                .filter(|(k, _)| !drop_set.contains(k.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+
+            Ok(Value::DataFrame {
+                columns: new_columns,
+                data: new_data,
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`drop()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `distinct(df)` — remove duplicate rows (all columns checked).
+/// `distinct(df, ["col"])` — deduplicate by specific key columns.
+pub fn df_distinct(df: &Value, key_cols: Option<&[String]>) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            let num_rows = columns.first()
+                .and_then(|c| data.get(c))
+                .map(|v| v.len())
+                .unwrap_or(0);
+
+            let check_cols: Vec<&String> = match key_cols {
+                Some(ks) => ks.iter().collect(),
+                None => columns.iter().collect(),
+            };
+
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut keep_indices: Vec<usize> = Vec::new();
+
+            for row_idx in 0..num_rows {
+                let row_key: String = check_cols.iter()
+                    .map(|col| {
+                        data.get(*col)
+                            .and_then(|cv| cv.get(row_idx))
+                            .map(|v| format!("{:?}", v))
+                            .unwrap_or_default()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|");
+
+                if seen.insert(row_key) {
+                    keep_indices.push(row_idx);
+                }
+            }
+
+            let mut new_data = HashMap::new();
+            for col in columns {
+                if let Some(col_vals) = data.get(col) {
+                    let filtered: Vec<Value> = keep_indices.iter()
+                        .filter_map(|&i| col_vals.get(i))
+                        .cloned()
+                        .collect();
+                    new_data.insert(col.clone(), filtered);
+                }
+            }
+
+            Ok(Value::DataFrame {
+                columns: columns.clone(),
+                data: new_data,
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`distinct()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `nrow(df)` — number of rows.
+pub fn df_nrow(df: &Value) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            let n = columns.first()
+                .and_then(|c| data.get(c))
+                .map(|v| v.len())
+                .unwrap_or(0);
+            Ok(Value::I64(n as i64))
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`nrow()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `ncol(df)` — number of columns.
+pub fn df_ncol(df: &Value) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, .. } => Ok(Value::I64(columns.len() as i64)),
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`ncol()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `colnames(df)` — returns a `Vector[String]` of column names.
+pub fn df_colnames(df: &Value) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, .. } => {
+            let names = columns.iter().map(|c| Value::String(c.clone())).collect();
+            Ok(Value::Vector(names))
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`colnames()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `slice(df, from, to)` — slice rows by 0-based exclusive range [from, to).
+pub fn df_slice(df: &Value, from: usize, to: usize) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            let num_rows = columns.first()
+                .and_then(|c| data.get(c))
+                .map(|v| v.len())
+                .unwrap_or(0);
+            let end = to.min(num_rows);
+
+            let mut new_data = HashMap::new();
+            for col in columns {
+                if let Some(col_vals) = data.get(col) {
+                    let subset = col_vals.get(from..end)
+                        .map(|s| s.to_vec())
+                        .unwrap_or_default();
+                    new_data.insert(col.clone(), subset);
+                }
+            }
+            Ok(Value::DataFrame {
+                columns: columns.clone(),
+                data: new_data,
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`slice()` requires a DataFrame, found `{}`", other.type_name()),
         )),
     }
 }

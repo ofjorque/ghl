@@ -115,10 +115,25 @@ impl RuntimeEnv {
         env.set("parse_csv".into(), Value::NativeFn(native_parse_csv));
         env.set("write_csv".into(), Value::NativeFn(native_write_csv));
 
-        // DataFrame Wrangling Verbs
-        env.set("select".into(), Value::NativeFn(native_select));
-        env.set("head".into(), Value::NativeFn(native_head));
-        env.set("tail".into(), Value::NativeFn(native_tail));
+        // DataFrame Wrangling Verbs — Tidyverse-style
+        env.set("select".into(),   Value::NativeFn(native_select));
+        env.set("head".into(),     Value::NativeFn(native_head));
+        env.set("tail".into(),     Value::NativeFn(native_tail));
+        env.set("mutate".into(),   Value::NativeFn(native_mutate));
+        env.set("arrange".into(),  Value::NativeFn(native_arrange));
+        env.set("rename".into(),   Value::NativeFn(native_rename));
+        env.set("drop".into(),     Value::NativeFn(native_drop));
+        env.set("distinct".into(), Value::NativeFn(native_distinct));
+        env.set("nrow".into(),     Value::NativeFn(native_nrow));
+        env.set("ncol".into(),     Value::NativeFn(native_ncol));
+        env.set("colnames".into(), Value::NativeFn(native_colnames));
+        env.set("slice".into(),    Value::NativeFn(native_slice));
+
+        // Print alias (same as println)
+        env.set("print".into(), Value::NativeFn(|args| {
+            print!("{}", args.first().map(|v| v.to_string()).unwrap_or_default());
+            Ok(Value::Unit)
+        }));
 
         env
     }
@@ -1021,3 +1036,167 @@ fn native_tail(args: Vec<Value>) -> Result<Value, Diagnostic> {
     crate::io::df_tail(df, n)
 }
 
+// =========================================================================
+// Extended DataFrame Verb Native Functions
+// =========================================================================
+
+/// `mutate(df, "col_name", values)` or `df |> mutate("col_name", values)`
+///
+/// Adds or replaces a column. `values` can be a `Vector` or a scalar broadcast.
+fn native_mutate(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 3 {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`mutate()` requires 3 args: `mutate(df, \"col_name\", values)` or `df |> mutate(\"col_name\", values)`",
+        ));
+    }
+
+    let df = &args[0];
+    let col_name = args[1].as_str().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`mutate()` second argument must be a column name string")
+    })?;
+
+    // args[2] is the new column values — can be a Vector or a scalar
+    let new_values: Vec<Value> = match &args[2] {
+        Value::Vector(items) => items.clone(),
+        scalar => {
+            // Broadcast scalar to match nrow
+            let n = match df {
+                Value::DataFrame { columns, data } => columns.first()
+                    .and_then(|c| data.get(c))
+                    .map(|v| v.len())
+                    .unwrap_or(1),
+                _ => 1,
+            };
+            vec![scalar.clone(); n]
+        }
+    };
+
+    crate::io::df_mutate(df, col_name, new_values)
+}
+
+/// `arrange(df, "col")` or `df |> arrange("col")` — sort ascending.
+/// `arrange(df, "col", "desc")` — sort descending.
+fn native_arrange(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let df = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`arrange()` requires a DataFrame as first argument")
+    })?;
+
+    let col_name = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`arrange()` requires a column name string as second argument")
+    })?;
+
+    let descending = args.get(2)
+        .and_then(|v| v.as_str())
+        .map(|s| s.eq_ignore_ascii_case("desc") || s.eq_ignore_ascii_case("descending"))
+        .unwrap_or(false);
+
+    crate::io::df_arrange(df, col_name, descending)
+}
+
+/// `rename(df, "old", "new")` or `df |> rename("old", "new")`
+fn native_rename(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 3 {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`rename()` requires 3 arguments: `rename(df, \"old_name\", \"new_name\")`",
+        ));
+    }
+
+    let df = &args[0];
+    let old_name = args[1].as_str().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`rename()`: second argument must be the old column name string")
+    })?;
+    let new_name = args[2].as_str().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`rename()`: third argument must be the new column name string")
+    })?;
+
+    crate::io::df_rename(df, old_name, new_name)
+}
+
+/// `drop(df, ["col1", "col2"])` or `df |> drop(["col1", "col2"])`
+fn native_drop(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let df = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`drop()` requires a DataFrame as first argument")
+    })?;
+
+    let mut cols = Vec::new();
+    for arg in &args[1..] {
+        match arg {
+            Value::Vector(items) => {
+                for it in items {
+                    match it {
+                        Value::ColRef(s) | Value::String(s) => cols.push(s.clone()),
+                        other => cols.push(format!("{other}")),
+                    }
+                }
+            }
+            Value::ColRef(s) | Value::String(s) => cols.push(s.clone()),
+            other => cols.push(format!("{other}")),
+        }
+    }
+
+    crate::io::df_drop(df, &cols)
+}
+
+/// `distinct(df)` — deduplicate all rows.
+/// `distinct(df, ["col"])` — deduplicate by key column subset.
+fn native_distinct(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let df = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`distinct()` requires a DataFrame")
+    })?;
+
+    let key_cols: Option<Vec<String>> = if args.len() > 1 {
+        let mut cols = Vec::new();
+        for arg in &args[1..] {
+            match arg {
+                Value::Vector(items) => {
+                    for it in items {
+                        match it {
+                            Value::ColRef(s) | Value::String(s) => cols.push(s.clone()),
+                            other => cols.push(format!("{other}")),
+                        }
+                    }
+                }
+                Value::ColRef(s) | Value::String(s) => cols.push(s.clone()),
+                _ => {}
+            }
+        }
+        if cols.is_empty() { None } else { Some(cols) }
+    } else {
+        None
+    };
+
+    crate::io::df_distinct(df, key_cols.as_deref())
+}
+
+fn native_nrow(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let df = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`nrow()` requires a DataFrame")
+    })?;
+    crate::io::df_nrow(df)
+}
+
+fn native_ncol(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let df = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`ncol()` requires a DataFrame")
+    })?;
+    crate::io::df_ncol(df)
+}
+
+fn native_colnames(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let df = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`colnames()` requires a DataFrame")
+    })?;
+    crate::io::df_colnames(df)
+}
+
+/// `slice(df, from, to)` — 0-based inclusive [from, to) row slice.
+fn native_slice(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let df = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`slice()` requires a DataFrame")
+    })?;
+    let from = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
+    let to   = args.get(2).and_then(|v| v.as_i64()).unwrap_or(5) as usize;
+    crate::io::df_slice(df, from, to)
+}
