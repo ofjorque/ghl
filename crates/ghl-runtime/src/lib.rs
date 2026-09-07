@@ -442,8 +442,8 @@ mod tests {
             let dose_sq = [1.0, 4.0, 9.0, 16.0, 25.0, 4.0, 9.0];
             let df2 = df |> mutate("dose2", dose_sq);
 
-            // arrange: sort ascending by dose descending
-            let df_sorted = df |> arrange("dose", "desc");
+            // arrange: sort by dose descending
+            let df_sorted = df |> arrange(desc(dose));
 
             // rename: rename group -> cohort
             let df_renamed = df |> rename("group", "cohort");
@@ -526,6 +526,135 @@ mod tests {
             assert_eq!(ids[0], Value::I64(2));
             assert_eq!(ids[2], Value::I64(4));
         } else { panic!("Expected sliced to be DataFrame"); }
+    }
+
+    #[test]
+    fn test_group_by_summarize_unquoted_columns() {
+        // Bare column names (no quotes, no `col()`) inside `summarize()`'s named args.
+        let code = r#"
+            let df = dataframe {
+                species: ["a", "b", "a", "b", "a"],
+                x:       [1.0, 2.0, 3.0, 4.0, 5.0]
+            };
+
+            let summary = df
+                |> group_by(species)
+                |> summarize(n = count(), mean_x = mean(x), max_x = max(x));
+        "#;
+
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let summary = interp.env.get("summary").expect("summary");
+        if let Value::DataFrame { columns, data } = &summary {
+            assert_eq!(columns, &vec!["species".to_string(), "n".to_string(), "mean_x".to_string(), "max_x".to_string()]);
+            let species = data.get("species").unwrap();
+            let n = data.get("n").unwrap();
+            let mean_x = data.get("mean_x").unwrap();
+            assert_eq!(species.len(), 2);
+
+            let a_idx = species.iter().position(|v| v == &Value::String("a".into())).unwrap();
+            assert_eq!(n[a_idx], Value::I64(3));
+            assert_eq!(mean_x[a_idx], Value::F64(3.0)); // (1+3+5)/3
+
+            let b_idx = species.iter().position(|v| v == &Value::String("b".into())).unwrap();
+            assert_eq!(n[b_idx], Value::I64(2));
+            assert_eq!(mean_x[b_idx], Value::F64(3.0)); // (2+4)/2
+        } else {
+            panic!("Expected summary to be DataFrame");
+        }
+    }
+
+    #[test]
+    fn test_arrange_multi_column_with_desc() {
+        let code = r#"
+            let df = dataframe {
+                group: ["b", "a", "a", "b"],
+                x:     [2.0, 1.0, 2.0, 1.0]
+            };
+
+            // Ascending by group, then descending by x within each group.
+            let sorted = df |> arrange(group, desc(x));
+        "#;
+
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let sorted = interp.env.get("sorted").expect("sorted");
+        if let Value::DataFrame { data, .. } = &sorted {
+            let groups = data.get("group").unwrap();
+            let xs = data.get("x").unwrap();
+            assert_eq!(groups.clone(), vec![
+                Value::String("a".into()), Value::String("a".into()),
+                Value::String("b".into()), Value::String("b".into()),
+            ]);
+            assert_eq!(xs.clone(), vec![Value::F64(2.0), Value::F64(1.0), Value::F64(2.0), Value::F64(1.0)]);
+        } else {
+            panic!("Expected sorted to be DataFrame");
+        }
+    }
+
+    #[test]
+    fn test_slice_min_max_and_sample_n() {
+        let code = r#"
+            let df = dataframe {
+                id: [1, 2, 3, 4, 5],
+                x:  [30.0, 10.0, 50.0, 20.0, 40.0]
+            };
+
+            let smallest = df |> slice_min(x, 2);
+            let largest  = df |> slice_max(x, 2);
+            let sampled  = df |> sample_n(3);
+        "#;
+
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        if let Some(Value::DataFrame { data, .. }) = interp.env.get("smallest") {
+            let xs = data.get("x").unwrap();
+            assert_eq!(xs, &vec![Value::F64(10.0), Value::F64(20.0)]);
+        } else {
+            panic!("Expected smallest to be DataFrame");
+        }
+
+        if let Some(Value::DataFrame { data, .. }) = interp.env.get("largest") {
+            let xs = data.get("x").unwrap();
+            assert_eq!(xs, &vec![Value::F64(50.0), Value::F64(40.0)]);
+        } else {
+            panic!("Expected largest to be DataFrame");
+        }
+
+        if let Some(Value::DataFrame { data, .. }) = interp.env.get("sampled") {
+            assert_eq!(data.get("x").unwrap().len(), 3);
+        } else {
+            panic!("Expected sampled to be DataFrame");
+        }
+    }
+
+    #[test]
+    fn test_math_and_string_helpers() {
+        let code = r#"
+            let rounded = round(3.14159, 2);
+            let clamped = clamp(15.0, 0.0, 10.0);
+            let root = sqrt(-1.0);
+            let shouted = str_upper("hello");
+            let padded = str_pad("42", 5, "0");
+            let contains = str_contains("hello world", "world");
+        "#;
+
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(interp.env.get("rounded"), Some(Value::F64(3.14)));
+        assert_eq!(interp.env.get("clamped"), Some(Value::F64(10.0)));
+        assert!(matches!(interp.env.get("root"), Some(Value::NA(_))));
+        assert_eq!(interp.env.get("shouted"), Some(Value::String("HELLO".into())));
+        assert_eq!(interp.env.get("padded"), Some(Value::String("00042".into())));
+        assert_eq!(interp.env.get("contains"), Some(Value::Bool(true)));
     }
 }
 

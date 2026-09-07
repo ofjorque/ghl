@@ -60,6 +60,16 @@ impl Interpreter {
     }
 
     pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, Diagnostic> {
+        self.eval_expr_ctx(expr, false)
+    }
+
+    /// Evaluate an expression. When `col_ctx` is true, an identifier that isn't bound
+    /// in scope resolves to `Value::ColRef(name)` instead of erroring — this is how bare
+    /// column names work inside `filter`/`select`/`arrange`/`group_by`/`summarize`/etc.
+    /// `col_ctx` is only ever set to true for the argument trees of those specific verb
+    /// calls (see `COLUMN_CONTEXT_VERBS` below); everywhere else in the language,
+    /// undefined identifiers still error exactly as before.
+    fn eval_expr_ctx(&mut self, expr: &Expr, col_ctx: bool) -> Result<Value, Diagnostic> {
         match &expr.kind {
             ExprKind::Lit(Literal::Int(n)) => Ok(Value::I64(*n)),
             ExprKind::Lit(Literal::Float(x)) => Ok(Value::F64(*x)),
@@ -68,7 +78,9 @@ impl Interpreter {
             ExprKind::Lit(Literal::NA(reason)) => Ok(Value::NA(reason.clone())),
 
             ExprKind::Ident(name) => {
-                self.env.get(name).ok_or_else(|| {
+                self.env.get(name).or_else(|| {
+                    if col_ctx { Some(Value::ColRef(name.clone())) } else { None }
+                }).ok_or_else(|| {
                     Diagnostic::compute_error("C0101", format!("Undefined identifier `{}`", name))
                 })
             }
@@ -76,9 +88,14 @@ impl Interpreter {
             ExprKind::VectorLit(items) => {
                 let mut evaluated = Vec::with_capacity(items.len());
                 for item in items {
-                    evaluated.push(self.eval_expr(item)?);
+                    evaluated.push(self.eval_expr_ctx(item, col_ctx)?);
                 }
                 Ok(Value::Vector(evaluated))
+            }
+
+            ExprKind::NamedArg { name, value } => {
+                let v = self.eval_expr_ctx(value, col_ctx)?;
+                Ok(Value::NamedArg(name.clone(), Box::new(v)))
             }
 
             ExprKind::DataFrameLit(cols) => {
@@ -121,13 +138,13 @@ impl Interpreter {
             }
 
             ExprKind::Binary { op, lhs, rhs } => {
-                let left = self.eval_expr(lhs)?;
-                let right = self.eval_expr(rhs)?;
+                let left = self.eval_expr_ctx(lhs, col_ctx)?;
+                let right = self.eval_expr_ctx(rhs, col_ctx)?;
                 self.eval_binary_op(*op, left, right)
             }
 
             ExprKind::UnaryNeg(inner) => {
-                let val = self.eval_expr(inner)?;
+                let val = self.eval_expr_ctx(inner, col_ctx)?;
                 match val {
                     Value::I64(n) => Ok(Value::I64(-n)),
                     Value::F64(x) => Ok(Value::F64(-x)),
@@ -148,7 +165,7 @@ impl Interpreter {
             }
 
             ExprKind::UnaryNot(inner) => {
-                let val = self.eval_expr(inner)?;
+                let val = self.eval_expr_ctx(inner, col_ctx)?;
                 match val {
                     Value::Bool(b) => Ok(Value::Bool(!b)),
                     Value::NA(r) => Ok(Value::NA(r)), // Kleene: !NA is NA
@@ -160,9 +177,10 @@ impl Interpreter {
                 let val = self.eval_expr(src)?;
                 match &target.kind {
                     ExprKind::Call { callee, args } => {
+                        let arg_ctx = col_ctx || callee_name(callee).is_some_and(is_column_context_verb);
                         let mut call_args = vec![val];
                         for arg in args {
-                            call_args.push(self.eval_expr(arg)?);
+                            call_args.push(self.eval_expr_ctx(arg, arg_ctx)?);
                         }
                         let callee_val = self.eval_expr(callee)?;
                         self.call_value(callee_val, call_args)
@@ -179,9 +197,10 @@ impl Interpreter {
 
             ExprKind::Call { callee, args } => {
                 let callee_val = self.eval_expr(callee)?;
+                let arg_ctx = col_ctx || callee_name(callee).is_some_and(is_column_context_verb);
                 let mut evaluated_args = Vec::with_capacity(args.len());
                 for a in args {
-                    evaluated_args.push(self.eval_expr(a)?);
+                    evaluated_args.push(self.eval_expr_ctx(a, arg_ctx)?);
                 }
                 self.call_value(callee_val, evaluated_args)
             }
@@ -536,6 +555,15 @@ impl Interpreter {
                 }
             }
         }
+    }
+}
+
+use ghl_syntax::ast::is_column_context_verb;
+
+fn callee_name(expr: &Expr) -> Option<&str> {
+    match &expr.kind {
+        ExprKind::Ident(name) => Some(name.as_str()),
+        _ => None,
     }
 }
 

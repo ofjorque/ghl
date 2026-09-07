@@ -3,6 +3,13 @@ use ghl_diagnostics::Diagnostic;
 use crate::types::Type;
 use crate::env::TypeEnv;
 
+fn callee_name(expr: &Expr) -> Option<&str> {
+    match &expr.kind {
+        ExprKind::Ident(name) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
 pub struct TypeChecker {
     pub env: TypeEnv,
     pub diagnostics: Vec<Diagnostic>,
@@ -131,6 +138,13 @@ impl TypeChecker {
     }
 
     pub fn check_expr(&mut self, expr: &Expr) -> Type {
+        self.check_expr_ctx(expr, false)
+    }
+
+    /// Mirrors `Interpreter::eval_expr_ctx` in `ghl-runtime`: when `col_ctx` is true, an
+    /// undefined identifier is treated as a bare column reference (`Type::Any`, no
+    /// diagnostic) instead of an "undefined variable" error — see `ghl_syntax::ast::COLUMN_CONTEXT_VERBS`.
+    fn check_expr_ctx(&mut self, expr: &Expr, col_ctx: bool) -> Type {
         match &expr.kind {
             ExprKind::Lit(Literal::Int(_)) => Type::I64,
             ExprKind::Lit(Literal::Float(_)) => Type::F64,
@@ -141,6 +155,8 @@ impl TypeChecker {
             ExprKind::Ident(name) => {
                 if let Some(info) = self.env.lookup(name) {
                     info.ty.clone()
+                } else if col_ctx {
+                    Type::Any
                 } else {
                     self.diagnostics.push(
                         Diagnostic::compute_error(
@@ -165,7 +181,7 @@ impl TypeChecker {
                 let mut unified_elem = Type::NA;
 
                 for item in items {
-                    let item_ty = self.check_expr(item);
+                    let item_ty = self.check_expr_ctx(item, col_ctx);
                     if let Some(next_elem) = unified_elem.unify(&item_ty) {
                         unified_elem = next_elem;
                     } else {
@@ -215,8 +231,8 @@ impl TypeChecker {
             }
 
             ExprKind::Binary { op, lhs, rhs } => {
-                let t_lhs = self.check_expr(lhs);
-                let t_rhs = self.check_expr(rhs);
+                let t_lhs = self.check_expr_ctx(lhs, col_ctx);
+                let t_rhs = self.check_expr_ctx(rhs, col_ctx);
 
                 match op {
                     // Arithmetic operators
@@ -318,16 +334,17 @@ impl TypeChecker {
                 }
             }
 
-            ExprKind::UnaryNeg(inner) => self.check_expr(inner),
+            ExprKind::UnaryNeg(inner) => self.check_expr_ctx(inner, col_ctx),
             ExprKind::UnaryNot(_) => Type::Bool,
 
             ExprKind::Pipe { expr, target } => {
                 let src_ty = self.check_expr(expr);
                 match &target.kind {
                     ExprKind::Call { callee, args } => {
+                        let arg_ctx = col_ctx || callee_name(callee).is_some_and(is_column_context_verb);
                         let mut call_args = vec![src_ty];
                         for arg in args {
-                            call_args.push(self.check_expr(arg));
+                            call_args.push(self.check_expr_ctx(arg, arg_ctx));
                         }
                         self.check_call_type(callee, &call_args, target.span.clone())
                     }
@@ -342,7 +359,8 @@ impl TypeChecker {
             }
 
             ExprKind::Call { callee, args } => {
-                let arg_types: Vec<Type> = args.iter().map(|a| self.check_expr(a)).collect();
+                let arg_ctx = col_ctx || callee_name(callee).is_some_and(is_column_context_verb);
+                let arg_types: Vec<Type> = args.iter().map(|a| self.check_expr_ctx(a, arg_ctx)).collect();
                 self.check_call_type(callee, &arg_types, expr.span.clone())
             }
 
@@ -442,6 +460,8 @@ impl TypeChecker {
             }
 
             ExprKind::Placeholder => Type::Any,
+
+            ExprKind::NamedArg { value, .. } => self.check_expr_ctx(value, col_ctx),
         }
     }
 

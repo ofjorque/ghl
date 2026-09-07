@@ -108,6 +108,26 @@ mod tests {
     }
 
     #[test]
+    fn test_typecheck_bare_column_verbs() {
+        // Bare column names (no quotes, no `col()`) inside filter/group_by/summarize/arrange
+        // must type-check without "undefined variable" diagnostics — the checker's `col_ctx`
+        // mirrors the interpreter's ColRef fallback (see ghl_syntax::ast::COLUMN_CONTEXT_VERBS).
+        let code = r#"
+            let df = dataframe {
+                species: ["a", "b", "a"],
+                x: [1.0, 2.0, 3.0]
+            };
+
+            let filtered = df |> filter(x > 1.0);
+            let summary = df |> group_by(species) |> summarize(n = count(), mean_x = mean(x));
+            let sorted = df |> arrange(desc(x), species);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh");
+        assert!(res.is_ok(), "Bare column verbs should type-check cleanly: {:?}", res.err());
+    }
+
+    #[test]
     fn test_typecheck_reject_string_plus_float() {
         // Anti-R: No silent string coercion in arithmetic
         let code = r#"let bad = "hello" + 42.0;"#;

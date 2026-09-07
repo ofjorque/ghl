@@ -245,10 +245,22 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .or(match_expr)
             .boxed();
 
+        // Call argument: either `name = expr` (named) or a plain positional `expr`.
+        let named_arg = select! {
+            Token::Ident(name) => name,
+            Token::Col => "col".to_string(),
+        }
+        .then_ignore(just(Token::Eq))
+        .then(expr.clone())
+        .map_with_span(|(name, value), span| {
+            Expr::new(ExprKind::NamedArg { name, value: Box::new(value) }, span)
+        });
+        let call_arg = named_arg.or(expr.clone());
+
         // Function call: atom ( arg1, arg2 )
         let call = atom
             .then(
-                expr.clone()
+                call_arg
                     .separated_by(just(Token::Comma))
                     .allow_trailing()
                     .delimited_by(just(Token::LParen), just(Token::RParen))

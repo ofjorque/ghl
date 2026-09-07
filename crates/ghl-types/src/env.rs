@@ -560,6 +560,54 @@ impl TypeEnv {
             false,
         );
 
+        // Grouping / summarizing / sorting / row-selection helpers
+        for name in [
+            "ungroup", "first", "last", "n_distinct", "count", "coalesce", "desc",
+            "pull", "fill_na", "fill_na_all", "glimpse", "slice_min", "slice_max",
+            "sample_n", "sample_frac",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
+        // Math helpers — scalar + Vector[f64]
+        for name in ["log", "log2", "log10", "exp", "sqrt", "abs", "floor", "ceil", "round", "pow", "clamp"] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+        env.insert("pi".into(), Type::F64, false);
+        env.insert("e".into(), Type::F64, false);
+
+        // Vector / window helpers
+        for name in [
+            "cumsum", "cumprod", "cummax", "cummin", "lag", "lead",
+            "if_else", "between", "sort_asc", "sort_desc", "rank",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
+        // String helpers — scalar String + Vector[String]
+        for name in [
+            "str_upper", "str_lower", "str_trim", "str_len", "str_contains",
+            "str_starts", "str_ends", "str_replace", "str_split", "str_pad",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
         env
     }
 

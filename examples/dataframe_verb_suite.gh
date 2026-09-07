@@ -1,0 +1,65 @@
+// GHL (Generalized Hypothesis Language) - Extended DataFrame Verb Suite
+// Demonstrates group_by/summarize (unquoted columns, named aggregations),
+// multi-column arrange with desc(), the slice family, and the math/vector/
+// string helpers added alongside them.
+
+println("(=^･ω･^=) Extended DataFrame Verb Suite Demonstration!\n");
+
+let trials = dataframe {
+    species: ["setosa", "versicolor", "setosa", "versicolor", "setosa", "versicolor"],
+    weight:  [5.1, 6.4, 4.9, 6.9, 5.4, 6.5]
+};
+
+// -------------------------------------------------------------------------
+// 1. group_by() + summarize(): bare column names, named aggregations
+// -------------------------------------------------------------------------
+println("(U・ᴥ・U) 1. group_by(species) |> summarize(...):");
+let summary = trials
+    |> group_by(species)
+    |> summarize(
+        n           = count(),
+        mean_weight = mean(weight),
+        max_weight  = max(weight)
+    );
+show(summary);
+
+// -------------------------------------------------------------------------
+// 2. arrange(): multi-column sort with desc()
+// -------------------------------------------------------------------------
+println("\n(=^･ω･^=) 2. arrange(species, desc(weight)):");
+let sorted = trials |> arrange(species, desc(weight));
+show(sorted);
+
+// -------------------------------------------------------------------------
+// 3. The slice family: slice_min / slice_max / sample_n
+// -------------------------------------------------------------------------
+println("\n(U・ᴥ・U) 3. slice_min(weight, 2) and slice_max(weight, 2):");
+show(trials |> slice_min(weight, 2));
+show(trials |> slice_max(weight, 2));
+
+// -------------------------------------------------------------------------
+// 4. Column helpers: pull(), count(), glimpse()
+// -------------------------------------------------------------------------
+println("\n(=^･ω･^=) 4. pull(weight) and count(species):");
+let weights = trials |> pull(weight);
+println("Weights as a Vector:");
+println(weights);
+show(trials |> count(species));
+trials |> glimpse();
+
+// -------------------------------------------------------------------------
+// 5. Math, vector, and string helpers
+// -------------------------------------------------------------------------
+println("\n(U・ᴥ・U) 5. Math / vector / string helpers:");
+println("round(pi, 2):");
+println(round(pi, 2));
+println("clamp(15.0, 0.0, 10.0):");
+println(clamp(15.0, 0.0, 10.0));
+println("cumsum(weights):");
+println(cumsum(weights));
+println("str_upper(\"setosa\"):");
+println(str_upper("setosa"));
+println("str_pad(\"7\", 3, \"0\"):");
+println(str_pad("7", 3, "0"));
+
+println("\n(=^･ω･^=) All extended DataFrame verb operations succeeded. Haru approves!\n");

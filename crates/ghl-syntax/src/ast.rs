@@ -2,6 +2,20 @@
 
 pub type Span = std::ops::Range<usize>;
 
+/// Verbs whose call arguments are evaluated/checked in "column context": a bare
+/// identifier that isn't otherwise bound resolves to a column reference (`ColRef`)
+/// instead of erroring. Shared between the interpreter (`ghl-runtime::eval`) and the
+/// type checker (`ghl-types::checker`) so the two never drift out of sync.
+pub const COLUMN_CONTEXT_VERBS: &[&str] = &[
+    "filter", "select", "arrange", "desc", "group_by", "summarize",
+    "mutate", "drop", "distinct", "pull", "count", "fill_na",
+    "slice_min", "slice_max",
+];
+
+pub fn is_column_context_verb(name: &str) -> bool {
+    COLUMN_CONTEXT_VERBS.contains(&name)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Int(i64),
@@ -131,6 +145,11 @@ pub enum ExprKind {
     },
     VectorLit(Vec<Expr>),
     Placeholder, // _
+    /// `name = expr` inside a call's argument list, e.g. `summarize(n = count())`.
+    NamedArg {
+        name: String,
+        value: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

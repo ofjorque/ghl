@@ -345,39 +345,56 @@ pub fn df_mutate(df: &Value, col_name: &str, new_values: Vec<Value>) -> Result<V
     }
 }
 
-/// `arrange(df, "col")` / `arrange(df, "col", "desc")` — sort rows by column.
-pub fn df_arrange(df: &Value, col_name: &str, descending: bool) -> Result<Value, Diagnostic> {
+/// Total order over two optional cell values, used by `arrange()`, `rank()`, `sort_asc()`/`sort_desc()`.
+/// Mixed/incomparable types (including missing cells) compare as equal rather than panicking.
+pub(crate) fn compare_values(a: Option<&Value>, b: Option<&Value>) -> std::cmp::Ordering {
+    match (a, b) {
+        (Some(Value::I64(x)), Some(Value::I64(y))) => x.cmp(y),
+        (Some(Value::F64(x)), Some(Value::F64(y))) => {
+            x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
+        }
+        (Some(Value::I64(x)), Some(Value::F64(y))) => {
+            (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
+        }
+        (Some(Value::F64(x)), Some(Value::I64(y))) => {
+            x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal)
+        }
+        (Some(Value::String(x)), Some(Value::String(y))) => x.cmp(y),
+        (Some(Value::Bool(x)), Some(Value::Bool(y))) => x.cmp(y),
+        _ => std::cmp::Ordering::Equal,
+    }
+}
+
+/// `arrange(df, col1, col2, ...)` — stable, multi-column sort. Each `(col, desc)` pair
+/// is tried in order, falling through to the next column on ties.
+pub fn df_arrange(df: &Value, specs: &[(String, bool)]) -> Result<Value, Diagnostic> {
     match df {
         Value::DataFrame { columns, data } => {
-            let sort_col = data.get(col_name).ok_or_else(|| {
-                Diagnostic::statistical_error(
-                    "S0201",
-                    format!("Column `{}` not found in DataFrame for `arrange()`", col_name),
-                )
-            })?;
+            let mut sort_cols: Vec<(&Vec<Value>, bool)> = Vec::with_capacity(specs.len());
+            for (col_name, desc) in specs {
+                let col_vals = data.get(col_name).ok_or_else(|| {
+                    Diagnostic::statistical_error(
+                        "S0201",
+                        format!("Column `{}` not found in DataFrame for `arrange()`", col_name),
+                    )
+                })?;
+                sort_cols.push((col_vals, *desc));
+            }
 
-            let num_rows = sort_col.len();
+            let num_rows = columns.first()
+                .and_then(|c| data.get(c))
+                .map(|v| v.len())
+                .unwrap_or(0);
             let mut indices: Vec<usize> = (0..num_rows).collect();
 
             indices.sort_by(|&a, &b| {
-                let va = sort_col.get(a);
-                let vb = sort_col.get(b);
-                let ord = match (va, vb) {
-                    (Some(Value::I64(x)), Some(Value::I64(y))) => x.cmp(y),
-                    (Some(Value::F64(x)), Some(Value::F64(y))) => {
-                        x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
+                for (col_vals, desc) in &sort_cols {
+                    let ord = compare_values(col_vals.get(a), col_vals.get(b));
+                    if ord != std::cmp::Ordering::Equal {
+                        return if *desc { ord.reverse() } else { ord };
                     }
-                    (Some(Value::I64(x)), Some(Value::F64(y))) => {
-                        (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
-                    }
-                    (Some(Value::F64(x)), Some(Value::I64(y))) => {
-                        x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal)
-                    }
-                    (Some(Value::String(x)), Some(Value::String(y))) => x.cmp(y),
-                    (Some(Value::Bool(x)), Some(Value::Bool(y))) => x.cmp(y),
-                    _ => std::cmp::Ordering::Equal,
-                };
-                if descending { ord.reverse() } else { ord }
+                }
+                std::cmp::Ordering::Equal
             });
 
             let mut new_data = HashMap::new();
@@ -401,6 +418,91 @@ pub fn df_arrange(df: &Value, col_name: &str, descending: bool) -> Result<Value,
             format!("`arrange()` requires a DataFrame, found `{}`", other.type_name()),
         )),
     }
+}
+
+/// `slice_min(df, col, n)` — the `n` rows with the smallest `col` value.
+pub fn df_slice_min(df: &Value, col: &str, n: usize) -> Result<Value, Diagnostic> {
+    let sorted = df_arrange(df, &[(col.to_string(), false)])?;
+    df_head(&sorted, n)
+}
+
+/// `slice_max(df, col, n)` — the `n` rows with the largest `col` value.
+pub fn df_slice_max(df: &Value, col: &str, n: usize) -> Result<Value, Diagnostic> {
+    let sorted = df_arrange(df, &[(col.to_string(), true)])?;
+    df_head(&sorted, n)
+}
+
+fn xorshift_next(state: &mut u64) -> u64 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    x
+}
+
+fn sample_indices(num_rows: usize, k: usize) -> Vec<usize> {
+    let k = k.min(num_rows);
+    let mut state = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0x9E37_79B9_7F4A_7C15)
+        | 1; // xorshift requires a non-zero state
+
+    let mut indices: Vec<usize> = (0..num_rows).collect();
+    for i in 0..k {
+        let r = i + (xorshift_next(&mut state) as usize) % (num_rows - i);
+        indices.swap(i, r);
+    }
+    indices.truncate(k);
+    indices
+}
+
+/// `sample_n(df, n)` — `n` random rows, without replacement.
+pub fn df_sample_n(df: &Value, n: usize) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            let num_rows = columns.first()
+                .and_then(|c| data.get(c))
+                .map(|v| v.len())
+                .unwrap_or(0);
+            let indices = sample_indices(num_rows, n);
+
+            let mut new_data = HashMap::new();
+            for col in columns {
+                if let Some(col_vals) = data.get(col) {
+                    let subset: Vec<Value> = indices.iter()
+                        .filter_map(|&i| col_vals.get(i))
+                        .cloned()
+                        .collect();
+                    new_data.insert(col.clone(), subset);
+                }
+            }
+            Ok(Value::DataFrame { columns: columns.clone(), data: new_data })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`sample_n()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `sample_frac(df, frac)` — a random `frac` fraction of rows, without replacement.
+pub fn df_sample_frac(df: &Value, frac: f64) -> Result<Value, Diagnostic> {
+    let num_rows = match df {
+        Value::DataFrame { columns, data } => columns.first()
+            .and_then(|c| data.get(c))
+            .map(|v| v.len())
+            .unwrap_or(0),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                format!("`sample_frac()` requires a DataFrame, found `{}`", other.type_name()),
+            ));
+        }
+    };
+    let n = ((num_rows as f64) * frac).round().max(0.0) as usize;
+    df_sample_n(df, n)
 }
 
 /// `rename(df, "old_name", "new_name")` — rename a column non-destructively.
@@ -597,6 +699,263 @@ pub fn df_slice(df: &Value, from: usize, to: usize) -> Result<Value, Diagnostic>
         other => Err(Diagnostic::compute_error(
             "C0201",
             format!("`slice()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+// =========================================================================
+// 4. Grouping / summarizing + remaining column helpers
+// =========================================================================
+
+/// `group_by(df, key1, key2, ...)` — partitions rows by one or more key columns.
+/// Returns a `GroupedDataFrame`; only `summarize()`/`ungroup()` consume it, so grouped
+/// state never leaks into unrelated verbs.
+pub fn df_group_by(df: &Value, keys: &[String]) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            for k in keys {
+                if !data.contains_key(k) {
+                    return Err(Diagnostic::statistical_error(
+                        "S0201",
+                        format!("Column `{}` not found in DataFrame for `group_by()`", k),
+                    ));
+                }
+            }
+
+            let num_rows = columns.first()
+                .and_then(|c| data.get(c))
+                .map(|v| v.len())
+                .unwrap_or(0);
+
+            let mut group_index: HashMap<String, usize> = HashMap::new();
+            let mut groups: Vec<(Vec<Value>, Vec<usize>)> = Vec::new();
+
+            for row in 0..num_rows {
+                let key_vals: Vec<Value> = keys.iter()
+                    .map(|k| data[k].get(row).cloned().unwrap_or(Value::NA(None)))
+                    .collect();
+                let hash_key: String = key_vals.iter()
+                    .map(|v| format!("{:?}", v))
+                    .collect::<Vec<_>>()
+                    .join("\u{1}");
+
+                match group_index.get(&hash_key) {
+                    Some(&idx) => groups[idx].1.push(row),
+                    None => {
+                        group_index.insert(hash_key, groups.len());
+                        groups.push((key_vals, vec![row]));
+                    }
+                }
+            }
+
+            Ok(Value::GroupedDataFrame {
+                keys: keys.to_vec(),
+                groups,
+                columns: columns.clone(),
+                data: data.clone(),
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`group_by()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+fn compute_agg(
+    kind: &str,
+    col: Option<&str>,
+    data: &HashMap<String, Vec<Value>>,
+    indices: &[usize],
+) -> Result<Value, Diagnostic> {
+    if kind == "count" {
+        return Ok(Value::I64(indices.len() as i64));
+    }
+
+    let col_name = col.ok_or_else(|| {
+        Diagnostic::compute_error("C0201", format!("`{}()` requires a column argument in `summarize()`", kind))
+    })?;
+    let col_vals = data.get(col_name).ok_or_else(|| {
+        Diagnostic::statistical_error(
+            "S0201",
+            format!("Column `{}` not found in DataFrame for `summarize()`", col_name),
+        )
+    })?;
+    let subset: Vec<Value> = indices.iter().filter_map(|&i| col_vals.get(i).cloned()).collect();
+
+    // Reuse the same aggregation math the standalone functions use, so `mean(x)`
+    // inside `summarize()` and `mean(pull(df, "x"))` outside it never disagree.
+    let native_fn: crate::value::NativeFunction = match kind {
+        "mean" => crate::env::native_mean,
+        "sum" => crate::env::native_sum,
+        "std_dev" => crate::env::native_std_dev,
+        "var" => crate::env::native_var,
+        "min" => crate::env::native_min,
+        "max" => crate::env::native_max,
+        "first" => crate::env::native_first,
+        "last" => crate::env::native_last,
+        "median" => crate::env::native_median,
+        "n_distinct" => crate::env::native_n_distinct,
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                format!("Unknown aggregation `{}` in `summarize()`", other),
+            ));
+        }
+    };
+    native_fn(vec![Value::Vector(subset)])
+}
+
+/// `summarize(gdf, name = agg, ...)` — consumes the `GroupedDataFrame`, returns a plain
+/// `DataFrame`. `specs` is `(output_name, agg_kind, source_col)`.
+pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> Result<Value, Diagnostic> {
+    match gdf {
+        Value::GroupedDataFrame { keys, groups, data, .. } => {
+            let mut out_columns: Vec<String> = keys.clone();
+            let mut out_data: HashMap<String, Vec<Value>> = HashMap::new();
+            for k in keys {
+                out_data.insert(k.clone(), Vec::with_capacity(groups.len()));
+            }
+            for (name, _, _) in specs {
+                out_columns.push(name.clone());
+                out_data.insert(name.clone(), Vec::with_capacity(groups.len()));
+            }
+
+            for (key_vals, indices) in groups {
+                for (k, v) in keys.iter().zip(key_vals.iter()) {
+                    out_data.get_mut(k).unwrap().push(v.clone());
+                }
+                for (name, kind, col) in specs {
+                    let result = compute_agg(kind, col.as_deref(), data, indices)?;
+                    out_data.get_mut(name).unwrap().push(result);
+                }
+            }
+
+            Ok(Value::DataFrame { columns: out_columns, data: out_data })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!(
+                "`summarize()` requires a GroupedDataFrame (did you forget `group_by()`?), found `{}`",
+                other.type_name()
+            ),
+        )),
+    }
+}
+
+/// `pull(df, col)` — extract a column as a plain `Vector`.
+pub fn df_pull(df: &Value, col: &str) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { data, .. } => data.get(col).cloned().map(Value::Vector).ok_or_else(|| {
+            Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `pull()`", col))
+        }),
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`pull()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `fill_na(df, col, default)` — replace `NA` in one column with a constant.
+pub fn df_fill_na(df: &Value, col: &str, default: &Value) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            let col_vals = data.get(col).ok_or_else(|| {
+                Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `fill_na()`", col))
+            })?;
+            let filled: Vec<Value> = col_vals.iter()
+                .map(|v| if v.is_na() { default.clone() } else { v.clone() })
+                .collect();
+            let mut new_data = data.clone();
+            new_data.insert(col.to_string(), filled);
+            Ok(Value::DataFrame { columns: columns.clone(), data: new_data })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`fill_na()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `fill_na_all(df, default)` — replace `NA` in every column with a constant.
+pub fn df_fill_na_all(df: &Value, default: &Value) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            let mut new_data = HashMap::new();
+            for col in columns {
+                if let Some(col_vals) = data.get(col) {
+                    let filled: Vec<Value> = col_vals.iter()
+                        .map(|v| if v.is_na() { default.clone() } else { v.clone() })
+                        .collect();
+                    new_data.insert(col.clone(), filled);
+                }
+            }
+            Ok(Value::DataFrame { columns: columns.clone(), data: new_data })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`fill_na_all()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `count(df, col)` — frequency table: `DataFrame[col, n]`, one row per distinct value.
+pub fn df_count(df: &Value, col: &str) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { data, .. } => {
+            let col_vals = data.get(col).ok_or_else(|| {
+                Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `count()`", col))
+            })?;
+
+            let mut order: Vec<Value> = Vec::new();
+            let mut counts: HashMap<String, i64> = HashMap::new();
+            for v in col_vals {
+                let key = format!("{:?}", v);
+                if !counts.contains_key(&key) {
+                    order.push(v.clone());
+                }
+                *counts.entry(key).or_insert(0) += 1;
+            }
+
+            let n_out: Vec<Value> = order.iter()
+                .map(|v| Value::I64(*counts.get(&format!("{:?}", v)).unwrap_or(&0)))
+                .collect();
+
+            let mut new_data = HashMap::new();
+            new_data.insert(col.to_string(), order);
+            new_data.insert("n".to_string(), n_out);
+
+            Ok(Value::DataFrame { columns: vec![col.to_string(), "n".to_string()], data: new_data })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`count()` requires a DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `glimpse(df)` — compact per-column overview (name, type, first few values); prints, returns `Unit`.
+pub fn df_glimpse(df: &Value) -> Result<Value, Diagnostic> {
+    match df {
+        Value::DataFrame { columns, data } => {
+            let num_rows = columns.first()
+                .and_then(|c| data.get(c))
+                .map(|v| v.len())
+                .unwrap_or(0);
+            println!("Rows: {}", num_rows);
+            println!("Columns: {}", columns.len());
+            for col in columns {
+                if let Some(col_vals) = data.get(col) {
+                    let ty = col_vals.iter().find(|v| !v.is_na()).map(|v| v.type_name()).unwrap_or("any");
+                    let preview: Vec<String> = col_vals.iter().take(10).map(|v| v.to_string()).collect();
+                    println!("$ {:<15} <{}> {}", col, ty, preview.join(", "));
+                }
+            }
+            Ok(Value::Unit)
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`glimpse()` requires a DataFrame, found `{}`", other.type_name()),
         )),
     }
 }

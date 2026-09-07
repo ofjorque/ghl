@@ -39,6 +39,30 @@ pub enum Value {
         op: BinaryOp,
         rhs: Box<Value>,
     },
+    /// Rows partitioned by one or more key columns. Produced by `group_by()`,
+    /// consumed by `summarize()`/`ungroup()` — never leaks past either.
+    GroupedDataFrame {
+        keys: Vec<String>,
+        groups: Vec<(Vec<Value>, Vec<usize>)>,
+        columns: Vec<String>,
+        data: HashMap<String, Vec<Value>>,
+    },
+    /// A deferred aggregation, e.g. `mean(x)` where `x` is a bare column reference
+    /// rather than real data yet — resolved per-group inside `summarize()`.
+    /// `col: None` means a row-count aggregate (`count()`/`n()`).
+    AggSpec {
+        kind: String,
+        col: Option<String>,
+    },
+    /// A column sort key with direction, produced by a bare column (ascending)
+    /// or `desc(col)` (descending) inside `arrange()`.
+    SortSpec {
+        col: String,
+        desc: bool,
+    },
+    /// Runtime counterpart of `ExprKind::NamedArg` — `name = value` inside a call,
+    /// e.g. `summarize(mean_x = mean(x))`.
+    NamedArg(String, Box<Value>),
     Factor {
         levels: Vec<String>,
         indices: Vec<usize>,
@@ -117,6 +141,10 @@ impl Value {
             Value::DataFrame { .. } => "DataFrame",
             Value::ColRef(_) => "ColRef",
             Value::ColPredicate { .. } => "ColPredicate",
+            Value::GroupedDataFrame { .. } => "GroupedDataFrame",
+            Value::AggSpec { .. } => "AggSpec",
+            Value::SortSpec { .. } => "SortSpec",
+            Value::NamedArg(..) => "NamedArg",
             Value::Factor { .. } => "Factor",
             Value::Formula { .. } => "Formula",
             Value::ModelFit(_) => "ModelFit",
@@ -164,6 +192,19 @@ impl PartialEq for Value {
             (Value::Plot(p1), Value::Plot(p2)) => p1 == p2,
             (Value::Aesthetic(a1), Value::Aesthetic(a2)) => a1 == a2,
             (Value::Geom(g1), Value::Geom(g2)) => g1 == g2,
+            (
+                Value::GroupedDataFrame { keys: k1, groups: g1, columns: c1, data: d1 },
+                Value::GroupedDataFrame { keys: k2, groups: g2, columns: c2, data: d2 },
+            ) => k1 == k2 && g1 == g2 && c1 == c2 && d1 == d2,
+            (
+                Value::AggSpec { kind: k1, col: c1 },
+                Value::AggSpec { kind: k2, col: c2 },
+            ) => k1 == k2 && c1 == c2,
+            (
+                Value::SortSpec { col: c1, desc: d1 },
+                Value::SortSpec { col: c2, desc: d2 },
+            ) => c1 == c2 && d1 == d2,
+            (Value::NamedArg(n1, v1), Value::NamedArg(n2, v2)) => n1 == n2 && v1 == v2,
             _ => false,
         }
     }
@@ -353,6 +394,21 @@ impl Value {
             }
             Value::ColRef(c) => format!("col(\"{}\")", c),
             Value::ColPredicate { col, op, rhs } => format!("col(\"{}\") {:?} {}", col, op, rhs),
+            Value::GroupedDataFrame { keys, groups, .. } => {
+                format!("GroupedDataFrame[keys={:?}, n_groups={}]", keys, groups.len())
+            }
+            Value::AggSpec { kind, col } => match col {
+                Some(c) => format!("{}(\"{}\")", kind, c),
+                None => format!("{}()", kind),
+            },
+            Value::SortSpec { col, desc } => {
+                if *desc {
+                    format!("desc(\"{}\")", col)
+                } else {
+                    format!("\"{}\"", col)
+                }
+            }
+            Value::NamedArg(name, value) => format!("{} = {}", name, value),
             Value::Factor {
                 levels,
                 indices,
