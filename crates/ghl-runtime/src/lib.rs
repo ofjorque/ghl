@@ -8,6 +8,7 @@ pub mod matrix;
 pub mod env;
 pub mod eval;
 pub mod neko;
+pub mod io;
 
 pub use value::Value;
 pub use env::RuntimeEnv;
@@ -381,6 +382,49 @@ mod tests {
 
         let b_val = interp.env.get("b").expect("b exists");
         assert!(matches!(b_val, Value::Plot(_)));
+    }
+
+    #[test]
+    fn test_layered_io_and_wrangling_pipeline() {
+        let temp_dir = std::env::temp_dir();
+        let in_path = temp_dir.join("ghl_test_input.csv");
+        let out_path = temp_dir.join("ghl_test_output.csv");
+        let in_str = in_path.to_str().unwrap().replace('\\', "/");
+        let out_str = out_path.to_str().unwrap().replace('\\', "/");
+
+        let code = format!(
+            r#"
+            let raw_csv = "id,dose,response,batch\n1,1.0,10.0,A\n2,2.0,20.5,A\n3,3.0,30.2,B\n4,4.0,39.9,B\n5,5.0,50.1,C\n";
+            raw_csv |> write_file("{in_str}");
+
+            let df = read_csv("{in_str}");
+            let subset = df |> select(["dose", "response"]) |> head(4);
+            let model = fit(response ~ dose, subset);
+            let tidy_df = tidy(model);
+
+            tidy_df |> write_csv("{out_str}");
+            let exists = file_exists("{out_str}");
+            let lines = read_lines("{out_str}");
+            "#
+        );
+
+        let program = parse(&code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let exists_val = interp.env.get("exists").expect("exists val");
+        assert_eq!(exists_val, Value::Bool(true));
+
+        let lines_val = interp.env.get("lines").expect("lines val");
+        if let Value::Vector(lines) = lines_val {
+            assert!(lines.len() >= 3); // Header + Intercept + dose
+            assert!(lines[0].to_string().contains("term"));
+        } else {
+            panic!("Expected Vector for lines");
+        }
+
+        let _ = std::fs::remove_file(in_path);
+        let _ = std::fs::remove_file(out_path);
     }
 }
 

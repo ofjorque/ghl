@@ -1,0 +1,66 @@
+// GHL (Generalized Hypothesis Language) - Layered I/O & DataFrame Wrangling
+// Demonstrates primitive I/O, tabular CSV parsing with type inference & NA reasoning,
+// DataFrame verbs (select, head), statistical fitting, and export.
+
+println("(=^･ω･^=) Haru & Gojo: Initializing GHL Layered I/O & Wrangling Demonstration!\n");
+
+// -------------------------------------------------------------------------
+// 1. Primitive File I/O: Writing and inspecting raw files
+// -------------------------------------------------------------------------
+println("(U・ᴥ・U) 1. Primitive File I/O operations:");
+
+let raw_data = "id,dose,response,active,status\n1,1.2,12.4,true,OK\n2,2.4,24.1,true,OK\n3,3.5,NA,false,NA:SensorDropout\n4,4.8,47.9,true,OK\n5,5.9,59.3,false,OK\n6,7.1,72.0,true,OK\n7,8.2,NA,false,NA:LowBattery\n8,9.5,96.4,true,OK\n";
+
+raw_data |> write_file("target/clinical_trial_raw.csv");
+println("File written. Exists: " + file_exists("target/clinical_trial_raw.csv"));
+
+// -------------------------------------------------------------------------
+// 2. Tabular CSV I/O: Automatic Type Inference & Reasoned NA Detection
+// -------------------------------------------------------------------------
+println("\n(=^･ω･^=) 2. Loading DataFrame with read_csv() [auto-types + NA reasoning]:");
+let df = read_csv("target/clinical_trial_raw.csv");
+show(df);
+
+// -------------------------------------------------------------------------
+// 3. DataFrame Wrangling Verbs: select() and head()
+// -------------------------------------------------------------------------
+println("(U・ᴥ・U) 3. select([dose, response, status]) |> head(5):");
+let subset = df |> select(["id", "dose", "response", "status"]) |> head(5);
+show(subset);
+
+// -------------------------------------------------------------------------
+// 4. Statistical Modeling on Ingested Data (OLS via NEKO)
+// -------------------------------------------------------------------------
+println("(=^･ω･^=) 4. Fitting OLS model: response ~ dose");
+let model = fit(response ~ dose, df);
+summary(model);
+
+let tidy_results  = tidy(model);
+let glance_results = glance(model);
+
+println("\nTidy Coefficient Estimates:");
+show(tidy_results);
+
+println("Model Diagnostics Glance:");
+show(glance_results);
+
+// -------------------------------------------------------------------------
+// 5. Exporting Results to Structured CSV
+// -------------------------------------------------------------------------
+println("(U・ᴥ・U) 5. Exporting tidy results to target/dose_response_tidy.csv:");
+tidy_results |> write_csv("target/dose_response_tidy.csv");
+println("Done! Tidy CSV written successfully.\n");
+
+// -------------------------------------------------------------------------
+// 6. Grammar of Graphics: Terminal Plot + Plotters Export
+// -------------------------------------------------------------------------
+println("(=^･ω･^=) 6. Cockpit Deck Plot (terminal) + PNG export:");
+let p = df |> plot(aes(col("dose"), col("response")))
+           |> geom_point()
+           |> geom_smooth()
+           |> labs("Clinical Trial: Dose vs Response (OLS)");
+show(p);
+
+p |> save("target/clinical_trial_plot.png");
+
+println("\n(=^･ω･^=) All layered I/O and wrangling operations succeeded. Haru approves!\n");

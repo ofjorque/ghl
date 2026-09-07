@@ -404,6 +404,88 @@ impl TypeEnv {
             false,
         );
 
+        // Primitive and Tabular I/O
+        env.insert(
+            "read_file".into(),
+            Type::Function {
+                params: vec![Type::String],
+                ret: Box::new(Type::String),
+            },
+            false,
+        );
+        env.insert(
+            "read_lines".into(),
+            Type::Function {
+                params: vec![Type::String],
+                ret: Box::new(Type::Vector(Box::new(Type::String))),
+            },
+            false,
+        );
+        env.insert(
+            "write_file".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
+            "append_file".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
+            "file_exists".into(),
+            Type::Function {
+                params: vec![Type::String],
+                ret: Box::new(Type::Bool),
+            },
+            false,
+        );
+        env.insert(
+            "read_csv".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+        env.insert(
+            "parse_csv".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+        env.insert(
+            "write_csv".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
+            "head".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Any),
+            },
+            false,
+        );
+        env.insert(
+            "tail".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Any),
+            },
+            false,
+        );
+
         env
     }
 
