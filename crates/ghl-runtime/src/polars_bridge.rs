@@ -51,7 +51,7 @@ pub fn build_dataframe(cols: &[(String, Vec<Value>)]) -> Result<(DataFrame, NaRe
     Ok((frame, na_reasons))
 }
 
-fn value_column_to_polars(name: &str, values: &[Value]) -> Column {
+pub(crate) fn value_column_to_polars(name: &str, values: &[Value]) -> Column {
     let has_string = values.iter().any(|v| matches!(v, Value::String(_)));
     let has_f64 = values.iter().any(|v| matches!(v, Value::F64(_)));
     let has_i64 = values.iter().any(|v| matches!(v, Value::I64(_)));
@@ -93,19 +93,47 @@ pub fn pull_column_as_values(
     na_reasons: &NaReasonTable,
     col: &str,
 ) -> Result<Vec<Value>, Diagnostic> {
+    let all_rows: Vec<usize> = (0..frame.height()).collect();
+    pull_rows_as_values(frame, na_reasons, col, &all_rows)
+}
+
+/// Como [`pull_column_as_values`] pero para un subconjunto arbitrario de filas — lo usa
+/// `summarize()` para extraer los valores de un grupo sin materializar la columna entera.
+pub(crate) fn pull_rows_as_values(
+    frame: &DataFrame,
+    na_reasons: &NaReasonTable,
+    col: &str,
+    rows: &[usize],
+) -> Result<Vec<Value>, Diagnostic> {
     let column = frame.column(col).map_err(|_| {
         Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame", col))
     })?;
 
-    let height = frame.height();
-    let mut out = Vec::with_capacity(height);
-    for row in 0..height {
+    let mut out = Vec::with_capacity(rows.len());
+    for &row in rows {
         let av = column.get(row).map_err(|e| {
             Diagnostic::compute_error("C0210", format!("Error leyendo la celda ({col}, {row}): {e}"))
         })?;
         out.push(any_value_to_value(&av, col, row, na_reasons));
     }
     Ok(out)
+}
+
+/// Una sola celda — lo usa `group_by()`/`summarize()` para leer el valor de cada
+/// columna clave (todas las filas de un grupo comparten el mismo valor de clave).
+pub(crate) fn get_cell_as_value(
+    frame: &DataFrame,
+    na_reasons: &NaReasonTable,
+    col: &str,
+    row: usize,
+) -> Result<Value, Diagnostic> {
+    let column = frame.column(col).map_err(|_| {
+        Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame", col))
+    })?;
+    let av = column.get(row).map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("Error leyendo la celda ({col}, {row}): {e}"))
+    })?;
+    Ok(any_value_to_value(&av, col, row, na_reasons))
 }
 
 fn any_value_to_value(av: &AnyValue, col: &str, row: usize, na_reasons: &NaReasonTable) -> Value {
@@ -130,6 +158,24 @@ fn any_value_to_value(av: &AnyValue, col: &str, row: usize, na_reasons: &NaReaso
         // como texto en vez de perder el dato silenciosamente.
         other => Value::String(format!("{other}")),
     }
+}
+
+/// Compatibility shim for NEKO's statistical-modeling code (`neko.rs`), which predates
+/// the polars migration and works in terms of `(Vec<String>, HashMap<String, Vec<Value>>)`
+/// rather than the DataFrame directly. Its numerics (Cholesky-based OLS, IRLS-adjacent
+/// baking of the design matrix) are out of scope for this migration — this shim lets it
+/// keep working unchanged rather than rewriting model-fitting internals in the same pass
+/// as the DataFrame backend swap.
+pub fn dataframe_to_columns_and_data(
+    frame: &DataFrame,
+    na_reasons: &NaReasonTable,
+) -> Result<(Vec<String>, std::collections::HashMap<String, Vec<Value>>), Diagnostic> {
+    let columns: Vec<String> = frame.get_column_names().iter().map(|s| s.to_string()).collect();
+    let mut data = std::collections::HashMap::with_capacity(columns.len());
+    for col in &columns {
+        data.insert(col.clone(), pull_column_as_values(frame, na_reasons, col)?);
+    }
+    Ok((columns, data))
 }
 
 #[cfg(test)]

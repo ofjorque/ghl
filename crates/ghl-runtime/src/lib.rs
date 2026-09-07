@@ -30,6 +30,34 @@ pub fn eval(program: &Program) -> Result<Value, Diagnostic> {
 mod tests {
     use super::*;
     use ghl_syntax::parser::parse;
+    use crate::polars_bridge;
+
+    /// Test helper: extract a column's values from a `Value::DataFrame`, panicking with
+    /// a clear message if `v` isn't one or the column doesn't exist — keeps assertions
+    /// below focused on what they're checking rather than on the polars accessor API.
+    fn df_column(v: &Value, col: &str) -> Vec<Value> {
+        match v {
+            Value::DataFrame { frame, na_reasons } => {
+                polars_bridge::pull_column_as_values(frame, na_reasons, col)
+                    .unwrap_or_else(|e| panic!("column `{col}` not found: {e:?}"))
+            }
+            other => panic!("Expected DataFrame, found `{}`", other.type_name()),
+        }
+    }
+
+    fn df_columns(v: &Value) -> Vec<String> {
+        match v {
+            Value::DataFrame { frame, .. } => frame.get_column_names().iter().map(|s| s.to_string()).collect(),
+            other => panic!("Expected DataFrame, found `{}`", other.type_name()),
+        }
+    }
+
+    fn df_height(v: &Value) -> usize {
+        match v {
+            Value::DataFrame { frame, .. } => frame.height(),
+            other => panic!("Expected DataFrame, found `{}`", other.type_name()),
+        }
+    }
 
     #[test]
     fn test_eval_arithmetic_and_kleene_na() {
@@ -178,15 +206,11 @@ mod tests {
         interp.eval_program(&program).expect("evaluation ok");
 
         let filtered_val = interp.env.get("filtered").expect("filtered exists");
-        if let Value::DataFrame { columns: _, data } = filtered_val {
-            let ids = data.get("id").expect("id column exists");
-            assert_eq!(ids.len(), 3);
-            assert_eq!(ids[0], Value::I64(2));
-            assert_eq!(ids[1], Value::I64(3));
-            assert_eq!(ids[2], Value::I64(4));
-        } else {
-            panic!("Expected DataFrame result");
-        }
+        let ids = df_column(&filtered_val, "id");
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids[0], Value::I64(2));
+        assert_eq!(ids[1], Value::I64(3));
+        assert_eq!(ids[2], Value::I64(4));
     }
 
     #[test]
@@ -234,26 +258,18 @@ mod tests {
 
         // Verify tidy table
         let tidy_val = interp.env.get("tidied").expect("tidy exists");
-        if let Value::DataFrame { columns, data } = tidy_val {
-            assert_eq!(columns, vec!["term", "estimate", "std_error", "statistic", "p_value"]);
-            let terms = data.get("term").unwrap();
-            assert_eq!(terms.len(), 3);
-            assert_eq!(terms[0], Value::String("(Intercept)".into()));
-            assert_eq!(terms[1], Value::String("x1".into()));
-            assert_eq!(terms[2], Value::String("x2".into()));
-        } else {
-            panic!("Expected DataFrame for tidy");
-        }
+        assert_eq!(df_columns(&tidy_val), vec!["term", "estimate", "std_error", "statistic", "p_value"]);
+        let terms = df_column(&tidy_val, "term");
+        assert_eq!(terms.len(), 3);
+        assert_eq!(terms[0], Value::String("(Intercept)".into()));
+        assert_eq!(terms[1], Value::String("x1".into()));
+        assert_eq!(terms[2], Value::String("x2".into()));
 
         // Verify glance table
         let glance_val = interp.env.get("glanced").expect("glance exists");
-        if let Value::DataFrame { columns, data } = glance_val {
-            assert!(columns.contains(&"r_squared".to_string()));
-            let r2 = data.get("r_squared").unwrap()[0].as_f64().unwrap();
-            assert!((r2 - 1.0).abs() < 1e-6, "R2 must be 1.0 for perfect linear fit");
-        } else {
-            panic!("Expected DataFrame for glance");
-        }
+        assert!(df_columns(&glance_val).contains(&"r_squared".to_string()));
+        let r2 = df_column(&glance_val, "r_squared")[0].as_f64().unwrap();
+        assert!((r2 - 1.0).abs() < 1e-6, "R2 must be 1.0 for perfect linear fit");
 
         // Verify predictions
         let pred_val = interp.env.get("pred").expect("pred exists");
@@ -282,24 +298,21 @@ mod tests {
         interp.eval_program(&program).expect("evaluation ok");
 
         let eval_val = interp.env.get("eval_df").expect("eval_df exists");
-        if let Value::DataFrame { columns, data } = eval_val {
-            assert!(columns.contains(&".fitted".to_string()));
-            assert!(columns.contains(&".used_in_fit".to_string()));
-            assert!(columns.contains(&".na_reason".to_string()));
+        let columns = df_columns(&eval_val);
+        assert!(columns.contains(&".fitted".to_string()));
+        assert!(columns.contains(&".used_in_fit".to_string()));
+        assert!(columns.contains(&".na_reason".to_string()));
 
-            let used = data.get(".used_in_fit").unwrap();
-            let reasons = data.get(".na_reason").unwrap();
+        let used = df_column(&eval_val, ".used_in_fit");
+        let reasons = df_column(&eval_val, ".na_reason");
 
-            // Row 0 (valid)
-            assert_eq!(used[0], Value::Bool(true));
-            assert_eq!(reasons[0], Value::String("none".into()));
+        // Row 0 (valid)
+        assert_eq!(used[0], Value::Bool(true));
+        assert_eq!(reasons[0], Value::String("none".into()));
 
-            // Row 2 (NA:SensorDropout)
-            assert_eq!(used[2], Value::Bool(false));
-            assert_eq!(reasons[2], Value::String("SensorDropout".into()));
-        } else {
-            panic!("Expected DataFrame for augment");
-        }
+        // Row 2 (NA:SensorDropout)
+        assert_eq!(used[2], Value::Bool(false));
+        assert_eq!(reasons[2], Value::String("SensorDropout".into()));
     }
 
     #[test]
@@ -471,43 +484,33 @@ mod tests {
 
         // mutate added a 4th column
         let df2 = interp.env.get("df2").expect("df2");
-        if let Value::DataFrame { columns, data } = &df2 {
-            assert_eq!(columns.len(), 4);
-            assert!(columns.contains(&"dose2".to_string()));
-            let d2 = data.get("dose2").unwrap();
-            assert_eq!(d2[0], Value::F64(1.0));
-            assert_eq!(d2[1], Value::F64(4.0));
-        } else { panic!("Expected df2 to be DataFrame"); }
+        assert_eq!(df_columns(&df2).len(), 4);
+        assert!(df_columns(&df2).contains(&"dose2".to_string()));
+        let d2 = df_column(&df2, "dose2");
+        assert_eq!(d2[0], Value::F64(1.0));
+        assert_eq!(d2[1], Value::F64(4.0));
 
         // arrange sorted descending: first dose should be 5.0
         let df_s = interp.env.get("df_sorted").expect("df_sorted");
-        if let Value::DataFrame { data, .. } = &df_s {
-            let doses = data.get("dose").unwrap();
-            assert_eq!(doses[0], Value::F64(5.0));
-            assert_eq!(doses[1], Value::F64(4.0));
-        } else { panic!("Expected df_sorted to be DataFrame"); }
+        let doses = df_column(&df_s, "dose");
+        assert_eq!(doses[0], Value::F64(5.0));
+        assert_eq!(doses[1], Value::F64(4.0));
 
         // rename: cohort present, group absent
         let df_r = interp.env.get("df_renamed").expect("df_renamed");
-        if let Value::DataFrame { columns, data } = &df_r {
-            assert!(columns.contains(&"cohort".to_string()));
-            assert!(!columns.contains(&"group".to_string()));
-            assert!(data.contains_key("cohort"));
-        } else { panic!("Expected df_renamed to be DataFrame"); }
+        let renamed_cols = df_columns(&df_r);
+        assert!(renamed_cols.contains(&"cohort".to_string()));
+        assert!(!renamed_cols.contains(&"group".to_string()));
 
         // drop: id column removed
         let df_d = interp.env.get("df_dropped").expect("df_dropped");
-        if let Value::DataFrame { columns, .. } = &df_d {
-            assert!(!columns.contains(&"id".to_string()));
-            assert!(columns.contains(&"dose".to_string()));
-        } else { panic!("Expected df_dropped to be DataFrame"); }
+        let dropped_cols = df_columns(&df_d);
+        assert!(!dropped_cols.contains(&"id".to_string()));
+        assert!(dropped_cols.contains(&"dose".to_string()));
 
         // distinct: 7 rows -> 5 unique (rows with id=2 and id=3 have exact duplicates)
         let df_u = interp.env.get("df_unique").expect("df_unique");
-        if let Value::DataFrame { columns, data } = &df_u {
-            let n = data.get(&columns[0]).map(|v| v.len()).unwrap_or(0);
-            assert_eq!(n, 5, "Expected 5 distinct rows, got {n}");
-        } else { panic!("Expected df_unique to be DataFrame"); }
+        assert_eq!(df_height(&df_u), 5, "Expected 5 distinct rows");
 
         // nrow = 7, ncol = 3
         assert_eq!(interp.env.get("n_rows"), Some(Value::I64(7)));
@@ -522,12 +525,10 @@ mod tests {
 
         // slice(1, 4) = rows 1,2,3 — second id should be 2
         let sliced_val = interp.env.get("sliced").expect("sliced");
-        if let Value::DataFrame { data, .. } = &sliced_val {
-            let ids = data.get("id").unwrap();
-            assert_eq!(ids.len(), 3);
-            assert_eq!(ids[0], Value::I64(2));
-            assert_eq!(ids[2], Value::I64(4));
-        } else { panic!("Expected sliced to be DataFrame"); }
+        let ids = df_column(&sliced_val, "id");
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids[0], Value::I64(2));
+        assert_eq!(ids[2], Value::I64(4));
     }
 
     #[test]
@@ -549,23 +550,22 @@ mod tests {
         interp.eval_program(&program).expect("evaluation ok");
 
         let summary = interp.env.get("summary").expect("summary");
-        if let Value::DataFrame { columns, data } = &summary {
-            assert_eq!(columns, &vec!["species".to_string(), "n".to_string(), "mean_x".to_string(), "max_x".to_string()]);
-            let species = data.get("species").unwrap();
-            let n = data.get("n").unwrap();
-            let mean_x = data.get("mean_x").unwrap();
-            assert_eq!(species.len(), 2);
+        assert_eq!(
+            df_columns(&summary),
+            vec!["species".to_string(), "n".to_string(), "mean_x".to_string(), "max_x".to_string()]
+        );
+        let species = df_column(&summary, "species");
+        let n = df_column(&summary, "n");
+        let mean_x = df_column(&summary, "mean_x");
+        assert_eq!(species.len(), 2);
 
-            let a_idx = species.iter().position(|v| v == &Value::String("a".into())).unwrap();
-            assert_eq!(n[a_idx], Value::I64(3));
-            assert_eq!(mean_x[a_idx], Value::F64(3.0)); // (1+3+5)/3
+        let a_idx = species.iter().position(|v| v == &Value::String("a".into())).unwrap();
+        assert_eq!(n[a_idx], Value::I64(3));
+        assert_eq!(mean_x[a_idx], Value::F64(3.0)); // (1+3+5)/3
 
-            let b_idx = species.iter().position(|v| v == &Value::String("b".into())).unwrap();
-            assert_eq!(n[b_idx], Value::I64(2));
-            assert_eq!(mean_x[b_idx], Value::F64(3.0)); // (2+4)/2
-        } else {
-            panic!("Expected summary to be DataFrame");
-        }
+        let b_idx = species.iter().position(|v| v == &Value::String("b".into())).unwrap();
+        assert_eq!(n[b_idx], Value::I64(2));
+        assert_eq!(mean_x[b_idx], Value::F64(3.0)); // (2+4)/2
     }
 
     #[test]
@@ -585,17 +585,13 @@ mod tests {
         interp.eval_program(&program).expect("evaluation ok");
 
         let sorted = interp.env.get("sorted").expect("sorted");
-        if let Value::DataFrame { data, .. } = &sorted {
-            let groups = data.get("group").unwrap();
-            let xs = data.get("x").unwrap();
-            assert_eq!(groups.clone(), vec![
-                Value::String("a".into()), Value::String("a".into()),
-                Value::String("b".into()), Value::String("b".into()),
-            ]);
-            assert_eq!(xs.clone(), vec![Value::F64(2.0), Value::F64(1.0), Value::F64(2.0), Value::F64(1.0)]);
-        } else {
-            panic!("Expected sorted to be DataFrame");
-        }
+        let groups = df_column(&sorted, "group");
+        let xs = df_column(&sorted, "x");
+        assert_eq!(groups, vec![
+            Value::String("a".into()), Value::String("a".into()),
+            Value::String("b".into()), Value::String("b".into()),
+        ]);
+        assert_eq!(xs, vec![Value::F64(2.0), Value::F64(1.0), Value::F64(2.0), Value::F64(1.0)]);
     }
 
     #[test]
@@ -615,25 +611,55 @@ mod tests {
         let mut interp = Interpreter::new();
         interp.eval_program(&program).expect("evaluation ok");
 
-        if let Some(Value::DataFrame { data, .. }) = interp.env.get("smallest") {
-            let xs = data.get("x").unwrap();
-            assert_eq!(xs, &vec![Value::F64(10.0), Value::F64(20.0)]);
+        if let Some(smallest) = interp.env.get("smallest") {
+            assert_eq!(df_column(&smallest, "x"), vec![Value::F64(10.0), Value::F64(20.0)]);
         } else {
             panic!("Expected smallest to be DataFrame");
         }
 
-        if let Some(Value::DataFrame { data, .. }) = interp.env.get("largest") {
-            let xs = data.get("x").unwrap();
-            assert_eq!(xs, &vec![Value::F64(50.0), Value::F64(40.0)]);
+        if let Some(largest) = interp.env.get("largest") {
+            assert_eq!(df_column(&largest, "x"), vec![Value::F64(50.0), Value::F64(40.0)]);
         } else {
             panic!("Expected largest to be DataFrame");
         }
 
-        if let Some(Value::DataFrame { data, .. }) = interp.env.get("sampled") {
-            assert_eq!(data.get("x").unwrap().len(), 3);
+        if let Some(sampled) = interp.env.get("sampled") {
+            assert_eq!(df_column(&sampled, "x").len(), 3);
         } else {
             panic!("Expected sampled to be DataFrame");
         }
+    }
+
+    #[test]
+    fn test_inner_join_and_left_join() {
+        let code = r#"
+            let orders = dataframe {
+                order_id: [1, 2, 3, 4],
+                customer_id: [10, 20, 10, 30]
+            };
+            let customers = dataframe {
+                customer_id: [10, 20],
+                name: ["Alice", "Bob"]
+            };
+
+            let inner = orders |> inner_join(customers, customer_id);
+            let left = orders |> left_join(customers, customer_id);
+        "#;
+
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let inner = interp.env.get("inner").expect("inner exists");
+        assert_eq!(df_height(&inner), 3, "unmatched customer_id=30 row should be dropped");
+        assert!(df_columns(&inner).contains(&"name".to_string()));
+
+        let left = interp.env.get("left").expect("left exists");
+        assert_eq!(df_height(&left), 4, "every `orders` row should survive a left join");
+        let names = df_column(&left, "name");
+        let order_ids = df_column(&left, "order_id");
+        let unmatched_idx = order_ids.iter().position(|v| v == &Value::I64(4)).unwrap();
+        assert_eq!(names[unmatched_idx], Value::NA(None), "unmatched right side should be NA");
     }
 
     #[test]

@@ -560,11 +560,11 @@ impl TypeEnv {
             false,
         );
 
-        // Grouping / summarizing / sorting / row-selection helpers
+        // Grouping / summarizing / sorting / row-selection helpers / joins
         for name in [
             "ungroup", "first", "last", "n_distinct", "count", "coalesce", "desc",
             "pull", "fill_na", "fill_na_all", "glimpse", "slice_min", "slice_max",
-            "sample_n", "sample_frac",
+            "sample_n", "sample_frac", "inner_join", "left_join",
         ] {
             env.insert(
                 name.into(),

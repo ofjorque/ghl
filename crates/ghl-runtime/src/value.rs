@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt;
 use ghl_diagnostics::{
     CockpitTable, RenderCaps, TableAlignment, TableColumn, Diagnostic,
@@ -29,9 +28,12 @@ pub enum Value {
         cols: usize,
         data: Vec<f64>,
     },
+    /// Backed by a real `polars_core::frame::DataFrame` (TODO.md Fase 0/1) — `frame`
+    /// carries the columnar/typed data, `na_reasons` is the side-channel for GHL's
+    /// `NA:reason` semantics that Arrow has no equivalent for (see `na_reasons.rs`).
     DataFrame {
-        columns: Vec<String>,
-        data: HashMap<String, Vec<Value>>,
+        frame: polars_core::frame::DataFrame,
+        na_reasons: crate::na_reasons::NaReasonTable,
     },
     ColRef(String),
     ColPredicate {
@@ -40,12 +42,13 @@ pub enum Value {
         rhs: Box<Value>,
     },
     /// Rows partitioned by one or more key columns. Produced by `group_by()`,
-    /// consumed by `summarize()`/`ungroup()` — never leaks past either.
+    /// consumed by `summarize()`/`ungroup()` — never leaks past either. Grouping is
+    /// recomputed from `frame`/`keys` at the point of use rather than stored, since
+    /// polars' `GroupBy<'a>` borrows its source frame and can't live in an owned `Value`.
     GroupedDataFrame {
+        frame: polars_core::frame::DataFrame,
+        na_reasons: crate::na_reasons::NaReasonTable,
         keys: Vec<String>,
-        groups: Vec<(Vec<Value>, Vec<usize>)>,
-        columns: Vec<String>,
-        data: HashMap<String, Vec<Value>>,
     },
     /// A deferred aggregation, e.g. `mean(x)` where `x` is a bare column reference
     /// rather than real data yet — resolved per-group inside `summarize()`.
@@ -172,9 +175,9 @@ impl PartialEq for Value {
                 Value::Matrix { rows: r2, cols: c2, data: d2 },
             ) => r1 == r2 && c1 == c2 && d1 == d2,
             (
-                Value::DataFrame { columns: c1, data: d1 },
-                Value::DataFrame { columns: c2, data: d2 },
-            ) => c1 == c2 && d1 == d2,
+                Value::DataFrame { frame: f1, na_reasons: n1 },
+                Value::DataFrame { frame: f2, na_reasons: n2 },
+            ) => f1.columns() == f2.columns() && n1 == n2,
             (Value::ColRef(c1), Value::ColRef(c2)) => c1 == c2,
             (
                 Value::ColPredicate { col: c1, op: o1, rhs: r1 },
@@ -193,9 +196,9 @@ impl PartialEq for Value {
             (Value::Aesthetic(a1), Value::Aesthetic(a2)) => a1 == a2,
             (Value::Geom(g1), Value::Geom(g2)) => g1 == g2,
             (
-                Value::GroupedDataFrame { keys: k1, groups: g1, columns: c1, data: d1 },
-                Value::GroupedDataFrame { keys: k2, groups: g2, columns: c2, data: d2 },
-            ) => k1 == k2 && g1 == g2 && c1 == c2 && d1 == d2,
+                Value::GroupedDataFrame { frame: f1, na_reasons: n1, keys: k1 },
+                Value::GroupedDataFrame { frame: f2, na_reasons: n2, keys: k2 },
+            ) => f1.columns() == f2.columns() && n1 == n2 && k1 == k2,
             (
                 Value::AggSpec { kind: k1, col: c1 },
                 Value::AggSpec { kind: k2, col: c2 },
@@ -342,20 +345,20 @@ impl Value {
                 }
                 out
             }
-            Value::DataFrame { columns, data } => {
-                let num_rows = columns
-                    .first()
-                    .and_then(|c| data.get(c))
-                    .map(|v| v.len())
-                    .unwrap_or(0);
+            Value::DataFrame { frame, na_reasons } => {
+                let columns: Vec<String> = frame.get_column_names().iter().map(|s| s.to_string()).collect();
+                let num_rows = frame.height();
+
+                // Reuse the same Value <-> polars extraction the language uses for
+                // `pull()`, so display and data access never disagree on a cell's value.
+                let col_values: Vec<Vec<Value>> = columns
+                    .iter()
+                    .map(|c| crate::polars_bridge::pull_column_as_values(frame, na_reasons, c).unwrap_or_default())
+                    .collect();
 
                 let mut table = CockpitTable::new();
-                for col in columns {
-                    let col_data = data.get(col);
-                    let detected_ty = col_data
-                        .and_then(|v| v.iter().find(|it| !it.is_na()))
-                        .map(|it| it.type_name())
-                        .unwrap_or("any");
+                for (col, values) in columns.iter().zip(&col_values) {
+                    let detected_ty = values.iter().find(|it| !it.is_na()).map(|it| it.type_name()).unwrap_or("any");
 
                     let align = match detected_ty {
                         "i64" | "f64" => TableAlignment::Right,
@@ -371,21 +374,15 @@ impl Value {
 
                 for r in 0..num_rows {
                     let mut row_cells = Vec::with_capacity(columns.len());
-                    for col in columns {
-                        if let Some(col_data) = data.get(col) {
-                            if let Some(val) = col_data.get(r) {
-                                row_cells.push(match val {
-                                    Value::String(s) => s.clone(),
-                                    Value::F64(f) => format!("{f:>7.2}"),
-                                    Value::I64(n) => n.to_string(),
-                                    Value::NA(None) => "NA".to_string(),
-                                    Value::NA(Some(reason)) => format!("NA:{}", reason),
-                                    other => format!("{other}"),
-                                });
-                            } else {
-                                row_cells.push("NA".to_string());
-                            }
-                        }
+                    for values in &col_values {
+                        row_cells.push(match values.get(r) {
+                            Some(Value::String(s)) => s.clone(),
+                            Some(Value::F64(f)) => format!("{f:>7.2}"),
+                            Some(Value::I64(n)) => n.to_string(),
+                            Some(Value::NA(None)) | None => "NA".to_string(),
+                            Some(Value::NA(Some(reason))) => format!("NA:{}", reason),
+                            Some(other) => format!("{other}"),
+                        });
                     }
                     table.add_row(row_cells);
                 }
@@ -394,8 +391,8 @@ impl Value {
             }
             Value::ColRef(c) => format!("col(\"{}\")", c),
             Value::ColPredicate { col, op, rhs } => format!("col(\"{}\") {:?} {}", col, op, rhs),
-            Value::GroupedDataFrame { keys, groups, .. } => {
-                format!("GroupedDataFrame[keys={:?}, n_groups={}]", keys, groups.len())
+            Value::GroupedDataFrame { frame, keys, .. } => {
+                format!("GroupedDataFrame[keys={:?}, n_rows={}]", keys, frame.height())
             }
             Value::AggSpec { kind, col } => match col {
                 Some(c) => format!("{}(\"{}\")", kind, c),

@@ -79,21 +79,41 @@ Bloquea todo lo demás: el diseño de `Value::DataFrame` / `Value::Matrix` depen
 ## Fase 1 — Motor columnar + Joins (`benchmarks/suites/02`)
 Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto de la Fase de datos.
 
-- [ ] Reemplazar `Value::DataFrame { columns: Vec<String>, data: HashMap<String, Vec<Value>> }`
-      por `Value::DataFrame(polars::DataFrame)` (Fase 0, Opción A) — reescribir la
-      *ejecución* de los ~30 `df_*` de `io.rs` para llamar a la API/expresiones de polars
-      en vez de loops a mano; la capa de sintaxis (`col_ctx`, `AggSpec`, named-args) no cambia.
-- [ ] `inner_join(left, right, on)` / `left_join(left, right, on)` — usar `DataFrame::join`
-      de polars directamente, no reimplementar el hash join a mano.
-- [ ] `group_by`/`summarize` paralelo: viene dado por polars una vez migrado el backend
-      (su motor de agregación ya es multi-hilo) — verificar en el spike, no reimplementar.
+- [x] Reemplazar `Value::DataFrame { columns: Vec<String>, data: HashMap<String, Vec<Value>> }`
+      por `Value::DataFrame { frame: polars_core::frame::DataFrame, na_reasons: NaReasonTable }`.
+      Los ~30 `df_*` de `io.rs` fueron reescritos contra la API de polars (`select`,
+      `head`/`tail` vía `take`, `sort`/`arrange` con comparador propio + `take`, `rename`,
+      `drop_many`, `unique`-equivalente a mano para `distinct` con reindexado de razones,
+      `group_by().get_groups()` recomputado en `summarize` ya que `GroupBy<'a>` no puede
+      vivir dentro de un `Value` propio). La capa de sintaxis (`col_ctx`, `AggSpec`,
+      named-args) no cambió — se confirmó lo que decía la Fase 0. `neko.rs`/`env.rs`
+      (fit/tidy/glance/augment/predict/plot) migrados vía un shim de compatibilidad
+      (`polars_bridge::dataframe_to_columns_and_data`) sin tocar sus internos numéricos.
+      Los 21 tests de DataFrame preexistentes siguen pasando sin cambiar sus aserciones.
+- [x] `inner_join(left, right, on1, on2, ...)` / `left_join(...)` — usan
+      `DataFrame::join` de `polars-ops` (`polars-ops` se sumó a Fase 0 solo para esto,
+      `polars-core` no trae joins). Columnas `on` aceptan bare/`ColRef`/string igual que
+      el resto de verbos. Razón de NA se descarta en el resultado del join a propósito:
+      un join puede duplicar o descartar filas de origen, así que el reindexado posicional
+      simple de `filter`/`arrange`/`slice` no aplica, y la API eager seleccionada no
+      expone qué fila(s) de origen generó cada fila de salida.
+- [x] `group_by`/`summarize`: la agrupación (`get_groups()`) viene de polars; la
+      evaluación de cada `AggSpec` sigue reutilizando `native_mean`/`native_sum`/etc.
+      sobre el subconjunto extraído por grupo — **no** es todavía el camino 100%
+      zero-copy vía agregaciones nativas de polars por serie. Ver ítem nuevo abajo.
+- [ ] Optimización pendiente (no bloqueante): `summarize()` extrae cada grupo a
+      `Vec<Value>` antes de agregar (ver `compute_agg` en `io.rs`) en vez de usar
+      agregaciones nativas de polars por `Series` sin boxear — el Spike #1 ya midió
+      600µs para 100k filas con el camino ingenuo de polars, así que esto no es
+      urgente, pero es la primera optimización real cuando se mida contra Suite 02.
 - [ ] CSV/Parquet a escala GB: usar los lectores de `polars`/`arrow2`
       (`read_csv`/`read_parquet`, ya multi-hilo) en vez de extender el parser propio de
-      `crates/ghl-runtime/src/io.rs` — ese parser queda solo para el camino chico/`parse_csv` actual.
+      `crates/ghl-runtime/src/io.rs` — ese parser sigue siendo el usado hoy (vía
+      `polars_bridge::build_dataframe` al final), queda solo para el camino chico.
 - [ ] Generar el CSV sintético de 5GB / 25M filas / 12 columnas mixtas (Caso 2.1)
       + script reproducible para generarlo (no versionar el archivo en sí).
-- [ ] Filtrado vectorial con bitmask de validez + asignación copy-on-write (Caso 2.3),
-      depende del nuevo backend columnar.
+- [ ] Filtrado vectorial con bitmask de validez + asignación copy-on-write (Caso 2.3) —
+      el backend columnar ya existe; falta medir/optimizar el camino de filtrado a escala.
 - [ ] Actualizar `docs/design` / `benchmarks/suites/02-dataframe-operations.md`:
       su `query.gh` de ejemplo usa method-chaining (`df.filter(...).group_by(...).parallel().agg([...])`)
       que no coincide con la sintaxis real de pipes (`df |> filter(...) |> group_by(...)`).

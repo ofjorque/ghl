@@ -129,6 +129,10 @@ impl RuntimeEnv {
         env.set("colnames".into(), Value::NativeFn(native_colnames));
         env.set("slice".into(),    Value::NativeFn(native_slice));
 
+        // Joins
+        env.set("inner_join".into(), Value::NativeFn(native_inner_join));
+        env.set("left_join".into(),  Value::NativeFn(native_left_join));
+
         // Grouping / summarizing
         env.set("group_by".into(),  Value::NativeFn(native_group_by));
         env.set("summarize".into(), Value::NativeFn(native_summarize));
@@ -530,6 +534,54 @@ fn col_name_of(v: &Value) -> Option<String> {
 // Grouping / summarizing
 // =========================================================================
 
+/// `inner_join(left, right, on1, on2, ...)` — hash join, keeping only matching rows.
+fn native_inner_join(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    native_join(args, "inner_join", crate::io::df_inner_join)
+}
+
+/// `left_join(left, right, on1, on2, ...)` — hash join, keeping every row of `left`.
+fn native_left_join(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    native_join(args, "left_join", crate::io::df_left_join)
+}
+
+fn native_join(
+    args: Vec<Value>,
+    verb: &str,
+    join_fn: fn(&Value, &Value, &[String]) -> Result<Value, Diagnostic>,
+) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`{verb}()` requires two DataFrames: `{verb}(left, right, on)`"),
+        ));
+    }
+    let left = &args[0];
+    let right = &args[1];
+
+    let mut on = Vec::new();
+    for arg in &args[2..] {
+        match arg {
+            Value::Vector(items) => {
+                for it in items {
+                    if let Some(name) = col_name_of(it) {
+                        on.push(name);
+                    }
+                }
+            }
+            other => {
+                if let Some(name) = col_name_of(other) {
+                    on.push(name);
+                }
+            }
+        }
+    }
+    if on.is_empty() {
+        return Err(Diagnostic::compute_error("C0201", format!("`{verb}()` requires at least one join column")));
+    }
+
+    join_fn(left, right, &on)
+}
+
 fn native_group_by(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let df = args.first().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`group_by()` requires a DataFrame as first argument")
@@ -606,8 +658,8 @@ fn native_summarize(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 fn native_ungroup(args: Vec<Value>) -> Result<Value, Diagnostic> {
     match args.first() {
-        Some(Value::GroupedDataFrame { columns, data, .. }) => {
-            Ok(Value::DataFrame { columns: columns.clone(), data: data.clone() })
+        Some(Value::GroupedDataFrame { frame, na_reasons, .. }) => {
+            Ok(Value::DataFrame { frame: frame.clone(), na_reasons: na_reasons.clone() })
         }
         Some(df @ Value::DataFrame { .. }) => Ok(df.clone()),
         Some(other) => Err(Diagnostic::compute_error(
@@ -1093,63 +1145,32 @@ fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     let df = args[0].clone();
     match df {
-        Value::DataFrame { columns, data } => {
+        Value::DataFrame { frame, na_reasons } => {
             // If condition was passed as second argument:
             if args.len() > 1 {
                 // If the second argument is a ColPredicate
                 if let Value::ColPredicate { col, op, rhs } = &args[1] {
-                    let mut new_data: HashMap<String, Vec<Value>> = HashMap::new();
-                    for c in &columns {
-                        new_data.insert(c.clone(), Vec::new());
-                    }
-
-                    if let Some(col_vec) = data.get(col) {
-                        for (row_idx, item) in col_vec.iter().enumerate() {
-                            if eval_predicate(*op, item, rhs) {
-                                for c in &columns {
-                                    if let Some(c_vec) = data.get(c) {
-                                        if let Some(val) = c_vec.get(row_idx) {
-                                            new_data.get_mut(c).unwrap().push(val.clone());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    return Ok(Value::DataFrame {
-                        columns,
-                        data: new_data,
-                    });
+                    let col_vals = crate::polars_bridge::pull_column_as_values(&frame, &na_reasons, col)?;
+                    let keep_indices: Vec<usize> = col_vals.iter().enumerate()
+                        .filter(|(_, item)| eval_predicate(*op, item, rhs))
+                        .map(|(i, _)| i)
+                        .collect();
+                    let (new_frame, new_reasons) = crate::io::take_rows(&frame, &na_reasons, &keep_indices)?;
+                    return Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons });
                 }
 
                 // If the second argument is a boolean Vector (mask)
                 if let Value::Vector(mask) = &args[1] {
-                    let mut new_data: HashMap<String, Vec<Value>> = HashMap::new();
-                    for col in &columns {
-                        new_data.insert(col.clone(), Vec::new());
-                    }
-
-                    for (row_idx, m) in mask.iter().enumerate() {
-                        if m.as_bool() == Some(true) {
-                            for col in &columns {
-                                if let Some(col_vec) = data.get(col) {
-                                    if let Some(val) = col_vec.get(row_idx) {
-                                        new_data.get_mut(col).unwrap().push(val.clone());
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    return Ok(Value::DataFrame {
-                        columns,
-                        data: new_data,
-                    });
+                    let keep_indices: Vec<usize> = mask.iter().enumerate()
+                        .filter(|(_, m)| m.as_bool() == Some(true))
+                        .map(|(i, _)| i)
+                        .collect();
+                    let (new_frame, new_reasons) = crate::io::take_rows(&frame, &na_reasons, &keep_indices)?;
+                    return Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons });
                 }
             }
 
-            Ok(Value::DataFrame { columns, data })
+            Ok(Value::DataFrame { frame, na_reasons })
         }
         other => Ok(other),
     }
@@ -1175,8 +1196,8 @@ fn native_fit_ols(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
     };
 
-    let (columns, data) = match &args[1] {
-        Value::DataFrame { columns, data } => (columns, data),
+    let (frame, na_reasons) = match &args[1] {
+        Value::DataFrame { frame, na_reasons } => (frame, na_reasons),
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
@@ -1184,9 +1205,10 @@ fn native_fit_ols(args: Vec<Value>) -> Result<Value, Diagnostic> {
             ));
         }
     };
+    let (columns, data) = crate::polars_bridge::dataframe_to_columns_and_data(frame, na_reasons)?;
 
     let blueprint = crate::neko::Blueprint::new(response, terms);
-    let model = crate::neko::FittedModel::fit_ols(blueprint, columns, data)?;
+    let model = crate::neko::FittedModel::fit_ols(blueprint, &columns, &data)?;
     Ok(Value::ModelFit(Box::new(model)))
 }
 
@@ -1366,20 +1388,19 @@ fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     let first = &args[0];
     match first {
-        Value::DataFrame { columns: _, data } => {
+        Value::DataFrame { frame, na_reasons } => {
             let mut plot_spec = PlotSpec::new();
+            let col_f64 = |name: &str| -> Vec<f64> {
+                crate::polars_bridge::pull_column_as_values(frame, na_reasons, name)
+                    .map(|vals| vals.iter().filter_map(|v| v.as_f64()).collect())
+                    .unwrap_or_default()
+            };
 
             if let Some(Value::Aesthetic(aes)) = args.get(1) {
                 plot_spec = plot_spec.with_mapping(aes.clone());
-                if let Some(col_data) = data.get(&aes.x) {
-                    let xs: Vec<f64> = col_data.iter().filter_map(|v| v.as_f64()).collect();
-                    plot_spec = plot_spec.with_x_data(xs);
-                }
+                plot_spec = plot_spec.with_x_data(col_f64(&aes.x));
                 if let Some(ref y_name) = aes.y {
-                    if let Some(col_data) = data.get(y_name) {
-                        let ys: Vec<f64> = col_data.iter().filter_map(|v| v.as_f64()).collect();
-                        plot_spec.y_data = ys;
-                    }
+                    plot_spec.y_data = col_f64(y_name);
                     plot_spec.labels.y_label = Some(y_name.clone());
                     plot_spec.labels.title = Some(format!("Plot: {} vs {}", y_name, aes.x));
                 } else {
@@ -1391,10 +1412,7 @@ fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     Value::ColRef(s) | Value::String(s) => s.clone(),
                     other => format!("{other}"),
                 };
-                if let Some(col_data) = data.get(&x_name) {
-                    let xs: Vec<f64> = col_data.iter().filter_map(|v| v.as_f64()).collect();
-                    plot_spec = plot_spec.with_x_data(xs);
-                }
+                plot_spec = plot_spec.with_x_data(col_f64(&x_name));
                 plot_spec.labels.x_label = Some(x_name.clone());
 
                 if let Some(y_arg) = args.get(2) {
@@ -1402,10 +1420,7 @@ fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
                         Value::ColRef(s) | Value::String(s) => s.clone(),
                         other => format!("{other}"),
                     };
-                    if let Some(col_data) = data.get(&y_name) {
-                        let ys: Vec<f64> = col_data.iter().filter_map(|v| v.as_f64()).collect();
-                        plot_spec.y_data = ys;
-                    }
+                    plot_spec.y_data = col_f64(&y_name);
                     plot_spec.labels.y_label = Some(y_name.clone());
                     plot_spec.labels.title = Some(format!("Plot: {} vs {}", y_name, x_name));
                 } else {
@@ -1774,10 +1789,7 @@ fn native_mutate(args: Vec<Value>) -> Result<Value, Diagnostic> {
         scalar => {
             // Broadcast scalar to match nrow
             let n = match df {
-                Value::DataFrame { columns, data } => columns.first()
-                    .and_then(|c| data.get(c))
-                    .map(|v| v.len())
-                    .unwrap_or(1),
+                Value::DataFrame { frame, .. } => frame.height().max(1),
                 _ => 1,
             };
             vec![scalar.clone(); n]

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::*;
 use crate::value::Value;
@@ -99,23 +98,19 @@ impl Interpreter {
             }
 
             ExprKind::DataFrameLit(cols) => {
-                let mut columns = Vec::new();
-                let mut data = HashMap::new();
+                let mut columns: Vec<(String, Vec<Value>)> = Vec::new();
 
                 for (name, col_expr) in cols {
-                    columns.push(name.clone());
                     let col_val = self.eval_expr(col_expr)?;
-                    match col_val {
-                        Value::Vector(vec_data) => {
-                            data.insert(name.clone(), vec_data);
-                        }
-                        single => {
-                            data.insert(name.clone(), vec![single]);
-                        }
-                    }
+                    let values = match col_val {
+                        Value::Vector(vec_data) => vec_data,
+                        single => vec![single],
+                    };
+                    columns.push((name.clone(), values));
                 }
 
-                Ok(Value::DataFrame { columns, data })
+                let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
+                Ok(Value::DataFrame { frame, na_reasons })
             }
 
             ExprKind::MatrixLit { rows } => {

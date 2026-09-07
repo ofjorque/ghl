@@ -162,9 +162,8 @@ impl ReplSession {
                                 .map(|info| info.ty.to_string())
                                 .unwrap_or_else(|| val.type_name().to_string());
                             let val_preview = match &val {
-                                Value::DataFrame { columns, data } => {
-                                    let rows = data.values().next().map(|v| v.len()).unwrap_or(0);
-                                    format!("DataFrame ({} rows x {} cols)", rows, columns.len())
+                                Value::DataFrame { frame, .. } => {
+                                    format!("DataFrame ({} rows x {} cols)", frame.height(), frame.width())
                                 }
                                 Value::Matrix { rows, cols, .. } => {
                                     format!("Matrix ({} x {})", rows, cols)

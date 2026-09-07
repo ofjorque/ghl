@@ -1192,6 +1192,7 @@ dependencies = [
  "ghl-syntax",
  "ghl-types",
  "polars-core",
+ "polars-ops",
  "rand 0.10.2",
  "rand_distr 0.6.0",
  "rand_xoshiro",
@@ -2136,6 +2137,34 @@ dependencies = [
  "parking_lot",
  "signal-hook",
  "simdutf8",
+]
+
+[[package]]
+name = "polars-ops"
+version = "0.55.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3eeac77f1380bc8ba40ae9a9512911697952dfd3cfa48013f98a477e7ec6771"
+dependencies = [
+ "argminmax",
+ "bytemuck",
+ "either",
+ "hashbrown 0.17.1",
+ "indexmap",
+ "libm",
+ "memchr",
+ "num-traits",
+ "polars-arrow",
+ "polars-buffer",
+ "polars-compute",
+ "polars-core",
+ "polars-error",
+ "polars-schema",
+ "polars-utils",
+ "rayon",
+ "regex",
+ "regex-syntax",
+ "strum_macros",
+ "version_check",
 ]
 
 [[package]]

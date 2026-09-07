@@ -76,6 +76,27 @@ impl NaReasonTable {
         }
         out
     }
+
+    /// Descarta las razones de una sola columna (usado por `fill_na()`: tras rellenar,
+    /// esa columna ya no tiene celdas NA, así que ninguna razón sigue siendo válida).
+    pub fn without_column(&self, col: &str) -> NaReasonTable {
+        let mut out = NaReasonTable::default();
+        for ((c, row), reason) in &self.reasons {
+            if c != col {
+                out.set(c, *row, reason.clone());
+            }
+        }
+        out
+    }
+
+    /// Fusiona las entradas de otra tabla, sobrescribiendo en caso de choque
+    /// (usado por `mutate()` al reemplazar una columna: primero se descartan sus
+    /// razones viejas con [`without_column`], luego se insertan las nuevas).
+    pub fn merge(&mut self, other: &NaReasonTable) {
+        for (k, v) in &other.reasons {
+            self.reasons.insert(k.clone(), v.clone());
+        }
+    }
 }
 
 #[cfg(test)]

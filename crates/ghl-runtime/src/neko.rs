@@ -395,54 +395,42 @@ impl FittedModel {
             p_vals.push(Value::F64(self.p_values[i]));
         }
 
-        let columns = vec![
-            "term".to_string(),
-            "estimate".to_string(),
-            "std_error".to_string(),
-            "statistic".to_string(),
-            "p_value".to_string(),
+        let cols = vec![
+            ("term".to_string(), terms),
+            ("estimate".to_string(), estimates),
+            ("std_error".to_string(), std_errors),
+            ("statistic".to_string(), statistics),
+            ("p_value".to_string(), p_vals),
         ];
 
-        let mut data = HashMap::new();
-        data.insert("term".to_string(), terms);
-        data.insert("estimate".to_string(), estimates);
-        data.insert("std_error".to_string(), std_errors);
-        data.insert("statistic".to_string(), statistics);
-        data.insert("p_value".to_string(), p_vals);
-
-        Value::DataFrame { columns, data }
+        let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&cols)
+            .expect("tidy() builds a DataFrame from well-formed numeric/string vectors");
+        Value::DataFrame { frame, na_reasons }
     }
 
     /// Returns a 1-row DataFrame summarizing global goodness-of-fit metrics.
     pub fn glance(&self) -> Value {
-        let columns = vec![
-            "r_squared".to_string(),
-            "adj_r_squared".to_string(),
-            "residual_se".to_string(),
-            "f_statistic".to_string(),
-            "aic".to_string(),
-            "bic".to_string(),
-            "n_obs".to_string(),
-            "dropped_n".to_string(),
+        let cols = vec![
+            ("r_squared".to_string(), vec![Value::F64(self.r_squared)]),
+            ("adj_r_squared".to_string(), vec![Value::F64(self.adj_r_squared)]),
+            ("residual_se".to_string(), vec![Value::F64(self.residual_se)]),
+            ("f_statistic".to_string(), vec![Value::F64(self.f_stat)]),
+            ("aic".to_string(), vec![Value::F64(self.aic)]),
+            ("bic".to_string(), vec![Value::F64(self.bic)]),
+            ("n_obs".to_string(), vec![Value::I64(self.n_obs as i64)]),
+            ("dropped_n".to_string(), vec![Value::I64(self.dropped_n as i64)]),
         ];
 
-        let mut data = HashMap::new();
-        data.insert("r_squared".to_string(), vec![Value::F64(self.r_squared)]);
-        data.insert("adj_r_squared".to_string(), vec![Value::F64(self.adj_r_squared)]);
-        data.insert("residual_se".to_string(), vec![Value::F64(self.residual_se)]);
-        data.insert("f_statistic".to_string(), vec![Value::F64(self.f_stat)]);
-        data.insert("aic".to_string(), vec![Value::F64(self.aic)]);
-        data.insert("bic".to_string(), vec![Value::F64(self.bic)]);
-        data.insert("n_obs".to_string(), vec![Value::I64(self.n_obs as i64)]);
-        data.insert("dropped_n".to_string(), vec![Value::I64(self.dropped_n as i64)]);
-
-        Value::DataFrame { columns, data }
+        let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&cols)
+            .expect("glance() builds a DataFrame from well-formed numeric vectors");
+        Value::DataFrame { frame, na_reasons }
     }
 
     /// Returns the original DataFrame augmented with .fitted, .residual, .used_in_fit, .na_reason.
     pub fn augment(&self, orig_df: &Value) -> Result<Value, Diagnostic> {
         match orig_df {
-            Value::DataFrame { columns, data } => {
+            Value::DataFrame { frame, na_reasons } => {
+                let (columns, data) = crate::polars_bridge::dataframe_to_columns_and_data(frame, na_reasons)?;
                 let mut new_columns = columns.clone();
                 new_columns.push(".fitted".to_string());
                 new_columns.push(".residual".to_string());
@@ -480,10 +468,11 @@ impl FittedModel {
                 new_data.insert(".used_in_fit".to_string(), used_col);
                 new_data.insert(".na_reason".to_string(), reason_col);
 
-                Ok(Value::DataFrame {
-                    columns: new_columns,
-                    data: new_data,
-                })
+                let cols: Vec<(String, Vec<Value>)> = new_columns.iter()
+                    .map(|c| (c.clone(), new_data.remove(c).unwrap_or_default()))
+                    .collect();
+                let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&cols)?;
+                Ok(Value::DataFrame { frame, na_reasons })
             }
             _ => Err(Diagnostic::compute_error(
                 "C0201",
@@ -495,8 +484,9 @@ impl FittedModel {
     /// Predicts values for a new DataFrame using the frozen Blueprint.
     pub fn predict(&self, newdata: &Value) -> Result<Value, Diagnostic> {
         match newdata {
-            Value::DataFrame { columns, data } => {
-                let (x_data, _, _, n, p) = self.blueprint.bake(columns, data)?;
+            Value::DataFrame { frame, na_reasons } => {
+                let (columns, data) = crate::polars_bridge::dataframe_to_columns_and_data(frame, na_reasons)?;
+                let (x_data, _, _, n, p) = self.blueprint.bake(&columns, &data)?;
                 let mut predictions = Vec::with_capacity(n);
 
                 for i in 0..n {
