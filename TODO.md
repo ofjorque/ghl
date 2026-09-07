@@ -11,33 +11,70 @@ o simplifica las siguientes, no por prioridad de "lo más importante primero".
 > `statrs` + `rand_distr` (distribuciones), `rand_xoshiro` (PRNG reproducible),
 > `bumpalo` (arenas). **Ninguna está en `Cargo.toml` hoy.** El runtime actual es
 > un intérprete tree-walking artesanal sobre `Value` / `Vec<Value>` / `HashMap`.
-> Fase 0 decide si se adoptan esas librerías o se sigue a mano — esa decisión
-> determina el diseño de todo lo demás, por eso va primero.
+> Fase 0 ya resolvió esto — se adoptan directamente (ver decisión abajo) — y esa
+> decisión determina el diseño de todo lo demás, por eso va primero.
 
 ---
 
-## Fase 0 — Decisión de arquitectura y adopción de dependencias
+## Fase 0 — Arquitectura: decisión tomada
 Bloquea todo lo demás: el diseño de `Value::DataFrame` / `Value::Matrix` depende de esto.
 
-- [ ] Decidir: adoptar `polars-core`/`arrow2` + `faer` + `rayon` + `statrs`/`rand_distr` +
-      `rand_xoshiro` + `bumpalo` (RFC 08) vs. seguir con implementación artesanal.
-- [ ] Si se adopta: spike de integración mínima (una función de cada librería
-      corriendo dentro de `ghl-runtime`) antes de comprometerse.
-- [ ] Definir cómo conviven los `Value` dinámicos del intérprete con tipos
-      estáticos/tipados de esas librerías (capa de conversión en los bordes).
+> **Decisión (2026-09-07) — Opción A:** `Value::DataFrame` envuelve un `polars::DataFrame`
+> real desde el día uno; los verbos (`select`, `filter`, `group_by`, `summarize`, `arrange`,
+> joins, ...) llaman directo a la API/expresiones de polars. Se descartó un híbrido
+> (DataFrame chico en `Value` + `LazyFrame` grande en polars aparte): mantener dos
+> representaciones duplica cada verbo, contradice cómo se usan pandas/polars/dplyr en la
+> práctica (misma representación para explorar 10 filas y procesar millones), y el propio
+> RFC 08 ya especifica adoptar polars directamente, no un híbrido.
+>
+> Por qué no es tanto trabajo como parece: el diseño de `col_ctx`/`ColRef`/`AggSpec`/
+> named-args (`summarize(n = count(), mean_x = mean(x))`) ya commiteado es una capa de
+> *sintaxis y orden de evaluación*, no depende de que el DataFrame sea un
+> `HashMap<String, Vec<Value>>`. Lo que cambia es la *ejecución* dentro de
+> `crates/ghl-runtime/src/io.rs` (traducir la lista de `AggSpec` a
+> `.group_by(keys).agg([...])` de polars y envolver el resultado en `Value::DataFrame`),
+> no el parser, el AST, ni `col_ctx` en `eval.rs`/`checker.rs`.
+
+- [ ] Agregar a `Cargo.toml` de `ghl-runtime`: `polars-core` (o `polars` con features
+      mínimas — trae `arrow2` internamente, incluye lectores de CSV multi-hilo y
+      Parquet), `faer`, `rayon`, `statrs`, `rand_distr`, `rand`, `rand_xoshiro`, `bumpalo`.
+- [ ] **Spike #1 (bloqueante antes de tocar `io.rs`):** medir latencia de construir +
+      operar sobre un `polars::DataFrame` chico (10-100k filas) para confirmar que no
+      mete overhead que rompa las metas de arranque de Suite 04. Si el spike muestra
+      un problema real (poco probable), recién ahí reconsiderar un camino separado para
+      DataFrames chicos — no antes, no por hipótesis.
+- [ ] **Spike #2:** prototipo mínimo del side-channel de NA con razón (ver abajo) sobre
+      una sola operación (`filter`) antes de aplicarlo a los ~30 verbos.
+- [ ] Diseño de la capa de conversión en los bordes:
+  - **DataFrame:** `Value::DataFrame(polars::DataFrame)` reemplaza
+    `{ columns: Vec<String>, data: HashMap<String, Vec<Value>> }`. Conversión `Value` ⇄
+    polars solo en bordes reales: literales `dataframe { ... }` (construye Series desde
+    `Vec<Value>`) y verbos que sacan datos a GHL puro (`pull()` → `Value::Vector`).
+  - **NA con razón:** Arrow/polars solo tiene bit de validez, sin razón semántica
+    (`NA:SensorDropout`). Se preserva con una tabla lateral `HashMap<(col, row), String>`
+    de razones adjunta al wrapper de `Value::DataFrame`, propagada solo en operaciones
+    que preservan filas (`filter`/`arrange`/`slice`/joins, reindexando por posición) y
+    descartada/decidida explícitamente en operaciones que colapsan filas
+    (`group_by`/`summarize` — qué razón "gana" no está definido y no hace falta estarlo).
+  - **Matrix:** casi gratis — `Value::Matrix { rows, cols, data: Vec<f64> }` ya es
+    compatible con `faer::Mat<f64>` (buffer contiguo), la conversión es un wrap directo.
+- [ ] Si el side-channel de NA termina divergiendo de lo que describe RFC 03/09,
+      actualizar esas RFCs para que documenten el diseño real.
 
 ## Fase 1 — Motor columnar + Joins (`benchmarks/suites/02`)
 Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto de la Fase de datos.
 
 - [ ] Reemplazar `Value::DataFrame { columns: Vec<String>, data: HashMap<String, Vec<Value>> }`
-      por un backend columnar tipado (Arrow-compatible si se adoptó Fase 0),
-      con bitmasks de validez en vez de `Value::NA` por celda.
-- [ ] `inner_join(left, right, on)` / `left_join(left, right, on)` — hash join.
-- [ ] Paralelizar `group_by`/`summarize` sobre múltiples hilos (tabla hash concurrente
-      o particionado + merge).
-- [ ] Parser CSV multi-hilo para archivos de varios GB (el actual es un parser
-      simple in-memory de una sola pasada, ver `crates/ghl-runtime/src/io.rs`).
-- [ ] Ingestión Parquet (mencionada en `benchmarks/README.md`, sin suite detallada).
+      por `Value::DataFrame(polars::DataFrame)` (Fase 0, Opción A) — reescribir la
+      *ejecución* de los ~30 `df_*` de `io.rs` para llamar a la API/expresiones de polars
+      en vez de loops a mano; la capa de sintaxis (`col_ctx`, `AggSpec`, named-args) no cambia.
+- [ ] `inner_join(left, right, on)` / `left_join(left, right, on)` — usar `DataFrame::join`
+      de polars directamente, no reimplementar el hash join a mano.
+- [ ] `group_by`/`summarize` paralelo: viene dado por polars una vez migrado el backend
+      (su motor de agregación ya es multi-hilo) — verificar en el spike, no reimplementar.
+- [ ] CSV/Parquet a escala GB: usar los lectores de `polars`/`arrow2`
+      (`read_csv`/`read_parquet`, ya multi-hilo) en vez de extender el parser propio de
+      `crates/ghl-runtime/src/io.rs` — ese parser queda solo para el camino chico/`parse_csv` actual.
 - [ ] Generar el CSV sintético de 5GB / 25M filas / 12 columnas mixtas (Caso 2.1)
       + script reproducible para generarlo (no versionar el archivo en sí).
 - [ ] Filtrado vectorial con bitmask de validez + asignación copy-on-write (Caso 2.3),
@@ -61,7 +98,7 @@ Depende del backend columnar de la Fase 1; sin él no hay nada que optimizar de 
 Independiente de las Fases 1-2, puede avanzar en paralelo una vez resuelta la Fase 0.
 
 - [ ] Reemplazar `crates/ghl-runtime/src/matrix.rs` (implementación a mano) por
-      `faer` (o el motor elegido en Fase 0): LU, QR, Cholesky, SVD, autovalores.
+      `faer` (Fase 0): LU, QR, Cholesky, SVD, autovalores.
 - [ ] Multiplicación matricial densa multinúcleo por bloques (Caso 1.2).
 - [ ] SIMD real (AVX2/AVX-512/NEON) para dot product y reducciones sobre `Vector` (Caso 1.1).
 - [ ] Fusión de operaciones elemento-a-elemento sin buffers intermedios en heap —
@@ -69,7 +106,7 @@ Independiente de las Fases 1-2, puede avanzar en paralelo una vez resuelta la Fa
 - [ ] Métodos/sintaxis: `Vector::random_uniform(n)`, `.dot(&b)`, `.map(...)`.
 
 ## Fase 4 — Paralelismo transversal (RFC 05)
-Se apoya en lo que exista de Fase 0 (`rayon` si se adoptó); habilita el resto de casos de Suite 03.
+Se apoya en `rayon` (Fase 0); habilita el resto de casos de Suite 03.
 
 - [ ] Iteradores work-stealing (`.par_iter()` o equivalente) sobre `Vector`.
 - [ ] Paralelismo automático/opt-in en verbos de DataFrame (`.parallel()` antes de `.agg()`).
