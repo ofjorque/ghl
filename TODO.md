@@ -54,20 +54,25 @@ Bloquea todo lo demás: el diseño de `Value::DataFrame` / `Value::Matrix` depen
       `filter`: la razón de una fila que sobrevive se reasigna a su nueva posición: la
       razón de una fila descartada desaparece sin filtrarse a la fila equivocada; un
       filtro no-op deja la tabla de razones intacta.
-- [ ] Diseño de la capa de conversión en los bordes (mecanismo de NA validado por el
-      Spike #2 arriba; falta la implementación real de construcción/extracción):
-  - **DataFrame:** `Value::DataFrame(polars::DataFrame)` reemplaza
-    `{ columns: Vec<String>, data: HashMap<String, Vec<Value>> }`. Conversión `Value` ⇄
-    polars solo en bordes reales: literales `dataframe { ... }` (construye Series desde
-    `Vec<Value>`) y verbos que sacan datos a GHL puro (`pull()` → `Value::Vector`).
-  - **NA con razón:** Arrow/polars solo tiene bit de validez, sin razón semántica
-    (`NA:SensorDropout`). Se preserva con una tabla lateral `HashMap<(col, row), String>`
-    de razones adjunta al wrapper de `Value::DataFrame`, propagada solo en operaciones
-    que preservan filas (`filter`/`arrange`/`slice`/joins, reindexando por posición) y
-    descartada/decidida explícitamente en operaciones que colapsan filas
-    (`group_by`/`summarize` — qué razón "gana" no está definido y no hace falta estarlo).
-  - **Matrix:** casi gratis — `Value::Matrix { rows, cols, data: Vec<f64> }` ya es
-    compatible con `faer::Mat<f64>` (buffer contiguo), la conversión es un wrap directo.
+- [x] **Capa de conversión en los bordes — implementada y probada** (aún no enchufada a
+      `Value::DataFrame`, ver nota):
+  - `crates/ghl-runtime/src/na_reasons.rs` — `NaReasonTable` de producción (`set`/`get`/
+    `reindex`/`rename_column`/`retain_columns`), generaliza el mecanismo validado en el
+    Spike #2 para que también lo usen `rename()`/`select()`/`drop()`, no solo `filter()`.
+  - `crates/ghl-runtime/src/polars_bridge.rs` — `build_dataframe(cols)` (construcción:
+    `Vec<(String, Vec<Value>)>` → `polars::DataFrame` + `NaReasonTable`, ensanchando cada
+    columna al tipo más permisivo presente: `String` > `f64` > `i64` > `bool`) y
+    `pull_column_as_values(frame, na_reasons, col)` (extracción: columna de polars →
+    `Vec<Value>`, reconstruyendo `NA:razon` donde exista). 7 tests cubriendo round-trip
+    por tipo, ensanche `i64`+`f64` → `f64`, columnas enteramente NA, y columna inexistente.
+  - **Nota:** `Value::DataFrame` todavía tiene su forma vieja
+    (`{ columns: Vec<String>, data: HashMap<String, Vec<Value>> }`) — esta capa está
+    lista pero no reemplaza nada todavía. Enchufarla (cambiar la variante + reescribir
+    los ~30 `df_*` de `io.rs` contra `polars::DataFrame`) es el primer punto de Fase 1,
+    deliberadamente separado para no mezclar "¿la conversión es correcta?" con "¿la
+    migración completa no rompió nada?" en un mismo cambio.
+  - **Matrix:** sigue pendiente pero casi gratis — `Value::Matrix { rows, cols, data: Vec<f64> }`
+    ya es compatible con `faer::Mat<f64>` (buffer contiguo), la conversión es un wrap directo.
 - [ ] Si el side-channel de NA termina divergiendo de lo que describe RFC 03/09,
       actualizar esas RFCs para que documenten el diseño real.
 

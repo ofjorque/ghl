@@ -9,6 +9,8 @@ pub mod env;
 pub mod eval;
 pub mod neko;
 pub mod io;
+pub mod na_reasons;
+pub mod polars_bridge;
 
 pub use value::Value;
 pub use env::RuntimeEnv;
