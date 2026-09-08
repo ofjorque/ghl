@@ -36,11 +36,26 @@ pub enum Value {
         na_reasons: crate::na_reasons::NaReasonTable,
     },
     ColRef(String),
+    /// `col(x) > 5`-style single comparison. The leaf of the predicate tree `filter()`
+    /// evaluates — see `IsNaPredicate`/`NotPredicate`/`AndPredicate`/`OrPredicate` for
+    /// the rest of it (`is_na(x)`, `!`, `&&`, `||` combining predicates).
     ColPredicate {
         col: String,
         op: BinaryOp,
         rhs: Box<Value>,
     },
+    /// `is_na(col(...))` used as a predicate rather than a standalone boolean check —
+    /// produced by `native_is_na` when given a `ColRef` instead of a real value.
+    IsNaPredicate(String),
+    /// `!predicate` where `predicate` is itself deferred (a `ColPredicate`/
+    /// `IsNaPredicate`/`AndPredicate`/`OrPredicate`) — negating a real `Bool`/`NA` still
+    /// goes through the ordinary `UnaryNot` path unchanged.
+    NotPredicate(Box<Value>),
+    /// `predicate && predicate` — only built when at least one side is itself deferred;
+    /// two real `Bool`s still go through ordinary Kleene `&&`.
+    AndPredicate(Box<Value>, Box<Value>),
+    /// `predicate || predicate` — see `AndPredicate`.
+    OrPredicate(Box<Value>, Box<Value>),
     /// Rows partitioned by one or more key columns. Produced by `group_by()`,
     /// consumed by `summarize()`/`ungroup()` — never leaks past either. Grouping is
     /// recomputed from `frame`/`keys` at the point of use rather than stored, since
@@ -144,6 +159,10 @@ impl Value {
             Value::DataFrame { .. } => "DataFrame",
             Value::ColRef(_) => "ColRef",
             Value::ColPredicate { .. } => "ColPredicate",
+            Value::IsNaPredicate(_) => "IsNaPredicate",
+            Value::NotPredicate(_) => "NotPredicate",
+            Value::AndPredicate(..) => "AndPredicate",
+            Value::OrPredicate(..) => "OrPredicate",
             Value::GroupedDataFrame { .. } => "GroupedDataFrame",
             Value::AggSpec { .. } => "AggSpec",
             Value::SortSpec { .. } => "SortSpec",
@@ -183,6 +202,10 @@ impl PartialEq for Value {
                 Value::ColPredicate { col: c1, op: o1, rhs: r1 },
                 Value::ColPredicate { col: c2, op: o2, rhs: r2 },
             ) => c1 == c2 && o1 == o2 && r1 == r2,
+            (Value::IsNaPredicate(c1), Value::IsNaPredicate(c2)) => c1 == c2,
+            (Value::NotPredicate(a), Value::NotPredicate(b)) => a == b,
+            (Value::AndPredicate(a1, b1), Value::AndPredicate(a2, b2)) => a1 == a2 && b1 == b2,
+            (Value::OrPredicate(a1, b1), Value::OrPredicate(a2, b2)) => a1 == a2 && b1 == b2,
             (
                 Value::Factor { levels: l1, indices: i1, ordered: o1, contrast: k1 },
                 Value::Factor { levels: l2, indices: i2, ordered: o2, contrast: k2 },
@@ -391,6 +414,10 @@ impl Value {
             }
             Value::ColRef(c) => format!("col(\"{}\")", c),
             Value::ColPredicate { col, op, rhs } => format!("col(\"{}\") {:?} {}", col, op, rhs),
+            Value::IsNaPredicate(col) => format!("is_na(col(\"{}\"))", col),
+            Value::NotPredicate(inner) => format!("!({})", inner),
+            Value::AndPredicate(a, b) => format!("({}) && ({})", a, b),
+            Value::OrPredicate(a, b) => format!("({}) || ({})", a, b),
             Value::GroupedDataFrame { frame, keys, .. } => {
                 format!("GroupedDataFrame[keys={:?}, n_rows={}]", keys, frame.height())
             }

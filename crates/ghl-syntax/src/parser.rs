@@ -282,14 +282,19 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 )
             });
 
-        // Unary operators
+        // Unary operators (-, !)
         let op_unary = just(Token::Minus)
-            .map_with_span(|_, span: std::ops::Range<usize>| span)
+            .to(false)
+            .or(just(Token::Bang).to(true))
             .repeated()
             .then(call)
-            .foldr(|_span, rhs| {
+            .foldr(|is_not, rhs| {
                 let s = rhs.span.clone();
-                Expr::new(ExprKind::UnaryNeg(Box::new(rhs)), s)
+                if is_not {
+                    Expr::new(ExprKind::UnaryNot(Box::new(rhs)), s)
+                } else {
+                    Expr::new(ExprKind::UnaryNeg(Box::new(rhs)), s)
+                }
             });
 
         // Binary operators: Product (*, /, %, .*, ./, \)

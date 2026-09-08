@@ -335,7 +335,10 @@ impl TypeChecker {
             }
 
             ExprKind::UnaryNeg(inner) => self.check_expr_ctx(inner, col_ctx),
-            ExprKind::UnaryNot(_) => Type::Bool,
+            ExprKind::UnaryNot(inner) => {
+                self.check_expr_ctx(inner, col_ctx);
+                Type::Bool
+            }
 
             ExprKind::Pipe { expr, target } => {
                 let src_ty = self.check_expr(expr);

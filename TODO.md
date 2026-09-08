@@ -102,10 +102,9 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
       un join puede duplicar o descartar filas de origen, así que el reindexado posicional
       simple de `filter`/`arrange`/`slice` no aplica, y la API eager seleccionada no
       expone qué fila(s) de origen generó cada fila de salida.
-- [x] `group_by`/`summarize`: la agrupación (`get_groups()`) viene de polars; la
-      evaluación de cada `AggSpec` sigue reutilizando `native_mean`/`native_sum`/etc.
-      sobre el subconjunto extraído por grupo — **no** es todavía el camino 100%
-      zero-copy vía agregaciones nativas de polars por serie. Ver ítem nuevo abajo.
+- [x] `group_by`/`summarize`: la agrupación (`get_groups()`) viene de polars; cada
+      `AggSpec` se evalúa con una pasada fusionada nativa de polars por `(kind, col)`
+      distinto (ver el ítem de fusión más abajo, ahora hecho).
 - [x] **Optimización de `summarize()` — hecha, y encontró un bug de correctitud real
       en el camino.** `compute_agg` (`io.rs`) ya no extrae cada grupo a `Vec<Value>`
       antes de agregar: toma el subconjunto del grupo como `Column` nativo
@@ -136,14 +135,54 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
     Se agregó `test_summarize_propagates_na_kleene_style` para que esto no vuelva a
     pasar inadvertido. **Lección concreta:** el chequeo automatizado no reemplaza
     probar con datos que tengan NA de verdad cuando se toca código de agregación.
-- [ ] Optimización de seguimiento (no bloqueante, solo si alta cardinalidad de grupos
-      lo justifica al medir): reemplazar el `take()`+reduce por-grupo-por-agregación de
-      `compute_agg` por una sola pasada fusionada nativa de polars por cada `(kind, col)`
-      distinto (ej. `frame.group_by(keys)?.select([col]).mean()` para TODOS los grupos a
-      la vez), uniendo los resultados de cada pasada por las claves. Más rápido en teoría
-      con muchos grupos, pero requiere manejar joins entre N resultados parciales —
-      complejidad real, no vale la pena sin medir primero que el camino actual es un
-      cuello de botella real contra Suite 02 (100.000 grupos).
+- [x] **Optimización de seguimiento — hecha.** `compute_fused_agg` (`io.rs`) reemplazó
+      el `take()`+reduce por-grupo-por-agregación de `compute_agg` por una sola pasada
+      fusionada nativa de polars por cada `(kind, col)` distinto que aparece en los
+      `specs` de `summarize()` (`grouped.clone().select([col]).mean()`/`.sum()`/etc. —
+      un `GroupBy` completo, no una serie a la vez — sobre TODOS los grupos de una).
+      `df_summarize` calcula `group_by()` **una sola vez** y reutiliza ese mismo
+      `GroupBy` (clonar un `GroupBy` es barato: solo copia el handle — claves
+      seleccionadas + posiciones de grupo ya calculadas — no los datos) para cada pasada.
+  - **La preocupación de "requiere manejar joins entre N resultados parciales" que este
+    ítem tenía anotada resultó no aplicar:** como todas las pasadas comparten el mismo
+    `GroupBy` (mismas `self.groups`), sus resultados ya vienen alineados por posición
+    en el mismo orden de grupo — concatenar columnas alcanza, no hace falta un join real
+    por claves.
+  - **Kleene NA sigue propagando** (la regresión que este mismo ítem había encontrado
+    arriba) sin repetir el `take()` por grupo: por cada columna fuente que participa en
+    una agregación que debe propagar NA (`mean`/`sum`/`std_dev`/`var`/`min`/`max`/`median`)
+    y que de hecho tiene algún nulo (`column.null_count() > 0`, chequeo O(1) que se salta
+    la columna entera si no aplica), se agrega una columna auxiliar `u32` (0/1, "esta celda
+    es nula") al `DataFrame` de trabajo *antes* del único `group_by()`, y se le corre la
+    misma pasada fusionada (`.sum()`) para obtener el conteo de nulos por grupo en un solo
+    tiro — si ese conteo es >0 para un grupo, esa celda del resultado se reemplaza por
+    `NA` sin adivinar una razón (igual que antes). `test_summarize_propagates_na_kleene_style`
+    y `test_group_by_summarize_unquoted_columns` siguen pasando sin cambiar sus aserciones,
+    y se verificó de nuevo a mano con `ghl run` (grupo con un `NA:SensorDropout` en la
+    columna agregada → `mean`/`max` de ese grupo dan `NA`, los otros grupos no se ven
+    afectados).
+  - **Decisión de dependencias:** los métodos de reducción de `GroupBy` (`.mean()`,
+    `.sum()`, `.min()`, `.max()`, `.median()`, `.std()`/`.var()`, `.first()`/`.last()`,
+    `.n_unique()`) están *deprecados* en `polars-core` 0.55.2 a favor de la API lazy
+    (`polars-lazy`, no es dependencia de `ghl-runtime` hoy). Se optó por seguir usándolos
+    (con `#[allow(deprecated)]`, documentado en el código) en vez de sumar `polars-lazy`
+    como dependencia nueva solo para esto — mantiene el cambio dentro del mismo crate,
+    sin la superficie extra (optimizador de queries, tiempos de compilación) que trae la
+    API lazy. Si algún día se hace el motor "lazy" real de Fase 2, ese es el momento
+    natural de migrar esto también.
+  - **Medido (`spike_summarize_high_cardinality.rs`, dataset sintético en memoria, sin
+    reusar el de 5 grupos del Caso 2.1 porque no ejercita el escenario que este ítem
+    apunta):** 2M filas / **100.000 grupos** / 4 agregaciones (`count`, `mean`, `max`,
+    `sum`) en **321.79ms** (~6.2M filas/s). No hay una comparación A/B directa contra el
+    camino viejo con el mismo número exacto — el código por-grupo-por-spec que este ítem
+    reemplazó ya no existe para correrlo lado a lado — pero el diseño logra lo que este
+    ítem pedía: en vez de 100.000 grupos × 4 specs = 400.000 llamadas nativas pequeñas
+    (`take()` + reduce cada una), corren como máximo 3 pasadas nativas grandes (una por
+    cada `(kind, col)` distinto: `mean(value_b)`, `max(value_b)`, `sum(value_c)`) más un
+    barrido liviano en Rust para `count` (tamaño de cada grupo, ya calculado por
+    `get_groups()`, sin agregación nativa extra). Correcto y verificado de punta a punta;
+    la ganancia relativa exacta contra el camino anterior queda sin medir con precisión
+    a propósito, en vez de inventar un número.
 - [x] **CSV a escala — `read_csv()` reescrito, resultado: mejora real pero parcial.**
       Se sumó `polars-io` (con feature `csv`) a Fase 0. `read_csv_file` (`io.rs`) ahora
       usa `CsvReadOptions` de polars-io para la tokenización multi-hilo del archivo,
@@ -201,13 +240,11 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
     diferencia de un `i64` que es una copia trivial dentro del enum — la ganancia ahí
     debería ser bastante mayor). Ambos casos son rápidos en términos absolutos (<100ms/1M
     filas) independientemente de la mejora relativa.
-  - **Fuera de alcance, a propósito:** el ejemplo exacto del Caso 2.3
-    (`col("score") > 75.0 && !is_na(col("category"))`, un predicado *compuesto*) no está
-    soportado todavía — hoy `filter()` solo entiende un único `ColPredicate`, combinar dos
-    con `&&`/`||` cae en la lógica normal de `BinaryOp::And`/`Or` (que espera `Bool`, no
-    `ColPredicate`) y falla. Es una limitación preexistente de sintaxis/evaluación, no de
-    rendimiento — extenderla es un cambio de diseño aparte (predicados compuestos o un DSL
-    de expresiones para `filter()`), no lo que pedía este ítem.
+  - **Predicados compuestos — ahora soportados.** El ejemplo exacto del Caso 2.3
+    (`score > 75.0 && !is_na(category)`) corre tal cual. Ver el detalle completo en
+    "Mismatch de sintaxis del doc" más abajo — el hueco que esa sección documentaba
+    (`is_na()`/`!`/`&&`/`||` dentro de `filter()`) se arregló de raíz, no se dejó como
+    limitación aceptada.
   - "Asignación sin copia (Copy-on-Write)" de la descripción del Caso 2.3 no se abordó
     aparte — `take_rows`/`Column::Scalar` ya evitan las copias evitables que estaban al
     alcance sin rediseñar el modelo de memoria completo (RFC 03, Fase 5).
@@ -222,16 +259,40 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
   - **Se agregó `is_na(x)` como builtin** (antes solo existía `Value::is_na()` a nivel
     de Rust, ningún script GHL podía llamarlo) — vectorizado sobre `Vector` igual que
     los demás helpers de math/string.
-  - **Se encontró y documentó (no se ocultó) un hueco real al intentar escribir el
-    ejemplo del Caso 2.3 tal como lo describe el enunciado original**
-    (`score > 75.0 && !is_na(category)`): `is_na(col)` envuelve el `ColRef` en una
-    llamada de función *antes* de la comparación, así que `filter()` pierde la
-    referencia a la columna — probado a mano
-    (`filter(is_na(category) == false)` no filtra nada, 4 de 4 filas sobreviven cuando
-    debería filtrar 2). No hay today ni predicados compuestos (`&&`/`||` combinando dos
-    `ColPredicate`) ni una forma vectorizada de negar un `Vector[Bool]` para usarlo como
-    máscara de `filter()`. El doc ahora documenta esto explícitamente en vez de mostrar
-    un ejemplo que aparenta funcionar pero no filtra nada.
+  - **Se encontró un hueco real de diseño al escribir el ejemplo del Caso 2.3 tal como
+    lo describe el enunciado original** (`score > 75.0 && !is_na(category)`), y **se
+    arregló de raíz en vez de dejarlo documentado como limitación aceptada** — el primer
+    intento de cerrar este ítem solo documentaba el hueco (`is_na(col)` envolvía el
+    `ColRef` en una llamada de función *antes* de la comparación, `filter()` perdía la
+    referencia a la columna, y probado a mano con `filter(is_na(category) == false)` no
+    filtraba nada: 4 de 4 filas sobrevivían cuando debía filtrar 2 — un *fallo silencioso*,
+    exactamente lo que RFC 00 prohíbe). Documentar eso como "hueco conocido" en vez de
+    arreglarlo fue rechazado explícitamente: un `filter()` que a veces no filtra sin avisar
+    no es un límite de alcance aceptable, es un defecto de diseño.
+  - **El arreglo real:** un pequeño árbol de predicados diferidos en `Value`
+    (`IsNaPredicate(String)`, `NotPredicate(Box<Value>)`, `AndPredicate`/`OrPredicate`,
+    junto al `ColPredicate` que ya existía). `is_na(col(x))` ahora produce
+    `IsNaPredicate("x")` en vez de perder la referencia a la columna; `eval.rs` construye
+    `Not`/`And`/`Or` sobre estos predicados en vez de sobre `Bool` cuando cualquiera de los
+    operandos es un predicado diferido (`is_predicate()`); y `io::predicate_mask` resuelve
+    el árbol completo a un solo `BooleanChunked` reusando el álgebra booleana nativa de
+    polars (`!`, `&`, `|` sobre `BooleanChunked` — ya soportan Kleene 3-valores para NA
+    reales del lado de polars, no hubo que reimplementar lógica de 3 valores a mano).
+    También se agregó al parser (`ghl-syntax`) el operador unario `!` (`Token::Bang`), que
+    hasta ahora no se conectaba a ningún `ExprKind` a pesar de que el lexer y el evaluador
+    ya lo esperaban — sin este cambio `!is_na(...)` ni siquiera parseaba.
+  - **`filter()` ahora falla en vez de pasar de largo en silencio:** si el segundo
+    argumento no es ninguno de (comparación de columna, `is_na(...)`, una combinación de
+    esos con `!`/`&&`/`||`, o un `Vector[Bool]`), `filter()` devuelve un diagnóstico
+    (`C0202`) en vez de devolver el DataFrame sin filtrar — cerrando la clase completa de
+    bug que motivó este arreglo, no solo el caso puntual de `is_na`.
+  - Tests nuevos: `test_filter_is_na_predicate_and_negation`,
+    `test_filter_compound_predicate_and_or`,
+    `test_filter_rejects_unrecognized_predicate_instead_of_silently_passing_through`
+    (`lib.rs`). Verificado además de punta a punta con `ghl run`: `!is_na(category)`,
+    `is_na(category)`, `score > 75.0 && !is_na(category)` y
+    `score > 90.0 || category == "B"` sobre datos con NA simple y `NA:SensorDropout`,
+    todos con el resultado esperado fila por fila.
 
 ## Fase 2 — Motor "lazy" (consultas diferidas)
 Depende del backend columnar de la Fase 1; sin él no hay nada que optimizar de forma diferida.

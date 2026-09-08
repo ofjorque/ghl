@@ -754,6 +754,10 @@ fn native_na_reasons(args: Vec<Value>) -> Result<Value, Diagnostic> {
 fn native_is_na(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`is_na()` requires 1 argument"))?;
     match v {
+        // `is_na(col(...))` / `is_na(bare_column)` inside filter()'s argument tree:
+        // no data to check yet, stay deferred as a predicate the same way `col(x) > 5`
+        // does (see Value::IsNaPredicate).
+        Value::ColRef(col) => Ok(Value::IsNaPredicate(col.clone())),
         Value::Vector(items) => Ok(Value::Vector(items.iter().map(|it| Value::Bool(it.is_na())).collect())),
         other => Ok(Value::Bool(other.is_na())),
     }
@@ -1170,27 +1174,41 @@ fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let df = args[0].clone();
     match df {
         Value::DataFrame { frame, na_reasons } => {
-            // If condition was passed as second argument:
-            if args.len() > 1 {
-                // If the second argument is a ColPredicate: vectorized comparison
-                // straight on the polars column (Suite 02, Caso 2.3) -- no boxing the
-                // whole column to Vec<Value> and comparing scalar-by-scalar in Rust.
-                if let Value::ColPredicate { col, op, rhs } = &args[1] {
-                    return crate::io::df_filter_by_col_predicate(&Value::DataFrame { frame, na_reasons }, col, *op, rhs);
-                }
+            if args.len() < 2 {
+                return Ok(Value::DataFrame { frame, na_reasons });
+            }
+            let predicate = &args[1];
 
-                // If the second argument is a boolean Vector (mask)
-                if let Value::Vector(mask) = &args[1] {
-                    let keep_indices: Vec<usize> = mask.iter().enumerate()
-                        .filter(|(_, m)| m.as_bool() == Some(true))
-                        .map(|(i, _)| i)
-                        .collect();
-                    let (new_frame, new_reasons) = crate::io::take_rows(&frame, &na_reasons, &keep_indices)?;
-                    return Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons });
-                }
+            // A boolean Vector mask (`filter(df, [true, false, ...])`).
+            if let Value::Vector(mask) = predicate {
+                let keep_indices: Vec<usize> = mask.iter().enumerate()
+                    .filter(|(_, m)| m.as_bool() == Some(true))
+                    .map(|(i, _)| i)
+                    .collect();
+                let (new_frame, new_reasons) = crate::io::take_rows(&frame, &na_reasons, &keep_indices)?;
+                return Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons });
             }
 
-            Ok(Value::DataFrame { frame, na_reasons })
+            // Any predicate tree: `col(x) > 5`, `is_na(col(y))`, and `!`/`&&`/`||`
+            // combinations of those (Suite 02, Caso 2.3) -- vectorized straight against
+            // polars columns, no boxing to Vec<Value> and comparing scalar-by-scalar.
+            if crate::eval::is_predicate(predicate) {
+                return crate::io::df_filter_by_predicate(&Value::DataFrame { frame, na_reasons }, predicate);
+            }
+
+            // Anything else is a mistake, not a no-op: GHL doesn't silently ignore a
+            // condition it doesn't understand and hand back the DataFrame unfiltered
+            // (RFC 00: no silent state) -- it used to, and that was a real bug.
+            Err(Diagnostic::compute_error(
+                "C0202",
+                format!(
+                    "`filter()` does not understand the second argument (`{}`) as a \
+                     predicate -- expected a column comparison (`col(x) > 5` or bare \
+                     `x > 5`), `is_na(col(x))`, a combination of those with `!`/`&&`/`||`, \
+                     or a boolean Vector",
+                    predicate.type_name()
+                ),
+            ))
         }
         other => Ok(other),
     }

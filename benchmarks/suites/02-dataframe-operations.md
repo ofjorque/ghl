@@ -60,17 +60,11 @@ let summary = df
         event_count   = count()
     );
 
-// Caso 2.3: filtrado vectorial + columna derivada. `filter()` hoy solo entiende un
-// único predicado `col OP escalar` (vectorizado nativamente contra polars, ver TODO.md
-// Fase 1) — el enunciado original de este caso ("score > 75.0 && !is_na(category)") no
-// es expresable en una sola llamada todavía: no hay predicados compuestos (`&&`/`||`
-// combinando dos condiciones de columna) ni una forma vectorizada de "excluir NA" que
-// se pueda pasar como predicado de `filter()` (`is_na(col)` da un `Vector[Bool]` que
-// sirve para inspección, pero envolver un `ColRef` en una llamada antes de comparar le
-// hace perder a `filter()` la referencia a la columna). Con lo que existe hoy, la parte
-// de score se filtra vectorizado y las filas con NA se dejan así, documentado como
-// limitación real en vez de simulado con código que en verdad no filtra nada:
-let filtered = df |> filter(score > 75.0);
+// Caso 2.3: filtrado vectorial + columna derivada. `filter()` entiende comparaciones de
+// columna (`col OP escalar`, vectorizado nativamente contra polars), `is_na(col)`, y
+// combinaciones de esas con `!`/`&&`/`||` -- el enunciado original de este caso
+// ("score > 75.0 && !is_na(category)") corre tal cual, sin rodeos (TODO.md, Fase 1):
+let filtered = df |> filter(score > 75.0 && !is_na(category));
 let log_scores = log(pull(filtered, "score"));
 let clean = filtered |> mutate("log_score", log_scores);
 

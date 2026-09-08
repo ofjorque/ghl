@@ -164,6 +164,11 @@ impl Interpreter {
                 match val {
                     Value::Bool(b) => Ok(Value::Bool(!b)),
                     Value::NA(r) => Ok(Value::NA(r)), // Kleene: !NA is NA
+                    // `!is_na(col(...))` / `!(col(x) > 5)` etc: the operand is itself a
+                    // deferred predicate (no DataFrame to evaluate against yet), so stay
+                    // deferred too rather than erroring — `filter()` resolves the whole
+                    // tree into one BooleanChunked mask.
+                    v if is_predicate(&v) => Ok(Value::NotPredicate(Box::new(v))),
                     _ => Err(Diagnostic::compute_error("C0202", "Unary `!` expects boolean operand")),
                 }
             }
@@ -338,6 +343,19 @@ impl Interpreter {
                 col,
                 op: flipped_op,
                 rhs: Box::new(left),
+            });
+        }
+
+        // `score > 75.0 && !is_na(category)`: combining two deferred predicates (or one
+        // predicate with anything else) stays deferred rather than going through the
+        // Kleene Bool `&&`/`||` below, which would just error on a non-Bool operand.
+        // Two real Bools/NAs never hit this branch (`is_predicate` is false for both),
+        // so ordinary `&&`/`||` semantics are unaffected.
+        if matches!(op, BinaryOp::And | BinaryOp::Or) && (is_predicate(&left) || is_predicate(&right)) {
+            return Ok(match op {
+                BinaryOp::And => Value::AndPredicate(Box::new(left), Box::new(right)),
+                BinaryOp::Or => Value::OrPredicate(Box::new(left), Box::new(right)),
+                _ => unreachable!(),
             });
         }
 
@@ -560,6 +578,20 @@ fn callee_name(expr: &Expr) -> Option<&str> {
         ExprKind::Ident(name) => Some(name.as_str()),
         _ => None,
     }
+}
+
+/// True for any `Value` that represents a deferred `filter()` predicate rather than a
+/// real computed value — the leaf `ColPredicate`/`IsNaPredicate` and the combinators
+/// (`Not`/`And`/`Or`) built on top of them.
+pub(crate) fn is_predicate(v: &Value) -> bool {
+    matches!(
+        v,
+        Value::ColPredicate { .. }
+            | Value::IsNaPredicate(_)
+            | Value::NotPredicate(_)
+            | Value::AndPredicate(..)
+            | Value::OrPredicate(..)
+    )
 }
 
 fn match_pattern(pattern: &Pattern, target: &Value, env: &mut RuntimeEnv) -> bool {

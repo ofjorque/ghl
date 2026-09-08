@@ -214,6 +214,67 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_is_na_predicate_and_negation() {
+        let code = r#"
+            let df = dataframe {
+                id: [1, 2, 3, 4],
+                category: ["A", NA, "B", NA:Dropout]
+            };
+            let only_na = df |> filter(is_na(category));
+            let without_na = df |> filter(!is_na(category));
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let only_na = interp.env.get("only_na").expect("only_na exists");
+        assert_eq!(df_column(&only_na, "id"), vec![Value::I64(2), Value::I64(4)]);
+
+        let without_na = interp.env.get("without_na").expect("without_na exists");
+        assert_eq!(df_column(&without_na, "id"), vec![Value::I64(1), Value::I64(3)]);
+    }
+
+    #[test]
+    fn test_filter_compound_predicate_and_or() {
+        let code = r#"
+            let df = dataframe {
+                id:       [1, 2, 3, 4, 5],
+                score:    [80.0, 60.0, 90.0, 40.0, 95.0],
+                category: ["A", "B", NA, "A", "B"]
+            };
+            // Caso 2.3 de benchmarks/suites/02: score > 75.0 && !is_na(category).
+            let clean = df |> filter(score > 75.0 && !is_na(category));
+            let either = df |> filter(score > 90.0 || category == "B");
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        // Rows with score > 75.0: 1 (80), 3 (90), 5 (95). Row 3 has NA category, so it
+        // must be excluded by !is_na(category) -- only rows 1 and 5 survive.
+        let clean = interp.env.get("clean").expect("clean exists");
+        assert_eq!(df_column(&clean, "id"), vec![Value::I64(1), Value::I64(5)]);
+
+        // score > 90.0: row 5 (95). category == "B": rows 2, 5. Union: rows 2, 5.
+        let either = interp.env.get("either").expect("either exists");
+        assert_eq!(df_column(&either, "id"), vec![Value::I64(2), Value::I64(5)]);
+    }
+
+    #[test]
+    fn test_filter_rejects_unrecognized_predicate_instead_of_silently_passing_through() {
+        // A `filter()` that doesn't understand its second argument must error, not
+        // silently hand back the DataFrame unfiltered -- GHL doesn't do silent state.
+        let code = r#"
+            let df = dataframe { id: [1, 2, 3] };
+            let filtered = df |> filter(42);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let result = interp.eval_program(&program);
+        assert!(result.is_err(), "filter() with a nonsensical predicate must error, not no-op");
+    }
+
+    #[test]
     fn test_neko_ols_fit_and_projections() {
         // True model: y = 5.0 + 2.0*x1 - 1.0*x2
         // Observations:
