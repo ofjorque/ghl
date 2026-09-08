@@ -13,6 +13,7 @@ use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::BinaryOp;
 use polars_core::prelude::*;
 use polars_io::prelude::*;
+use polars_lazy::prelude::*;
 use polars_ops::prelude::*;
 use rayon::prelude::*;
 use crate::na_reasons::NaReasonTable;
@@ -762,56 +763,57 @@ pub fn df_group_by(df: &Value, keys: &[String]) -> Result<Value, Diagnostic> {
     Ok(Value::GroupedDataFrame { frame: frame.clone(), na_reasons: na_reasons.clone(), keys: keys.to_vec() })
 }
 
-fn group_indicator_to_indices(g: &GroupsIndicator) -> Vec<usize> {
-    match g {
-        GroupsIndicator::Idx((_, idxs)) => idxs.iter().map(|&i| i as usize).collect(),
-        GroupsIndicator::Slice([first, len]) => (*first as usize..(*first + *len) as usize).collect(),
-    }
-}
-
 const PROPAGATES_NA_KINDS: [&str; 7] = ["mean", "sum", "std_dev", "var", "min", "max", "median"];
 
-/// One fused native-polars pass computing `kind(col)` for every group at once (instead
-/// of `compute_agg`'s old per-group `take()`+reduce, one such pass per group per spec —
-/// this is the "optimización de seguimiento" TODO.md deferred when `summarize()` first
-/// shipped). `grouped.clone()` is cheap: it only clones the small `GroupBy` handle
-/// (selected keys/columns + the already-computed group positions), not the underlying
-/// data, so every spec reuses the one `group_by()` computed in `df_summarize` and all
-/// results stay aligned to the same group order (`grouped.keys()`) with no join needed.
-/// The eager `GroupBy` reduction methods (`.mean()`/`.sum()`/etc.) are deprecated in
-/// favor of the lazy-query API, but remain fully functional; using them here (instead of
-/// pulling in `polars-lazy` as a new dependency) keeps this a same-crate, minimal-diff
-/// change.
-#[allow(deprecated)]
-fn compute_fused_agg(kind: &str, col: &str, grouped: &GroupBy) -> Result<Column, Diagnostic> {
-    let sub = grouped.clone().select([col.to_string()]);
-    let agg_err = |e: PolarsError| Diagnostic::compute_error("C0210", format!("`{kind}()` failed in `summarize()`: {e}"));
-    let result_df = match kind {
-        "mean" => sub.mean(),
-        "sum" => sub.sum(),
-        "min" => sub.min(),
-        "max" => sub.max(),
-        "median" => sub.median(),
-        "std_dev" => sub.std(1),
-        "var" => sub.var(1),
-        "first" => sub.first(),
-        "last" => sub.last(),
-        "n_distinct" => sub.n_unique(),
+/// Builds the `Expr` for one `(kind, col)` aggregation, aliased to `alias` — one leaf of the
+/// single fused `LazyFrame::group_by().agg([...])` query `df_summarize` runs for every
+/// distinct aggregation the caller asked for, across ALL groups at once (this is the
+/// "optimización de seguimiento" TODO.md deferred when `summarize()` first shipped: one
+/// query-engine pass instead of one `take()`+reduce per group per spec).
+fn agg_expr_for(kind: &str, col_name: &str, alias: &str) -> Result<Expr, Diagnostic> {
+    let base = col(col_name);
+    let expr = match kind {
+        "mean" => base.mean(),
+        "sum" => base.sum(),
+        "min" => base.min(),
+        "max" => base.max(),
+        "median" => base.median(),
+        "std_dev" => base.std(1),
+        "var" => base.var(1),
+        "first" => base.first(),
+        "last" => base.last(),
+        "n_distinct" => base.n_unique(),
         other => {
             return Err(Diagnostic::compute_error("C0201", format!("Unknown aggregation `{}` in `summarize()`", other)));
         }
-    }.map_err(agg_err)?;
+    };
+    Ok(expr.alias(PlSmallStr::from_string(alias.to_string())))
+}
 
-    // Selecting exactly one column means the result has exactly one non-key column,
-    // regardless of the (deprecated-API-specific) name polars gave it -- taking the last
-    // column avoids hardcoding that naming scheme.
-    result_df.columns().last().cloned().ok_or_else(|| {
-        Diagnostic::compute_error("C0210", format!("`{kind}()` produced no result column in `summarize()`"))
-    })
+/// Reads one `IdxSize` (`u32` unless polars is built with the `bigidx` feature, which this
+/// workspace doesn't enable) cell out of a `len()`/`null_count()`/row-index aggregation
+/// column — these are always index-sized counts, never anything else, so an unexpected
+/// `AnyValue` variant fails loudly instead of silently coercing.
+fn get_idx_cell(column: &Column, i: usize, what: &str) -> Result<usize, Diagnostic> {
+    match column.get(i) {
+        Ok(AnyValue::UInt32(v)) => Ok(v as usize),
+        Ok(AnyValue::UInt64(v)) => Ok(v as usize),
+        other => Err(Diagnostic::compute_error("C0210", format!("`summarize()`: unexpected type reading {what}: {other:?}"))),
+    }
 }
 
 /// `summarize(gdf, name = agg, ...)` — consumes the `GroupedDataFrame`, returns a plain
 /// `DataFrame`. `specs` is `(output_name, agg_kind, source_col)`.
+///
+/// Uses `polars-lazy`'s query engine (`LazyFrame::group_by().agg([...])`) rather than
+/// `polars-core`'s eager `GroupBy` reduction methods (`.mean()`/`.sum()`/etc.) — those have
+/// been deprecated since polars-core 0.24.1 in favor of exactly this lazy path ("use
+/// polars.lazy aggregations"), and there is no non-deprecated eager alternative that fuses
+/// an aggregation across all groups in one native pass. One single `.agg([...])` call
+/// computes every distinct `(kind, col)` aggregation the caller asked for, plus a per-column
+/// null-count (for Kleene NA propagation) and a representative original-row index per group
+/// (for na_reason-aware key values) — all fused into that one query-engine pass, so there's
+/// no join between partial results to manage (TODO.md's original worry about this item).
 pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> Result<Value, Diagnostic> {
     let (frame, na_reasons, keys) = match gdf {
         Value::GroupedDataFrame { frame, na_reasons, keys } => (frame, na_reasons, keys),
@@ -826,121 +828,117 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
         }
     };
 
-    // Kleene propagation (RFC 02 sect2.4: GHL never silently skips missing data the way
-    // pandas/numpy do) -- polars' native reductions skip nulls by default, which is
-    // exactly the "silent" behavior the language's own NA design rejects. Rather than
-    // checking null-ness per group per spec (the old per-group loop), one u32 helper
-    // column (0/1 "is this cell null") is added per distinct source column that actually
-    // needs propagation, and its own fused `.sum()` pass below yields the per-group null
-    // count in the same one-group_by-call design as the real aggregations. Columns with
-    // zero nulls overall (checked once, O(1) via Arrow's tracked null count) skip the
-    // helper entirely -- no group of theirs can possibly contain one.
-    let mut work_frame = frame.clone();
-    let mut null_helper_names: HashMap<String, String> = HashMap::new();
-    for (_, kind, col) in specs {
-        if !PROPAGATES_NA_KINDS.contains(&kind.as_str()) {
-            continue;
-        }
-        let Some(c) = col else { continue };
-        if null_helper_names.contains_key(c) {
-            continue;
-        }
-        let column = frame.column(c).map_err(|_| {
-            Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `summarize()`", c))
-        })?;
-        if column.null_count() == 0 {
-            continue;
-        }
-        let helper_name = format!("__ghl_isnull__{c}");
-        let mask = column.is_null().into_column().with_name(PlSmallStr::from_string(helper_name.clone()));
-        let mask_u32 = mask.cast(&DataType::UInt32).map_err(|e| {
-            Diagnostic::compute_error("C0210", format!("`summarize()`: building null-count helper for `{c}` failed: {e}"))
-        })?;
-        work_frame.with_column(mask_u32).map_err(|e| {
-            Diagnostic::compute_error("C0210", format!("`summarize()`: building null-count helper for `{c}` failed: {e}"))
-        })?;
-        null_helper_names.insert(c.clone(), helper_name);
-    }
+    const ROW_IDX_COL: &str = "__ghl_row_idx__";
+    const FIRST_IDX_ALIAS: &str = "__ghl_first_idx__";
+    const COUNT_ALIAS: &str = "__ghl_count__";
 
-    let grouped = work_frame.group_by(keys.iter().map(|s| s.as_str())).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`summarize()`: group_by failed: {e}"))
+    // A row-index column, carried through the group_by/agg query as `first()` per group, is
+    // the only way to recover which original row represents each group afterward -- needed
+    // to fetch na_reason-aware key values (a key row that's itself an `NA:Reason` keeps that
+    // reason), the same semantics as before this was fused into one lazy query.
+    let indexed = frame.with_row_index(PlSmallStr::from_static(ROW_IDX_COL), None).map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("`summarize()`: failed to build row index: {e}"))
     })?;
 
-    // Group key values, na_reason-aware (a key row that's itself an `NA:Reason` keeps
-    // that reason) -- taken from each group's first member, same as before. `positions`
-    // and every fused aggregation pass below all walk `grouped`'s one shared, already-
-    // computed group order, so everything stays aligned by construction: no join needed
-    // to combine the N per-(kind,col) results, unlike the join-based design TODO.md
-    // originally sketched (`group_by(keys)?.select([col]).mean()` per spec, "uniendo los
-    // resultados... por las claves") -- concatenating columns suffices.
-    let positions = grouped.get_groups();
-    let n_groups = positions.len();
-    let mut key_columns: Vec<Vec<Value>> = keys.iter().map(|_| Vec::with_capacity(n_groups)).collect();
-    let mut row_counts: Vec<i64> = Vec::with_capacity(n_groups);
-    for indicator in positions.iter() {
-        let indices = group_indicator_to_indices(&indicator);
-        let first_idx = indices[0];
-        for (k, out) in keys.iter().zip(key_columns.iter_mut()) {
-            out.push(polars_bridge::get_cell_as_value(frame, na_reasons, k, first_idx)?);
-        }
-        row_counts.push(indices.len() as i64);
-    }
+    let mut agg_exprs: Vec<Expr> = vec![
+        col(ROW_IDX_COL).first().alias(PlSmallStr::from_static(FIRST_IDX_ALIAS)),
+    ];
+    let mut result_aliases: HashMap<(String, Option<String>), String> = HashMap::new();
+    let mut null_count_aliases: HashMap<String, String> = HashMap::new();
 
-    let mut null_counts: HashMap<String, Column> = HashMap::new();
-    for (c, helper_name) in &null_helper_names {
-        let count_col = compute_fused_agg("sum", helper_name, &grouped)?;
-        null_counts.insert(c.clone(), count_col);
-    }
-
-    let mut fused_results: HashMap<(String, Option<String>), Column> = HashMap::new();
-    for (_, kind, col) in specs {
-        let cache_key = (kind.clone(), col.clone());
-        if fused_results.contains_key(&cache_key) || kind == "count" {
+    for (_, kind, col_opt) in specs {
+        if kind == "count" {
             continue;
         }
-        let col_name = col.as_deref().ok_or_else(|| {
+        let col_name = col_opt.as_deref().ok_or_else(|| {
             Diagnostic::compute_error("C0201", format!("`{}()` requires a column argument in `summarize()`", kind))
         })?;
-        if frame.column(col_name).is_err() {
-            return Err(Diagnostic::statistical_error(
-                "S0201",
-                format!("Column `{}` not found in DataFrame for `summarize()`", col_name),
-            ));
+        let source_column = frame.column(col_name).map_err(|_| {
+            Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `summarize()`", col_name))
+        })?;
+
+        let cache_key = (kind.clone(), col_opt.clone());
+        if !result_aliases.contains_key(&cache_key) {
+            let alias = format!("__ghl_agg__{kind}__{col_name}");
+            agg_exprs.push(agg_expr_for(kind, col_name, &alias)?);
+            result_aliases.insert(cache_key, alias);
         }
-        let result = compute_fused_agg(kind, col_name, &grouped)?;
-        fused_results.insert(cache_key, result);
+
+        // Kleene propagation (RFC 02 sect2.4: GHL never silently skips missing data the way
+        // pandas/numpy do). `col(x).null_count()` in the same fused query yields the
+        // per-group null count for `x` in one pass, no separate helper column or group_by
+        // needed. Columns with zero nulls overall (checked once, O(1) via Arrow's tracked
+        // null count) skip this entirely -- no group of theirs can possibly contain one.
+        if PROPAGATES_NA_KINDS.contains(&kind.as_str())
+            && !null_count_aliases.contains_key(col_name)
+            && source_column.null_count() > 0
+        {
+            let alias = format!("__ghl_nullcount__{col_name}");
+            agg_exprs.push(col(col_name).null_count().alias(PlSmallStr::from_string(alias.clone())));
+            null_count_aliases.insert(col_name.to_string(), alias);
+        }
     }
+
+    let has_count = specs.iter().any(|(_, kind, _)| kind == "count");
+    if has_count {
+        agg_exprs.push(len().alias(PlSmallStr::from_static(COUNT_ALIAS)));
+    }
+
+    let key_exprs: Vec<Expr> = keys.iter().map(|k| col(k.as_str())).collect();
+    let result_df = indexed
+        .lazy()
+        .group_by_stable(key_exprs)
+        .agg(agg_exprs)
+        .collect()
+        .map_err(|e| Diagnostic::compute_error("C0210", format!("`summarize()`: group_by/agg failed: {e}")))?;
+
+    let n_groups = result_df.height();
+    let first_idx_col = result_df.column(FIRST_IDX_ALIAS).map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("`summarize()`: missing internal row-index column: {e}"))
+    })?;
 
     let mut out_columns: Vec<String> = keys.clone();
     let mut out_data: HashMap<String, Vec<Value>> = HashMap::new();
-    for (k, vals) in keys.iter().zip(key_columns.into_iter()) {
-        out_data.insert(k.clone(), vals);
+    for k in keys {
+        out_data.insert(k.clone(), Vec::with_capacity(n_groups));
+    }
+    for i in 0..n_groups {
+        let first_idx = get_idx_cell(first_idx_col, i, "row index")?;
+        for k in keys {
+            out_data.get_mut(k).unwrap().push(polars_bridge::get_cell_as_value(frame, na_reasons, k, first_idx)?);
+        }
     }
 
-    for (name, kind, col) in specs {
+    for (name, kind, col_opt) in specs {
         out_columns.push(name.clone());
-        let propagates_na = PROPAGATES_NA_KINDS.contains(&kind.as_str());
         let mut values = Vec::with_capacity(n_groups);
         if kind == "count" {
-            values.extend(row_counts.iter().map(|&n| Value::I64(n)));
-        } else {
-            let col_name = col.as_deref();
-            let result = fused_results.get(&(kind.clone(), col.clone())).ok_or_else(|| {
-                Diagnostic::compute_error("C0210", format!("`summarize()`: missing fused result for `{kind}()`"))
+            let count_col = result_df.column(COUNT_ALIAS).map_err(|e| {
+                Diagnostic::compute_error("C0210", format!("`summarize()`: missing count column: {e}"))
             })?;
-            let null_count_col = col_name.and_then(|c| null_counts.get(c));
             for i in 0..n_groups {
-                let is_null_group = propagates_na
-                    && null_count_col
-                        .map(|nc| !matches!(nc.get(i), Ok(AnyValue::UInt32(0))))
-                        .unwrap_or(false);
+                values.push(Value::I64(get_idx_cell(count_col, i, "group count")? as i64));
+            }
+        } else {
+            let col_name = col_opt.as_deref().expect("validated above: non-count specs always carry a column");
+            let alias = &result_aliases[&(kind.clone(), col_opt.clone())];
+            let agg_col = result_df.column(alias).map_err(|e| {
+                Diagnostic::compute_error("C0210", format!("`{kind}()` missing from `summarize()` result: {e}"))
+            })?;
+            let null_count_col = null_count_aliases.get(col_name).map(|a| result_df.column(a).unwrap());
+            let propagates_na = PROPAGATES_NA_KINDS.contains(&kind.as_str());
+            for i in 0..n_groups {
+                let is_null_group = match (propagates_na, null_count_col) {
+                    (true, Some(nc)) => get_idx_cell(nc, i, "null count")? > 0,
+                    _ => false,
+                };
                 if is_null_group {
                     // No specific reason is attempted even if the group's NA had one
                     // recorded: aggregated columns never carry NA-with-reason regardless
                     // (see doc comment above) -- which reason would "win" isn't defined.
                     values.push(Value::NA(None));
                 } else {
-                    let av = result.get(i).map_err(|e| {
+                    let av = agg_col.get(i).map_err(|e| {
                         Diagnostic::compute_error("C0210", format!("`{kind}()` failed in `summarize()`: {e}"))
                     })?;
                     values.push(polars_bridge::any_value_to_plain_value(&av));

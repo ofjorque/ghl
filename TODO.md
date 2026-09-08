@@ -102,6 +102,13 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
       un join puede duplicar o descartar filas de origen, así que el reindexado posicional
       simple de `filter`/`arrange`/`slice` no aplica, y la API eager seleccionada no
       expone qué fila(s) de origen generó cada fila de salida.
+  - [ ] Preservar `na_reasons` a través de `inner_join`/`left_join` — hoy se descartan a
+        propósito porque la API eager de `DataFrame::join` no expone qué fila(s) de origen
+        generaron cada fila de salida, así que no hay forma de reindexar el side-channel de
+        razones como sí se hace en `filter`/`arrange`/`slice`. No bloqueante (perder la razón
+        puntual de un NA al cruzar tablas es un límite razonable), pero es una pérdida de
+        información real, no solo cosmética — no cerrar sin decidir explícitamente si vale
+        la pena trackear índices de origen por fila para resolverlo.
 - [x] `group_by`/`summarize`: la agrupación (`get_groups()`) viene de polars; cada
       `AggSpec` se evalúa con una pasada fusionada nativa de polars por `(kind, col)`
       distinto (ver el ítem de fusión más abajo, ahora hecho).
@@ -135,54 +142,54 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
     Se agregó `test_summarize_propagates_na_kleene_style` para que esto no vuelva a
     pasar inadvertido. **Lección concreta:** el chequeo automatizado no reemplaza
     probar con datos que tengan NA de verdad cuando se toca código de agregación.
-- [x] **Optimización de seguimiento — hecha.** `compute_fused_agg` (`io.rs`) reemplazó
-      el `take()`+reduce por-grupo-por-agregación de `compute_agg` por una sola pasada
-      fusionada nativa de polars por cada `(kind, col)` distinto que aparece en los
-      `specs` de `summarize()` (`grouped.clone().select([col]).mean()`/`.sum()`/etc. —
-      un `GroupBy` completo, no una serie a la vez — sobre TODOS los grupos de una).
-      `df_summarize` calcula `group_by()` **una sola vez** y reutiliza ese mismo
-      `GroupBy` (clonar un `GroupBy` es barato: solo copia el handle — claves
-      seleccionadas + posiciones de grupo ya calculadas — no los datos) para cada pasada.
+- [x] **Optimización de seguimiento — hecha, sobre `polars-lazy` (sin API deprecada).**
+      `df_summarize` (`io.rs`) reemplazó el `take()`+reduce por-grupo-por-agregación de
+      `compute_agg` por **una sola query de `polars-lazy`**: `frame.lazy().group_by_stable
+      (keys).agg([...])`, con un `Expr` por cada `(kind, col)` distinto que aparece en los
+      `specs` de `summarize()` (`col(x).mean()`, `col(x).sum()`, etc.), más un
+      `col(x).null_count()` por cada columna que participa en una agregación que debe
+      propagar NA (ver más abajo) y un `col(row_idx).first()` para poder recuperar la fila
+      representante de cada grupo — todo evaluado en una única pasada del motor de queries
+      de polars sobre TODOS los grupos a la vez.
+  - **Primer intento (revertido): API eager deprecada + `#[allow(deprecated)]`.** La
+    primera versión de este arreglo reusaba los métodos de reducción eager de `GroupBy`
+    (`.mean()`, `.sum()`, etc.), que están deprecados en `polars-core` 0.55.2 desde 0.24.1
+    ("use polars.lazy aggregations"), silenciando el warning del compilador con
+    `#[allow(deprecated)]`. Se rechazó explícitamente: silenciar un warning no es resolver
+    el problema, solo esconderlo. No hay alternativa eager no-deprecada que fusione una
+    agregación sobre todos los grupos en una sola pasada nativa — la única salida real es
+    `polars-lazy`, así que se sumó como dependencia nueva de `ghl-runtime` (antes de lo
+    planeado; se iba a introducir recién en Fase 2) y se reescribió sobre eso. El spike
+    `spike_polars_latency.rs` (Fase 0), que ya usaba esa misma API eager deprecada, se
+    migró también por consistencia. `cargo build --workspace --examples` queda limpio, cero
+    warnings de deprecación en todo el crate.
   - **La preocupación de "requiere manejar joins entre N resultados parciales" que este
-    ítem tenía anotada resultó no aplicar:** como todas las pasadas comparten el mismo
-    `GroupBy` (mismas `self.groups`), sus resultados ya vienen alineados por posición
-    en el mismo orden de grupo — concatenar columnas alcanza, no hace falta un join real
-    por claves.
+    ítem tenía anotada resultó no aplicar:** las expresiones de agregación viven todas
+    dentro del mismo `.agg([...])` de la misma query, así que sus resultados ya vienen
+    alineados por posición en el mismo orden de grupo — concatenar columnas alcanza, no
+    hace falta un join real por claves.
   - **Kleene NA sigue propagando** (la regresión que este mismo ítem había encontrado
-    arriba) sin repetir el `take()` por grupo: por cada columna fuente que participa en
-    una agregación que debe propagar NA (`mean`/`sum`/`std_dev`/`var`/`min`/`max`/`median`)
-    y que de hecho tiene algún nulo (`column.null_count() > 0`, chequeo O(1) que se salta
-    la columna entera si no aplica), se agrega una columna auxiliar `u32` (0/1, "esta celda
-    es nula") al `DataFrame` de trabajo *antes* del único `group_by()`, y se le corre la
-    misma pasada fusionada (`.sum()`) para obtener el conteo de nulos por grupo en un solo
-    tiro — si ese conteo es >0 para un grupo, esa celda del resultado se reemplaza por
-    `NA` sin adivinar una razón (igual que antes). `test_summarize_propagates_na_kleene_style`
-    y `test_group_by_summarize_unquoted_columns` siguen pasando sin cambiar sus aserciones,
-    y se verificó de nuevo a mano con `ghl run` (grupo con un `NA:SensorDropout` en la
-    columna agregada → `mean`/`max` de ese grupo dan `NA`, los otros grupos no se ven
-    afectados).
-  - **Decisión de dependencias:** los métodos de reducción de `GroupBy` (`.mean()`,
-    `.sum()`, `.min()`, `.max()`, `.median()`, `.std()`/`.var()`, `.first()`/`.last()`,
-    `.n_unique()`) están *deprecados* en `polars-core` 0.55.2 a favor de la API lazy
-    (`polars-lazy`, no es dependencia de `ghl-runtime` hoy). Se optó por seguir usándolos
-    (con `#[allow(deprecated)]`, documentado en el código) en vez de sumar `polars-lazy`
-    como dependencia nueva solo para esto — mantiene el cambio dentro del mismo crate,
-    sin la superficie extra (optimizador de queries, tiempos de compilación) que trae la
-    API lazy. Si algún día se hace el motor "lazy" real de Fase 2, ese es el momento
-    natural de migrar esto también.
-  - **Medido (`spike_summarize_high_cardinality.rs`, dataset sintético en memoria, sin
-    reusar el de 5 grupos del Caso 2.1 porque no ejercita el escenario que este ítem
-    apunta):** 2M filas / **100.000 grupos** / 4 agregaciones (`count`, `mean`, `max`,
-    `sum`) en **321.79ms** (~6.2M filas/s). No hay una comparación A/B directa contra el
-    camino viejo con el mismo número exacto — el código por-grupo-por-spec que este ítem
-    reemplazó ya no existe para correrlo lado a lado — pero el diseño logra lo que este
-    ítem pedía: en vez de 100.000 grupos × 4 specs = 400.000 llamadas nativas pequeñas
-    (`take()` + reduce cada una), corren como máximo 3 pasadas nativas grandes (una por
-    cada `(kind, col)` distinto: `mean(value_b)`, `max(value_b)`, `sum(value_c)`) más un
-    barrido liviano en Rust para `count` (tamaño de cada grupo, ya calculado por
-    `get_groups()`, sin agregación nativa extra). Correcto y verificado de punta a punta;
-    la ganancia relativa exacta contra el camino anterior queda sin medir con precisión
-    a propósito, en vez de inventar un número.
+    arriba): por cada columna fuente que participa en una agregación que debe propagar NA
+    (`mean`/`sum`/`std_dev`/`var`/`min`/`max`/`median`) y que de hecho tiene algún nulo
+    (`column.null_count() > 0`, chequeo O(1) que se salta la columna entera si no aplica),
+    se agrega `col(x).null_count().alias(...)` a la misma query — sin helper column ni
+    `group_by()` aparte, la expresión de conteo de nulos corre en la misma pasada fusionada
+    que la agregación real. Si ese conteo es >0 para un grupo, esa celda del resultado se
+    reemplaza por `NA` sin adivinar una razón (igual que antes).
+    `test_summarize_propagates_na_kleene_style` y `test_group_by_summarize_unquoted_columns`
+    siguen pasando sin cambiar sus aserciones, y se verificó de nuevo a mano con `ghl run`
+    (grupo con un `NA:SensorDropout` en la columna agregada → `mean`/`max` de ese grupo dan
+    `NA`, los otros grupos no se ven afectados).
+  - **Medido (`spike_summarize_high_cardinality.rs`, dataset sintético en memoria de 100.000
+    grupos, la cardinalidad que Suite 02 pide — no se reusa el de 5 grupos del Caso 2.1
+    porque no ejercita el escenario que este ítem apunta):** 2M filas / 4 agregaciones
+    (`count`, `mean`, `max`, `sum`) en **164.68ms** (~12.1M filas/s) con `polars-lazy` — más
+    rápido incluso que la primera versión sobre la API eager deprecada (321.79ms, misma
+    máquina/dataset), probablemente porque el optimizador de queries fusiona las 4
+    expresiones (3 agregaciones + `first()` del índice de fila, sin helper column de nulos
+    en este dataset porque no tiene NA) en un único recorrido físico en vez de 3-4 pasadas
+    `GroupBy` separadas. No es una comparación controlada (no es lo que este ítem pedía
+    medir), solo un dato adicional de que la migración no salió cara.
 - [x] **CSV a escala — `read_csv()` reescrito, resultado: mejora real pero parcial.**
       Se sumó `polars-io` (con feature `csv`) a Fase 0. `read_csv_file` (`io.rs`) ahora
       usa `CsvReadOptions` de polars-io para la tokenización multi-hilo del archivo,
@@ -198,11 +205,14 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
     punta con `ghl run` sobre `read_csv(...)`.
   - **Por qué no es más rápido:** el cuello de botella que queda es la construcción de
     `Vec<Value>` por celda (un `String` propio por cada valor, boxeado en `Value::String`/
-    `Value::F64`/etc.) — el mismo tipo de costo que ya está anotado como pendiente en
-    `summarize()` arriba, ahora también aquí. La solución real es parsear directo a
-    `ChunkedArray` tipados de polars sin pasar por `Value` en el camino de ingestión —
-    trabajo más grande, deliberadamente no hecho en esta pasada (`infer_and_convert_column`
-    tendría que reescribirse para producir Series de polars, no `Vec<Value>`).
+    `Value::F64`/etc.). La solución real es parsear directo a `ChunkedArray` tipados de
+    polars sin pasar por `Value` en el camino de ingestión — trabajo más grande,
+    deliberadamente no hecho en esta pasada. Ver el subitem abierto abajo.
+  - [ ] Reescribir `infer_and_convert_column` (`io.rs`) para producir `ChunkedArray`/`Series`
+        de polars directo, no `Vec<Value>` por celda — es el cuello de botella real que deja
+        a `read_csv()` en ~1.8x en vez del salto multi-hilo esperado (ver medición arriba).
+        No bloqueante para cerrar Fase 1, pero es el próximo paso real para CSV a escala si
+        se vuelve a medir y todavía importa.
   - **CSV sintético reproducible:** `crates/ghl-runtime/examples/generate_synthetic_csv.rs`
     (parametrizado por filas; `cargo run --release --example generate_synthetic_csv -p
     ghl-runtime -- 25000000 target/synthetic_25m.csv` para el caso completo de Suite 02).
@@ -245,9 +255,12 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
     "Mismatch de sintaxis del doc" más abajo — el hueco que esa sección documentaba
     (`is_na()`/`!`/`&&`/`||` dentro de `filter()`) se arregló de raíz, no se dejó como
     limitación aceptada.
-  - "Asignación sin copia (Copy-on-Write)" de la descripción del Caso 2.3 no se abordó
-    aparte — `take_rows`/`Column::Scalar` ya evitan las copias evitables que estaban al
-    alcance sin rediseñar el modelo de memoria completo (RFC 03, Fase 5).
+  - [ ] "Asignación sin copia (Copy-on-Write)" real de la descripción del Caso 2.3 no se
+        abordó — `take_rows`/`Column::Scalar` ya evitan las copias evitables que estaban al
+        alcance sin rediseñar el modelo de memoria completo. Depende del modelo ARC +
+        Copy-on-Write real de Fase 5 (RFC 03 §2.1, ítem ya existente ahí) — se deja anotado
+        acá también para que no se pierda de vista al leer Fase 1 en diagonal y parecer
+        "hecho" del todo.
 - [x] **Mismatch de sintaxis del doc — resuelto: se reescribió a la sintaxis real, no
       se agregó azúcar de method-chaining.** Reescribir el lenguaje para soportar
       `df.filter(...).group_by(...)` hubiera sido mucho trabajo por una sola sección de

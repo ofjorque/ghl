@@ -9,6 +9,7 @@
 use std::time::Instant;
 
 use polars_core::prelude::*;
+use polars_lazy::prelude::*;
 
 const REPEATS: u32 = 20;
 
@@ -53,11 +54,17 @@ fn run_case(n: usize) {
         df.filter(&mask).expect("filter should succeed")
     });
 
-    time_it("group_by(group).select(value).mean()", || {
-        df.group_by(["group"])
-            .expect("group_by should succeed")
-            .select(["value"])
-            .mean()
+    // `GroupBy::select().mean()` (the eager API) has been deprecated since polars-core
+    // 0.24.1 in favor of exactly this lazy-query path -- `ghl-runtime`'s own
+    // `df_summarize` (io.rs, TODO.md Fase 1 "Optimización de seguimiento") uses the same
+    // `LazyFrame::group_by().agg([...])` shape, so this spike matches the real code path
+    // instead of measuring an API the runtime no longer calls.
+    time_it("group_by(group).agg(mean(value))", || {
+        df.clone()
+            .lazy()
+            .group_by([col("group")])
+            .agg([col("value").mean()])
+            .collect()
             .expect("mean aggregation should succeed")
     });
 }
