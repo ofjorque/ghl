@@ -211,10 +211,27 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
   - "Asignación sin copia (Copy-on-Write)" de la descripción del Caso 2.3 no se abordó
     aparte — `take_rows`/`Column::Scalar` ya evitan las copias evitables que estaban al
     alcance sin rediseñar el modelo de memoria completo (RFC 03, Fase 5).
-- [ ] Actualizar `docs/design` / `benchmarks/suites/02-dataframe-operations.md`:
-      su `query.gh` de ejemplo usa method-chaining (`df.filter(...).group_by(...).parallel().agg([...])`)
-      que no coincide con la sintaxis real de pipes (`df |> filter(...) |> group_by(...)`).
-      Decidir: reescribir el doc a la sintaxis real, o agregar azúcar de method-chaining al lenguaje.
+- [x] **Mismatch de sintaxis del doc — resuelto: se reescribió a la sintaxis real, no
+      se agregó azúcar de method-chaining.** Reescribir el lenguaje para soportar
+      `df.filter(...).group_by(...)` hubiera sido mucho trabajo por una sola sección de
+      un doc, cuando la sintaxis de pipes ya está establecida y probada en ~30 verbos.
+      `benchmarks/suites/02-dataframe-operations.md` ahora tiene un `query.gh` real que
+      corre tal cual (verificado con `ghl run`, no solo escrito a mano), cubriendo los
+      Casos 2.2/2.3/2.4 con `read_csv`/`filter`/`group_by`/`summarize`/`mutate`/
+      `inner_join`/`left_join` reales.
+  - **Se agregó `is_na(x)` como builtin** (antes solo existía `Value::is_na()` a nivel
+    de Rust, ningún script GHL podía llamarlo) — vectorizado sobre `Vector` igual que
+    los demás helpers de math/string.
+  - **Se encontró y documentó (no se ocultó) un hueco real al intentar escribir el
+    ejemplo del Caso 2.3 tal como lo describe el enunciado original**
+    (`score > 75.0 && !is_na(category)`): `is_na(col)` envuelve el `ColRef` en una
+    llamada de función *antes* de la comparación, así que `filter()` pierde la
+    referencia a la columna — probado a mano
+    (`filter(is_na(category) == false)` no filtra nada, 4 de 4 filas sobreviven cuando
+    debería filtrar 2). No hay today ni predicados compuestos (`&&`/`||` combinando dos
+    `ColPredicate`) ni una forma vectorizada de negar un `Vector[Bool]` para usarlo como
+    máscara de `filter()`. El doc ahora documenta esto explícitamente en vez de mostrar
+    un ejemplo que aparenta funcionar pero no filtra nada.
 
 ## Fase 2 — Motor "lazy" (consultas diferidas)
 Depende del backend columnar de la Fase 1; sin él no hay nada que optimizar de forma diferida.

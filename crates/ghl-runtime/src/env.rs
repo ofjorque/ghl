@@ -157,6 +157,7 @@ impl RuntimeEnv {
         env.set("pull".into(),        Value::NativeFn(native_pull));
         env.set("na_reason".into(),   Value::NativeFn(native_na_reason));
         env.set("na_reasons".into(),  Value::NativeFn(native_na_reasons));
+        env.set("is_na".into(),       Value::NativeFn(native_is_na));
         env.set("fill_na".into(),     Value::NativeFn(native_fill_na));
         env.set("fill_na_all".into(), Value::NativeFn(native_fill_na_all));
         env.set("glimpse".into(),     Value::NativeFn(native_glimpse));
@@ -746,6 +747,16 @@ fn native_na_reasons(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Diagnostic::compute_error("C0201", "`na_reasons()` requires a column name")
     })?;
     crate::io::df_na_reasons(df, &col)
+}
+
+/// `is_na(x)` — RFC 02's `x.is_na()` as a callable function, vectorized over a `Vector`
+/// the same way the math/string helpers are (`is_na(pull(df, "col"))` -> `Vector[Bool]`).
+fn native_is_na(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`is_na()` requires 1 argument"))?;
+    match v {
+        Value::Vector(items) => Ok(Value::Vector(items.iter().map(|it| Value::Bool(it.is_na())).collect())),
+        other => Ok(Value::Bool(other.is_na())),
+    }
 }
 
 fn native_fill_na(args: Vec<Value>) -> Result<Value, Diagnostic> {

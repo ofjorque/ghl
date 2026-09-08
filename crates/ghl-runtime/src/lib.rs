@@ -788,6 +788,25 @@ mod tests {
     }
 
     #[test]
+    fn test_is_na() {
+        let code = r#"
+            let scalar_true = is_na(NA);
+            let scalar_false = is_na(5.0);
+            let vectorized = is_na([1.0, NA, NA:SensorDropout, 4.0]);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(interp.env.get("scalar_true"), Some(Value::Bool(true)));
+        assert_eq!(interp.env.get("scalar_false"), Some(Value::Bool(false)));
+        assert_eq!(
+            interp.env.get("vectorized"),
+            Some(Value::Vector(vec![Value::Bool(false), Value::Bool(true), Value::Bool(true), Value::Bool(false)]))
+        );
+    }
+
+    #[test]
     fn test_math_and_string_helpers() {
         let code = r#"
             let rounded = round(3.14159, 2);

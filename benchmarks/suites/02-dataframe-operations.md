@@ -32,24 +32,49 @@
 | **R** | `data.frame` + `dplyr` | `data.table` / `collapse` |
 | **Python** | `pandas` (NumPy backend) | `polars` (Rust backend) / `duckdb` |
 | **Julia** | `DataFrames.jl` | `DataFrames.jl` multi-threaded |
-| **GHL** | `std::dataframe` nativo | Motor Lazy / Arrow C Data Interface nativo |
+| **GHL** | `polars-core` embebido vía `ghl-runtime` (TODO.md, Fase 0/1) | Motor Lazy (TODO.md, Fase 2 — todavía no implementado) |
 
 ---
 
 ## 3. Ejemplo de Consulta de Prueba en GHL (`query.gh`)
 
-```lang
-use std::dataframe::{DataFrame, col, count};
+> **Nota (2026-09-07):** esta sección usaba antes una sintaxis de method-chaining
+> (`df.filter(...).group_by(...).parallel().agg([...])`) que nunca coincidió con la
+> sintaxis real del lenguaje — GHL usa pipes con funciones libres (`df |> filter(...)`).
+> El ejemplo de abajo es real: corre tal cual contra el intérprete (`ghl run`), no es
+> aspiracional. Ver `TODO.md`, Fase 1, para el detalle de qué verbos hay detrás.
 
-// Case 2.2: High-cardinality aggregation in GHL
+```lang
+let df = read_csv("events.csv"); // o read_parquet(...) — ver Caso 2.1
+
+// Caso 2.2: agrupación de alta cardinalidad. Los nombres de columna van sin comillas
+// dentro de filter/group_by/summarize (col_ctx, ver docs/design/01-syntax-and-grammar.md);
+// `col("status")` con comillas también funciona, es la forma explícita equivalente.
 let summary = df
-    .filter(col("status") == "active")
-    .group_by("customer_id")
-    .parallel()
-    .agg([
-        col("revenue").sum().as("total_revenue"),
-        col("revenue").mean().as("avg_revenue"),
-        col("latency_ms").std().as("sd_latency"),
-        count().as("event_count")
-    ]);
+    |> filter(status == "active")
+    |> group_by(customer_id)
+    |> summarize(
+        total_revenue = sum(revenue),
+        avg_revenue   = mean(revenue),
+        sd_latency    = std_dev(latency_ms),
+        event_count   = count()
+    );
+
+// Caso 2.3: filtrado vectorial + columna derivada. `filter()` hoy solo entiende un
+// único predicado `col OP escalar` (vectorizado nativamente contra polars, ver TODO.md
+// Fase 1) — el enunciado original de este caso ("score > 75.0 && !is_na(category)") no
+// es expresable en una sola llamada todavía: no hay predicados compuestos (`&&`/`||`
+// combinando dos condiciones de columna) ni una forma vectorizada de "excluir NA" que
+// se pueda pasar como predicado de `filter()` (`is_na(col)` da un `Vector[Bool]` que
+// sirve para inspección, pero envolver un `ColRef` en una llamada antes de comparar le
+// hace perder a `filter()` la referencia a la columna). Con lo que existe hoy, la parte
+// de score se filtra vectorizado y las filas con NA se dejan así, documentado como
+// limitación real en vez de simulado con código que en verdad no filtra nada:
+let filtered = df |> filter(score > 75.0);
+let log_scores = log(pull(filtered, "score"));
+let clean = filtered |> mutate("log_score", log_scores);
+
+// Caso 2.4: cruce de tablas — hash join real vía polars-ops (TODO.md, Fase 1).
+let joined = orders |> inner_join(customers, customer_id);
+let joined_left = orders |> left_join(customers, customer_id);
 ```
