@@ -138,9 +138,21 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
     compartido — `benchmarks/methodology.md` exige hardware aislado para números
     "oficiales" de todas formas, así que la corrida completa de 25M queda para esa etapa
     (Fase 10), no para esta medición de spike.
-- [ ] Parquet a escala GB: falta por completo — `polars-io` también lo trae
-      (`feature = "parquet"`), mismo patrón que CSV pero sin el problema de `NA:razon`
-      (Parquet ya tiene su propio bit de validez nativo, no hay texto que reinterpretar).
+- [x] **Parquet — hecho, resultado: el salto real que CSV no dio.** `read_parquet(path)`/
+      `write_parquet(df, path)` (`io.rs::read_parquet_file`/`write_parquet_file`, feature
+      `parquet` de `polars-io`). Sin el problema de `NA:razon` de CSV — Parquet ya tiene su
+      propio bit de validez nativo, así que es una lectura directa y tipada, sin el híbrido
+      string-luego-inferir que necesitó CSV. `write_parquet()` avisa (no falla) si el
+      DataFrame tiene razones de NA registradas, porque Parquet no tiene dónde guardarlas
+      — se pierden a propósito, documentado, no silenciosamente.
+  - **Medido sobre el mismo archivo de 1M filas:** lectura en **61ms** (16.4M filas/s,
+    206 MB/s) — **~43x más rápido que el `read_csv()` nuevo (2.6s) y ~75x más rápido que
+    el parser viejo (4.6s).** En disco, 12.6 MB vs 84.2 MB del CSV (**6.7x más chico**).
+    Esto sí es el salto de rendimiento que CSV no pudo dar (ver nota de arriba sobre el
+    boxing a `Vec<Value>`) — Parquet no tiene que parsear texto ni inferir tipos en
+    absoluto, así que ese cuello de botella directamente no existe en este camino.
+  - Test de round-trip (`test_parquet_round_trip`, `lib.rs`) + verificado de punta a
+    punta con `ghl run` (`read_csv → write_parquet → read_parquet`, tamaños reales).
 - [ ] Filtrado vectorial con bitmask de validez + asignación copy-on-write (Caso 2.3) —
       el backend columnar ya existe; falta medir/optimizar el camino de filtrado a escala.
 - [ ] Actualizar `docs/design` / `benchmarks/suites/02-dataframe-operations.md`:

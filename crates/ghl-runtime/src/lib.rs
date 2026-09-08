@@ -663,6 +663,43 @@ mod tests {
     }
 
     #[test]
+    fn test_parquet_round_trip() {
+        let path = std::env::temp_dir().join("ghl_test_round_trip.parquet");
+        let path_str = path.to_str().unwrap();
+
+        let code = format!(
+            r#"
+            let df = dataframe {{
+                id: [1, 2, 3],
+                score: [10.5, 20.5, NA],
+                label: ["a", "b", "c"]
+            }};
+            df |> write_parquet("{path}");
+            let roundtripped = read_parquet("{path}");
+            "#,
+            path = path_str
+        );
+
+        let program = parse(&code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        let _ = std::fs::remove_file(&path);
+
+        let roundtripped = interp.env.get("roundtripped").expect("roundtripped exists");
+        assert_eq!(df_height(&roundtripped), 3);
+        assert_eq!(df_column(&roundtripped, "id"), vec![Value::I64(1), Value::I64(2), Value::I64(3)]);
+        assert_eq!(
+            df_column(&roundtripped, "score"),
+            vec![Value::F64(10.5), Value::F64(20.5), Value::NA(None)],
+            "plain NA (validity bit) must survive Parquet even though a *reason* can't"
+        );
+        assert_eq!(
+            df_column(&roundtripped, "label"),
+            vec![Value::String("a".into()), Value::String("b".into()), Value::String("c".into())]
+        );
+    }
+
+    #[test]
     fn test_na_reason_accessors_survive_filter() {
         // RFC 02 sect2.5: reasons exist so missing-data-analysis code can consume them
         // via ordinary GHL values, not just internally.

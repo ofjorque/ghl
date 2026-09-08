@@ -307,6 +307,46 @@ pub fn write_csv_file(df: &Value, path: &str, delim: Option<char>) -> Result<(),
     write_file(path, &out)
 }
 
+/// Reads a Parquet file (`benchmarks/README.md` mentions it alongside CSV; Fase 1).
+/// Unlike CSV, Parquet has its own native validity bitmap — there's no `NA:Reason` text
+/// to reinterpret, so nulls always come back as plain `Value::NA(None)`. No hybrid
+/// string-then-infer step is needed either: Parquet is already typed and columnar, so
+/// this is a direct, fully multi-threaded read straight into the target representation.
+pub fn read_parquet_file(path: &str) -> Result<Value, Diagnostic> {
+    let file = fs::File::open(path).map_err(|e| {
+        Diagnostic::compute_error("C0401", format!("Failed to open file `{}`: {}", path, e))
+    })?;
+    let frame = ParquetReader::new(file).finish().map_err(|e| {
+        Diagnostic::compute_error("C0405", format!("Failed to read Parquet `{}`: {}", path, e))
+    })?;
+    Ok(Value::DataFrame { frame, na_reasons: NaReasonTable::new() })
+}
+
+/// Writes a `DataFrame` to Parquet. NA-with-reason is intentionally not persisted:
+/// Parquet's binary format has no text cell to encode `NA:Reason` into the way CSV does
+/// (where `write_csv`/`read_csv` round-trip it for free), and inventing a side-channel
+/// column/metadata convention for it would be exactly the kind of extra complexity the
+/// NA-reason design decided against (TODO.md, Fase 0). A visible notice beats silently
+/// dropping data the caller might not expect to lose.
+pub fn write_parquet_file(df: &Value, path: &str) -> Result<(), Diagnostic> {
+    let (frame, na_reasons) = as_dataframe(df, "write_parquet")?;
+    if !na_reasons.is_empty() {
+        eprintln!(
+            "(U・ᴥ・U) `write_parquet()`: this DataFrame has NA reasons recorded (na_reasons()); \
+             Parquet has no slot for them, so they will not round-trip through this file."
+        );
+    }
+
+    let file = fs::File::create(path).map_err(|e| {
+        Diagnostic::compute_error("C0402", format!("Failed to create file `{}`: {}", path, e))
+    })?;
+    let mut frame = frame.clone();
+    ParquetWriter::new(file).finish(&mut frame).map_err(|e| {
+        Diagnostic::compute_error("C0405", format!("Failed to write Parquet `{}`: {}", path, e))
+    })?;
+    Ok(())
+}
+
 // =========================================================================
 // 3. DataFrame Wrangling Verbs (select, head, tail, mutate, arrange,
 //    rename, drop, distinct, nrow, ncol, colnames, slice)

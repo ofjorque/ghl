@@ -115,6 +115,10 @@ impl RuntimeEnv {
         env.set("parse_csv".into(), Value::NativeFn(native_parse_csv));
         env.set("write_csv".into(), Value::NativeFn(native_write_csv));
 
+        // Parquet I/O
+        env.set("read_parquet".into(),  Value::NativeFn(native_read_parquet));
+        env.set("write_parquet".into(), Value::NativeFn(native_write_parquet));
+
         // DataFrame Wrangling Verbs — Tidyverse-style
         env.set("select".into(),   Value::NativeFn(native_select));
         env.set("head".into(),     Value::NativeFn(native_head));
@@ -1739,6 +1743,36 @@ fn native_write_csv(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     let delim = args.get(delim_idx).and_then(|v| v.as_str()).and_then(|s| s.chars().next());
     crate::io::write_csv_file(df, p, delim)?;
+    Ok(Value::Unit)
+}
+
+fn native_read_parquet(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let path = args.first().and_then(|v| v.as_str()).ok_or_else(|| {
+        Diagnostic::compute_error("C0405", "`read_parquet()` requires a file path string")
+    })?;
+    crate::io::read_parquet_file(path)
+}
+
+fn native_write_parquet(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error(
+            "C0405",
+            "`write_parquet()` requires DataFrame and path arguments: `write_parquet(df, \"out.parquet\")` or `df |> write_parquet(\"out.parquet\")`",
+        ));
+    }
+
+    let (df, path) = match (&args[0], &args[1]) {
+        (Value::DataFrame { .. }, _) => (&args[0], args[1].as_str()),
+        (_, Value::DataFrame { .. }) => (&args[1], args[0].as_str()),
+        _ => {
+            return Err(Diagnostic::compute_error("C0405", "`write_parquet()` requires a DataFrame argument"));
+        }
+    };
+    let p = path.ok_or_else(|| {
+        Diagnostic::compute_error("C0405", "`write_parquet()` requires a string destination path")
+    })?;
+
+    crate::io::write_parquet_file(df, p)?;
     Ok(Value::Unit)
 }
 

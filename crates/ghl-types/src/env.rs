@@ -470,6 +470,22 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "read_parquet".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::DataFrame(Vec::new())),
+            },
+            false,
+        );
+        env.insert(
+            "write_parquet".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
             "head".into(),
             Type::Function {
                 params: vec![Type::Any],
