@@ -300,26 +300,46 @@ pub fn read_csv_file(path: &str, delim: Option<char>) -> Result<Value, Diagnosti
         .map_err(|e| Diagnostic::compute_error("C0403", format!("Failed to read CSV `{}`: {}", path, e)))?;
 
     // Columns are independent of each other, so the per-column type-inference/NA-reason
-    // pass (several full scans over each column, see infer_and_convert_column) runs
-    // across `rayon`'s thread pool rather than one column at a time -- this is where
-    // most of the wall-clock time actually goes once polars-io has done the fast part
-    // (tokenizing the file), so it's worth parallelizing even with as few as ~12 columns.
-    let cols: Vec<(String, Vec<Value>)> = raw_frame
+    // pass runs across `rayon`'s thread pool rather than one column at a time -- this is
+    // where most of the wall-clock time actually goes once polars-io has done the fast
+    // part (tokenizing the file), so it's worth parallelizing even with as few as ~12
+    // columns. `infer_and_convert_column_native` builds each column's final polars
+    // `Column` directly from the `StringChunked` polars-io already produced -- no
+    // `Vec<Value>` hop in between (TODO.md's "Vec<Value>-per-cell boxing bottleneck":
+    // the old path cloned every string cell three times -- into a `Vec<String>`, into a
+    // `Value::String`, then into the final `ChunkedArray` -- before the data reached its
+    // final form; this path clones each string once, same as a native polars ingestion
+    // path would).
+    let cols: Vec<(Column, Vec<(usize, String)>)> = raw_frame
         .get_column_names()
         .into_par_iter()
-        .map(|name| -> Result<(String, Vec<Value>), Diagnostic> {
+        .map(|name| -> Result<(Column, Vec<(usize, String)>), Diagnostic> {
             let raw_col = raw_frame.column(name).map_err(|e| {
                 Diagnostic::compute_error("C0403", format!("Internal error reading column `{name}`: {e}"))
             })?;
             let raw_strs = raw_col.str().map_err(|e| {
                 Diagnostic::compute_error("C0403", format!("Internal error reading column `{name}`: {e}"))
             })?;
-            let raw_vals: Vec<String> = raw_strs.iter().map(|opt| opt.unwrap_or("").to_string()).collect();
-            Ok((name.to_string(), infer_and_convert_column(&raw_vals)))
+            Ok(infer_and_convert_column_native(name, raw_strs))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let (frame, na_reasons) = polars_bridge::build_dataframe(&cols)?;
+    let mut na_reasons = NaReasonTable::new();
+    let mut columns: Vec<Column> = Vec::with_capacity(cols.len());
+    for (column, reasons) in cols {
+        let name = column.name().to_string();
+        for (row, reason) in reasons {
+            na_reasons.set(&name, row, reason);
+        }
+        columns.push(column);
+    }
+    let frame = if columns.is_empty() {
+        DataFrame::empty()
+    } else {
+        DataFrame::new_infer_height(columns).map_err(|e| {
+            Diagnostic::compute_error("C0210", format!("No se pudo construir el DataFrame: {e}"))
+        })?
+    };
     Ok(Value::DataFrame { frame, na_reasons })
 }
 
@@ -1067,14 +1087,26 @@ pub fn df_left_join(left: &Value, right: &Value, on: &[String]) -> Result<Value,
     df_join(left, right, on, JoinType::Left)
 }
 
+/// Like `get_idx_cell` (used by `df_summarize`), but tolerates a null cell instead of
+/// failing — needed for the right-row-index column in a `left_join()`, which is null for
+/// every left row that had no match on the right (there's no source right row to point at).
+fn get_idx_cell_opt(column: &Column, i: usize, what: &str) -> Result<Option<usize>, Diagnostic> {
+    match column.get(i) {
+        Ok(AnyValue::Null) => Ok(None),
+        Ok(AnyValue::UInt32(v)) => Ok(Some(v as usize)),
+        Ok(AnyValue::UInt64(v)) => Ok(Some(v as usize)),
+        other => Err(Diagnostic::compute_error("C0210", format!("`join()`: unexpected type reading {what}: {other:?}"))),
+    }
+}
+
 fn df_join(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<Value, Diagnostic> {
     let verb = match how {
         JoinType::Inner => "inner_join",
         JoinType::Left => "left_join",
         _ => "join",
     };
-    let (left_frame, _) = as_dataframe(left, verb)?;
-    let (right_frame, _) = as_dataframe(right, verb)?;
+    let (left_frame, left_na_reasons) = as_dataframe(left, verb)?;
+    let (right_frame, right_na_reasons) = as_dataframe(right, verb)?;
 
     for k in on {
         if left_frame.column(k).is_err() {
@@ -1091,17 +1123,90 @@ fn df_join(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<
         }
     }
 
-    let joined = left_frame
-        .join(right_frame, on, on, JoinArgs::new(how), None)
+    const LEFT_IDX_COL: &str = "__ghl_left_idx__";
+    const RIGHT_IDX_COL: &str = "__ghl_right_idx__";
+    const SUFFIX: &str = "_right";
+
+    // Row-index columns, carried through the join like any other data column, are what
+    // makes recovering na_reasons afterward possible: the safe eager join API doesn't
+    // otherwise expose which left/right row(s) a given output row came from (a join can
+    // duplicate a row on a one-to-many match, or drop it on no match), so the simple
+    // positional reindex `filter`/`arrange`/`slice` use doesn't apply here directly --
+    // this is the general version of the same idea.
+    let left_indexed = left_frame.with_row_index(PlSmallStr::from_static(LEFT_IDX_COL), None).map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("`{verb}()`: failed to build left row index: {e}"))
+    })?;
+    let mut right_indexed = right_frame.with_row_index(PlSmallStr::from_static(RIGHT_IDX_COL), None).map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("`{verb}()`: failed to build right row index: {e}"))
+    })?;
+
+    // Pre-rename colliding right-side non-key columns ourselves (using the same `_right`
+    // suffix polars' own default join behavior would have used) instead of letting the
+    // join do it -- this way the output-column-name -> source-mapping below is exact,
+    // not guessed from a naming convention that could coincidentally already be in use.
+    let mut right_source_names: HashMap<String, String> = HashMap::new();
+    for name in right_frame.get_column_names() {
+        let name_str = name.as_str();
+        if on.iter().any(|k| k == name_str) {
+            continue;
+        }
+        let output_name = if left_frame.column(name_str).is_ok() {
+            format!("{name_str}{SUFFIX}")
+        } else {
+            name_str.to_string()
+        };
+        if output_name != name_str {
+            right_indexed.rename(name_str, PlSmallStr::from_string(output_name.clone())).map_err(|e| {
+                Diagnostic::compute_error("C0210", format!("`{verb}()`: failed to rename `{name_str}`: {e}"))
+            })?;
+        }
+        right_source_names.insert(output_name, name_str.to_string());
+    }
+
+    let joined = left_indexed
+        .join(&right_indexed, on, on, JoinArgs::new(how), None)
         .map_err(|e| Diagnostic::compute_error("C0210", format!("`{verb}()` failed: {e}")))?;
 
-    // NA-with-reason is intentionally dropped here rather than guessed at: a join can
-    // duplicate a left row (one-to-many match) or drop it (inner join, no match), so
-    // the simple positional reindex `filter`/`arrange`/`slice` use doesn't apply — the
-    // safe eager join API doesn't expose which output row(s) a given input row landed
-    // on, so there's no correct mapping to reconstruct without one. Revisit if/when
-    // Fase 1's lazy engine exposes that mapping.
-    Ok(Value::DataFrame { frame: joined, na_reasons: NaReasonTable::new() })
+    let n_out = joined.height();
+    let left_idx_col = joined.column(LEFT_IDX_COL).map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("`{verb}()`: missing internal left row-index column: {e}"))
+    })?;
+    let right_idx_col = joined.column(RIGHT_IDX_COL).map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("`{verb}()`: missing internal right row-index column: {e}"))
+    })?;
+
+    let mut result_reasons = NaReasonTable::new();
+    for out_name in joined.get_column_names() {
+        let out_name_str = out_name.as_str();
+        if out_name_str == LEFT_IDX_COL || out_name_str == RIGHT_IDX_COL {
+            continue;
+        }
+        if let Some(orig_right_name) = right_source_names.get(out_name_str) {
+            // Right-sourced column (possibly renamed for a name collision). Only rows
+            // that actually matched a right row (right_idx present) can carry a reason
+            // forward -- an unmatched left_join row has no source right row to have had
+            // one in the first place.
+            for i in 0..n_out {
+                if let Some(ri) = get_idx_cell_opt(right_idx_col, i, "right row index")? {
+                    if let Some(reason) = right_na_reasons.get(orig_right_name, ri) {
+                        result_reasons.set(out_name_str, i, reason);
+                    }
+                }
+            }
+        } else {
+            // Left-sourced column, including coalesced `on` key columns -- every output
+            // row (matched or not, for a left_join) traces back to exactly one left row.
+            for i in 0..n_out {
+                let li = get_idx_cell(left_idx_col, i, "left row index")?;
+                if let Some(reason) = left_na_reasons.get(out_name_str, li) {
+                    result_reasons.set(out_name_str, i, reason);
+                }
+            }
+        }
+    }
+
+    let joined = joined.drop_many([LEFT_IDX_COL, RIGHT_IDX_COL]);
+    Ok(Value::DataFrame { frame: joined, na_reasons: result_reasons })
 }
 
 // =========================================================================
@@ -1159,6 +1264,85 @@ fn escape_csv_field(field: &str, sep: char) -> String {
     } else {
         field.to_string()
     }
+}
+
+/// Same dtype-inference policy as `infer_and_convert_column` (i64 > f64 > bool > string,
+/// widest-if-any-doubt), but builds the final polars `Column` directly from a
+/// `StringChunked` -- no `Vec<Value>` in between. Used by `read_csv_file` (the
+/// scale-sensitive path); `parse_csv_string`'s in-memory `Vec<String>` path keeps using
+/// the `Vec<Value>` version below since it isn't the GB-scale path (TODO.md, Fase 1).
+/// Returns the `Column` plus a sparse `(row, reason)` list for cells that were a reasoned
+/// `NA:reason` token -- built in the same single pass, rather than re-scanning a `Vec<Value>`
+/// for `Value::NA(Some(_))` afterward the way `build_dataframe` does for every other path.
+fn infer_and_convert_column_native(name: &str, raw: &StringChunked) -> (Column, Vec<(usize, String)>) {
+    let n = raw.len();
+    let get = |i: usize| raw.get(i).unwrap_or("");
+
+    let mut reasons: Vec<(usize, String)> = Vec::new();
+    for i in 0..n {
+        let s = get(i);
+        if is_na_token(s) {
+            if let Some(reason) = s.trim().strip_prefix("NA:") {
+                reasons.push((i, reason.to_string()));
+            }
+        }
+    }
+
+    let non_na_entries: Vec<&str> = (0..n).map(get).filter(|&s| !is_na_token(s)).collect();
+
+    if non_na_entries.is_empty() {
+        // Empty or entirely-NA column: no non-NA cell to infer a dtype from, same
+        // Float64-nulls fallback `value_column_to_polars` uses for this case.
+        let data: Vec<Option<f64>> = vec![None; n];
+        let col = data.into_iter().collect::<Float64Chunked>().with_name(name.into()).into_column();
+        return (col, reasons);
+    }
+
+    if non_na_entries.iter().all(|s| s.parse::<i64>().is_ok()) {
+        let data: Vec<Option<i64>> = (0..n).map(|i| {
+            let s = get(i);
+            if is_na_token(s) { None } else { s.parse::<i64>().ok() }
+        }).collect();
+        let col = data.into_iter().collect::<Int64Chunked>().with_name(name.into()).into_column();
+        return (col, reasons);
+    }
+
+    if non_na_entries.iter().all(|s| s.parse::<f64>().is_ok()) {
+        let data: Vec<Option<f64>> = (0..n).map(|i| {
+            let s = get(i);
+            if is_na_token(s) { None } else { s.parse::<f64>().ok() }
+        }).collect();
+        let col = data.into_iter().collect::<Float64Chunked>().with_name(name.into()).into_column();
+        return (col, reasons);
+    }
+
+    let all_bool = non_na_entries.iter().all(|s| {
+        let lower = s.to_lowercase();
+        lower == "true" || lower == "false" || lower == "t" || lower == "f"
+    });
+    if all_bool {
+        let data: Vec<Option<bool>> = (0..n).map(|i| {
+            let s = get(i);
+            if is_na_token(s) {
+                None
+            } else {
+                let lower = s.to_lowercase();
+                Some(lower == "true" || lower == "t")
+            }
+        }).collect();
+        let col = data.into_iter().collect::<BooleanChunked>().with_name(name.into()).into_column();
+        return (col, reasons);
+    }
+
+    // Fallback: string. This is the only branch that needs owned string data -- one clone
+    // per cell as `StringChunked`'s builder copies each `&str` into its own buffer, the
+    // same single clone a native polars string ingestion path would need too.
+    let data: Vec<Option<&str>> = (0..n).map(|i| {
+        let s = get(i);
+        if is_na_token(s) { None } else { Some(s) }
+    }).collect();
+    let col = data.into_iter().collect::<StringChunked>().with_name(name.into()).into_column();
+    (col, reasons)
 }
 
 fn infer_and_convert_column(raw: &[String]) -> Vec<Value> {

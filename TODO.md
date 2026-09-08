@@ -98,17 +98,22 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
 - [x] `inner_join(left, right, on1, on2, ...)` / `left_join(...)` — usan
       `DataFrame::join` de `polars-ops` (`polars-ops` se sumó a Fase 0 solo para esto,
       `polars-core` no trae joins). Columnas `on` aceptan bare/`ColRef`/string igual que
-      el resto de verbos. Razón de NA se descarta en el resultado del join a propósito:
-      un join puede duplicar o descartar filas de origen, así que el reindexado posicional
-      simple de `filter`/`arrange`/`slice` no aplica, y la API eager seleccionada no
-      expone qué fila(s) de origen generó cada fila de salida.
-  - [ ] Preservar `na_reasons` a través de `inner_join`/`left_join` — hoy se descartan a
-        propósito porque la API eager de `DataFrame::join` no expone qué fila(s) de origen
-        generaron cada fila de salida, así que no hay forma de reindexar el side-channel de
-        razones como sí se hace en `filter`/`arrange`/`slice`. No bloqueante (perder la razón
-        puntual de un NA al cruzar tablas es un límite razonable), pero es una pérdida de
-        información real, no solo cosmética — no cerrar sin decidir explícitamente si vale
-        la pena trackear índices de origen por fila para resolverlo.
+      el resto de verbos.
+  - [x] **`na_reasons` preservado a través del join — hecho.** La API eager de
+        `DataFrame::join` no expone qué fila(s) de origen generó cada fila de salida, así
+        que `df_join` (`io.rs`) construye esa provenance a mano: agrega una columna
+        `__ghl_left_idx__`/`__ghl_right_idx__` (vía `with_row_index`) a cada lado *antes*
+        de unir — el join las lleva como cualquier otra columna de datos — y las usa
+        después para reconstruir el `NaReasonTable` del resultado, columna por columna,
+        leyendo la razón desde el lado (izquierdo o derecho) y la fila original correcta.
+        Las columnas no-clave del lado derecho que colisionan de nombre con el izquierdo
+        se renombran a mano con el mismo sufijo `_right` que usaría polars por default,
+        pero decidido por este código (no adivinado post-join a partir del nombre), así el
+        mapeo columna-de-salida → columna-de-origen es exacto. Una fila de `left_join` sin
+        match del lado derecho no fabrica una razón (no hay fila de origen que la tuviera).
+        Test nuevo: `test_join_preserves_na_reasons_on_both_sides` (cubre ambos lados,
+        `inner`/`left`, y el caso de colisión de nombres). Verificado de punta a punta con
+        `ghl run`.
 - [x] `group_by`/`summarize`: la agrupación (`get_groups()`) viene de polars; cada
       `AggSpec` se evalúa con una pasada fusionada nativa de polars por `(kind, col)`
       distinto (ver el ítem de fusión más abajo, ahora hecho).
@@ -190,29 +195,38 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
     en este dataset porque no tiene NA) en un único recorrido físico en vez de 3-4 pasadas
     `GroupBy` separadas. No es una comparación controlada (no es lo que este ítem pedía
     medir), solo un dato adicional de que la migración no salió cara.
-- [x] **CSV a escala — `read_csv()` reescrito, resultado: mejora real pero parcial.**
-      Se sumó `polars-io` (con feature `csv`) a Fase 0. `read_csv_file` (`io.rs`) ahora
-      usa `CsvReadOptions` de polars-io para la tokenización multi-hilo del archivo,
-      forzando `dtype_overwrite` a `String` en todas las columnas — así polars solo hace
-      la parte cara (leer + partir en campos), y la inferencia de tipos + `NA:razon` de
-      GHL (`infer_and_convert_column`, sin cambios) corre encima, columna por columna en
-      paralelo vía `rayon` (ya en Fase 0). `parse_csv()` (texto en memoria, `parse_csv_string`)
-      se dejó con el parser viejo a propósito — no es el camino de escala GB.
+- [x] **CSV a escala — `read_csv()` reescrito, y luego reescrito otra vez para sacar el
+      cuello de botella real.** Se sumó `polars-io` (con feature `csv`) a Fase 0.
+      `read_csv_file` (`io.rs`) usa `CsvReadOptions` de polars-io para la tokenización
+      multi-hilo del archivo, forzando `dtype_overwrite` a `String` en todas las columnas
+      — así polars solo hace la parte cara (leer + partir en campos) — y la inferencia de
+      tipos + `NA:razon` de GHL corre encima, columna por columna en paralelo vía `rayon`
+      (ya en Fase 0). `parse_csv()` (texto en memoria, `parse_csv_string`) se dejó con el
+      parser viejo a propósito — no es el camino de escala GB.
+  - **Primer intento: mejora real pero parcial (~1.8x), cuello de botella identificado y
+    dejado como subitem abierto.** `infer_and_convert_column` producía `Vec<Value>` por
+    celda (un `String` propio por cada valor, boxeado en `Value::String`/`Value::F64`/etc.)
+    — con `build_dataframe` reboxeando eso otra vez a la `ChunkedArray` final, una columna
+    de texto llegaba a clonar cada celda **tres veces** (`StringChunked` de polars-io →
+    `Vec<String>` → `Value::String` → `Vec<Option<String>>` final) antes de llegar a su
+    forma definitiva.
+  - **Segundo intento (esta pasada): arreglado de raíz.** `infer_and_convert_column_native`
+    (`io.rs`) hace la misma inferencia de tipo (i64 > f64 > bool > string, ensanchando ante
+    cualquier duda, política sin cambios) pero directo sobre el `StringChunked` que entrega
+    polars-io, construyendo la `ChunkedArray`/`Column` final en un solo paso — sin pasar por
+    `Vec<Value>` en absoluto. Las razones `NA:razon` se recolectan en la misma pasada a una
+    lista rala `(fila, razón)`, no re-escaneando un `Vec<Value>` después como hacía
+    `build_dataframe`. `parse_csv_string` (el camino que no es de escala) sigue usando la
+    versión vieja basada en `Vec<Value>` sin cambios — no valía la pena tocarla.
   - **Medido con `generate_synthetic_csv` + `spike_csv_ingest_latency`, 1M filas/12
-    columnas/84MB:** parser viejo 4.6s (18 MB/s) → nuevo 2.6s (32 MB/s), **~1.8x**, no el
-    salto de "multi-hilo real" que se esperaría. Verificado además con `test_read_csv_file_matches_parse_csv_string`
-    (misma salida byte a byte que el parser viejo, incluyendo razones de NA) y de punta a
-    punta con `ghl run` sobre `read_csv(...)`.
-  - **Por qué no es más rápido:** el cuello de botella que queda es la construcción de
-    `Vec<Value>` por celda (un `String` propio por cada valor, boxeado en `Value::String`/
-    `Value::F64`/etc.). La solución real es parsear directo a `ChunkedArray` tipados de
-    polars sin pasar por `Value` en el camino de ingestión — trabajo más grande,
-    deliberadamente no hecho en esta pasada. Ver el subitem abierto abajo.
-  - [ ] Reescribir `infer_and_convert_column` (`io.rs`) para producir `ChunkedArray`/`Series`
-        de polars directo, no `Vec<Value>` por celda — es el cuello de botella real que deja
-        a `read_csv()` en ~1.8x en vez del salto multi-hilo esperado (ver medición arriba).
-        No bloqueante para cerrar Fase 1, pero es el próximo paso real para CSV a escala si
-        se vuelve a medir y todavía importa.
+    columnas/84MB:** parser viejo 4.6s (18 MB/s) — sin cambios, no es el camino tocado —
+    → primer intento 2.6s (32 MB/s, ~1.8x) → **segundo intento ~0.85-0.90s (95-99 MB/s,
+    ~5.2x contra el parser viejo, ~3x contra el primer intento)**, medido 3 veces para
+    confirmar que no era ruido de caché de disco (la primera corrida en frío dio 1.81s,
+    las siguientes ya con el archivo en caché del SO se estabilizaron en ese rango).
+    Verificado además con `test_read_csv_file_matches_parse_csv_string` (misma salida byte
+    a byte que el parser viejo, incluyendo razones de NA — no solo más rápido, sigue siendo
+    exactamente correcto) y de punta a punta con `ghl run` sobre `read_csv(...)`.
   - **CSV sintético reproducible:** `crates/ghl-runtime/examples/generate_synthetic_csv.rs`
     (parametrizado por filas; `cargo run --release --example generate_synthetic_csv -p
     ghl-runtime -- 25000000 target/synthetic_25m.csv` para el caso completo de Suite 02).

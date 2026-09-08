@@ -771,6 +771,52 @@ mod tests {
     }
 
     #[test]
+    fn test_join_preserves_na_reasons_on_both_sides() {
+        // TODO.md Fase 1: na_reasons used to be dropped entirely by inner_join/left_join
+        // (the eager join API doesn't expose per-output-row provenance on its own) --
+        // df_join now carries a row-index column through the join on each side to recover
+        // it. `score` collides between `left` and `right` on purpose, to also cover the
+        // rename-on-collision path (`score` -> `score_right`).
+        let code = r#"
+            let left = dataframe {
+                id:    [1, 2, 3],
+                score: [10.0, NA:SensorDropout, 30.0]
+            };
+            let right = dataframe {
+                id:    [1, 2],
+                score: [NA:Timeout, 200.0]
+            };
+
+            let inner = left |> inner_join(right, id);
+            let inner_left_reasons = inner |> na_reasons(score);
+            let inner_right_reasons = inner |> na_reasons(score_right);
+
+            let outer = left |> left_join(right, id);
+            let outer_left_reasons = outer |> na_reasons(score);
+            let outer_right_reasons = outer |> na_reasons(score_right);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let na = Value::NA(None);
+        let vec_of = |interp: &Interpreter, name: &str| match interp.env.get(name).expect(name) {
+            Value::Vector(vals) => vals,
+            other => panic!("expected Vector for `{name}`, got {other:?}"),
+        };
+
+        // Inner join: id=3 (left-only) is dropped, id=1/2 both matched.
+        assert_eq!(vec_of(&interp, "inner_left_reasons"), vec![na.clone(), Value::String("SensorDropout".into())]);
+        assert_eq!(vec_of(&interp, "inner_right_reasons"), vec![Value::String("Timeout".into()), na.clone()]);
+
+        // Left join: every left row survives, including the unmatched id=3 -- its
+        // `score_right` is a real (reason-less) NA, not a fabricated reason from a right
+        // row that never existed.
+        assert_eq!(vec_of(&interp, "outer_left_reasons"), vec![na.clone(), Value::String("SensorDropout".into()), na.clone()]);
+        assert_eq!(vec_of(&interp, "outer_right_reasons"), vec![Value::String("Timeout".into()), na.clone(), na.clone()]);
+    }
+
+    #[test]
     fn test_parquet_round_trip() {
         let path = std::env::temp_dir().join("ghl_test_round_trip.parquet");
         let path_str = path.to_str().unwrap();
