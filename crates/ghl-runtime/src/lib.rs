@@ -569,6 +569,53 @@ mod tests {
     }
 
     #[test]
+    fn test_summarize_propagates_na_kleene_style() {
+        // RFC 02 sect2.4: GHL never silently skips missing data in aggregates the way
+        // pandas/numpy do. summarize()'s native polars reduce (mean_reduce/max_reduce/
+        // etc.) skips nulls by default -- this locks in the explicit null_count() guard
+        // in compute_agg (io.rs) that makes any NA in a group taint the whole result,
+        // same as the standalone mean(vec)/max(vec) functions already do.
+        let code = r#"
+            let df = dataframe {
+                g: ["a", "b", "a", "b", "a"],
+                x: [1.0, 2.0, NA:SensorDropout, 4.0, 5.0]
+            };
+            let summary = df |> group_by(g) |> summarize(
+                mean_x = mean(x), max_x = max(x), min_x = min(x),
+                sum_x = sum(x), n_distinct_x = n_distinct(x)
+            );
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let summary = interp.env.get("summary").expect("summary");
+        let groups = df_column(&summary, "g");
+        let mean_x = df_column(&summary, "mean_x");
+        let max_x = df_column(&summary, "max_x");
+        let sum_x = df_column(&summary, "sum_x");
+
+        // Group "a" (values [1.0, NA:SensorDropout, 5.0]) must come back as plain NA for
+        // every value-touching aggregate -- not skip the NA and average [1.0, 5.0] to 3.0.
+        let a_idx = groups.iter().position(|v| v == &Value::String("a".into())).unwrap();
+        assert_eq!(mean_x[a_idx], Value::NA(None));
+        assert_eq!(max_x[a_idx], Value::NA(None));
+        assert_eq!(sum_x[a_idx], Value::NA(None));
+
+        // Group "b" (values [2.0, 4.0], no NA) must still compute normally.
+        let b_idx = groups.iter().position(|v| v == &Value::String("b".into())).unwrap();
+        assert_eq!(mean_x[b_idx], Value::F64(3.0));
+        assert_eq!(max_x[b_idx], Value::F64(4.0));
+        assert_eq!(sum_x[b_idx], Value::F64(6.0));
+
+        // n_distinct() isn't a Kleene-propagating aggregate (matches the pre-optimization
+        // behavior): the NA itself counts as one of the distinct values in the group.
+        let n_distinct_x = df_column(&summary, "n_distinct_x");
+        assert_eq!(n_distinct_x[a_idx], Value::I64(3));
+        assert_eq!(n_distinct_x[b_idx], Value::I64(2));
+    }
+
+    #[test]
     fn test_arrange_multi_column_with_desc() {
         let code = r#"
             let df = dataframe {

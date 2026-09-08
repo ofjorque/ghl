@@ -142,6 +142,17 @@ fn any_value_to_value(av: &AnyValue, col: &str, row: usize, na_reasons: &NaReaso
             Some(reason) => Value::NA(Some(reason.to_string())),
             None => Value::NA(None),
         },
+        other => any_value_to_plain_value(other),
+    }
+}
+
+/// Como [`any_value_to_value`] pero sin contexto de `(col, row)` — para valores que no
+/// vienen de una celda concreta del DataFrame, como el resultado escalar de una
+/// agregación (`summarize()`'s `compute_agg` en `io.rs`). Un `Null` aquí siempre se
+/// vuelve `Value::NA(None)`: no hay una razón que buscar para un escalar sintético.
+pub(crate) fn any_value_to_plain_value(av: &AnyValue) -> Value {
+    match av {
+        AnyValue::Null => Value::NA(None),
         AnyValue::Boolean(b) => Value::Bool(*b),
         AnyValue::String(s) => Value::String(s.to_string()),
         AnyValue::Int8(n) => Value::I64(*n as i64),

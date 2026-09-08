@@ -730,13 +730,12 @@ fn group_indicator_to_indices(g: &GroupsIndicator) -> Vec<usize> {
     }
 }
 
-fn compute_agg(
-    kind: &str,
-    col: Option<&str>,
-    frame: &DataFrame,
-    na_reasons: &NaReasonTable,
-    indices: &[usize],
-) -> Result<Value, Diagnostic> {
+/// Computes one `AggSpec` for one group directly against polars — no boxing the
+/// group's cells into `Vec<Value>` and looping in Rust first (that was the "optimización
+/// pendiente" TODO.md flagged when `summarize()` first shipped). Aggregated results
+/// never carry NA-with-reason regardless of path (which reason "wins" across a
+/// collapsed group isn't defined), so there's no `NaReasonTable` to thread through here.
+fn compute_agg(kind: &str, col: Option<&str>, frame: &DataFrame, indices: &[usize]) -> Result<Value, Diagnostic> {
     if kind == "count" {
         return Ok(Value::I64(indices.len() as i64));
     }
@@ -744,34 +743,50 @@ fn compute_agg(
     let col_name = col.ok_or_else(|| {
         Diagnostic::compute_error("C0201", format!("`{}()` requires a column argument in `summarize()`", kind))
     })?;
-    let subset = polars_bridge::pull_rows_as_values(frame, na_reasons, col_name, indices).map_err(|_| {
+    let column = frame.column(col_name).map_err(|_| {
         Diagnostic::statistical_error(
             "S0201",
             format!("Column `{}` not found in DataFrame for `summarize()`", col_name),
         )
     })?;
 
-    // Reuse the same aggregation math the standalone functions use, so `mean(x)`
-    // inside `summarize()` and `mean(pull(df, "x"))` outside it never disagree.
-    let native_fn: crate::value::NativeFunction = match kind {
-        "mean" => crate::env::native_mean,
-        "sum" => crate::env::native_sum,
-        "std_dev" => crate::env::native_std_dev,
-        "var" => crate::env::native_var,
-        "min" => crate::env::native_min,
-        "max" => crate::env::native_max,
-        "first" => crate::env::native_first,
-        "last" => crate::env::native_last,
-        "median" => crate::env::native_median,
-        "n_distinct" => crate::env::native_n_distinct,
-        other => {
-            return Err(Diagnostic::compute_error(
-                "C0201",
-                format!("Unknown aggregation `{}` in `summarize()`", other),
-            ));
-        }
-    };
-    native_fn(vec![Value::Vector(subset)])
+    let idx: Vec<IdxSize> = indices.iter().map(|&i| i as IdxSize).collect();
+    let idx_ca = IdxCa::from_vec(PlSmallStr::EMPTY, idx);
+    let subset = column.take(&idx_ca).map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("`summarize()`: error extracting group subset: {e}"))
+    })?;
+
+    // Kleene propagation (RFC 02 sect2.4: GHL never silently skips missing data the way
+    // pandas/numpy do) -- polars' native mean_reduce/sum_reduce/etc. skip nulls by
+    // default, which is exactly the "silent" behavior the language's own NA design
+    // rejects. `null_count()` is O(1) (Arrow tracks it in the array metadata), so this
+    // check costs nothing extra before the reduce would otherwise run.
+    let propagates_na = matches!(kind, "mean" | "sum" | "std_dev" | "var" | "min" | "max" | "median");
+    if propagates_na && subset.null_count() > 0 {
+        // No specific reason is attempted here even if the group's NA had one recorded:
+        // aggregated columns never carry NA-with-reason regardless (see doc comment on
+        // df_summarize) -- which reason would "win" isn't defined, so it isn't guessed at.
+        return Ok(Value::NA(None));
+    }
+
+    let reduce_err = |e: PolarsError| Diagnostic::compute_error("C0210", format!("`{kind}()` failed in `summarize()`: {e}"));
+
+    match kind {
+        "mean" => subset.mean_reduce().map_err(reduce_err).map(|s| polars_bridge::any_value_to_plain_value(s.value())),
+        "sum" => subset.sum_reduce().map_err(reduce_err).map(|s| polars_bridge::any_value_to_plain_value(s.value())),
+        "std_dev" => subset.std_reduce(1).map_err(reduce_err).map(|s| polars_bridge::any_value_to_plain_value(s.value())),
+        "var" => subset.var_reduce(1).map_err(reduce_err).map(|s| polars_bridge::any_value_to_plain_value(s.value())),
+        "min" => subset.min_reduce().map_err(reduce_err).map(|s| polars_bridge::any_value_to_plain_value(s.value())),
+        "max" => subset.max_reduce().map_err(reduce_err).map(|s| polars_bridge::any_value_to_plain_value(s.value())),
+        "median" => subset.median_reduce().map_err(reduce_err).map(|s| polars_bridge::any_value_to_plain_value(s.value())),
+        "first" => subset.get(0).map_err(reduce_err).map(|av| polars_bridge::any_value_to_plain_value(&av)),
+        "last" => subset.get(subset.len().saturating_sub(1)).map_err(reduce_err).map(|av| polars_bridge::any_value_to_plain_value(&av)),
+        "n_distinct" => subset.n_unique().map_err(reduce_err).map(|n| Value::I64(n as i64)),
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("Unknown aggregation `{}` in `summarize()`", other),
+        )),
+    }
 }
 
 /// `summarize(gdf, name = agg, ...)` — consumes the `GroupedDataFrame`, returns a plain
@@ -822,7 +837,7 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
             out_data.get_mut(k).unwrap().push(v.clone());
         }
         for (name, kind, col) in specs {
-            let result = compute_agg(kind, col.as_deref(), frame, na_reasons, indices)?;
+            let result = compute_agg(kind, col.as_deref(), frame, indices)?;
             out_data.get_mut(name).unwrap().push(result);
         }
     }

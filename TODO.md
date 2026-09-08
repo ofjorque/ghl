@@ -106,11 +106,44 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
       evaluación de cada `AggSpec` sigue reutilizando `native_mean`/`native_sum`/etc.
       sobre el subconjunto extraído por grupo — **no** es todavía el camino 100%
       zero-copy vía agregaciones nativas de polars por serie. Ver ítem nuevo abajo.
-- [ ] Optimización pendiente (no bloqueante): `summarize()` extrae cada grupo a
-      `Vec<Value>` antes de agregar (ver `compute_agg` en `io.rs`) en vez de usar
-      agregaciones nativas de polars por `Series` sin boxear — el Spike #1 ya midió
-      600µs para 100k filas con el camino ingenuo de polars, así que esto no es
-      urgente, pero es la primera optimización real cuando se mida contra Suite 02.
+- [x] **Optimización de `summarize()` — hecha, y encontró un bug de correctitud real
+      en el camino.** `compute_agg` (`io.rs`) ya no extrae cada grupo a `Vec<Value>`
+      antes de agregar: toma el subconjunto del grupo como `Column` nativo
+      (`column.take(&idx_ca)`) y llama `mean_reduce`/`sum_reduce`/`min_reduce`/
+      `max_reduce`/`median_reduce`/`std_reduce`/`var_reduce`/`n_unique` de polars
+      directo — sin pasar por `Value` para nada salvo el resultado final escalar.
+  - **Medido:** `group_by(category) |> summarize(4 agregaciones)` sobre 1M filas /
+    5 grupos: 44-50ms (~4.4-5ms proyectado a 100k filas). El Spike #1 original midió
+    ~601µs para 100k filas con **una sola** agregación nativa vía la API eager de
+    polars (`GroupBy::select().mean()`) — la diferencia (~8x) es real y esperada:
+    esta implementación hace `take()` + reduce **por grupo por agregación** (aquí
+    4 grupos × 4 specs = 20 llamadas nativas), no una sola pasada fusionada de
+    polars sobre todos los grupos a la vez. Con alta cardinalidad de grupos (Suite
+    02 pide 100.000) ese overhead por-llamada empieza a importar — anotado abajo
+    como el siguiente paso real si se mide que hace falta, no asumido.
+  - **El bug que encontró la verificación de punta a punta (no los tests unitarios):**
+    las reducciones nativas de polars **saltan los NA por defecto** (estilo
+    pandas/numpy) — exactamente el comportamiento "silencioso" que RFC 02 §2.4
+    dice explícitamente que GHL NO hace (`mean(data)` con un NA debe dar `NA`, no
+    promediar el resto). El primer intento de este cambio pasó los 32 tests
+    existentes sin problema, **porque ninguno de ellos combinaba `summarize()` con
+    datos NA** — recién al probarlo a mano con `NA:SensorDropout` en una columna
+    agrupada apareció la regresión (`mean_x`/`max_x` calculados ignorando el NA en
+    vez de dar `NA`). Arreglado con un chequeo `subset.null_count() > 0` (O(1),
+    metadata de Arrow, no un escaneo) antes de reducir para las agregaciones que
+    deben propagar NA (`mean`/`sum`/`std_dev`/`var`/`min`/`max`/`median`) — `count`/
+    `n_distinct`/`first`/`last` no lo necesitan, igual que antes de esta optimización.
+    Se agregó `test_summarize_propagates_na_kleene_style` para que esto no vuelva a
+    pasar inadvertido. **Lección concreta:** el chequeo automatizado no reemplaza
+    probar con datos que tengan NA de verdad cuando se toca código de agregación.
+- [ ] Optimización de seguimiento (no bloqueante, solo si alta cardinalidad de grupos
+      lo justifica al medir): reemplazar el `take()`+reduce por-grupo-por-agregación de
+      `compute_agg` por una sola pasada fusionada nativa de polars por cada `(kind, col)`
+      distinto (ej. `frame.group_by(keys)?.select([col]).mean()` para TODOS los grupos a
+      la vez), uniendo los resultados de cada pasada por las claves. Más rápido en teoría
+      con muchos grupos, pero requiere manejar joins entre N resultados parciales —
+      complejidad real, no vale la pena sin medir primero que el camino actual es un
+      cuello de botella real contra Suite 02 (100.000 grupos).
 - [x] **CSV a escala — `read_csv()` reescrito, resultado: mejora real pero parcial.**
       Se sumó `polars-io` (con feature `csv`) a Fase 0. `read_csv_file` (`io.rs`) ahora
       usa `CsvReadOptions` de polars-io para la tokenización multi-hilo del archivo,
