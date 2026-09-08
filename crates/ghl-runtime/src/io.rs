@@ -11,7 +11,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use ghl_diagnostics::Diagnostic;
 use polars_core::prelude::*;
+use polars_io::prelude::*;
 use polars_ops::prelude::*;
+use rayon::prelude::*;
 use crate::na_reasons::NaReasonTable;
 use crate::polars_bridge;
 use crate::value::Value;
@@ -137,9 +139,76 @@ pub fn file_exists(path: &str) -> bool {
 // 2. Tabular CSV I/O
 // =========================================================================
 
+/// Reads a CSV file at GB scale (`benchmarks/suites/02`, Caso 2.1) using polars-io's
+/// multi-threaded reader for the expensive part (splitting the file into fields across
+/// however many rows it has), then runs GHL's own type inference and `NA:reason` parsing
+/// (`infer_and_convert_column`, unchanged) on top of the resulting string columns.
+///
+/// This is a deliberate hybrid rather than handing the whole read to polars: polars'
+/// native numeric parsing has no notion of `NA:SensorDropout` — a single such cell in a
+/// numeric column would either force that whole column to `String` or get silently
+/// dropped, depending on how strict the reader is configured. Forcing every column to
+/// `String` via `dtype_overwrite` sidesteps that entirely: polars only does the fast
+/// I/O + tokenizing, and the exact same inference/NA-reason logic already covered by
+/// `test_csv_parser_with_inferred_types` runs unchanged on the result.
 pub fn read_csv_file(path: &str, delim: Option<char>) -> Result<Value, Diagnostic> {
-    let content = read_file(path)?;
-    parse_csv_string(&content, delim)
+    let header_line = {
+        let file = fs::File::open(path).map_err(|e| {
+            Diagnostic::compute_error("C0401", format!("Failed to open file `{}`: {}", path, e))
+        })?;
+        let mut lines = BufReader::new(file).lines();
+        loop {
+            match lines.next() {
+                Some(Ok(l)) if l.trim().is_empty() => continue,
+                Some(Ok(l)) => break l,
+                Some(Err(e)) => {
+                    return Err(Diagnostic::compute_error("C0401", format!("Failed to read `{}`: {}", path, e)));
+                }
+                None => {
+                    return Err(Diagnostic::compute_error("C0403", "Cannot parse empty CSV content (no header found)"));
+                }
+            }
+        }
+    };
+    let header_line = header_line.trim_start_matches('\u{feff}');
+    let sep = delim.unwrap_or_else(|| detect_delimiter(header_line));
+    let num_cols = parse_csv_row(header_line, sep).len();
+    if num_cols == 0 {
+        return Err(Diagnostic::compute_error("C0403", "CSV header row contains zero columns"));
+    }
+
+    let parse_options = CsvParseOptions::default().with_separator(sep as u8);
+    let dtype_overwrite = std::sync::Arc::new(vec![DataType::String; num_cols]);
+    let raw_frame = CsvReadOptions::default()
+        .with_has_header(true)
+        .with_parse_options(parse_options)
+        .with_dtype_overwrite(Some(dtype_overwrite))
+        .try_into_reader_with_file_path(Some(std::path::PathBuf::from(path)))
+        .and_then(|reader| reader.finish())
+        .map_err(|e| Diagnostic::compute_error("C0403", format!("Failed to read CSV `{}`: {}", path, e)))?;
+
+    // Columns are independent of each other, so the per-column type-inference/NA-reason
+    // pass (several full scans over each column, see infer_and_convert_column) runs
+    // across `rayon`'s thread pool rather than one column at a time -- this is where
+    // most of the wall-clock time actually goes once polars-io has done the fast part
+    // (tokenizing the file), so it's worth parallelizing even with as few as ~12 columns.
+    let cols: Vec<(String, Vec<Value>)> = raw_frame
+        .get_column_names()
+        .into_par_iter()
+        .map(|name| -> Result<(String, Vec<Value>), Diagnostic> {
+            let raw_col = raw_frame.column(name).map_err(|e| {
+                Diagnostic::compute_error("C0403", format!("Internal error reading column `{name}`: {e}"))
+            })?;
+            let raw_strs = raw_col.str().map_err(|e| {
+                Diagnostic::compute_error("C0403", format!("Internal error reading column `{name}`: {e}"))
+            })?;
+            let raw_vals: Vec<String> = raw_strs.iter().map(|opt| opt.unwrap_or("").to_string()).collect();
+            Ok((name.to_string(), infer_and_convert_column(&raw_vals)))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let (frame, na_reasons) = polars_bridge::build_dataframe(&cols)?;
+    Ok(Value::DataFrame { frame, na_reasons })
 }
 
 pub fn parse_csv_string(content: &str, delim: Option<char>) -> Result<Value, Diagnostic> {
@@ -1018,6 +1087,47 @@ mod tests {
             assert_eq!(sensors[3], Value::NA(Some("LowBattery".into())));
         } else {
             panic!("Expected DataFrame");
+        }
+    }
+
+    #[test]
+    fn test_read_csv_file_matches_parse_csv_string() {
+        // read_csv_file uses polars-io for the fast/multi-threaded tokenizing step
+        // (forcing every column to String via dtype_overwrite) and then runs the exact
+        // same infer_and_convert_column/NA:reason logic as parse_csv_string on top --
+        // this locks in that the two paths produce identical results.
+        let csv_data = "id,name,score,active,sensor_status\n\
+                         1,Alpha,98.5,true,OK\n\
+                         2,Beta,NA,false,NA:SensorDropout\n\
+                         3,Gamma,87.2,true,OK\n\
+                         4,Delta,76.0,false,NA:LowBattery\n";
+
+        let temp_dir = std::env::temp_dir();
+        let path = temp_dir.join("ghl_test_read_csv_file.csv");
+        let p_str = path.to_str().unwrap();
+        write_file(p_str, csv_data).unwrap();
+
+        let from_string = parse_csv_string(csv_data, None).expect("parse_csv_string should succeed");
+        let from_file = read_csv_file(p_str, None).expect("read_csv_file should succeed");
+        let _ = fs::remove_file(&path);
+
+        let (frame_a, reasons_a) = match &from_string {
+            Value::DataFrame { frame, na_reasons } => (frame, na_reasons),
+            _ => panic!("Expected DataFrame from parse_csv_string"),
+        };
+        let (frame_b, reasons_b) = match &from_file {
+            Value::DataFrame { frame, na_reasons } => (frame, na_reasons),
+            _ => panic!("Expected DataFrame from read_csv_file"),
+        };
+
+        assert_eq!(
+            frame_a.get_column_names().iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            frame_b.get_column_names().iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        );
+        for col in frame_a.get_column_names() {
+            let vals_a = polars_bridge::pull_column_as_values(frame_a, reasons_a, col).unwrap();
+            let vals_b = polars_bridge::pull_column_as_values(frame_b, reasons_b, col).unwrap();
+            assert_eq!(vals_a, vals_b, "column `{col}` differs between the two CSV paths");
         }
     }
 

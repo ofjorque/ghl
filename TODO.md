@@ -111,12 +111,36 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
       agregaciones nativas de polars por `Series` sin boxear — el Spike #1 ya midió
       600µs para 100k filas con el camino ingenuo de polars, así que esto no es
       urgente, pero es la primera optimización real cuando se mida contra Suite 02.
-- [ ] CSV/Parquet a escala GB: usar los lectores de `polars`/`arrow2`
-      (`read_csv`/`read_parquet`, ya multi-hilo) en vez de extender el parser propio de
-      `crates/ghl-runtime/src/io.rs` — ese parser sigue siendo el usado hoy (vía
-      `polars_bridge::build_dataframe` al final), queda solo para el camino chico.
-- [ ] Generar el CSV sintético de 5GB / 25M filas / 12 columnas mixtas (Caso 2.1)
-      + script reproducible para generarlo (no versionar el archivo en sí).
+- [x] **CSV a escala — `read_csv()` reescrito, resultado: mejora real pero parcial.**
+      Se sumó `polars-io` (con feature `csv`) a Fase 0. `read_csv_file` (`io.rs`) ahora
+      usa `CsvReadOptions` de polars-io para la tokenización multi-hilo del archivo,
+      forzando `dtype_overwrite` a `String` en todas las columnas — así polars solo hace
+      la parte cara (leer + partir en campos), y la inferencia de tipos + `NA:razon` de
+      GHL (`infer_and_convert_column`, sin cambios) corre encima, columna por columna en
+      paralelo vía `rayon` (ya en Fase 0). `parse_csv()` (texto en memoria, `parse_csv_string`)
+      se dejó con el parser viejo a propósito — no es el camino de escala GB.
+  - **Medido con `generate_synthetic_csv` + `spike_csv_ingest_latency`, 1M filas/12
+    columnas/84MB:** parser viejo 4.6s (18 MB/s) → nuevo 2.6s (32 MB/s), **~1.8x**, no el
+    salto de "multi-hilo real" que se esperaría. Verificado además con `test_read_csv_file_matches_parse_csv_string`
+    (misma salida byte a byte que el parser viejo, incluyendo razones de NA) y de punta a
+    punta con `ghl run` sobre `read_csv(...)`.
+  - **Por qué no es más rápido:** el cuello de botella que queda es la construcción de
+    `Vec<Value>` por celda (un `String` propio por cada valor, boxeado en `Value::String`/
+    `Value::F64`/etc.) — el mismo tipo de costo que ya está anotado como pendiente en
+    `summarize()` arriba, ahora también aquí. La solución real es parsear directo a
+    `ChunkedArray` tipados de polars sin pasar por `Value` en el camino de ingestión —
+    trabajo más grande, deliberadamente no hecho en esta pasada (`infer_and_convert_column`
+    tendría que reescribirse para producir Series de polars, no `Vec<Value>`).
+  - **CSV sintético reproducible:** `crates/ghl-runtime/examples/generate_synthetic_csv.rs`
+    (parametrizado por filas; `cargo run --release --example generate_synthetic_csv -p
+    ghl-runtime -- 25000000 target/synthetic_25m.csv` para el caso completo de Suite 02).
+    El archivo generado no se versiona. Medido a 1M filas por tiempo/disco en este sandbox
+    compartido — `benchmarks/methodology.md` exige hardware aislado para números
+    "oficiales" de todas formas, así que la corrida completa de 25M queda para esa etapa
+    (Fase 10), no para esta medición de spike.
+- [ ] Parquet a escala GB: falta por completo — `polars-io` también lo trae
+      (`feature = "parquet"`), mismo patrón que CSV pero sin el problema de `NA:razon`
+      (Parquet ya tiene su propio bit de validez nativo, no hay texto que reinterpretar).
 - [ ] Filtrado vectorial con bitmask de validez + asignación copy-on-write (Caso 2.3) —
       el backend columnar ya existe; falta medir/optimizar el camino de filtrado a escala.
 - [ ] Actualizar `docs/design` / `benchmarks/suites/02-dataframe-operations.md`:
