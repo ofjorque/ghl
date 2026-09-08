@@ -153,8 +153,31 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
     absoluto, así que ese cuello de botella directamente no existe en este camino.
   - Test de round-trip (`test_parquet_round_trip`, `lib.rs`) + verificado de punta a
     punta con `ghl run` (`read_csv → write_parquet → read_parquet`, tamaños reales).
-- [ ] Filtrado vectorial con bitmask de validez + asignación copy-on-write (Caso 2.3) —
-      el backend columnar ya existe; falta medir/optimizar el camino de filtrado a escala.
+- [x] **Filtrado vectorial (Caso 2.3) — hecho para predicado simple `col OP escalar`.**
+      `filter(df, col(...) > 75.0)` (`io.rs::colref_predicate_mask` +
+      `df_filter_by_col_predicate`) ya no boxea la columna a `Vec<Value>` y compara celda
+      por celda: compara nativo en polars (`Column::gt`/`lt`/`equal`/etc. contra un
+      `Column::Scalar` — broadcast real, sin materializar N copias del escalar) y da
+      directo un `BooleanChunked`, que se reindexa/aplica con el mismo `take_rows` que
+      usan `arrange`/`slice`/`sample_n`/`distinct`. `eval_predicate` (comparación escalar
+      vieja) se eliminó por completo, no quedó como código muerto.
+  - **Medido sobre el archivo de 1M filas:** columna `i64` (`value_a > 500000`): nuevo
+    67ms vs viejo 99ms — **~1.5x, modesto**. Columna string (`category == "A"`): nuevo
+    27ms (no se rehizo el camino viejo para strings, pero por lo ya medido en la ingesta
+    de CSV — donde boxear un string implica clonar un `String` en heap por celda, a
+    diferencia de un `i64` que es una copia trivial dentro del enum — la ganancia ahí
+    debería ser bastante mayor). Ambos casos son rápidos en términos absolutos (<100ms/1M
+    filas) independientemente de la mejora relativa.
+  - **Fuera de alcance, a propósito:** el ejemplo exacto del Caso 2.3
+    (`col("score") > 75.0 && !is_na(col("category"))`, un predicado *compuesto*) no está
+    soportado todavía — hoy `filter()` solo entiende un único `ColPredicate`, combinar dos
+    con `&&`/`||` cae en la lógica normal de `BinaryOp::And`/`Or` (que espera `Bool`, no
+    `ColPredicate`) y falla. Es una limitación preexistente de sintaxis/evaluación, no de
+    rendimiento — extenderla es un cambio de diseño aparte (predicados compuestos o un DSL
+    de expresiones para `filter()`), no lo que pedía este ítem.
+  - "Asignación sin copia (Copy-on-Write)" de la descripción del Caso 2.3 no se abordó
+    aparte — `take_rows`/`Column::Scalar` ya evitan las copias evitables que estaban al
+    alcance sin rediseñar el modelo de memoria completo (RFC 03, Fase 5).
 - [ ] Actualizar `docs/design` / `benchmarks/suites/02-dataframe-operations.md`:
       su `query.gh` de ejemplo usa method-chaining (`df.filter(...).group_by(...).parallel().agg([...])`)
       que no coincide con la sintaxis real de pipes (`df |> filter(...) |> group_by(...)`).

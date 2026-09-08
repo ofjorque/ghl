@@ -1150,18 +1150,6 @@ fn native_str_pad(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }))
 }
 
-fn eval_predicate(op: ghl_syntax::ast::BinaryOp, left: &Value, right: &Value) -> bool {
-    use ghl_syntax::ast::BinaryOp;
-    match op {
-        BinaryOp::Eq => left == right,
-        BinaryOp::NotEq => left != right,
-        BinaryOp::Lt => left.as_f64().and_then(|l| right.as_f64().map(|r| l < r)).unwrap_or(false),
-        BinaryOp::LtEq => left.as_f64().and_then(|l| right.as_f64().map(|r| l <= r)).unwrap_or(false),
-        BinaryOp::Gt => left.as_f64().and_then(|l| right.as_f64().map(|r| l > r)).unwrap_or(false),
-        BinaryOp::GtEq => left.as_f64().and_then(|l| right.as_f64().map(|r| l >= r)).unwrap_or(false),
-        _ => false,
-    }
-}
 
 fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
@@ -1173,15 +1161,11 @@ fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Value::DataFrame { frame, na_reasons } => {
             // If condition was passed as second argument:
             if args.len() > 1 {
-                // If the second argument is a ColPredicate
+                // If the second argument is a ColPredicate: vectorized comparison
+                // straight on the polars column (Suite 02, Caso 2.3) -- no boxing the
+                // whole column to Vec<Value> and comparing scalar-by-scalar in Rust.
                 if let Value::ColPredicate { col, op, rhs } = &args[1] {
-                    let col_vals = crate::polars_bridge::pull_column_as_values(&frame, &na_reasons, col)?;
-                    let keep_indices: Vec<usize> = col_vals.iter().enumerate()
-                        .filter(|(_, item)| eval_predicate(*op, item, rhs))
-                        .map(|(i, _)| i)
-                        .collect();
-                    let (new_frame, new_reasons) = crate::io::take_rows(&frame, &na_reasons, &keep_indices)?;
-                    return Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons });
+                    return crate::io::df_filter_by_col_predicate(&Value::DataFrame { frame, na_reasons }, col, *op, rhs);
                 }
 
                 // If the second argument is a boolean Vector (mask)

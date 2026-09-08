@@ -10,6 +10,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use ghl_diagnostics::Diagnostic;
+use ghl_syntax::ast::BinaryOp;
 use polars_core::prelude::*;
 use polars_io::prelude::*;
 use polars_ops::prelude::*;
@@ -41,6 +42,77 @@ pub(crate) fn take_rows(frame: &DataFrame, na_reasons: &NaReasonTable, indices: 
         Diagnostic::compute_error("C0210", format!("Error seleccionando filas: {e}"))
     })?;
     Ok((new_frame, na_reasons.reindex(indices)))
+}
+
+fn value_to_any_value(v: &Value) -> AnyValue<'static> {
+    match v {
+        Value::I64(n) => AnyValue::Int64(*n),
+        Value::F64(x) => AnyValue::Float64(*x),
+        Value::Bool(b) => AnyValue::Boolean(*b),
+        Value::String(s) => AnyValue::StringOwned(s.as_str().into()),
+        _ => AnyValue::Null,
+    }
+}
+
+/// `col(...) OP scalar` (`filter(df, col("score") > 75.0)`) — Caso 2.3 de Suite 02:
+/// "filtrado vectorial mediante bitmasks de validez Arrow", en vez de boxear la columna
+/// entera a `Vec<Value>` y comparar celda por celda en Rust (lo que hacía la versión
+/// anterior de `filter()`). El escalar se envuelve en un `Column::Scalar` de largo
+/// lógico igual al frame (sin materializarlo — broadcast real, no una copia de N
+/// elementos) y la comparación corre nativa en polars, dando directo un `BooleanChunked`.
+pub(crate) fn colref_predicate_mask(
+    frame: &DataFrame,
+    col: &str,
+    op: BinaryOp,
+    rhs: &Value,
+) -> Result<BooleanChunked, Diagnostic> {
+    let left = frame.column(col).map_err(|_| {
+        Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `filter()`", col))
+    })?;
+
+    let av = value_to_any_value(rhs);
+    let scalar = Scalar::new(av.dtype(), av);
+    let right = Column::new_scalar(PlSmallStr::EMPTY, scalar, frame.height());
+
+    let result = match op {
+        BinaryOp::Gt => left.gt(&right),
+        BinaryOp::GtEq => left.gt_eq(&right),
+        BinaryOp::Lt => left.lt(&right),
+        BinaryOp::LtEq => left.lt_eq(&right),
+        BinaryOp::Eq => left.equal(&right),
+        BinaryOp::NotEq => left.not_equal(&right),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!("`filter()` does not support operator `{:?}` on a column comparison", other),
+            ));
+        }
+    };
+    result.map_err(|e| Diagnostic::compute_error("C0210", format!("`filter()` comparison failed: {e}")))
+}
+
+/// Row positions (in order) where `mask` is `true` — nulls in the mask count as `false`,
+/// matching Kleene semantics (an unknown condition doesn't pass a filter). Shared by
+/// `filter()`'s vectorized path and anything else that needs indices back from a
+/// `BooleanChunked` for `take_rows`/`NaReasonTable::reindex`.
+pub(crate) fn mask_to_indices(mask: &BooleanChunked) -> Vec<usize> {
+    mask.iter().enumerate().filter_map(|(i, v)| v.unwrap_or(false).then_some(i)).collect()
+}
+
+/// `filter(df, col OP scalar)` end to end: computes the vectorized mask, then applies it
+/// to both the frame and the NA-reason table via the same `take_rows` every other
+/// row-preserving verb uses.
+pub fn df_filter_by_col_predicate(
+    df: &Value,
+    col: &str,
+    op: BinaryOp,
+    rhs: &Value,
+) -> Result<Value, Diagnostic> {
+    let (frame, na_reasons) = as_dataframe(df, "filter")?;
+    let mask = colref_predicate_mask(frame, col, op, rhs)?;
+    let indices = mask_to_indices(&mask);
+    let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
+    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
 }
 
 // =========================================================================
