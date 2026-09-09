@@ -141,7 +141,7 @@ pub(crate) fn get_cell_as_value(
     Ok(any_value_to_value(&av, col, row, na_reasons))
 }
 
-fn any_value_to_value(av: &AnyValue, col: &str, row: usize, na_reasons: &NaReasonTable) -> Value {
+pub(crate) fn any_value_to_value(av: &AnyValue, col: &str, row: usize, na_reasons: &NaReasonTable) -> Value {
     match av {
         AnyValue::Null => match na_reasons.get(col, row) {
             Some(reason) => Value::NA(Some(reason.to_string())),
@@ -160,6 +160,13 @@ pub(crate) fn any_value_to_plain_value(av: &AnyValue) -> Value {
         AnyValue::Null => Value::NA(None),
         AnyValue::Boolean(b) => Value::Bool(*b),
         AnyValue::String(s) => Value::String(s.to_string()),
+        // `Column::get()` on a length-1 `ScalarColumn` (e.g. a single-element `Vector`
+        // literal like `["id"]`, common as a column-name argument to `select`/`drop`/etc.)
+        // returns this owned variant instead of the borrowed `String(&str)` above -- found
+        // via `VectorData`'s round-trip corrupting single-string vectors (the fallback
+        // arm below stringifies via `AnyValue`'s `Display`, which quotes string values,
+        // turning `"id"` into the literal text `"\"id\""`).
+        AnyValue::StringOwned(s) => Value::String(s.to_string()),
         AnyValue::Int8(n) => Value::I64(*n as i64),
         AnyValue::Int16(n) => Value::I64(*n as i64),
         AnyValue::Int32(n) => Value::I64(*n as i64),

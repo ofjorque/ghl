@@ -20,6 +20,7 @@ use rayon::prelude::*;
 use crate::na_reasons::NaReasonTable;
 use crate::polars_bridge;
 use crate::value::Value;
+use crate::vector_data::VectorData;
 
 /// Extrae `&DataFrame`/`&Arc<NaReasonTable>` de un `Value`, o el diagnóstico de error
 /// estándar que usan los ~30 verbos de este módulo cuando el primer argumento no es un
@@ -754,7 +755,7 @@ pub fn df_ncol(df: &Value) -> Result<Value, Diagnostic> {
 pub fn df_colnames(df: &Value) -> Result<Value, Diagnostic> {
     let (frame, _) = as_dataframe(df, "colnames")?;
     let names = frame.get_column_names().iter().map(|s| Value::String(s.to_string())).collect();
-    Ok(Value::Vector(names))
+    Ok(Value::Vector(VectorData::from_values(names)))
 }
 
 /// `slice(df, from, to)` — slice rows by 0-based exclusive range [from, to).
@@ -989,7 +990,7 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
 pub fn df_pull(df: &Value, col: &str) -> Result<Value, Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "pull")?;
     let values = polars_bridge::pull_column_as_values(frame, na_reasons, col)?;
-    Ok(Value::Vector(values))
+    Ok(Value::Vector(VectorData::from_values(values)))
 }
 
 /// `na_reasons(df, col)` — a `Vector` the same length as `col`, with the recorded
@@ -1011,7 +1012,7 @@ pub fn df_na_reasons(df: &Value, col: &str) -> Result<Value, Diagnostic> {
             None => Value::NA(None),
         })
         .collect();
-    Ok(Value::Vector(values))
+    Ok(Value::Vector(VectorData::from_values(values)))
 }
 
 /// `fill_na(df, col, default)` — replace `NA` in one column with a constant.

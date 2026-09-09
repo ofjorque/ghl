@@ -1,6 +1,7 @@
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::*;
 use crate::value::Value;
+use crate::vector_data::VectorData;
 use crate::env::RuntimeEnv;
 use crate::matrix::MatrixOps;
 
@@ -89,7 +90,7 @@ impl Interpreter {
                 for item in items {
                     evaluated.push(self.eval_expr_ctx(item, col_ctx)?);
                 }
-                Ok(Value::Vector(evaluated))
+                Ok(Value::Vector(VectorData::from_values(evaluated)))
             }
 
             ExprKind::NamedArg { name, value } => {
@@ -103,7 +104,7 @@ impl Interpreter {
                 for (name, col_expr) in cols {
                     let col_val = self.eval_expr(col_expr)?;
                     let values = match col_val {
-                        Value::Vector(vec_data) => vec_data,
+                        Value::Vector(vec_data) => vec_data.iter().cloned().collect(),
                         single => vec![single],
                     };
                     columns.push((name.clone(), values));
@@ -146,14 +147,14 @@ impl Interpreter {
                     Value::NA(r) => Ok(Value::NA(r)),
                     Value::Vector(v) => {
                         let mut res = Vec::new();
-                        for item in v {
+                        for item in v.iter().cloned() {
                             match item {
                                 Value::I64(n) => res.push(Value::I64(-n)),
                                 Value::F64(x) => res.push(Value::F64(-x)),
                                 other => res.push(other),
                             }
                         }
-                        Ok(Value::Vector(res))
+                        Ok(Value::Vector(VectorData::from_values(res)))
                     }
                     _ => Err(Diagnostic::compute_error("C0202", "Unary `-` expects numeric operand")),
                 }
@@ -365,12 +366,11 @@ impl Interpreter {
                 match (left, right) {
                     (Value::Matrix { rows, cols: _, data }, Value::Vector(v)) => {
                         let mut b_floats = Vec::with_capacity(v.len());
-                        for item in v {
+                        for item in v.iter() {
                             b_floats.push(item.as_f64().unwrap_or(0.0));
                         }
                         let x = MatrixOps::solve(rows, &data, &b_floats)?;
-                        let res_vals = x.into_iter().map(Value::F64).collect();
-                        Ok(Value::Vector(res_vals))
+                        Ok(Value::Vector(VectorData::from_f64(x)))
                     }
                     (l, r) => Err(Diagnostic::statistical_error(
                         "S0412",
@@ -416,7 +416,7 @@ impl Interpreter {
                                 res.push(Value::F64(op_fn(fa, fb)));
                             }
                         }
-                        Ok(Value::Vector(res))
+                        Ok(Value::Vector(VectorData::from_values(res)))
                     }
                     (l, r) => Err(Diagnostic::compute_error(
                         "C0202",
@@ -487,7 +487,7 @@ impl Interpreter {
                 if let (Value::Vector(v), scalar) = (&left, &right) {
                     if let Some(s) = scalar.as_f64() {
                         let mut res = Vec::with_capacity(v.len());
-                        for item in v {
+                        for item in v.iter() {
                             if item.is_na() {
                                 res.push(item.clone());
                             } else if let Some(x) = item.as_f64() {
@@ -501,7 +501,7 @@ impl Interpreter {
                                 res.push(Value::F64(calculated));
                             }
                         }
-                        return Ok(Value::Vector(res));
+                        return Ok(Value::Vector(VectorData::from_values(res)));
                     }
                 }
 

@@ -432,31 +432,74 @@ Independiente de las Fases 1-2, puede avanzar en paralelo una vez resuelta la Fa
     `test_neko_singular_matrix_emits_s0101`) siguen pasando sin cambiar sus aserciones —
     el swap de backend es transparente. Verificado además de punta a punta con `ghl run`.
 
-### Track 2: Vector (SIMD real, fusión, sintaxis) — pendiente, alcance real más grande
+### Track 2: Vector (SIMD real, fusión, sintaxis)
+Reordenado (2026-09-08) para que lo estructural vaya primero — Punto 1 es el prerequisito
+real de los Puntos 2 y 3, no un ítem independiente más.
 
-- [ ] **SIMD real (AVX2/AVX-512/NEON) para dot product y reducciones sobre `Vector`
-      (Caso 1.1) — bloqueado por la representación actual de `Value::Vector`.**
-      `Value::Vector(Vec<Value>)` boxea cada elemento individualmente (un `Value::F64(x)`
-      por celda) — el mismo problema que tenía `Value::DataFrame` antes de la migración a
-      polars de Fase 0/1. No hay forma de vectorizar de verdad un dot product sobre 10⁷
-      `f64` mientras cada uno viva envuelto en un enum; hace falta un layout plano tipado
-      para el camino numérico (`Vec<f64>` + bitmap de validez, o un `faer::Col<f64>`
-      directo) — un rediseño de representación del mismo tamaño que esa migración, no
-      "llamar una función SIMD". Evaluar entonces si conviene reusar `faer`/`pulp`
-      (ya en el árbol de dependencias, con SIMD portable) en vez de intrínsecos por
-      arquitectura a mano.
-- [ ] Fusión de operaciones elemento-a-elemento sin buffers intermedios en heap —
-      soporte real para `map(x, xi => log(1.0 + exp(-abs(xi))) + sin(xi))` (Caso 1.4).
-      Depende de la misma decisión de representación de arriba.
-- [ ] Métodos/sintaxis: `random_uniform(n)`, `dot(a, b)`, `map(x, f)` — como funciones
-      libres/pipe (`x |> map(f)`), **no** `.dot(&b)`/`x.map(...)` como escribe
-      `benchmarks/suites/01-vector-and-matrix-algebra.md` hoy: GHL no tiene sintaxis de
-      método (`.foo()`) en absoluto, solo pipes y funciones libres — ese doc va a
-      necesitar la misma reescritura que ya le hizo Fase 1 al de DataFrames ("Mismatch de
-      sintaxis del doc"). `random_uniform` además roza a propósito con Fase 5 ("PRNG
-      reproducible bit-a-bit... con `PRNG::seed(seed)`") — una versión mínima ahora
-      (`rand::thread_rng()`, no reproducible entre corridas) es aceptable para desbloquear
-      los benchmarks de Suite 01, con la reproducibilidad real quedando para Fase 5.
+- [x] **Punto 1 — Migrar `Value::Vector` a una representación plana y tipada — hecho.**
+      `Value::Vector(Vec<Value>)` boxeaba cada elemento individualmente — el mismo
+      problema que tenía `Value::DataFrame` antes de Fase 0/1. Ahora es
+      `Value::Vector(VectorData)` (`vector_data.rs`, nuevo), donde `VectorData` envuelve
+      un `polars_core::Column` (mismo backend que `DataFrame`, reusando toda la
+      inferencia de tipos y el side-channel de `NA:razon` ya construidos) más un
+      `Arc<NaReasonTable>` propio.
+  - **Estrategia de shim para no reescribir las ~35 funciones existentes de una:**
+    `VectorData` implementa `Deref<Target = Vec<Value>>`, materializando perezosamente
+    (una sola vez, cacheado en un `Arc<OnceLock<Vec<Value>>>` — clonar `VectorData` es
+    siempre barato, se haya materializado o no) el `Vec<Value>` boxeado que el código
+    viejo espera. Los ~35 sitios que ya hacían `Value::Vector(items) => ... items.iter()
+    ...`/`for item in items` compilaron sin tocar su lógica interna (solo `for item in
+    items` directo — sin `.iter()` — necesitó el insert mecánico de `.iter()`, unas 15
+    veces, señalado exacto por el compilador). Los ~25 sitios de *construcción*
+    (`Value::Vector(vec_de_values)`) sí necesitaron un cambio de una línea a
+    `Value::Vector(VectorData::from_values(vec_de_values))` — también señalados exactos
+    por el compilador, cero quedaron sin cubrir. El código numérico nuevo (`MatrixOps::
+    solve`, `rank()`, `residuals()`/`coef()`, `svd_s()`/`eigen_values()`) usa en cambio
+    `VectorData::from_f64(Vec<f64>)`, que no boxea nada — el camino que de verdad importa
+    para Punto 2/3.
+  - **Bug real encontrado (no solo "quedó compilando"):** un `Vector` de un solo elemento
+    string (ej. `["id"]`, el patrón más común para pasar nombres de columna a
+    `select`/`drop`/`rename`) se corrompía a `"\"id\""` (comillas literales embebidas) —
+    `df |> drop(["id"])` no rompía, pero tampoco dropeaba nada, porque buscaba una columna
+    llamada `"id"` (con comillas) que no existía. Causa: polars representa un `Column` de
+    longitud 1 como un `ScalarColumn` internamente, cuyo `.get()` devuelve
+    `AnyValue::StringOwned` en vez del `AnyValue::String(&str)` prestado que devuelve una
+    columna normal de varias filas — variante que `any_value_to_plain_value`
+    (`polars_bridge.rs`) no manejaba, cayendo a un fallback genérico que usa `Display`
+    (que cita los strings) para tipos "sin contraparte en GHL". Arreglado agregando el
+    arm que faltaba. Esto no es un bug nuevo de esta migración — ya existía para
+    cualquier `Column`/`Series` de una sola fila con datos de texto — pero recién se
+    manifestó al ejercitar vectores de un solo elemento intensivamente. Tests nuevos:
+    `single_element_string_vector_round_trips_without_quote_corruption`,
+    `from_f64_round_trips_without_boxing_na` (`vector_data.rs`).
+  - Las 50 pruebas de `ghl-runtime` (incluida `test_dataframe_tidyverse_pipeline`, que
+    ejercitaba `drop(["id"])` y fue la que hizo saltar el bug de arriba) y el test suite
+    completo del workspace pasan sin cambiar aserciones. Verificado de nuevo a mano con
+    `ghl run` sobre `select`/`rename`/`drop`/`mutate`/`fill_na` — comportamiento idéntico
+    al de antes de la migración.
+- [ ] **Punto 2 — SIMD real (AVX2/AVX-512/NEON) para dot product y reducciones sobre
+      `Vector` (Caso 1.1).** Ya desbloqueado por el Punto 1: `VectorData::column()`
+      expone el `Column`/`Series` de polars, y de ahí se puede sacar el slice contiguo
+      `&[f64]` (cuando no hay nulos) para pasárselo a `faer`/`pulp` (ya en el árbol de
+      dependencias, con SIMD portable) en vez de intrínsecos por arquitectura a mano.
+      Falta: `dot(a, b)` real, y revisar si conviene que `mean`/`sum`/`var`/etc. tengan un
+      camino rápido cuando el `Vector` de entrada ya es `VectorData` sin materializar
+      (hoy siguen pasando por el `Vec<Value>` boxeado vía Deref, correcto pero no rápido
+      — el Punto 1 dejó esto DISPONIBLE, no lo hizo automático).
+- [ ] **Punto 3 — Fusión de `map` sin buffers intermedios en heap (Caso 1.4).** Soporte
+      real para `map(x, xi => log(1.0 + exp(-abs(xi))) + sin(xi))` construyendo el
+      resultado directo como `VectorData::from_f64` en un solo recorrido, reusando la
+      maquinaria de acceso a slice contiguo del Punto 2.
+- [ ] **Punto 4 — Superficie de sintaxis:** `random_uniform(n)`, `dot(a, b)`, `map(x, f)`
+      como funciones libres/pipe (`x |> map(f)`), **no** `.dot(&b)`/`x.map(...)` como
+      escribe `benchmarks/suites/01-vector-and-matrix-algebra.md` hoy: GHL no tiene
+      sintaxis de método (`.foo()`) en absoluto, solo pipes y funciones libres — ese doc
+      va a necesitar la misma reescritura que ya le hizo Fase 1 al de DataFrames
+      ("Mismatch de sintaxis del doc"). `random_uniform` además roza a propósito con
+      Fase 5 ("PRNG reproducible bit-a-bit... con `PRNG::seed(seed)`") — una versión
+      mínima ahora (`rand::thread_rng()`, no reproducible entre corridas) es aceptable
+      para desbloquear los benchmarks de Suite 01, con la reproducibilidad real quedando
+      para Fase 5.
 
 ## Fase 4 — Paralelismo transversal (RFC 05)
 Se apoya en `rayon` (Fase 0); habilita el resto de casos de Suite 03.

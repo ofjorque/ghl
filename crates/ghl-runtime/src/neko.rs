@@ -3,6 +3,7 @@ use std::fmt;
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps, Sparkline};
 use crate::matrix::MatrixOps;
 use crate::value::Value;
+use crate::vector_data::VectorData;
 
 /// Positional row disposition tracking complete cases analysis.
 /// Distinguishes between included rows and the exact cause of omission.
@@ -497,7 +498,7 @@ impl FittedModel {
                     predictions.push(Value::F64(y_hat));
                 }
 
-                Ok(Value::Vector(predictions))
+                Ok(Value::Vector(VectorData::from_values(predictions)))
             }
             _ => Err(Diagnostic::compute_error(
                 "C0201",

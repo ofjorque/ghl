@@ -22,7 +22,10 @@ pub enum Value {
     /// - None => generic NA
     /// - Some("SensorDropout") => NA:SensorDropout
     NA(Option<String>),
-    Vector(Vec<Value>),
+    /// Flat, typed backing (TODO.md Fase 3, Track 2) — `VectorData` derefs to `Vec<Value>`
+    /// (lazily materialized) so existing code that reads it as one keeps compiling and
+    /// behaving unchanged; see `vector_data.rs` for why and how.
+    Vector(crate::vector_data::VectorData),
     Matrix {
         rows: usize,
         cols: usize,

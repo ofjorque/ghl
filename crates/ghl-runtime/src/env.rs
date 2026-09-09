@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
 use crate::value::Value;
+use crate::vector_data::VectorData;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeEnv {
@@ -282,7 +283,7 @@ pub(crate) fn native_mean(args: Vec<Value>) -> Result<Value, Diagnostic> {
             let mut sum = 0.0;
             let mut count = 0;
 
-            for item in items {
+            for item in items.iter() {
                 if let Value::NA(r) = item {
                     // Under GHL Kleene semantics: NA propagates through mean unless skip_na is active
                     return Ok(Value::NA(r.clone()));
@@ -316,7 +317,7 @@ pub(crate) fn native_sum(args: Vec<Value>) -> Result<Value, Diagnostic> {
             let mut sum = 0.0;
             let mut has_float = false;
 
-            for item in items {
+            for item in items.iter() {
                 if let Value::NA(r) = item {
                     return Ok(Value::NA(r.clone()));
                 } else if let Some(x) = item.as_f64() {
@@ -356,7 +357,7 @@ pub(crate) fn native_var(args: Vec<Value>) -> Result<Value, Diagnostic> {
             }
 
             let mut numbers = Vec::with_capacity(items.len());
-            for item in items {
+            for item in items.iter() {
                 if let Value::NA(r) = item {
                     return Ok(Value::NA(r.clone()));
                 } else if let Some(x) = item.as_f64() {
@@ -400,7 +401,7 @@ pub(crate) fn native_min(args: Vec<Value>) -> Result<Value, Diagnostic> {
             let mut min_val = f64::INFINITY;
             let mut found = false;
 
-            for item in items {
+            for item in items.iter() {
                 if let Value::NA(r) = item {
                     return Ok(Value::NA(r.clone()));
                 } else if let Some(x) = item.as_f64() {
@@ -432,7 +433,7 @@ pub(crate) fn native_max(args: Vec<Value>) -> Result<Value, Diagnostic> {
             let mut max_val = f64::NEG_INFINITY;
             let mut found = false;
 
-            for item in items {
+            for item in items.iter() {
                 if let Value::NA(r) = item {
                     return Ok(Value::NA(r.clone()));
                 } else if let Some(x) = item.as_f64() {
@@ -489,7 +490,7 @@ pub(crate) fn native_median(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Value::ColRef(name) => Ok(Value::AggSpec { kind: "median".into(), col: Some(name.clone()) }),
         Value::Vector(items) => {
             let mut nums: Vec<f64> = Vec::with_capacity(items.len());
-            for it in items {
+            for it in items.iter() {
                 if let Value::NA(r) = it {
                     return Ok(Value::NA(r.clone()));
                 } else if let Some(x) = it.as_f64() {
@@ -583,7 +584,7 @@ fn native_join(
     for arg in &args[2..] {
         match arg {
             Value::Vector(items) => {
-                for it in items {
+                for it in items.iter() {
                     if let Some(name) = col_name_of(it) {
                         on.push(name);
                     }
@@ -612,7 +613,7 @@ fn native_group_by(args: Vec<Value>) -> Result<Value, Diagnostic> {
     for arg in &args[1..] {
         match arg {
             Value::Vector(items) => {
-                for it in items {
+                for it in items.iter() {
                     if let Some(name) = col_name_of(it) {
                         keys.push(name);
                     }
@@ -772,7 +773,7 @@ fn native_is_na(args: Vec<Value>) -> Result<Value, Diagnostic> {
         // no data to check yet, stay deferred as a predicate the same way `col(x) > 5`
         // does (see Value::IsNaPredicate).
         Value::ColRef(col) => Ok(Value::IsNaPredicate(col.clone())),
-        Value::Vector(items) => Ok(Value::Vector(items.iter().map(|it| Value::Bool(it.is_na())).collect())),
+        Value::Vector(items) => Ok(Value::Vector(VectorData::from_values(items.iter().map(|it| Value::Bool(it.is_na())).collect()))),
         other => Ok(Value::Bool(other.is_na())),
     }
 }
@@ -838,7 +839,7 @@ fn native_sample_frac(args: Vec<Value>) -> Result<Value, Diagnostic> {
 fn map_numeric_fn(v: &Value, f: impl Fn(f64) -> f64 + Clone) -> Value {
     match v {
         Value::NA(r) => Value::NA(r.clone()),
-        Value::Vector(items) => Value::Vector(items.iter().map(|it| map_numeric_fn(it, f.clone())).collect()),
+        Value::Vector(items) => Value::Vector(VectorData::from_values(items.iter().map(|it| map_numeric_fn(it, f.clone())).collect())),
         other => match other.as_f64() {
             Some(x) => {
                 let y = f(x);
@@ -910,7 +911,7 @@ fn cumulative(items: &[Value], init: f64, combine: impl Fn(f64, f64) -> f64) -> 
     let mut acc = init;
     let mut out = Vec::with_capacity(items.len());
     let mut poisoned: Option<Option<String>> = None;
-    for it in items {
+    for it in items.iter() {
         if let Some(reason) = &poisoned {
             out.push(Value::NA(reason.clone()));
             continue;
@@ -930,28 +931,28 @@ fn native_cumsum(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let items = args.first().and_then(as_vector).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`cumsum()` requires a Vector argument")
     })?;
-    Ok(Value::Vector(cumulative(items, 0.0, |a, b| a + b)))
+    Ok(Value::Vector(VectorData::from_values(cumulative(items, 0.0, |a, b| a + b))))
 }
 
 fn native_cumprod(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let items = args.first().and_then(as_vector).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`cumprod()` requires a Vector argument")
     })?;
-    Ok(Value::Vector(cumulative(items, 1.0, |a, b| a * b)))
+    Ok(Value::Vector(VectorData::from_values(cumulative(items, 1.0, |a, b| a * b))))
 }
 
 fn native_cummax(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let items = args.first().and_then(as_vector).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`cummax()` requires a Vector argument")
     })?;
-    Ok(Value::Vector(cumulative(items, f64::NEG_INFINITY, f64::max)))
+    Ok(Value::Vector(VectorData::from_values(cumulative(items, f64::NEG_INFINITY, f64::max))))
 }
 
 fn native_cummin(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let items = args.first().and_then(as_vector).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`cummin()` requires a Vector argument")
     })?;
-    Ok(Value::Vector(cumulative(items, f64::INFINITY, f64::min)))
+    Ok(Value::Vector(VectorData::from_values(cumulative(items, f64::INFINITY, f64::min))))
 }
 
 fn native_lag(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -963,7 +964,7 @@ fn native_lag(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let mut out = Vec::with_capacity(len);
     out.extend(std::iter::repeat(Value::NA(None)).take(n));
     out.extend(items[..len - n].iter().cloned());
-    Ok(Value::Vector(out))
+    Ok(Value::Vector(VectorData::from_values(out)))
 }
 
 fn native_lead(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -975,7 +976,7 @@ fn native_lead(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let mut out = Vec::with_capacity(len);
     out.extend(items[n..].iter().cloned());
     out.extend(std::iter::repeat(Value::NA(None)).take(n));
-    Ok(Value::Vector(out))
+    Ok(Value::Vector(VectorData::from_values(out)))
 }
 
 fn broadcast_get(v: &Value, i: usize) -> Value {
@@ -1003,7 +1004,7 @@ fn native_if_else(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     _ => Value::NA(None),
                 });
             }
-            Ok(Value::Vector(out))
+            Ok(Value::Vector(VectorData::from_values(out)))
         }
         other => Err(Diagnostic::compute_error(
             "C0202",
@@ -1032,7 +1033,7 @@ fn native_between(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 
     match v {
-        Value::Vector(items) => Ok(Value::Vector(items.iter().map(|it| check(it, lo, hi)).collect())),
+        Value::Vector(items) => Ok(Value::Vector(VectorData::from_values(items.iter().map(|it| check(it, lo, hi)).collect()))),
         other => Ok(check(other, lo, hi)),
     }
 }
@@ -1046,7 +1047,7 @@ fn sort_vector(args: Vec<Value>, desc: bool, fn_name: &str) -> Result<Value, Dia
         let ord = crate::io::compare_values(Some(a), Some(b));
         if desc { ord.reverse() } else { ord }
     });
-    Ok(Value::Vector(sorted))
+    Ok(Value::Vector(VectorData::from_values(sorted)))
 }
 
 fn native_sort_asc(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -1081,7 +1082,7 @@ fn native_rank(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         i = j + 1;
     }
-    Ok(Value::Vector(ranks.into_iter().map(Value::F64).collect()))
+    Ok(Value::Vector(VectorData::from_f64(ranks)))
 }
 
 // =========================================================================
@@ -1091,7 +1092,7 @@ fn native_rank(args: Vec<Value>) -> Result<Value, Diagnostic> {
 fn map_string_fn(v: &Value, f: impl Fn(&str) -> Value + Clone) -> Value {
     match v {
         Value::String(s) => f(s),
-        Value::Vector(items) => Value::Vector(items.iter().map(|it| map_string_fn(it, f.clone())).collect()),
+        Value::Vector(items) => Value::Vector(VectorData::from_values(items.iter().map(|it| map_string_fn(it, f.clone())).collect())),
         Value::NA(r) => Value::NA(r.clone()),
         other => Value::NA(Some(format!("NotString:{}", other.type_name()))),
     }
@@ -1158,7 +1159,7 @@ fn native_str_split(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Diagnostic::compute_error("C0201", "`str_split()` second argument must be a string")
     })?.to_string();
     Ok(map_string_fn(v, move |s| {
-        Value::Vector(s.split(sep.as_str()).map(|p| Value::String(p.to_string())).collect())
+        Value::Vector(VectorData::from_values(s.split(sep.as_str()).map(|p| Value::String(p.to_string())).collect()))
     }))
 }
 
@@ -1350,8 +1351,7 @@ fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match model_val {
         Value::ModelFit(m) => {
-            let res_vals = m.residuals.iter().map(|&x| Value::F64(x)).collect();
-            Ok(Value::Vector(res_vals))
+            Ok(Value::Vector(VectorData::from_f64(m.residuals.clone())))
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
@@ -1367,8 +1367,7 @@ fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match model_val {
         Value::ModelFit(m) => {
-            let coef_vals = m.coefficients.iter().map(|&x| Value::F64(x)).collect();
-            Ok(Value::Vector(coef_vals))
+            Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone())))
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
@@ -1471,7 +1470,7 @@ fn native_svd(args: Vec<Value>) -> Result<Value, Diagnostic> {
             let (u_data, s_values, v_data, k) = crate::matrix::MatrixOps::svd(*rows, *cols, data)?;
             Ok(Value::SvdDecomp {
                 u: Box::new(Value::Matrix { rows: *rows, cols: k, data: u_data }),
-                s: Box::new(Value::Vector(s_values.into_iter().map(Value::F64).collect())),
+                s: Box::new(Value::Vector(VectorData::from_f64(s_values))),
                 v: Box::new(Value::Matrix { rows: *cols, cols: k, data: v_data }),
             })
         }
@@ -1517,7 +1516,7 @@ fn native_eigen(args: Vec<Value>) -> Result<Value, Diagnostic> {
             }
             let (values, vectors_data) = crate::matrix::MatrixOps::eigen_symmetric(*rows, data)?;
             Ok(Value::EigenDecomp {
-                values: Box::new(Value::Vector(values.into_iter().map(Value::F64).collect())),
+                values: Box::new(Value::Vector(VectorData::from_f64(values))),
                 vectors: Box::new(Value::Matrix { rows: *rows, cols: *cols, data: vectors_data }),
             })
         }
@@ -1786,7 +1785,7 @@ fn native_read_lines(args: Vec<Value>) -> Result<Value, Diagnostic> {
     })?;
     let lines = crate::io::read_lines(path)?;
     let vec_vals = lines.into_iter().map(Value::String).collect();
-    Ok(Value::Vector(vec_vals))
+    Ok(Value::Vector(VectorData::from_values(vec_vals)))
 }
 
 fn resolve_path_and_content(s1: &str, s2: &str) -> (String, String) {
@@ -1946,7 +1945,7 @@ fn native_select(args: Vec<Value>) -> Result<Value, Diagnostic> {
     for arg in &args[1..] {
         match arg {
             Value::Vector(items) => {
-                for it in items {
+                for it in items.iter() {
                     match it {
                         Value::ColRef(s) | Value::String(s) => cols.push(s.clone()),
                         other => cols.push(format!("{other}")),
@@ -1999,7 +1998,7 @@ fn native_mutate(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     // args[2] is the new column values — can be a Vector or a scalar
     let new_values: Vec<Value> = match &args[2] {
-        Value::Vector(items) => items.clone(),
+        Value::Vector(items) => items.iter().cloned().collect(),
         scalar => {
             // Broadcast scalar to match nrow
             let n = match df {
@@ -2043,7 +2042,7 @@ fn native_drop(args: Vec<Value>) -> Result<Value, Diagnostic> {
     for arg in &args[1..] {
         match arg {
             Value::Vector(items) => {
-                for it in items {
+                for it in items.iter() {
                     match it {
                         Value::ColRef(s) | Value::String(s) => cols.push(s.clone()),
                         other => cols.push(format!("{other}")),
@@ -2070,7 +2069,7 @@ fn native_distinct(args: Vec<Value>) -> Result<Value, Diagnostic> {
         for arg in &args[1..] {
             match arg {
                 Value::Vector(items) => {
-                    for it in items {
+                    for it in items.iter() {
                         match it {
                             Value::ColRef(s) | Value::String(s) => cols.push(s.clone()),
                             other => cols.push(format!("{other}")),

@@ -11,6 +11,7 @@ pub mod neko;
 pub mod io;
 pub mod na_reasons;
 pub mod polars_bridge;
+pub mod vector_data;
 
 pub use value::Value;
 pub use env::RuntimeEnv;
@@ -1003,7 +1004,7 @@ mod tests {
 
         let na = Value::NA(None);
         let vec_of = |interp: &Interpreter, name: &str| match interp.env.get(name).expect(name) {
-            Value::Vector(vals) => vals,
+            Value::Vector(vals) => vals.iter().cloned().collect::<Vec<Value>>(),
             other => panic!("expected Vector for `{name}`, got {other:?}"),
         };
 
@@ -1081,7 +1082,7 @@ mod tests {
 
         let before = interp.env.get("reasons_before").expect("reasons_before");
         if let Value::Vector(vals) = before {
-            assert_eq!(vals, vec![Value::NA(None), Value::String("SensorDropout".into()), Value::NA(None), Value::String("LowBattery".into())]);
+            assert_eq!(*vals, vec![Value::NA(None), Value::String("SensorDropout".into()), Value::NA(None), Value::String("LowBattery".into())]);
         } else {
             panic!("Expected Vector for na_reasons()");
         }
@@ -1090,7 +1091,7 @@ mod tests {
         // the LowBattery reason at the old row 3 must reindex to the new row 2.
         let after = interp.env.get("reasons_after").expect("reasons_after");
         if let Value::Vector(vals) = after {
-            assert_eq!(vals, vec![Value::NA(None), Value::String("SensorDropout".into()), Value::String("LowBattery".into())]);
+            assert_eq!(*vals, vec![Value::NA(None), Value::String("SensorDropout".into()), Value::String("LowBattery".into())]);
         } else {
             panic!("Expected Vector for na_reasons()");
         }
@@ -1111,7 +1112,7 @@ mod tests {
         assert_eq!(interp.env.get("scalar_false"), Some(Value::Bool(false)));
         assert_eq!(
             interp.env.get("vectorized"),
-            Some(Value::Vector(vec![Value::Bool(false), Value::Bool(true), Value::Bool(true), Value::Bool(false)]))
+            Some(Value::Vector(crate::vector_data::VectorData::from_values(vec![Value::Bool(false), Value::Bool(true), Value::Bool(true), Value::Bool(false)])))
         );
     }
 
