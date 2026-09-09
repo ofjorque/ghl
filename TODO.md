@@ -641,9 +641,72 @@ real de los Puntos 2 y 3, no un ítem independiente más.
 ## Fase 4 — Paralelismo transversal (RFC 05)
 Se apoya en `rayon` (Fase 0); habilita el resto de casos de Suite 03.
 
-- [ ] Iteradores work-stealing (`.par_iter()` o equivalente) sobre `Vector`.
-- [ ] Paralelismo automático/opt-in en verbos de DataFrame (`.parallel()` antes de `.agg()`).
-- [ ] Bootstrap paralelo sin duplicar la muestra base (memoria compartida, Caso 3.3).
+- [x] **Iteradores work-stealing (`.par_iter()` o equivalente) sobre `Vector`:**
+      `vector_elementwise_op` (`eval.rs`, compartido por `.+`/`.-`/`.*`/`./` y, desde el fix
+      de Fase 3, los operadores planos `+`/`-`/`*`/`/` Vector-Vector) tenía dos problemas
+      antes de este punto, no solo la falta de paralelismo: pagaba boxing completo a
+      `Vec<Value>` incluso en el caso 100% numérico sin NA, vía el `Deref` de `VectorData`.
+      Ahora tiene tres caminos:
+      - Numérico sin NA (`null_count() == 0` en ambos lados) y `len < 50_000`: secuencial
+        sobre `&[f64]` vía `as_f64_view()` (mismo mecanismo zero-copy que `dot()` usa desde
+        el Punto 2) — cero boxing, un solo hilo.
+      - Numérico sin NA y `len >= 50_000`: igual que arriba pero repartido con
+        `rayon::prelude::*`'s `par_iter().zip()`.
+      - Cualquier tamaño con al menos un NA de cualquiera de los dos lados: el loop
+        original sobre `Vec<Value>`, sin tocar — sigue siendo el único lugar con la lógica
+        Kleene por-elemento (si `a` es NA, resultado es `a`; si `b` es NA, resultado es
+        `b`). No se paralelizó a propósito: no es el caso que benchmarquea Suite 01 y
+        tocar esa rama sin necesidad medida era riesgo sin beneficio.
+      - **`PARALLEL_THRESHOLD = 50_000` no es adivinado** — medido con
+        `examples/spike_vector_elementwise_parallel_latency.rs`: a N=50.000 el camino
+        paralelo todavía va ~0.91x del secuencial (empate técnico), a N=75.000 ya es
+        ~1.23x más rápido, y a N=5.000.000 llega a ~2.9x. Por debajo de ~30.000 el overhead
+        de despacho de rayon lo hace directamente peor que el secuencial (a N=1.000, el
+        secuencial es ~66x más rápido que el paralelo) — de ahí que el threshold exista en
+        primer lugar, no sea "paralelizar siempre".
+      - **Nota honesta del primer intento del spike:** un primer intento midiendo hasta
+        N=20.000.000 terminó en un **OOM-kill real** (confirmado por `journalctl -k`:
+        `anon-rss:11563088kB`) en este sandbox de 15GB. Causa, medida y no adivinada:
+        `size_of::<Value>() == 160 bytes` (mucho más de lo estimado a ojo en sesiones
+        previas), y a diferencia de `dot()` (input+input+un `f64` escalar), una op
+        elementwise produce un vector de salida `O(n)` completo — el camino "boxed" del
+        spike sostenía hasta 3-4 buffers de tamaño N simultáneos (dos inputs + resultado
+        de la repetición anterior + resultado nuevo en construcción). Bajado a N=5.000.000
+        como techo del spike y liberando el resultado de cada repetición antes de construir
+        el siguiente (antes se solapaban un instante).
+      - `native_map()` (Punto 3) **no se tocó**: su loop invoca una clausura que captura
+        `RuntimeEnv` mutable e intercambia el env del intérprete por llamada
+        (`mem::replace`) — no es un loop `Send`/`Sync`-seguro para repartir en rayon sin
+        rediseñar ese mecanismo primero (un `RuntimeEnv` por hilo, no uno compartido). Queda
+        fuera de alcance de este punto, anotado explícitamente, no omitido en silencio.
+      - Tests nuevos en `lib.rs`:
+        `test_vector_elementwise_parallel_path_matches_sequential_reference` (N=60.000,
+        ejercita la rama rayon), `test_vector_elementwise_below_threshold_still_correct`
+        (N=100, rama secuencial sin boxing), `test_vector_elementwise_na_fallback_unaffected`
+        (NA mezclado, confirma que sigue cayendo al loop original y preserva Kleene
+        por-elemento).
+      - Verificado de punta a punta con el CLI de release: suma Vector-Vector grande
+        (1.000.000 elementos, camino paralelo), suma/`.* ` chicos (camino secuencial sin
+        boxing), y suma con un NA mezclado (camino de respaldo, preserva `NA:NaN` en la
+        posición correcta) — los tres dan el resultado correcto.
+- [x] **Paralelismo automático/opt-in en verbos de DataFrame** (`.parallel()` antes de
+      `.agg()`): investigado, no implementado, porque **ya no hacía falta implementar
+      nada** — `summarize()`/`group_by()` (`io.rs::df_summarize`) ya arman un único query de
+      `polars-lazy` (`LazyFrame::group_by_stable().agg([...])`), que **ya paraleliza
+      internamente** la agregación entre grupos vía el pool propio de `polars-core`/
+      `polars-lazy` (el mismo pool basado en rayon que usan las reducciones de `Vector` —
+      `mean_reduce`/`sum_reduce`/etc., ver Punto 2 de Fase 3). No hay una superficie de
+      sintaxis `.parallel()` explícita porque no hay nada que activar: es el comportamiento
+      por defecto del motor de queries, no un modo opt-in. Dejado como verificado y
+      documentado, no como trabajo pendiente.
+- [ ] Bootstrap paralelo sin duplicar la muestra base (memoria compartida, Caso 3.3). Aún
+      no existe ningún código de bootstrap/resample en el runtime (confirmado por
+      búsqueda exhaustiva). La base ya ayuda: `Column`/`Series` de polars es `Arc`-interno
+      (clonar es O(1), no duplica el buffer), así que la "memoria compartida sin duplicar
+      la muestra base" que pide el caso viene casi gratis de la representación actual —
+      falta el propio algoritmo de remuestreo + su paralelización con rayon, y una decisión
+      sobre RNG-por-réplica (roza con Fase 5: `rand::rng()` es seguro entre hilos de rayon
+      pero no reproducible entre corridas ni entre distinta cantidad de hilos).
 
 ## Fase 5 — RNG + distribuciones + arenas (`benchmarks/suites/03`, RFC 03 §2.2)
 Requisito para todo el modelado estadístico de la Suite 03.

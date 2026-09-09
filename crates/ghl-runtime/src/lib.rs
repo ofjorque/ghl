@@ -522,6 +522,82 @@ mod tests {
     }
 
     #[test]
+    fn test_vector_elementwise_parallel_path_matches_sequential_reference() {
+        // TODO.md Fase 4, punto (a): 60,000 elements is above PARALLEL_THRESHOLD (50,000,
+        // picked from examples/spike_vector_elementwise_parallel_latency.rs's measured
+        // crossover), so this exercises the rayon `par_iter()` branch of
+        // `vector_elementwise_op`, not just its zero-boxing sequential fast path.
+        let code = r#"
+            let a = random_uniform(60000);
+            let b = random_uniform(60000);
+            let sum = a + b;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let a = vector_f64(&interp.env.get("a").unwrap());
+        let b = vector_f64(&interp.env.get("b").unwrap());
+        let sum = vector_f64(&interp.env.get("sum").unwrap());
+        assert_eq!(sum.len(), 60_000);
+        for i in 0..sum.len() {
+            assert!(
+                (sum[i] - (a[i] + b[i])).abs() < 1e-9,
+                "mismatch at index {i}: sum={} expected={}",
+                sum[i],
+                a[i] + b[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_vector_elementwise_below_threshold_still_correct() {
+        // Below PARALLEL_THRESHOLD: exercises the sequential, zero-boxing numeric fast
+        // path (still `as_f64_view()`-based, just single-threaded).
+        let code = r#"
+            let a = random_uniform(100);
+            let b = random_uniform(100);
+            let sum = a + b;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let a = vector_f64(&interp.env.get("a").unwrap());
+        let b = vector_f64(&interp.env.get("b").unwrap());
+        let sum = vector_f64(&interp.env.get("sum").unwrap());
+        assert_eq!(sum.len(), 100);
+        for i in 0..sum.len() {
+            assert!((sum[i] - (a[i] + b[i])).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn test_vector_elementwise_na_fallback_unaffected() {
+        // A NA anywhere on either side must still fall back to the original per-element
+        // boxed loop (not the new numeric fast path) and preserve the Kleene "NA wins at
+        // that position only" behavior `test_vector_vector_plain_operators_are_elementwise`
+        // already established -- this is the case the fast path deliberately excludes.
+        let code = r#"
+            let a = [1.0, sqrt(-1.0), 3.0];
+            let b = [10.0, 20.0, 30.0];
+            let sum = a + b;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        match interp.env.get("sum").unwrap() {
+            Value::Vector(vd) => {
+                assert_eq!(vd.value_at(0), Some(Value::F64(11.0)));
+                assert!(matches!(vd.value_at(1), Some(Value::NA(_))), "expected NA at index 1, got {:?}", vd.value_at(1));
+                assert_eq!(vd.value_at(2), Some(Value::F64(33.0)));
+            }
+            other => panic!("Expected Vector, found {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_random_uniform_produces_vector_of_requested_length_in_unit_interval() {
         // TODO.md Fase 3, Track 2, Punto 4: not reproducible across runs yet (that's
         // Fase 5's PRNG::seed job) -- what's checked here is shape and range only.

@@ -1,5 +1,6 @@
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::*;
+use rayon::prelude::*;
 use crate::value::Value;
 use crate::vector_data::VectorData;
 use crate::env::RuntimeEnv;
@@ -618,6 +619,15 @@ fn callee_name(expr: &Expr) -> Option<&str> {
     }
 }
 
+/// Below this many elements, `vector_elementwise_op`'s numeric fast path stays on a single
+/// thread -- rayon's work-stealing dispatch has a real, measured cost that dominates at
+/// small sizes. Measured with `examples/spike_vector_elementwise_parallel_latency.rs`
+/// (TODO.md Fase 4, punto (a)): at N=50,000 the parallel path is still roughly on par with
+/// (very slightly behind) the sequential one (~0.91x), and by N=75,000 it's already ahead
+/// (~1.23x) and only grows from there (~2.9x at N=5,000,000). 50,000 is the crossover
+/// picked from that data, not a guess.
+const PARALLEL_THRESHOLD: usize = 50_000;
+
 /// Element-wise `op_fn` over two same-length `Vector`s, NA-propagating per element (an NA
 /// on either side at a position makes that position's result NA, unaffected positions
 /// stay unaffected). Shared by the explicit `.+`/`.-`/`.*`/`./` operators and, since
@@ -628,6 +638,17 @@ fn callee_name(expr: &Expr) -> Option<&str> {
 /// `Vector`s follows R/NumPy/Julia's own convention of being elementwise too -- `dot()`
 /// (Punto 2) is the dedicated way to ask for the dot product in all of those languages,
 /// not overloading `*`.
+///
+/// TODO.md Fase 4, punto (a): when both sides are already numeric with zero NAs (the
+/// common case for the kind of bulk arithmetic Suite 01 benchmarks), this skips the
+/// `Vec<Value>` boxing entirely via `as_f64_view()` (same fast-path mechanism Punto 2's
+/// `dot()` uses) and, above `PARALLEL_THRESHOLD`, spreads the work across rayon's
+/// work-stealing pool. Mixed-NA input falls back to the original per-element boxed loop
+/// unchanged -- that's the only place the Kleene "NA wins" logic below is needed, and it's
+/// deliberately not parallelized in this pass (not the case Suite 01 benchmarks, and not
+/// worth the risk without a measured need); `native_map`'s closure loop is not touched
+/// here either, since it captures a mutable `RuntimeEnv` it swaps per call -- not a
+/// `Send`/`Sync`-safe loop to hand to rayon without redesigning that mechanism first.
 fn vector_elementwise_op(v1: &VectorData, v2: &VectorData, op_fn: fn(f64, f64) -> f64) -> Result<Value, Diagnostic> {
     if v1.len() != v2.len() {
         return Err(Diagnostic::statistical_error(
@@ -635,6 +656,19 @@ fn vector_elementwise_op(v1: &VectorData, v2: &VectorData, op_fn: fn(f64, f64) -
             format!("Vector length mismatch in element-wise op: {} vs {}", v1.len(), v2.len()),
         ));
     }
+
+    if v1.null_count() == 0 && v2.null_count() == 0 {
+        let view1 = v1.as_f64_view()?;
+        let view2 = v2.as_f64_view()?;
+        let (a, b) = (view1.as_slice(), view2.as_slice());
+        let data: Vec<f64> = if a.len() >= PARALLEL_THRESHOLD {
+            a.par_iter().zip(b.par_iter()).map(|(&x, &y)| op_fn(x, y)).collect()
+        } else {
+            a.iter().zip(b.iter()).map(|(&x, &y)| op_fn(x, y)).collect()
+        };
+        return Ok(Value::Vector(VectorData::from_f64(data)));
+    }
+
     let mut res = Vec::with_capacity(v1.len());
     for (a, b) in v1.iter().zip(v2.iter()) {
         if a.is_na() {
