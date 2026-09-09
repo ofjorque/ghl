@@ -398,27 +398,7 @@ impl Interpreter {
                         let (r, c, d) = MatrixOps::elementwise(r1, c1, &d1, r2, c2, &d2, op_fn, "matrix op")?;
                         Ok(Value::Matrix { rows: r, cols: c, data: d })
                     }
-                    (Value::Vector(v1), Value::Vector(v2)) => {
-                        if v1.len() != v2.len() {
-                            return Err(Diagnostic::statistical_error(
-                                "S0412",
-                                format!("Vector length mismatch in element-wise op: {} vs {}", v1.len(), v2.len()),
-                            ));
-                        }
-                        let mut res = Vec::with_capacity(v1.len());
-                        for (a, b) in v1.iter().zip(v2.iter()) {
-                            if a.is_na() {
-                                res.push(a.clone());
-                            } else if b.is_na() {
-                                res.push(b.clone());
-                            } else {
-                                let fa = a.as_f64().unwrap_or(0.0);
-                                let fb = b.as_f64().unwrap_or(0.0);
-                                res.push(Value::F64(op_fn(fa, fb)));
-                            }
-                        }
-                        Ok(Value::Vector(VectorData::from_values(res)))
-                    }
+                    (Value::Vector(v1), Value::Vector(v2)) => vector_elementwise_op(&v1, &v2, op_fn),
                     (l, r) => Err(Diagnostic::compute_error(
                         "C0202",
                         format!("Element-wise op requires Vectors or Matrices, found `{}` and `{}`", l.type_name(), r.type_name()),
@@ -484,6 +464,24 @@ impl Interpreter {
                     };
                 }
 
+                // Vector op Vector (same length): `+`/`-`/`*`/`/` behave like their
+                // elementwise `.+`/`.-`/`.*`/`./` counterparts -- see `vector_elementwise_op`
+                // for why this doesn't collide with Matrix's `*` = real product design.
+                // `%`/`^` between two Vectors are intentionally left alone (no `.%`/`.^`
+                // operator exists either), so they still fall through to the final error.
+                if let (Value::Vector(v1), Value::Vector(v2)) = (&left, &right) {
+                    let op_fn: Option<fn(f64, f64) -> f64> = match op {
+                        BinaryOp::Add => Some(|a, b| a + b),
+                        BinaryOp::Sub => Some(|a, b| a - b),
+                        BinaryOp::Mul => Some(|a, b| a * b),
+                        BinaryOp::Div => Some(|a, b| a / b),
+                        _ => None,
+                    };
+                    if let Some(op_fn) = op_fn {
+                        return vector_elementwise_op(v1, v2, op_fn);
+                    }
+                }
+
                 // Vector with scalar broadcasting
                 if let (Value::Vector(v), scalar) = (&left, &right) {
                     if let Some(s) = scalar.as_f64() {
@@ -497,6 +495,30 @@ impl Interpreter {
                                     BinaryOp::Sub => x - s,
                                     BinaryOp::Mul => x * s,
                                     BinaryOp::Div => x / s,
+                                    _ => x,
+                                };
+                                res.push(Value::F64(calculated));
+                            }
+                        }
+                        return Ok(Value::Vector(VectorData::from_values(res)));
+                    }
+                }
+
+                // Scalar with Vector broadcasting (reversed order) -- symmetric with the
+                // branch above, but the computation direction must flip for non-commutative
+                // ops: `5.0 - v` must give `[5.0-v[0], ...]`, not `[v[0]-5.0, ...]`.
+                if let (scalar, Value::Vector(v)) = (&left, &right) {
+                    if let Some(s) = scalar.as_f64() {
+                        let mut res = Vec::with_capacity(v.len());
+                        for item in v.iter() {
+                            if item.is_na() {
+                                res.push(item.clone());
+                            } else if let Some(x) = item.as_f64() {
+                                let calculated = match op {
+                                    BinaryOp::Add => s + x,
+                                    BinaryOp::Sub => s - x,
+                                    BinaryOp::Mul => s * x,
+                                    BinaryOp::Div => s / x,
                                     _ => x,
                                 };
                                 res.push(Value::F64(calculated));
@@ -594,6 +616,38 @@ fn callee_name(expr: &Expr) -> Option<&str> {
         ExprKind::Ident(name) => Some(name.as_str()),
         _ => None,
     }
+}
+
+/// Element-wise `op_fn` over two same-length `Vector`s, NA-propagating per element (an NA
+/// on either side at a position makes that position's result NA, unaffected positions
+/// stay unaffected). Shared by the explicit `.+`/`.-`/`.*`/`./` operators and, since
+/// TODO.md Fase 3 Track 2's Vector-arithmetic follow-up, plain `+`/`-`/`*`/`/` between two
+/// same-length Vectors too -- there's no other sensible meaning for vector addition/
+/// subtraction (it's elementwise by definition), and unlike `Matrix` (where `*` means a
+/// real matrix product on purpose, `.* ` is the elementwise escape hatch), `*` between two
+/// `Vector`s follows R/NumPy/Julia's own convention of being elementwise too -- `dot()`
+/// (Punto 2) is the dedicated way to ask for the dot product in all of those languages,
+/// not overloading `*`.
+fn vector_elementwise_op(v1: &VectorData, v2: &VectorData, op_fn: fn(f64, f64) -> f64) -> Result<Value, Diagnostic> {
+    if v1.len() != v2.len() {
+        return Err(Diagnostic::statistical_error(
+            "S0412",
+            format!("Vector length mismatch in element-wise op: {} vs {}", v1.len(), v2.len()),
+        ));
+    }
+    let mut res = Vec::with_capacity(v1.len());
+    for (a, b) in v1.iter().zip(v2.iter()) {
+        if a.is_na() {
+            res.push(a.clone());
+        } else if b.is_na() {
+            res.push(b.clone());
+        } else {
+            let fa = a.as_f64().unwrap_or(0.0);
+            let fb = b.as_f64().unwrap_or(0.0);
+            res.push(Value::F64(op_fn(fa, fb)));
+        }
+    }
+    Ok(Value::Vector(VectorData::from_values(res)))
 }
 
 /// True for any `Value` that represents a deferred `filter()` predicate rather than a

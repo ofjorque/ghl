@@ -575,17 +575,29 @@ real de los Puntos 2 y 3, no un ítem independiente más.
     test suite completo del workspace pasan sin cambiar aserciones preexistentes.
     Verificado de punta a punta con `ghl run`.
   - **Dos huecos reales de la aritmética de `Vector` encontrados al escribir el spike de
-    comparación** (ninguno en el alcance de este punto, ninguno oculto):
-    - `escalar + Vector` no está soportado — el broadcasting de escalar (`eval.rs`) solo
-      maneja el orden `Vector op escalar`, no el inverso. `1.0 + v` falla con
-      "Cannot apply Add to f64 and Vector"; `v + 1.0` sí funciona.
-    - `Vector + Vector` con `+` liso no está soportado — hace falta el operador
-      elemento-a-elemento `.+ ` (`DotAdd`). `+` entre dos `Vector`s del mismo largo falla
-      con "Cannot apply Add to Vector and Vector".
-    - [ ] Decidir si vale la pena arreglar estos dos (broadcasting simétrico para
-          `+`/`-`/`*`/`/`, y quizás que `+`/`-`/`*`/`/` liso entre dos `Vector`s del mismo
-          largo haga lo mismo que `.+`/`.-`/`.*`/`./` en vez de fallar) — no forma parte
-          de ningún punto planeado hasta ahora, queda anotado para no perderse.
+    comparación, decididos y arreglados en un pase aparte (mismo día) — hecho.**
+    - [x] `escalar + Vector` no estaba soportado — el broadcasting de escalar (`eval.rs`)
+          solo manejaba el orden `Vector op escalar`, no el inverso (`1.0 + v` fallaba con
+          "Cannot apply Add to f64 and Vector"; `v + 1.0` sí funcionaba). Se agregó la rama
+          simétrica para `+`/`-`/`*`/`/`, con la dirección correcta para las no
+          conmutativas: `5.0 - v` da `[5.0-v[0], ...]`, no `[v[0]-5.0, ...]`.
+    - [x] `Vector + Vector` con `+` liso no estaba soportado (solo `.+`/`.-`/`.*`/`./`).
+          **Decisión tomada:** `+`/`-`/`*`/`/` entre dos `Vector`s del mismo largo ahora
+          se comportan como sus versiones con punto (elemento a elemento) — incluido `*`,
+          sin excepción. Esto sigue a propósito la convención de R/NumPy/Julia (`*` entre
+          vectores es elemento a elemento en los tres; el producto punto se pide con una
+          función aparte) en vez de replicar la distinción que sí tiene sentido para
+          `Matrix` (`*` = producto matricial real, `.* ` = Hadamard — esa decisión de
+          Track 1 queda intacta, no se tocó). Refactor: la lógica de `.+`/`.-`/`.*`/`./`
+          para Vector-Vector se extrajo a `vector_elementwise_op` (`eval.rs`), reusada
+          ahora por ambos caminos (con punto y sin punto) en vez de duplicarse.
+    - Tests nuevos: `test_scalar_vector_arithmetic_is_symmetric`,
+      `test_vector_vector_plain_operators_are_elementwise`,
+      `test_vector_vector_plain_operators_reject_mismatched_lengths`. Las 62 pruebas de
+      `ghl-runtime` y el test suite completo del workspace pasan sin cambiar aserciones
+      preexistentes. Verificado de punta a punta con `ghl run`, incluyendo que
+      `Matrix * Matrix` sigue dando el producto real (no se vio afectada por este cambio,
+      que es exclusivo de `Vector`).
   - **Medido (`spike_map_fusion_latency.rs`, N=2×10⁶ — no los 5×10⁷ que pide el
     enunciado del Caso 1.4 al pie de la letra: el camino "encadenado" aloca **seis**
     `Vec<Value>` completos a la vez a propósito, que es justo lo que se está midiendo, y

@@ -463,6 +463,65 @@ mod tests {
     }
 
     #[test]
+    fn test_scalar_vector_arithmetic_is_symmetric() {
+        // TODO.md Fase 3, Track 2 follow-up: `scalar op Vector` used to fail while
+        // `Vector op scalar` worked -- and non-commutative ops (`-`/`/`) must flip
+        // direction, not just accept the reversed order.
+        let code = r#"
+            let v = [1.0, 2.0, 4.0];
+            let a = 10.0 + v;
+            let b = v + 10.0;
+            let c = 10.0 - v;
+            let d = 100.0 / v;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(vector_f64(&interp.env.get("a").unwrap()), vec![11.0, 12.0, 14.0]);
+        assert_eq!(vector_f64(&interp.env.get("a").unwrap()), vector_f64(&interp.env.get("b").unwrap()));
+        assert_eq!(vector_f64(&interp.env.get("c").unwrap()), vec![9.0, 8.0, 6.0]);
+        assert_eq!(vector_f64(&interp.env.get("d").unwrap()), vec![100.0, 50.0, 25.0]);
+    }
+
+    #[test]
+    fn test_vector_vector_plain_operators_are_elementwise() {
+        // `+`/`-`/`*`/`/` between two same-length Vectors now behave like their explicit
+        // `.+`/`.-`/`.*`/`./` counterparts -- matching R/NumPy/Julia's convention that `*`
+        // between vectors is elementwise, not a dot product (`dot()`, Punto 2, is the
+        // dedicated way to ask for that).
+        let code = r#"
+            let a = [1.0, 2.0, 3.0];
+            let b = [10.0, 20.0, 30.0];
+            let sum = a + b;
+            let diff = b - a;
+            let prod = a * b;
+            let quot = b / a;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(vector_f64(&interp.env.get("sum").unwrap()), vec![11.0, 22.0, 33.0]);
+        assert_eq!(vector_f64(&interp.env.get("diff").unwrap()), vec![9.0, 18.0, 27.0]);
+        assert_eq!(vector_f64(&interp.env.get("prod").unwrap()), vec![10.0, 40.0, 90.0]);
+        assert_eq!(vector_f64(&interp.env.get("quot").unwrap()), vec![10.0, 10.0, 10.0]);
+    }
+
+    #[test]
+    fn test_vector_vector_plain_operators_reject_mismatched_lengths() {
+        let code = r#"
+            let a = [1.0, 2.0, 3.0];
+            let b = [10.0, 20.0];
+            let sum = a + b;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("mismatched lengths must fail");
+        assert_eq!(err.code, "S0412");
+    }
+
+    #[test]
     fn test_eval_singular_matrix_emits_s0101() {
         // Collinear matrix: rows are multiples (det = 0)
         let code = r#"
