@@ -610,16 +610,33 @@ real de los Puntos 2 y 3, no un ítem independiente más.
     expresión elemento por elemento (`eval_expr` recursivo), y lo único que cambia es
     evitar cinco pasadas extra de asignación de `Vector` completo. Reportado tal cual
     salió, no lo que se esperaba de antemano.
-- [ ] **Punto 4 — Superficie de sintaxis:** `random_uniform(n)` como función libre/pipe.
-      `map(x, f)` y `dot(a, b)` ya salieron de los Puntos 2/3 como funciones libres, como
-      corresponde — **no** `.map(...)`/`.dot(&b)` como escribe
-      `benchmarks/suites/01-vector-and-matrix-algebra.md` hoy: GHL no tiene sintaxis de
-      método (`.foo()`) en absoluto, solo pipes y funciones libres — ese doc va a
-      necesitar la misma reescritura que ya le hizo Fase 1 al de DataFrames ("Mismatch de
-      sintaxis del doc"). `random_uniform` además roza a propósito con Fase 5 ("PRNG
-      reproducible bit-a-bit... con `PRNG::seed(seed)`") — una versión mínima ahora
-      (`rand::thread_rng()`, no reproducible entre corridas) es aceptable para desbloquear
-      los benchmarks de Suite 01, con la reproducibilidad real quedando para Fase 5.
+- [x] **Punto 4 — Superficie de sintaxis:** `random_uniform(n)` implementado como función
+      libre (`env.rs::native_random_uniform`, registrada en el prelude y en el checker de
+      `ghl-types`), vía `rand::rng().random::<f64>()` (uniforme en `[0, 1)`) — versión
+      mínima no reproducible entre corridas, a propósito: roza con Fase 5 ("PRNG
+      reproducible bit-a-bit... con `PRNG::seed(seed)`"), que es donde le toca la
+      reproducibilidad real; esto solo desbloquea los benchmarks de Suite 01.
+      `map(x, f)` y `dot(a, b)` ya habían salido de los Puntos 2/3 como funciones libres,
+      como corresponde.
+    - Reescrito `benchmarks/suites/01-vector-and-matrix-math.md` (el nombre real del
+      archivo — el texto anterior de este punto lo llamaba, por error,
+      `01-vector-and-matrix-algebra.md`): el bloque de referencia GHL usaba
+      `Vector::random_uniform(n)` (estilo método estático), `a.dot(&b)` y `x.map(xi => ...)`
+      (method-chaining con flecha de lambda `=>`) — nada de eso existe en GHL, que no tiene
+      sintaxis de método (`.foo()`) en absoluto, solo pipes y funciones libres, y cuya
+      lambda real es `\param -> expr` (confirmado en su momento vía
+      `ghl-syntax::parser::test_parse_lambda`). Mismo tipo de "mismatch de sintaxis del
+      doc" que ya le corrigió Fase 1 al de DataFrames. Reescrito a
+      `random_uniform(n)` / `dot(a, b)` / `x |> map(\xi -> log(1.0 + exp(-abs(xi))) + sin(xi))`.
+    - Verificado de punta a punta con el CLI de release (`ghl run`) sobre un script que
+      ejercita los 4 casos de Suite 01 con la sintaxis final del doc: dot product,
+      multiplicación de matrices (`*` real vía faer), Cholesky, y el `map` fusionado tanto
+      en su forma de función libre (`map(x, f)`) como en pipe (`x |> map(f)`) — las dos
+      formas producen el mismo resultado, confirmando que el pipe simplemente inserta `x`
+      como primer argumento.
+      Tests nuevos en `lib.rs`:
+      `test_random_uniform_produces_vector_of_requested_length_in_unit_interval`,
+      `test_random_uniform_rejects_negative_length`.
 
 ## Fase 4 — Paralelismo transversal (RFC 05)
 Se apoya en `rayon` (Fase 0); habilita el resto de casos de Suite 03.

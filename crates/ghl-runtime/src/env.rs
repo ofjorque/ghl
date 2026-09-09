@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
 use polars_core::prelude::PolarsError;
+use rand::RngExt;
 use crate::eval::Interpreter;
 use crate::polars_bridge;
 use crate::value::Value;
@@ -191,6 +192,7 @@ impl RuntimeEnv {
         // instead of field syntax, since GHL's grammar has no `.field` access.
         env.set("dot".into(),          Value::NativeFn(native_dot));
         env.set("map".into(),          Value::NativeFnCtx(native_map));
+        env.set("random_uniform".into(), Value::NativeFn(native_random_uniform));
         env.set("qr".into(),           Value::NativeFn(native_qr));
         env.set("qr_q".into(),         Value::NativeFn(native_qr_q));
         env.set("qr_r".into(),         Value::NativeFn(native_qr_r));
@@ -424,6 +426,28 @@ pub(crate) fn native_max(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// far cheaper than per-cell `Value` boxing). Kleene NA propagation: a NA anywhere in
 /// either vector makes the whole dot product NA, preserving that cell's specific reason
 /// (`VectorData::first_na`), same rationale as `mean()`/`sum()`/etc. above.
+/// `random_uniform(n)` — a `Vector[f64]` of `n` values drawn uniformly from `[0, 1)`
+/// (TODO.md Fase 3, Track 2, Punto 4, Suite 01's own reference examples). Built straight
+/// via `VectorData::from_f64`, no boxing, matching every other numeric-fast-path
+/// constructor from Punto 1-3. **Not** reproducible across runs (`rand::rng()` is the
+/// thread-local, OS-seeded generator) -- real bit-for-bit reproducibility
+/// (`PRNG::seed(seed)`) is Fase 5's job (RFC 03 §2.2); this unblocks Suite 01's benchmarks
+/// now without pretending to solve that.
+fn native_random_uniform(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let n = args.first().and_then(|v| v.as_i64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`random_uniform()` requires an integer length argument")
+    })?;
+    if n < 0 {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`random_uniform()` length must be non-negative, found {n}"),
+        ));
+    }
+    let mut rng = rand::rng();
+    let data: Vec<f64> = (0..n).map(|_| rng.random::<f64>()).collect();
+    Ok(Value::Vector(VectorData::from_f64(data)))
+}
+
 fn native_dot(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let a = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`dot()` requires 2 arguments"))?;
     let b = args.get(1).ok_or_else(|| Diagnostic::compute_error("C0201", "`dot()` requires 2 arguments"))?;

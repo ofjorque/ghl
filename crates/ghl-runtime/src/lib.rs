@@ -522,6 +522,35 @@ mod tests {
     }
 
     #[test]
+    fn test_random_uniform_produces_vector_of_requested_length_in_unit_interval() {
+        // TODO.md Fase 3, Track 2, Punto 4: not reproducible across runs yet (that's
+        // Fase 5's PRNG::seed job) -- what's checked here is shape and range only.
+        let code = r#"
+            let v = random_uniform(1000);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let v = vector_f64(&interp.env.get("v").unwrap());
+        assert_eq!(v.len(), 1000);
+        assert!(v.iter().all(|&x| (0.0..1.0).contains(&x)), "all values must be in [0, 1): {v:?}");
+        // Not all-identical -- a real generator, not a stub returning a constant.
+        assert!(v.windows(2).any(|w| w[0] != w[1]));
+    }
+
+    #[test]
+    fn test_random_uniform_rejects_negative_length() {
+        let code = r#"
+            let v = random_uniform(-5);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("negative length must fail");
+        assert_eq!(err.code, "C0201");
+    }
+
+    #[test]
     fn test_eval_singular_matrix_emits_s0101() {
         // Collinear matrix: rows are multiples (det = 0)
         let code = r#"

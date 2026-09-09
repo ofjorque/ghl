@@ -64,13 +64,18 @@ y = @. log(1.0 + exp(-abs(x))) + sin(x) # Full kernel fusion
 ```
 
 ### GHL (`.gh`)
+
+GHL no tiene sintaxis de método (`.foo()`): solo funciones libres y pipes (`|>`), y las
+lambdas se escriben `\param -> expr` (no `param => expr`). `random_uniform`, `dot` y `map`
+son funciones libres de la biblioteca estándar, no métodos de `Vector`.
+
 ```lang
 // Case 1.1: Dot Product (Compiles to direct vector register SIMD instructions)
-let a = Vector::random_uniform(10_000_000);
-let b = Vector::random_uniform(10_000_000);
-let res = a.dot(&b);
+let a = random_uniform(10_000_000);
+let b = random_uniform(10_000_000);
+let res = dot(a, b);
 
 // Case 1.4: Element-wise fusion with zero intermediate heap allocations
-let x = Vector::random_uniform(50_000_000);
-let y = x.map(xi => log(1.0 + exp(-abs(xi))) + sin(xi));
+let x = random_uniform(50_000_000);
+let y = x |> map(\xi -> log(1.0 + exp(-abs(xi))) + sin(xi));
 ```
