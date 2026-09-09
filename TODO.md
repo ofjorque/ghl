@@ -269,12 +269,50 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
     "Mismatch de sintaxis del doc" más abajo — el hueco que esa sección documentaba
     (`is_na()`/`!`/`&&`/`||` dentro de `filter()`) se arregló de raíz, no se dejó como
     limitación aceptada.
-  - [ ] "Asignación sin copia (Copy-on-Write)" real de la descripción del Caso 2.3 no se
-        abordó — `take_rows`/`Column::Scalar` ya evitan las copias evitables que estaban al
-        alcance sin rediseñar el modelo de memoria completo. Depende del modelo ARC +
-        Copy-on-Write real de Fase 5 (RFC 03 §2.1, ítem ya existente ahí) — se deja anotado
-        acá también para que no se pierda de vista al leer Fase 1 en diagonal y parecer
-        "hecho" del todo.
+  - [x] **"Asignación sin copia (Copy-on-Write)" — hecho, acotado a `Value::DataFrame`/
+        `GroupedDataFrame` (no el modelo ARC+CoW completo de Fase 5).** El CoW real de
+        RFC 03 §2.1 (`Vector`/`Matrix`/`HashMap`, todo el intérprete) sigue siendo trabajo
+        de Fase 5 — este ítem se cerró con un alcance deliberadamente más chico, decidido
+        junto al usuario, después de que la primera respuesta ("queda abierto, depende de
+        Fase 5 completa") no fuera aceptable: perder de vista un ítem real detrás de una
+        dependencia grande tampoco es una solución.
+    - **El diseño:** `na_reasons` pasó de `NaReasonTable` (dueño) a
+      `Arc<NaReasonTable>` en `value.rs`. Como todos los ~30 verbos de este módulo son
+      puramente funcionales (piden prestado su `Value` de entrada y devuelven uno nuevo,
+      nunca mutan un `Value` que otro binding todavía sostiene), compartir la tabla vía
+      `Arc` y clonar el `Arc` (no su contenido) cuando la salida de un verbo mantiene las
+      mismas razones sin cambios es siempre seguro — no hace falta un disparador de
+      "clonar recién al mutar" (`Arc::make_mut`) porque nunca hay una mutación en el lugar
+      que vigilar: un verbo que necesita razones distintas simplemente construye una tabla
+      nueva antes de envolverla. `frame: DataFrame` no necesitó el mismo tratamiento:
+      `Column`/`Series` de polars ya son `Arc` por dentro, así que `DataFrame::clone()` ya
+      era barato (clona el vector de columnas, no los datos de fila).
+    - `take_rows`/`build_dataframe` (los dos puntos que ya centralizaban casi toda la
+      construcción de `NaReasonTable`) ahora envuelven en `Arc` internamente, así que la
+      inmensa mayoría de los ~30 verbos de `io.rs` no necesitó ningún cambio — solo los que
+      construyen una tabla nueva a mano por fuera de esos dos caminos (`df_join`,
+      `df_select`, `df_rename`, `df_drop`, `df_mutate`, `df_fill_na`, `read_parquet_file`,
+      la nueva `read_csv_file`) necesitaron envolver su resultado en `Arc::new(...)` — el
+      compilador señaló cada uno de esos sitios exactos al primer intento de build, cero
+      quedó sin cubrir.
+    - **Verificado que la propiedad es real, no solo "sigue andando":** test nuevo
+      `cloning_a_dataframe_value_shares_the_na_reasons_arc_instead_of_deep_cloning`
+      (`polars_bridge.rs`) usa `Arc::ptr_eq` para confirmar que clonar un `Value::DataFrame`
+      comparte el mismo puntero de `NaReasonTable`, no que produce una tabla igual por
+      casualidad. Las 39 pruebas de `ghl-runtime` (incluidas las de joins/CSV de este mismo
+      pase) y el test suite completo del workspace siguen pasando sin cambiar aserciones, y
+      se verificó de nuevo a mano con `ghl run` sobre `select`/`rename`/`drop`/`mutate`/
+      `fill_na`/joins — las razones se preservan/descartan exactamente igual que antes.
+    - **Medido (`spike_dataframe_clone_latency.rs`, comparando clonar la tabla completa
+      -- el costo real que se pagaba antes en cada lookup de variable, cada binding, cada
+      paso por valor de un `Value::DataFrame` -- contra clonar el `Arc`):** con 200.000
+      celdas `NA:razón` registradas (peor caso, todas las celdas), 31.05ms → ~16ns. Con
+      10.000: 453.66µs → ~16ns. Con 1.000: 42.63µs → ~16ns. Con 100: 8.63µs → ~46ns. El
+      camino viejo es O(N) en el número de razones registradas; el nuevo es O(1) sin
+      importar cuántas haya — el "speedup" crece con N a propósito, no es un número mágico
+      fijo, y en la práctica (pocas decenas o cientos de razones típicas, no 200k) la
+      diferencia absoluta ya es de microsegundos a nanosegundos por cada clonado de
+      `Value`, que ocurre con mucha frecuencia en un intérprete tree-walking.
 - [x] **Mismatch de sintaxis del doc — resuelto: se reescribió a la sintaxis real, no
       se agregó azúcar de method-chaining.** Reescribir el lenguaje para soportar
       `df.filter(...).group_by(...)` hubiera sido mucho trabajo por una sola sección de

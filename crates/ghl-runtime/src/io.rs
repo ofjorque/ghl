@@ -6,6 +6,7 @@
 //! - Core DataFrame wrangling verbs: `select`, `head`, `tail`
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -20,9 +21,14 @@ use crate::na_reasons::NaReasonTable;
 use crate::polars_bridge;
 use crate::value::Value;
 
-/// Extrae `&DataFrame`/`&NaReasonTable` de un `Value`, o el diagnóstico de error estándar
-/// que usan los ~30 verbos de este módulo cuando el primer argumento no es un DataFrame.
-fn as_dataframe<'a>(df: &'a Value, verb: &str) -> Result<(&'a DataFrame, &'a NaReasonTable), Diagnostic> {
+/// Extrae `&DataFrame`/`&Arc<NaReasonTable>` de un `Value`, o el diagnóstico de error
+/// estándar que usan los ~30 verbos de este módulo cuando el primer argumento no es un
+/// DataFrame. Devuelve el `Arc` en sí (no un `&NaReasonTable` ya destapado) para que un
+/// verbo que reutiliza las mismas razones sin cambios (`ungroup()`, una variable que solo
+/// se lee) pueda clonar el `Arc` -- barato, sin copiar la tabla -- en vez de perder esa
+/// posibilidad por haber "destapado" la referencia antes de tiempo (`&NaReasonTable` sigue
+/// funcionando igual para todo lo demás vía coerción automática de `Deref`).
+fn as_dataframe<'a>(df: &'a Value, verb: &str) -> Result<(&'a DataFrame, &'a Arc<NaReasonTable>), Diagnostic> {
     match df {
         Value::DataFrame { frame, na_reasons } => Ok((frame, na_reasons)),
         other => Err(Diagnostic::compute_error(
@@ -35,14 +41,15 @@ fn as_dataframe<'a>(df: &'a Value, verb: &str) -> Result<(&'a DataFrame, &'a NaR
 /// Aplica una permutación/subconjunto de filas (por posición absoluta en `frame`) a la
 /// vez sobre el `DataFrame` y su `NaReasonTable`, dejando ambos alineados — el mismo
 /// mecanismo validado en el Spike #2, ahora compartido por `arrange`/`slice`/`head`/
-/// `tail`/`sample_n`/`distinct`.
-pub(crate) fn take_rows(frame: &DataFrame, na_reasons: &NaReasonTable, indices: &[usize]) -> Result<(DataFrame, NaReasonTable), Diagnostic> {
+/// `tail`/`sample_n`/`distinct`. Envuelve el resultado en `Arc` acá mismo (no en cada
+/// llamador) para que sea imposible que un llamador se olvide de hacerlo.
+pub(crate) fn take_rows(frame: &DataFrame, na_reasons: &NaReasonTable, indices: &[usize]) -> Result<(DataFrame, Arc<NaReasonTable>), Diagnostic> {
     let idx: Vec<IdxSize> = indices.iter().map(|&i| i as IdxSize).collect();
     let idx_ca = IdxCa::from_vec(PlSmallStr::EMPTY, idx);
     let new_frame = frame.take(&idx_ca).map_err(|e| {
         Diagnostic::compute_error("C0210", format!("Error seleccionando filas: {e}"))
     })?;
-    Ok((new_frame, na_reasons.reindex(indices)))
+    Ok((new_frame, Arc::new(na_reasons.reindex(indices))))
 }
 
 fn value_to_any_value(v: &Value) -> AnyValue<'static> {
@@ -340,7 +347,7 @@ pub fn read_csv_file(path: &str, delim: Option<char>) -> Result<Value, Diagnosti
             Diagnostic::compute_error("C0210", format!("No se pudo construir el DataFrame: {e}"))
         })?
     };
-    Ok(Value::DataFrame { frame, na_reasons })
+    Ok(Value::DataFrame { frame, na_reasons: Arc::new(na_reasons) })
 }
 
 pub fn parse_csv_string(content: &str, delim: Option<char>) -> Result<Value, Diagnostic> {
@@ -451,7 +458,7 @@ pub fn read_parquet_file(path: &str) -> Result<Value, Diagnostic> {
     let frame = ParquetReader::new(file).finish().map_err(|e| {
         Diagnostic::compute_error("C0405", format!("Failed to read Parquet `{}`: {}", path, e))
     })?;
-    Ok(Value::DataFrame { frame, na_reasons: NaReasonTable::new() })
+    Ok(Value::DataFrame { frame, na_reasons: Arc::new(NaReasonTable::new()) })
 }
 
 /// Writes a `DataFrame` to Parquet. NA-with-reason is intentionally not persisted:
@@ -499,7 +506,7 @@ pub fn df_select(df: &Value, cols_to_keep: &[String]) -> Result<Value, Diagnosti
     let new_frame = frame.select(cols_to_keep.iter().map(|s| s.as_str())).map_err(|e| {
         Diagnostic::compute_error("C0210", format!("`select()` failed: {e}"))
     })?;
-    let new_reasons = na_reasons.retain_columns(cols_to_keep);
+    let new_reasons = Arc::new(na_reasons.retain_columns(cols_to_keep));
     Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
 }
 
@@ -555,7 +562,7 @@ pub fn df_mutate(df: &Value, col_name: &str, new_values: Vec<Value>) -> Result<V
         Diagnostic::compute_error("C0210", format!("`mutate()` failed: {e}"))
     })?;
 
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    Ok(Value::DataFrame { frame: new_frame, na_reasons: Arc::new(new_reasons) })
 }
 
 /// Total order over two optional cell values, used by `arrange()`, `rank()`, `sort_asc()`/`sort_desc()`.
@@ -684,7 +691,7 @@ pub fn df_rename(df: &Value, old_name: &str, new_name: &str) -> Result<Value, Di
     new_frame.rename(old_name, new_name.into()).map_err(|e| {
         Diagnostic::compute_error("C0210", format!("`rename()` failed: {e}"))
     })?;
-    let new_reasons = na_reasons.rename_column(old_name, new_name);
+    let new_reasons = Arc::new(na_reasons.rename_column(old_name, new_name));
     Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
 }
 
@@ -698,7 +705,7 @@ pub fn df_drop(df: &Value, cols_to_drop: &[String]) -> Result<Value, Diagnostic>
         .map(|s| s.to_string())
         .filter(|c| !drop_set.contains(c.as_str()))
         .collect();
-    let new_reasons = na_reasons.retain_columns(&keep_cols);
+    let new_reasons = Arc::new(na_reasons.retain_columns(&keep_cols));
     Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
 }
 
@@ -1020,7 +1027,7 @@ pub fn df_fill_na(df: &Value, col: &str, default: &Value) -> Result<Value, Diagn
     new_frame.with_column(column).map_err(|e| {
         Diagnostic::compute_error("C0210", format!("`fill_na()` failed: {e}"))
     })?;
-    let new_reasons = na_reasons.without_column(col);
+    let new_reasons = Arc::new(na_reasons.without_column(col));
     Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
 }
 
@@ -1206,7 +1213,7 @@ fn df_join(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<
     }
 
     let joined = joined.drop_many([LEFT_IDX_COL, RIGHT_IDX_COL]);
-    Ok(Value::DataFrame { frame: joined, na_reasons: result_reasons })
+    Ok(Value::DataFrame { frame: joined, na_reasons: Arc::new(result_reasons) })
 }
 
 // =========================================================================

@@ -16,6 +16,8 @@
 //! su forma `HashMap`-based); es la implementación real y probada de la conversión,
 //! lista para que la reescritura de `io.rs` (Fase 1) la use al reemplazar la variante.
 
+use std::sync::Arc;
+
 use ghl_diagnostics::Diagnostic;
 use polars_core::prelude::*;
 
@@ -27,7 +29,10 @@ use crate::value::Value;
 /// ensanchando al tipo más permisivo presente: `String` > `f64` > `i64` > `bool` — la
 /// misma política de "si hay cualquier duda, quedate con lo más general" que ya usan
 /// `select`/`drop` en `io.rs` para columnas heterogéneas (`format!("{other}")`).
-pub fn build_dataframe(cols: &[(String, Vec<Value>)]) -> Result<(DataFrame, NaReasonTable), Diagnostic> {
+/// Devuelve las razones ya envueltas en `Arc` (TODO.md Fase 1, "Copy-on-Write" acotado a
+/// `Value::DataFrame`) para que cada uno de los ~10 llamadores de esta función no tenga
+/// que acordarse de envolverlas por su cuenta.
+pub fn build_dataframe(cols: &[(String, Vec<Value>)]) -> Result<(DataFrame, Arc<NaReasonTable>), Diagnostic> {
     let mut na_reasons = NaReasonTable::new();
     let mut columns = Vec::with_capacity(cols.len());
 
@@ -48,7 +53,7 @@ pub fn build_dataframe(cols: &[(String, Vec<Value>)]) -> Result<(DataFrame, NaRe
         })?
     };
 
-    Ok((frame, na_reasons))
+    Ok((frame, Arc::new(na_reasons)))
 }
 
 pub(crate) fn value_column_to_polars(name: &str, values: &[Value]) -> Column {
@@ -238,6 +243,27 @@ mod tests {
 
         let pulled = pull_column_as_values(&frame, &na_reasons, "gap").unwrap();
         assert_eq!(pulled, vec![Value::NA(None), Value::NA(Some("NoResponse".into()))]);
+    }
+
+    #[test]
+    fn cloning_a_dataframe_value_shares_the_na_reasons_arc_instead_of_deep_cloning() {
+        // TODO.md Fase 1, "Copy-on-Write" scoped to Value::DataFrame/GroupedDataFrame:
+        // this is the property that actually matters (cloning a Value::DataFrame -- which
+        // happens on every plain variable lookup/binding -- must not re-clone the whole
+        // reasons table), not just "still correct after wrapping in Arc" (the other tests
+        // already cover correctness and wouldn't fail even without the Arc).
+        let cols = vec![("score".to_string(), vec![Value::NA(Some("SensorDropout".into())), Value::F64(1.0)])];
+        let (frame, na_reasons) = build_dataframe(&cols).unwrap();
+        let df = Value::DataFrame { frame, na_reasons };
+
+        let cloned = df.clone();
+        let (Value::DataFrame { na_reasons: original, .. }, Value::DataFrame { na_reasons: from_clone, .. }) = (&df, &cloned) else {
+            panic!("expected both to be DataFrame");
+        };
+        assert!(
+            std::sync::Arc::ptr_eq(original, from_clone),
+            "Value::clone() on a DataFrame should share the same NaReasonTable allocation, not deep-clone it"
+        );
     }
 
     #[test]

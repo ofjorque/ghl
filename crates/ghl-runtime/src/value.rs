@@ -31,9 +31,22 @@ pub enum Value {
     /// Backed by a real `polars_core::frame::DataFrame` (TODO.md Fase 0/1) — `frame`
     /// carries the columnar/typed data, `na_reasons` is the side-channel for GHL's
     /// `NA:reason` semantics that Arrow has no equivalent for (see `na_reasons.rs`).
+    /// `na_reasons` is `Arc`-wrapped (TODO.md Fase 1, "Copy-on-Write" for Caso 2.3,
+    /// scoped to `DataFrame`/`GroupedDataFrame` rather than the full ARC+CoW memory model
+    /// Fase 5 covers for `Vector`/`Matrix`/etc.): every verb here is purely functional
+    /// (it borrows its input and returns a brand-new `Value`, never mutates a `Value`
+    /// another binding might still hold), so sharing the reasons table via `Arc` and
+    /// cloning the `Arc` (not its contents) whenever a verb's output keeps the same
+    /// reasons unchanged is always safe — there is no in-place mutation path to guard
+    /// against, which is also why this needs no `Arc::make_mut`-style "clone on actual
+    /// write" trigger: a "write" here always means constructing a fresh table before
+    /// wrapping it, never mutating a shared one. `frame` itself doesn't need the same
+    /// treatment: polars' own `Column`/`Series` are already `Arc`-backed internally, so
+    /// `DataFrame::clone()` already only clones the small per-column handle vector, not
+    /// row data.
     DataFrame {
         frame: polars_core::frame::DataFrame,
-        na_reasons: crate::na_reasons::NaReasonTable,
+        na_reasons: std::sync::Arc<crate::na_reasons::NaReasonTable>,
     },
     ColRef(String),
     /// `col(x) > 5`-style single comparison. The leaf of the predicate tree `filter()`
@@ -62,7 +75,7 @@ pub enum Value {
     /// polars' `GroupBy<'a>` borrows its source frame and can't live in an owned `Value`.
     GroupedDataFrame {
         frame: polars_core::frame::DataFrame,
-        na_reasons: crate::na_reasons::NaReasonTable,
+        na_reasons: std::sync::Arc<crate::na_reasons::NaReasonTable>,
         keys: Vec<String>,
     },
     /// A deferred aggregation, e.g. `mean(x)` where `x` is a bare column reference
