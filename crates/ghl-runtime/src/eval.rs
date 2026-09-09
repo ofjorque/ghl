@@ -295,6 +295,7 @@ impl Interpreter {
     fn call_value(&mut self, callee: Value, args: Vec<Value>) -> Result<Value, Diagnostic> {
         match callee {
             Value::NativeFn(func) => func(args),
+            Value::NativeFnCtx(func) => func(self, args),
             Value::Closure { params, body, mut env } => {
                 // Inherit any newly defined globals into the closure environment
                 if let Some(global_scope) = self.env.scopes.first() {

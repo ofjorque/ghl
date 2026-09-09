@@ -378,6 +378,91 @@ mod tests {
     }
 
     #[test]
+    fn test_map_applies_closure_over_vector() {
+        // TODO.md Fase 3, Track 2, Punto 3, Caso 1.4's exact expression (in GHL's real
+        // lambda syntax, `\xi -> ...`, not the aspirational `xi => ...` the roadmap text
+        // used informally).
+        let code = r#"
+            let x = [1.0, -2.0, 0.5];
+            let y = x |> map(\xi -> log(1.0 + exp(-abs(xi))) + sin(xi));
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let y = vector_f64(&interp.env.get("y").unwrap());
+        let expected: Vec<f64> = [1.0f64, -2.0, 0.5]
+            .iter()
+            .map(|&xi| (1.0 + (-xi.abs()).exp()).ln() + xi.sin())
+            .collect();
+        assert_eq!(y.len(), 3);
+        for (got, want) in y.iter().zip(expected.iter()) {
+            assert!((got - want).abs() < 1e-9, "map() mismatch: {y:?} vs {expected:?}");
+        }
+    }
+
+    #[test]
+    fn test_map_with_native_fn() {
+        // map()'s second argument doesn't have to be a closure -- an existing builtin
+        // works directly, exercising the Value::NativeFn branch (not Value::Closure).
+        let code = r#"
+            let x = [4.0, 9.0, 16.0];
+            let y = map(x, sqrt);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let y = vector_f64(&interp.env.get("y").unwrap());
+        assert_eq!(y, vec![2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_map_preserves_per_element_na() {
+        // sqrt(-1.0) is NaN-safe (gives NA, never panics, per the existing math helpers)
+        // -- map() must keep that NA at its own position without disturbing the others.
+        let code = r#"
+            let x = [4.0, -1.0, 9.0];
+            let y = map(x, \xi -> sqrt(xi));
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        match interp.env.get("y").unwrap() {
+            Value::Vector(vd) => {
+                assert_eq!(vd.value_at(0), Some(Value::F64(2.0)));
+                assert!(matches!(vd.value_at(1), Some(Value::NA(_))), "expected NA at index 1, got {:?}", vd.value_at(1));
+                assert_eq!(vd.value_at(2), Some(Value::F64(3.0)));
+            }
+            other => panic!("Expected Vector, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_map_rejects_non_vector_first_argument() {
+        let code = r#"
+            let y = map(5.0, \xi -> xi * 2.0);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("non-Vector first argument must fail");
+        assert_eq!(err.code, "C0202");
+    }
+
+    #[test]
+    fn test_map_rejects_non_callable_second_argument() {
+        let code = r#"
+            let x = [1.0, 2.0];
+            let y = map(x, 5.0);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("non-callable second argument must fail");
+        assert_eq!(err.code, "C0203");
+    }
+
+    #[test]
     fn test_eval_singular_matrix_emits_s0101() {
         // Collinear matrix: rows are multiples (det = 0)
         let code = r#"

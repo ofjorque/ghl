@@ -139,6 +139,12 @@ pub enum Value {
         env: RuntimeEnv,
     },
     NativeFn(NativeFunction),
+    /// A native function that needs to call back into the interpreter (TODO.md Fase 3,
+    /// Track 2, Punto 3) -- `NativeFunction` is a plain `fn(Vec<Value>) -> ...` pointer
+    /// with no way to invoke a `Closure`/`NativeFn` passed as an argument (e.g. `map`'s
+    /// second argument). `crate::eval::Interpreter::call_value` is the only thing that
+    /// knows how to do that, so a function needing it takes `&mut Interpreter` too.
+    NativeFnCtx(fn(&mut crate::eval::Interpreter, Vec<Value>) -> Result<Value, Diagnostic>),
 }
 
 impl Value {
@@ -214,6 +220,7 @@ impl Value {
             Value::Geom(_) => "Geom",
             Value::Closure { .. } => "Function",
             Value::NativeFn(_) => "NativeFunction",
+            Value::NativeFnCtx(_) => "NativeFunction",
         }
     }
 }
@@ -534,6 +541,7 @@ impl Value {
                 format!("fn({}) -> <closure>", params.join(", "))
             }
             Value::NativeFn(_) => "<native_fn>".to_string(),
+            Value::NativeFnCtx(_) => "<native_fn>".to_string(),
         }
     }
 }

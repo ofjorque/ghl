@@ -591,7 +591,7 @@ impl TypeEnv {
         }
 
         // Math helpers — scalar + Vector[f64]
-        for name in ["log", "log2", "log10", "exp", "sqrt", "abs", "floor", "ceil", "round", "pow", "clamp"] {
+        for name in ["log", "log2", "log10", "exp", "sqrt", "abs", "floor", "ceil", "round", "pow", "clamp", "sin", "cos"] {
             env.insert(
                 name.into(),
                 Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
@@ -603,7 +603,7 @@ impl TypeEnv {
 
         // Dense linear algebra (TODO.md Fase 3, faer-backed)
         for name in [
-            "dot", "qr", "qr_q", "qr_r", "cholesky",
+            "dot", "map", "qr", "qr_q", "qr_r", "cholesky",
             "svd", "svd_u", "svd_s", "svd_v",
             "eigen", "eigen_values", "eigen_vectors",
         ] {

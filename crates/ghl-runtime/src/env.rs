@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
 use polars_core::prelude::PolarsError;
+use crate::eval::Interpreter;
 use crate::polars_bridge;
 use crate::value::Value;
 use crate::vector_data::VectorData;
@@ -178,6 +179,8 @@ impl RuntimeEnv {
         env.set("abs".into(),   Value::NativeFn(native_abs));
         env.set("floor".into(), Value::NativeFn(native_floor));
         env.set("ceil".into(),  Value::NativeFn(native_ceil));
+        env.set("sin".into(),   Value::NativeFn(native_sin));
+        env.set("cos".into(),   Value::NativeFn(native_cos));
         env.set("round".into(), Value::NativeFn(native_round));
         env.set("pow".into(),   Value::NativeFn(native_pow));
         env.set("clamp".into(), Value::NativeFn(native_clamp));
@@ -187,6 +190,7 @@ impl RuntimeEnv {
         // Dense linear algebra (TODO.md Fase 3, faer-backed) -- accessor functions
         // instead of field syntax, since GHL's grammar has no `.field` access.
         env.set("dot".into(),          Value::NativeFn(native_dot));
+        env.set("map".into(),          Value::NativeFnCtx(native_map));
         env.set("qr".into(),           Value::NativeFn(native_qr));
         env.set("qr_q".into(),         Value::NativeFn(native_qr_q));
         env.set("qr_r".into(),         Value::NativeFn(native_qr_r));
@@ -443,6 +447,85 @@ fn native_dot(args: Vec<Value>) -> Result<Value, Diagnostic> {
         (l, r) => Err(Diagnostic::compute_error(
             "C0202",
             format!("`dot()` expects two Vectors, found `{}` and `{}`", l.type_name(), r.type_name()),
+        )),
+    }
+}
+
+/// `map(x, f)` — applies `f` to every element of `Vector` `x` in a single pass (TODO.md
+/// Fase 3, Track 2, Punto 3, Caso 1.4). This is a `NativeFnCtx` (not a plain `NativeFn`)
+/// because it has to *call* `f` -- a `Value::Closure` or `Value::NativeFn` -- once per
+/// element, and the only thing that knows how to invoke a `Closure` is
+/// `Interpreter::call_value`.
+///
+/// The `Closure` branch deliberately does **not** call `call_value` in a loop: that
+/// method's `Closure` arm consumes the closure's captured `RuntimeEnv` on every call
+/// (`push_scope`, run the body, discard it), so calling it once per element would clone
+/// the whole captured environment once per element too -- a real, avoidable cost, not
+/// just overhead. Instead the environment is cloned and `push_scope`'d exactly once
+/// before the loop, and each iteration only rebinds the one parameter (`RuntimeEnv::set`,
+/// a `HashMap` insert) and does two `mem::replace` swaps (pointer/struct-field moves, not
+/// clones) around a single `eval_expr` call.
+///
+/// The result is collected into one `Vec<Value>` (via `VectorData::from_values`), not a
+/// flat `Vec<f64>`: `f` is arbitrary code and may legitimately produce `NA` for some
+/// elements (e.g. `log(-1.0)` already does via `map_numeric_fn`), so the output isn't
+/// guaranteed all-`f64` up front. The actual fusion this closes is avoiding one whole
+/// intermediate `Vector` allocation *per sub-operation* of an expression like
+/// `log(1.0 + exp(-abs(xi))) + sin(xi)` (six full-vector passes today if chained via the
+/// existing vectorized helpers) -- not eliminating the one, unavoidable final boxing pass.
+fn native_map(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let vd = match args.first() {
+        Some(Value::Vector(vd)) => vd.clone(),
+        Some(other) => {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!("`map()` expects a Vector as its first argument, found `{}`", other.type_name()),
+            ));
+        }
+        None => return Err(Diagnostic::compute_error("C0201", "`map()` requires 2 arguments")),
+    };
+    let callable = args.get(1).cloned().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`map()` requires 2 arguments")
+    })?;
+
+    match callable {
+        Value::NativeFn(func) => {
+            let mut out = Vec::with_capacity(vd.len());
+            for elem in vd.iter() {
+                out.push(func(vec![elem.clone()])?);
+            }
+            Ok(Value::Vector(VectorData::from_values(out)))
+        }
+        Value::Closure { params, body, env: closure_env } => {
+            let param_name = params.first().cloned().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`map()`'s function must take exactly 1 parameter")
+            })?;
+
+            // One-time setup -- see the doc comment above for why this isn't `call_value`
+            // in a loop.
+            let mut call_env = closure_env;
+            if let Some(global_scope) = interp.env.scopes.first().cloned() {
+                for (k, v) in global_scope {
+                    if call_env.get(&k).is_none() {
+                        call_env.set(k, v);
+                    }
+                }
+            }
+            call_env.push_scope();
+
+            let mut out = Vec::with_capacity(vd.len());
+            for elem in vd.iter() {
+                call_env.set(param_name.clone(), elem.clone());
+                let old_env = std::mem::replace(&mut interp.env, call_env);
+                let result = interp.eval_expr(&body);
+                call_env = std::mem::replace(&mut interp.env, old_env);
+                out.push(result?);
+            }
+            Ok(Value::Vector(VectorData::from_values(out)))
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0203",
+            format!("`map()`'s second argument must be callable, found `{}`", other.type_name()),
         )),
     }
 }
@@ -851,6 +934,11 @@ native_math_fn!(native_sqrt, f64::sqrt);
 native_math_fn!(native_abs, f64::abs);
 native_math_fn!(native_floor, f64::floor);
 native_math_fn!(native_ceil, f64::ceil);
+// `sin`/`cos` didn't exist before Punto 3 -- added because Caso 1.4's own reference
+// expression (`log(1.0 + exp(-abs(xi))) + sin(xi)`) needs `sin` to actually run
+// end-to-end, not a simplified stand-in for it.
+native_math_fn!(native_sin, f64::sin);
+native_math_fn!(native_cos, f64::cos);
 
 fn native_pow(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let base = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`pow()` requires 2 arguments"))?;

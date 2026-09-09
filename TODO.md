@@ -534,21 +534,80 @@ real de los Puntos 2 y 3, no un ítem independiente más.
       operadores `.+`/`.-`/`.*`/`./` Vector-Vector, y `UnaryNeg` sobre un `Vector`.
     - Ninguna de estas quedó peor que antes — dan el resultado correcto, simplemente no
       están en el camino rápido todavía.
-- [ ] **Punto 3 — Fusión de `map` sin buffers intermedios en heap (Caso 1.4).** Soporte
-      real para `map(x, xi => log(1.0 + exp(-abs(xi))) + sin(xi))` construyendo el
-      resultado directo como `VectorData::from_f64` en un solo recorrido, reusando la
-      maquinaria de acceso a slice contiguo del Punto 2.
-- [ ] **Punto 4 — Superficie de sintaxis:** `random_uniform(n)`, `map(x, f)` como
-      funciones libres/pipe (`x |> map(f)`), **no** `.map(...)` como escribe
+- [x] **Punto 3 — Fusión de `map` sin buffers intermedios en heap (Caso 1.4) — hecho.**
+      `map(x, f)` no existía en absoluto (ni rápido ni lento) y **no se podía implementar
+      como una función nativa común**: todas las ~100 funciones nativas de GHL son
+      `fn(Vec<Value>) -> Result<Value, Diagnostic>` (`value.rs`) — un puntero a función
+      plano, sin acceso al intérprete — y `map()` necesita *invocar* `f` (una `Closure` o
+      un `NativeFn`) una vez por elemento, algo que solo sabe hacer
+      `Interpreter::call_value` (`eval.rs`, método privado).
+  - **Nuevo tipo de función nativa:** `Value::NativeFnCtx(fn(&mut Interpreter, Vec<Value>)
+    -> Result<Value, Diagnostic>)`, junto a `NativeFn`. `call_value` gana una rama
+    (`Value::NativeFnCtx(func) => func(self, args)`). `value.rs` pasa a referenciar
+    `crate::eval::Interpreter` (dos módulos hermanos refiriéndose mutuamente a los tipos
+    del otro — válido en Rust, no es un ciclo de crates) — primer uso de este mecanismo,
+    reusable para una futura segunda función de orden superior si aparece.
+  - **Hallazgo real antes de que esto fuera rápido de verdad:** llamar a `call_value` una
+    vez por elemento (`call_value(f.clone(), ...)` en loop) habría clonado el
+    `RuntimeEnv` completo capturado por la clausura **una vez por elemento** — la rama
+    `Closure` de `call_value` consume el env capturado en cada llamada
+    (`push_scope`/correr el body/descartarlo). Para un vector grande eso es un costo real,
+    no solo overhead menor — exactamente el tipo de trampa que esta sesión viene cazando
+    en cada punto. Arreglado clonando el env de la clausura **una sola vez** antes del
+    loop, un solo `push_scope()`, y adentro del loop solo reasignar el parámetro
+    (`RuntimeEnv::set`, un `HashMap::insert`) + dos `mem::replace` (baratos, no clonan
+    nada) por elemento.
+  - El resultado se junta en un `Vec<Value>` (vía `VectorData::from_values`), no un
+    `Vec<f64>` directo: `f` es código arbitrario y puede dar `NA` para algunos elementos
+    (ej. `log(-1.0)` ya lo hace hoy vía `map_numeric_fn`), así que la salida no está
+    garantizada 100% `f64` de antemano. La fusión real que pedía el Caso 1.4 es evitar
+    los **buffers intermedios por sub-operación** (`abs`, `exp`, suma, `log`, `sin`, suma
+    final — seis `Vector` completos si se encadenan los helpers existentes), no eliminar
+    el boxeo de la salida final, que es inherente a que `f` devuelve un `Value`
+    arbitrario. Un `Vec<f64>` optimista con fallback a boxeado queda anotado como posible
+    refinamiento futuro, no implementado ahora (sin un caso medido que lo justifique).
+  - **`sin`/`cos` no existían y se agregaron** — el enunciado mismo del Caso 1.4
+    (`... + sin(xi)`) los necesita para correr de verdad, no una versión simplificada.
+  - Tests nuevos: `test_map_applies_closure_over_vector` (el ejemplo exacto del Caso 1.4),
+    `test_map_with_native_fn` (`map(v, sqrt)`, pasando un builtin existente en vez de una
+    clausura), `test_map_preserves_per_element_na`, `test_map_rejects_non_vector_first_argument`,
+    `test_map_rejects_non_callable_second_argument`. Las 59 pruebas de `ghl-runtime` y el
+    test suite completo del workspace pasan sin cambiar aserciones preexistentes.
+    Verificado de punta a punta con `ghl run`.
+  - **Dos huecos reales de la aritmética de `Vector` encontrados al escribir el spike de
+    comparación** (ninguno en el alcance de este punto, ninguno oculto):
+    - `escalar + Vector` no está soportado — el broadcasting de escalar (`eval.rs`) solo
+      maneja el orden `Vector op escalar`, no el inverso. `1.0 + v` falla con
+      "Cannot apply Add to f64 and Vector"; `v + 1.0` sí funciona.
+    - `Vector + Vector` con `+` liso no está soportado — hace falta el operador
+      elemento-a-elemento `.+ ` (`DotAdd`). `+` entre dos `Vector`s del mismo largo falla
+      con "Cannot apply Add to Vector and Vector".
+    - [ ] Decidir si vale la pena arreglar estos dos (broadcasting simétrico para
+          `+`/`-`/`*`/`/`, y quizás que `+`/`-`/`*`/`/` liso entre dos `Vector`s del mismo
+          largo haga lo mismo que `.+`/`.-`/`.*`/`./` en vez de fallar) — no forma parte
+          de ningún punto planeado hasta ahora, queda anotado para no perderse.
+  - **Medido (`spike_map_fusion_latency.rs`, N=2×10⁶ — no los 5×10⁷ que pide el
+    enunciado del Caso 1.4 al pie de la letra: el camino "encadenado" aloca **seis**
+    `Vec<Value>` completos a la vez a propósito, que es justo lo que se está midiendo, y
+    con 5×10⁷ un primer intento terminó en un **OOM-kill real** confirmado por `dmesg`
+    en este sandbox compartido de 15GB — 2×10⁶ ya deja ver el efecto con margen de
+    sobra):** encadenado 2.50-2.52s → `map()` fusionado 1.90-1.99s, **~1.26-1.33x**,
+    estable en 3 corridas. **Nota honesta:** la ganancia acá es mucho más modesta que el
+    ~14x de `dot()` (Punto 2) a propósito — ahí se reemplazaba un loop boxeado por SIMD
+    real; acá el costo dominante en ambos caminos sigue siendo interpretar el árbol de
+    expresión elemento por elemento (`eval_expr` recursivo), y lo único que cambia es
+    evitar cinco pasadas extra de asignación de `Vector` completo. Reportado tal cual
+    salió, no lo que se esperaba de antemano.
+- [ ] **Punto 4 — Superficie de sintaxis:** `random_uniform(n)` como función libre/pipe.
+      `map(x, f)` y `dot(a, b)` ya salieron de los Puntos 2/3 como funciones libres, como
+      corresponde — **no** `.map(...)`/`.dot(&b)` como escribe
       `benchmarks/suites/01-vector-and-matrix-algebra.md` hoy: GHL no tiene sintaxis de
       método (`.foo()`) en absoluto, solo pipes y funciones libres — ese doc va a
       necesitar la misma reescritura que ya le hizo Fase 1 al de DataFrames ("Mismatch de
-      sintaxis del doc"). `dot(a, b)` ya salió del Punto 2 (función libre, como corresponde
-      — el `.dot(&b)` del doc va a necesitar la reescritura igual). `random_uniform` además
-      roza a propósito con Fase 5 ("PRNG reproducible bit-a-bit... con `PRNG::seed(seed)`")
-      — una versión mínima ahora (`rand::thread_rng()`, no reproducible entre corridas) es
-      aceptable para desbloquear los benchmarks de Suite 01, con la reproducibilidad real
-      quedando para Fase 5.
+      sintaxis del doc"). `random_uniform` además roza a propósito con Fase 5 ("PRNG
+      reproducible bit-a-bit... con `PRNG::seed(seed)`") — una versión mínima ahora
+      (`rand::thread_rng()`, no reproducible entre corridas) es aceptable para desbloquear
+      los benchmarks de Suite 01, con la reproducibilidad real quedando para Fase 5.
 
 ## Fase 4 — Paralelismo transversal (RFC 05)
 Se apoya en `rayon` (Fase 0); habilita el resto de casos de Suite 03.
