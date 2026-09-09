@@ -601,6 +601,19 @@ impl TypeEnv {
         env.insert("pi".into(), Type::F64, false);
         env.insert("e".into(), Type::F64, false);
 
+        // Dense linear algebra (TODO.md Fase 3, faer-backed)
+        for name in [
+            "qr", "qr_q", "qr_r", "cholesky",
+            "svd", "svd_u", "svd_s", "svd_v",
+            "eigen", "eigen_values", "eigen_vectors",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
         // Vector / window helpers
         for name in [
             "cumsum", "cumprod", "cummax", "cummin", "lag", "lead",

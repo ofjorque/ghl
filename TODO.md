@@ -372,13 +372,91 @@ Depende del backend columnar de la Fase 1; sin él no hay nada que optimizar de 
 ## Fase 3 — Álgebra lineal de alto rendimiento (`benchmarks/suites/01`)
 Independiente de las Fases 1-2, puede avanzar en paralelo una vez resuelta la Fase 0.
 
-- [ ] Reemplazar `crates/ghl-runtime/src/matrix.rs` (implementación a mano) por
-      `faer` (Fase 0): LU, QR, Cholesky, SVD, autovalores.
-- [ ] Multiplicación matricial densa multinúcleo por bloques (Caso 1.2).
-- [ ] SIMD real (AVX2/AVX-512/NEON) para dot product y reducciones sobre `Vector` (Caso 1.1).
+> **Hallazgo al arrancar (2026-09-08):** el alcance real de esta fase era más grande de lo
+> que las 5 líneas de abajo sugerían. `MatrixOps::mul` (multiplicación real de matrices)
+> **existía pero no lo llamaba nada** — ni el operador `*` ni ningún builtin — así que el
+> Caso 1.2 no estaba implementado en absoluto, no solo lento. Tampoco existían
+> `transpose`/`det`/decomposiciones/`dot` para vectores/`map` fusionado/`random_uniform` —
+> Fase 3 era más "construir de cero" que "reemplazar lo que hay". Y el doc de referencia
+> (`benchmarks/suites/01`) usa sintaxis de method-chaining (`a.dot(&b)`, `x.map(xi => ...)`)
+> que el parser no soporta (no hay `.method()` en la gramática) — el mismo "mismatch de
+> sintaxis" que Fase 1 ya encontró para DataFrames. Se decidió con el usuario partir la fase
+> en dos tracks: **Matrices primero** (acotado, se cierra en esta pasada) y **Vector
+> después** (más grande de lo que parecía — ver la nota debajo del track de Vector).
+
+### Track 1: Matrices — hecho
+
+- [x] **Reemplazar `matrix.rs` por `faer`: LU (`solve`), QR, Cholesky, SVD, autovalores —
+      hecho.** `MatrixOps::solve` (usado por el operador `A \ b` y por el ajuste OLS de
+      `neko.rs`) pasó de eliminación gaussiana a mano a `faer`'s `partial_piv_lu()` +
+      `.solve()`, con la misma detección de matriz singular (S0101) leída del pivote mínimo
+      de la diagonal de `U` después de factorizar, en vez de durante la eliminación —
+      mismo comportamiento observable, backend real. `MatrixOps::elementwise` (usado por
+      `.+`/`.-`/`.*`/`./`) se dejó como estaba a propósito: ya es un loop plano
+      auto-vectorizable por LLVM, `faer` no le aporta nada (no hay descomposición ni kernel
+      de bloques involucrado).
+  - **Nuevo: `qr(m)`/`qr_q`/`qr_r`, `cholesky(m)`, `svd(m)`/`svd_u`/`svd_s`/`svd_v`,
+    `eigen(m)`/`eigen_values`/`eigen_vectors`.** GHL no tiene sintaxis de acceso a campos
+    (`resultado.q`) ni tuplas, así que cada descomposición devuelve un `Value` dedicado
+    (`QrDecomp`/`SvdDecomp`/`EigenDecomp`, mismo patrón que `ModelFit`) con funciones libres
+    de acceso — consistente con `na_reason()`/`na_reasons()` de Fase 0/1, no method-chaining.
+    `cholesky()` devuelve directo un `Matrix` (solo hay `L`, no hace falta envoltorio).
+  - **`eigen()` está acotado a matrices simétricas a propósito, no es una limitación
+    oculta:** `faer`'s `self_adjoint_eigen()`/`llt()` (Cholesky) **solo leen un triángulo y
+    asumen que el otro lo espeja, sin validarlo** — pasarles una matriz asimétrica
+    silenciosamente factoriza/diagonaliza una matriz *distinta* (la simetrizada), no la que
+    el usuario pidió. Se agregó un chequeo de simetría explícito (`check_symmetric`) antes
+    de llamar a `faer` en ambos casos, con error S0412 claro — exactamente el tipo de "no
+    silent state" que el resto del proyecto ya exige en todos lados. Autovalores/vectores
+    complejos (matrices no-simétricas en general) quedan fuera: `Value` no tiene tipo
+    complejo todavía.
+  - **`A * B` (Caso 1.2) — conectado por primera vez.** El operador `*` entre dos
+    `Value::Matrix` caía antes al error genérico "cannot apply Mul" (`MatrixOps::mul`
+    nunca se llamaba desde ningún lado). Ahora despacha a `MatrixOps::mul`, que usa el
+    operador `*` de `faer::Mat` — su propio kernel GEMM multinúcleo por bloques (los
+    crates `gemm`/`gemm-f64` que ya estaban en el árbol de dependencias transitivo) — así
+    que la "multiplicación matricial densa multinúcleo por bloques" que pedía el ítem
+    original sale del mismo cambio, no hizo falta implementarla a mano.
+  - Tests nuevos (`lib.rs`): `test_matrix_multiplication_real_product`,
+    `test_matrix_multiplication_rejects_non_conformable_dimensions`,
+    `test_qr_decomposition_reconstructs_original_matrix`,
+    `test_cholesky_reconstructs_symmetric_positive_definite_matrix`,
+    `test_cholesky_rejects_asymmetric_matrix`,
+    `test_cholesky_rejects_non_positive_definite_matrix`,
+    `test_eigen_symmetric_matrix`, `test_eigen_rejects_asymmetric_matrix`,
+    `test_svd_reconstructs_matrix` — cada uno verifica la reconstrucción numérica real
+    (`Q*R ≈ A`, `L*Lᵀ ≈ A`, `U·diag(S)·Vᵀ ≈ A`), no solo que no crashee. Los tests
+    preexistentes de `\` (`test_eval_matrix_solve_gaussian`,
+    `test_eval_singular_matrix_emits_s0101`) y de OLS/vcov en `neko.rs`
+    (`test_neko_ols_fit_and_projections`, `test_neko_vcov_hc3`,
+    `test_neko_singular_matrix_emits_s0101`) siguen pasando sin cambiar sus aserciones —
+    el swap de backend es transparente. Verificado además de punta a punta con `ghl run`.
+
+### Track 2: Vector (SIMD real, fusión, sintaxis) — pendiente, alcance real más grande
+
+- [ ] **SIMD real (AVX2/AVX-512/NEON) para dot product y reducciones sobre `Vector`
+      (Caso 1.1) — bloqueado por la representación actual de `Value::Vector`.**
+      `Value::Vector(Vec<Value>)` boxea cada elemento individualmente (un `Value::F64(x)`
+      por celda) — el mismo problema que tenía `Value::DataFrame` antes de la migración a
+      polars de Fase 0/1. No hay forma de vectorizar de verdad un dot product sobre 10⁷
+      `f64` mientras cada uno viva envuelto en un enum; hace falta un layout plano tipado
+      para el camino numérico (`Vec<f64>` + bitmap de validez, o un `faer::Col<f64>`
+      directo) — un rediseño de representación del mismo tamaño que esa migración, no
+      "llamar una función SIMD". Evaluar entonces si conviene reusar `faer`/`pulp`
+      (ya en el árbol de dependencias, con SIMD portable) en vez de intrínsecos por
+      arquitectura a mano.
 - [ ] Fusión de operaciones elemento-a-elemento sin buffers intermedios en heap —
-      soporte real para `x.map(xi => log(1.0 + exp(-abs(xi))) + sin(xi))` (Caso 1.4).
-- [ ] Métodos/sintaxis: `Vector::random_uniform(n)`, `.dot(&b)`, `.map(...)`.
+      soporte real para `map(x, xi => log(1.0 + exp(-abs(xi))) + sin(xi))` (Caso 1.4).
+      Depende de la misma decisión de representación de arriba.
+- [ ] Métodos/sintaxis: `random_uniform(n)`, `dot(a, b)`, `map(x, f)` — como funciones
+      libres/pipe (`x |> map(f)`), **no** `.dot(&b)`/`x.map(...)` como escribe
+      `benchmarks/suites/01-vector-and-matrix-algebra.md` hoy: GHL no tiene sintaxis de
+      método (`.foo()`) en absoluto, solo pipes y funciones libres — ese doc va a
+      necesitar la misma reescritura que ya le hizo Fase 1 al de DataFrames ("Mismatch de
+      sintaxis del doc"). `random_uniform` además roza a propósito con Fase 5 ("PRNG
+      reproducible bit-a-bit... con `PRNG::seed(seed)`") — una versión mínima ahora
+      (`rand::thread_rng()`, no reproducible entre corridas) es aceptable para desbloquear
+      los benchmarks de Suite 01, con la reproducibilidad real quedando para Fase 5.
 
 ## Fase 4 — Paralelismo transversal (RFC 05)
 Se apoya en `rayon` (Fase 0); habilita el resto de casos de Suite 03.

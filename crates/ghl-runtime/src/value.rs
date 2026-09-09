@@ -106,6 +106,26 @@ pub enum Value {
     },
     /// Fitted statistical model under NEKO framework
     ModelFit(Box<FittedModel>),
+    /// `qr(m)` result (TODO.md Fase 3) — accessed via `qr_q(result)`/`qr_r(result)`
+    /// rather than field syntax, which GHL's grammar doesn't have.
+    QrDecomp {
+        q: Box<Value>,
+        r: Box<Value>,
+    },
+    /// `svd(m)` result — `svd_u`/`svd_s`/`svd_v(result)`. `s` is a `Vector` of singular
+    /// values (nonincreasing), not a diagonal `Matrix` — matches how GHL already models
+    /// "one value per component" everywhere else.
+    SvdDecomp {
+        u: Box<Value>,
+        s: Box<Value>,
+        v: Box<Value>,
+    },
+    /// `eigen(m)` result (symmetric matrices only — see `MatrixOps::eigen_symmetric`) —
+    /// `eigen_values`/`eigen_vectors(result)`.
+    EigenDecomp {
+        values: Box<Value>,
+        vectors: Box<Value>,
+    },
     /// Grammar of Graphics statistical plot
     Plot(Box<PlotSpec>),
     Aesthetic(AestheticMap),
@@ -183,6 +203,9 @@ impl Value {
             Value::Factor { .. } => "Factor",
             Value::Formula { .. } => "Formula",
             Value::ModelFit(_) => "ModelFit",
+            Value::QrDecomp { .. } => "QrDecomp",
+            Value::SvdDecomp { .. } => "SvdDecomp",
+            Value::EigenDecomp { .. } => "EigenDecomp",
             Value::Plot(_) => "Plot",
             Value::Aesthetic(_) => "Aesthetic",
             Value::Geom(_) => "Geom",
@@ -228,6 +251,18 @@ impl PartialEq for Value {
                 Value::Formula { response: r2, terms: t2 },
             ) => r1 == r2 && t1 == t2,
             (Value::ModelFit(m1), Value::ModelFit(m2)) => m1 == m2,
+            (
+                Value::QrDecomp { q: q1, r: r1 },
+                Value::QrDecomp { q: q2, r: r2 },
+            ) => q1 == q2 && r1 == r2,
+            (
+                Value::SvdDecomp { u: u1, s: s1, v: v1 },
+                Value::SvdDecomp { u: u2, s: s2, v: v2 },
+            ) => u1 == u2 && s1 == s2 && v1 == v2,
+            (
+                Value::EigenDecomp { values: a1, vectors: b1 },
+                Value::EigenDecomp { values: a2, vectors: b2 },
+            ) => a1 == a2 && b1 == b2,
             (Value::Plot(p1), Value::Plot(p2)) => p1 == p2,
             (Value::Aesthetic(a1), Value::Aesthetic(a2)) => a1 == a2,
             (Value::Geom(g1), Value::Geom(g2)) => g1 == g2,
@@ -465,6 +500,21 @@ impl Value {
                 format!("{} ~ {}", response, terms.join(" + "))
             }
             Value::ModelFit(m) => m.render_cockpit(caps),
+            Value::QrDecomp { q, r } => {
+                format!("QrDecomp {{\nQ =\n{}\nR =\n{}\n}}", q.render_styled(caps), r.render_styled(caps))
+            }
+            Value::SvdDecomp { u, s, v } => {
+                format!(
+                    "SvdDecomp {{\nU =\n{}\nS =\n{}\nV =\n{}\n}}",
+                    u.render_styled(caps), s.render_styled(caps), v.render_styled(caps)
+                )
+            }
+            Value::EigenDecomp { values, vectors } => {
+                format!(
+                    "EigenDecomp {{\nvalues =\n{}\nvectors =\n{}\n}}",
+                    values.render_styled(caps), vectors.render_styled(caps)
+                )
+            }
             Value::Plot(p) => p.render(caps),
             Value::Aesthetic(a) => {
                 let mut parts = vec![format!("x: \"{}\"", a.x)];

@@ -181,6 +181,20 @@ impl RuntimeEnv {
         env.set("pi".into(), Value::F64(std::f64::consts::PI));
         env.set("e".into(),  Value::F64(std::f64::consts::E));
 
+        // Dense linear algebra (TODO.md Fase 3, faer-backed) -- accessor functions
+        // instead of field syntax, since GHL's grammar has no `.field` access.
+        env.set("qr".into(),           Value::NativeFn(native_qr));
+        env.set("qr_q".into(),         Value::NativeFn(native_qr_q));
+        env.set("qr_r".into(),         Value::NativeFn(native_qr_r));
+        env.set("cholesky".into(),     Value::NativeFn(native_cholesky));
+        env.set("svd".into(),          Value::NativeFn(native_svd));
+        env.set("svd_u".into(),        Value::NativeFn(native_svd_u));
+        env.set("svd_s".into(),        Value::NativeFn(native_svd_s));
+        env.set("svd_v".into(),        Value::NativeFn(native_svd_v));
+        env.set("eigen".into(),        Value::NativeFn(native_eigen));
+        env.set("eigen_values".into(), Value::NativeFn(native_eigen_values));
+        env.set("eigen_vectors".into(), Value::NativeFn(native_eigen_vectors));
+
         // Vector / window helpers
         env.set("cumsum".into(),    Value::NativeFn(native_cumsum));
         env.set("cumprod".into(),   Value::NativeFn(native_cumprod));
@@ -1393,6 +1407,138 @@ fn native_vcov(args: Vec<Value>) -> Result<Value, Diagnostic> {
             "S0200",
             format!("`vcov()` requires a ModelFit, found `{}`", other.type_name()),
         )),
+    }
+}
+
+// =========================================================================
+// Dense linear algebra (TODO.md Fase 3, faer-backed)
+// =========================================================================
+
+/// `qr(m)` — thin QR decomposition: `m` (rows×cols) = Q (rows×cols) × R (cols×cols).
+fn native_qr(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::Matrix { rows, cols, data }) => {
+            let (q_data, r_data) = crate::matrix::MatrixOps::qr(*rows, *cols, data)?;
+            Ok(Value::QrDecomp {
+                q: Box::new(Value::Matrix { rows: *rows, cols: *cols, data: q_data }),
+                r: Box::new(Value::Matrix { rows: *cols, cols: *cols, data: r_data }),
+            })
+        }
+        Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`qr()` requires a Matrix, found `{}`", other.type_name()))),
+        None => Err(Diagnostic::compute_error("C0201", "`qr()` requires a Matrix")),
+    }
+}
+
+fn native_qr_q(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::QrDecomp { q, .. }) => Ok((**q).clone()),
+        Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`qr_q()` requires a QrDecomp, found `{}`", other.type_name()))),
+        None => Err(Diagnostic::compute_error("C0201", "`qr_q()` requires a QrDecomp")),
+    }
+}
+
+fn native_qr_r(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::QrDecomp { r, .. }) => Ok((**r).clone()),
+        Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`qr_r()` requires a QrDecomp, found `{}`", other.type_name()))),
+        None => Err(Diagnostic::compute_error("C0201", "`qr_r()` requires a QrDecomp")),
+    }
+}
+
+/// `cholesky(m)` — L such that `m` = L × Lᵀ. Requires a symmetric positive-definite
+/// square matrix (checked in `MatrixOps::cholesky`, not silently assumed).
+fn native_cholesky(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::Matrix { rows, cols, data }) => {
+            if rows != cols {
+                return Err(Diagnostic::statistical_error(
+                    "S0412",
+                    format!("`cholesky()` requires a square matrix, found ({rows}x{cols})"),
+                ));
+            }
+            let l_data = crate::matrix::MatrixOps::cholesky(*rows, data)?;
+            Ok(Value::Matrix { rows: *rows, cols: *cols, data: l_data })
+        }
+        Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`cholesky()` requires a Matrix, found `{}`", other.type_name()))),
+        None => Err(Diagnostic::compute_error("C0201", "`cholesky()` requires a Matrix")),
+    }
+}
+
+/// `svd(m)` — thin SVD: `m` (rows×cols) = U (rows×k) × diag(S) × Vᵀ (k×cols), k = min(rows,cols).
+fn native_svd(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::Matrix { rows, cols, data }) => {
+            let (u_data, s_values, v_data, k) = crate::matrix::MatrixOps::svd(*rows, *cols, data)?;
+            Ok(Value::SvdDecomp {
+                u: Box::new(Value::Matrix { rows: *rows, cols: k, data: u_data }),
+                s: Box::new(Value::Vector(s_values.into_iter().map(Value::F64).collect())),
+                v: Box::new(Value::Matrix { rows: *cols, cols: k, data: v_data }),
+            })
+        }
+        Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`svd()` requires a Matrix, found `{}`", other.type_name()))),
+        None => Err(Diagnostic::compute_error("C0201", "`svd()` requires a Matrix")),
+    }
+}
+
+fn native_svd_u(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::SvdDecomp { u, .. }) => Ok((**u).clone()),
+        Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`svd_u()` requires an SvdDecomp, found `{}`", other.type_name()))),
+        None => Err(Diagnostic::compute_error("C0201", "`svd_u()` requires an SvdDecomp")),
+    }
+}
+
+fn native_svd_s(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::SvdDecomp { s, .. }) => Ok((**s).clone()),
+        Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`svd_s()` requires an SvdDecomp, found `{}`", other.type_name()))),
+        None => Err(Diagnostic::compute_error("C0201", "`svd_s()` requires an SvdDecomp")),
+    }
+}
+
+fn native_svd_v(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::SvdDecomp { v, .. }) => Ok((**v).clone()),
+        Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`svd_v()` requires an SvdDecomp, found `{}`", other.type_name()))),
+        None => Err(Diagnostic::compute_error("C0201", "`svd_v()` requires an SvdDecomp")),
+    }
+}
+
+/// `eigen(m)` — eigendecomposition of a symmetric matrix (see `MatrixOps::eigen_symmetric`
+/// for why non-symmetric input is rejected rather than silently misread).
+fn native_eigen(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::Matrix { rows, cols, data }) => {
+            if rows != cols {
+                return Err(Diagnostic::statistical_error(
+                    "S0412",
+                    format!("`eigen()` requires a square matrix, found ({rows}x{cols})"),
+                ));
+            }
+            let (values, vectors_data) = crate::matrix::MatrixOps::eigen_symmetric(*rows, data)?;
+            Ok(Value::EigenDecomp {
+                values: Box::new(Value::Vector(values.into_iter().map(Value::F64).collect())),
+                vectors: Box::new(Value::Matrix { rows: *rows, cols: *cols, data: vectors_data }),
+            })
+        }
+        Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`eigen()` requires a Matrix, found `{}`", other.type_name()))),
+        None => Err(Diagnostic::compute_error("C0201", "`eigen()` requires a Matrix")),
+    }
+}
+
+fn native_eigen_values(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::EigenDecomp { values, .. }) => Ok((**values).clone()),
+        Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`eigen_values()` requires an EigenDecomp, found `{}`", other.type_name()))),
+        None => Err(Diagnostic::compute_error("C0201", "`eigen_values()` requires an EigenDecomp")),
+    }
+}
+
+fn native_eigen_vectors(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::EigenDecomp { vectors, .. }) => Ok((**vectors).clone()),
+        Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`eigen_vectors()` requires an EigenDecomp, found `{}`", other.type_name()))),
+        None => Err(Diagnostic::compute_error("C0201", "`eigen_vectors()` requires an EigenDecomp")),
     }
 }
 

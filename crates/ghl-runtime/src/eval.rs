@@ -442,6 +442,21 @@ impl Interpreter {
                     }
                 }
 
+                // True matrix product `A * B` (Caso 1.2, Suite 01) -- distinct from the
+                // element-wise `.+`/`.-`/`.*`/`./` handled separately below under
+                // `BinaryOp::DotMul` etc. `MatrixOps::mul` dispatches to faer's `*`
+                // operator, which uses its own blocked multithreaded GEMM kernel.
+                if op == BinaryOp::Mul {
+                    if let (
+                        Value::Matrix { rows: r1, cols: c1, data: d1 },
+                        Value::Matrix { rows: r2, cols: c2, data: d2 },
+                    ) = (&left, &right)
+                    {
+                        let (r, c, d) = MatrixOps::mul(*r1, *c1, d1, *r2, *c2, d2)?;
+                        return Ok(Value::Matrix { rows: r, cols: c, data: d });
+                    }
+                }
+
                 // Integer arithmetic
                 if let (Value::I64(a), Value::I64(b)) = (&left, &right) {
                     return match op {

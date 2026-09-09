@@ -117,6 +117,208 @@ mod tests {
     }
 
     #[test]
+    fn test_matrix_multiplication_real_product() {
+        // TODO.md Fase 3, Caso 1.2: `A * B` on two Matrix values used to fall straight
+        // through to a "cannot apply Mul" error -- MatrixOps::mul existed but nothing in
+        // the interpreter ever called it. Now wired to faer's `*` operator.
+        //   A (2x3)      B (3x2)         A*B (2x2)
+        //   [1 2 3]      [ 7  8]         [1*7+2*9+3*11  1*8+2*10+3*12]   [58  64]
+        //   [4 5 6]      [ 9 10]    =    [4*7+5*9+6*11  4*8+5*10+6*12] = [139 154]
+        //                [11 12]
+        let code = r#"
+            let a = mat [ 1.0, 2.0, 3.0 ; 4.0, 5.0, 6.0 ];
+            let b = mat [ 7.0, 8.0 ; 9.0, 10.0 ; 11.0, 12.0 ];
+            let c = a * b;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        match interp.env.get("c").expect("c must be computed") {
+            Value::Matrix { rows, cols, data } => {
+                assert_eq!((rows, cols), (2, 2));
+                let expected = [58.0, 64.0, 139.0, 154.0];
+                for (got, want) in data.iter().zip(expected.iter()) {
+                    assert!((got - want).abs() < 1e-9, "got {data:?}, expected {expected:?}");
+                }
+            }
+            other => panic!("Expected Matrix, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_matrix_multiplication_rejects_non_conformable_dimensions() {
+        let code = r#"
+            let a = mat [ 1.0, 2.0 ; 3.0, 4.0 ];
+            let b = mat [ 1.0, 2.0, 3.0 ; 4.0, 5.0, 6.0 ; 7.0, 8.0, 9.0 ];
+            let c = a * b;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("2x2 * 3x3 must fail");
+        assert_eq!(err.code, "S0412");
+    }
+
+    fn matrix_data(v: &Value) -> Vec<f64> {
+        match v {
+            Value::Matrix { data, .. } => data.clone(),
+            other => panic!("Expected Matrix, found {other:?}"),
+        }
+    }
+
+    fn vector_f64(v: &Value) -> Vec<f64> {
+        match v {
+            Value::Vector(items) => items.iter().map(|x| x.as_f64().unwrap()).collect(),
+            other => panic!("Expected Vector, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_qr_decomposition_reconstructs_original_matrix() {
+        // TODO.md Fase 3: qr()/qr_q()/qr_r() over faer's thin QR. A (3x2, tall) must
+        // reconstruct as Q * R via GHL's own (now-wired) real matrix multiplication.
+        let code = r#"
+            let a = mat [ 1.0, 2.0 ; 3.0, 4.0 ; 5.0, 6.0 ];
+            let decomp = qr(a);
+            let q = qr_q(decomp);
+            let r = qr_r(decomp);
+            let reconstructed = q * r;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let a = matrix_data(&interp.env.get("a").unwrap());
+        let reconstructed = matrix_data(&interp.env.get("reconstructed").unwrap());
+        for (got, want) in reconstructed.iter().zip(a.iter()) {
+            assert!((got - want).abs() < 1e-9, "QR reconstruction mismatch: {reconstructed:?} vs {a:?}");
+        }
+    }
+
+    #[test]
+    fn test_cholesky_reconstructs_symmetric_positive_definite_matrix() {
+        let code = r#"
+            let a = mat [ 4.0, 2.0 ; 2.0, 3.0 ];
+            let l = cholesky(a);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let l = matrix_data(&interp.env.get("l").unwrap());
+        let (l11, l12, l21, l22) = (l[0], l[1], l[2], l[3]);
+        assert!(l12.abs() < 1e-12, "L must be lower triangular, got {l:?}");
+        let reconstructed = [
+            l11 * l11 + l12 * l12, l11 * l21 + l12 * l22,
+            l21 * l11 + l22 * l12, l21 * l21 + l22 * l22,
+        ];
+        let expected = [4.0, 2.0, 2.0, 3.0];
+        for (got, want) in reconstructed.iter().zip(expected.iter()) {
+            assert!((got - want).abs() < 1e-9, "L * Lt mismatch: {reconstructed:?} vs {expected:?}");
+        }
+    }
+
+    #[test]
+    fn test_cholesky_rejects_asymmetric_matrix() {
+        let code = r#"
+            let a = mat [ 1.0, 2.0 ; 999.0, 3.0 ];
+            let l = cholesky(a);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("asymmetric matrix must be rejected");
+        assert_eq!(err.code, "S0412");
+    }
+
+    #[test]
+    fn test_cholesky_rejects_non_positive_definite_matrix() {
+        // Symmetric but indefinite (eigenvalues 3 and -1) -- a real Cholesky failure, not
+        // the symmetry check above.
+        let code = r#"
+            let a = mat [ 1.0, 2.0 ; 2.0, 1.0 ];
+            let l = cholesky(a);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("indefinite matrix must be rejected");
+        assert_eq!(err.code, "S0101");
+    }
+
+    #[test]
+    fn test_eigen_symmetric_matrix() {
+        let code = r#"
+            let a = mat [ 2.0, 0.0 ; 0.0, 5.0 ];
+            let decomp = eigen(a);
+            let values = eigen_values(decomp);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let values = vector_f64(&interp.env.get("values").unwrap());
+        assert_eq!(values.len(), 2);
+        // faer returns eigenvalues in nondecreasing order.
+        assert!((values[0] - 2.0).abs() < 1e-9);
+        assert!((values[1] - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_eigen_rejects_asymmetric_matrix() {
+        let code = r#"
+            let a = mat [ 1.0, 2.0 ; 999.0, 3.0 ];
+            let decomp = eigen(a);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("asymmetric matrix must be rejected");
+        assert_eq!(err.code, "S0412");
+    }
+
+    #[test]
+    fn test_svd_reconstructs_matrix() {
+        let code = r#"
+            let a = mat [ 3.0, 0.0 ; 4.0, 5.0 ; 0.0, 0.0 ];
+            let decomp = svd(a);
+            let u = svd_u(decomp);
+            let s = svd_s(decomp);
+            let v = svd_v(decomp);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let (u_rows, u_cols, u) = match interp.env.get("u").unwrap() {
+            Value::Matrix { rows, cols, data } => (rows, cols, data),
+            other => panic!("Expected Matrix, found {other:?}"),
+        };
+        let s = vector_f64(&interp.env.get("s").unwrap());
+        let (v_rows, v_cols, v) = match interp.env.get("v").unwrap() {
+            Value::Matrix { rows, cols, data } => (rows, cols, data),
+            other => panic!("Expected Matrix, found {other:?}"),
+        };
+        assert_eq!((u_rows, u_cols), (3, 2));
+        assert_eq!((v_rows, v_cols), (2, 2));
+        assert_eq!(s.len(), 2);
+        assert!(s[0] >= s[1], "singular values must be nonincreasing: {s:?}");
+
+        // Reconstruct A = U * diag(S) * V^T by hand (no transpose()/diag() builtin yet).
+        let a = matrix_data(&interp.env.get("a").unwrap());
+        let mut reconstructed = vec![0.0; 3 * 2];
+        for i in 0..3 {
+            for j in 0..2 {
+                let mut acc = 0.0;
+                for k in 0..2 {
+                    acc += u[i * u_cols + k] * s[k] * v[j * v_cols + k];
+                }
+                reconstructed[i * 2 + j] = acc;
+            }
+        }
+        for (got, want) in reconstructed.iter().zip(a.iter()) {
+            assert!((got - want).abs() < 1e-9, "SVD reconstruction mismatch: {reconstructed:?} vs {a:?}");
+        }
+    }
+
+    #[test]
     fn test_eval_singular_matrix_emits_s0101() {
         // Collinear matrix: rows are multiples (det = 0)
         let code = r#"
