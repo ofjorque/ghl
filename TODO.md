@@ -482,10 +482,30 @@ real de los Puntos 2 y 3, no un ítem independiente más.
       expone el `Column`/`Series` de polars, y de ahí se puede sacar el slice contiguo
       `&[f64]` (cuando no hay nulos) para pasárselo a `faer`/`pulp` (ya en el árbol de
       dependencias, con SIMD portable) en vez de intrínsecos por arquitectura a mano.
-      Falta: `dot(a, b)` real, y revisar si conviene que `mean`/`sum`/`var`/etc. tengan un
-      camino rápido cuando el `Vector` de entrada ya es `VectorData` sin materializar
-      (hoy siguen pasando por el `Vec<Value>` boxeado vía Deref, correcto pero no rápido
-      — el Punto 1 dejó esto DISPONIBLE, no lo hizo automático).
+      Falta `dot(a, b)` en sí (no existe todavía, ni rápido ni lento).
+  - **Lista concreta de qué sigue en el camino lento (boxeado) después del Punto 1, para
+    que no se pierda cuáles funciones realmente faltan migrar** — el Punto 1 dejó el
+    camino rápido *disponible* (`VectorData::from_f64`/`.column()`), no lo activó en
+    ninguna de estas:
+    - **Los 4 dispatchers compartidos que casi todo lo demás llama, y que por eso son el
+      apalancamiento real** (migrar estos cuatro arregla la mayoría de las funciones de
+      abajo de una): `map_numeric_fn`/`map_string_fn` (recorren `Vec<Value>` elemento a
+      elemento, con recursión para vectores anidados) — usados por `log`/`log2`/`log10`/
+      `exp`/`sqrt`/`abs`/`floor`/`ceil`/`round`/`pow`/`clamp`/`str_upper`/`str_lower`/
+      `str_trim`/`str_len`/`str_contains`/`str_starts`/`str_ends`/`str_replace`/
+      `str_pad`; `cumulative` (usado por `cumsum`/`cumprod`/`cummax`/`cummin`);
+      `sort_vector` (usado por `sort_asc`/`sort_desc`).
+    - **Agregaciones que reducen sobre todo el Vector** (exactamente el tipo de operación
+      que Caso 1.1 mide): `mean`, `sum`, `var`/`std_dev`, `min`, `max`, `median`,
+      `first`, `last`, `n_distinct`.
+    - **Helpers de ventana/posición**: `lag`, `lead`, `rank`, `if_else`, `between`.
+    - **Aritmética/elementwise en `eval.rs`**: broadcasting de escalar contra `Vector`
+      (`+`/`-`/`*`/`/`), los operadores `.+`/`.-`/`.*`/`./` Vector-Vector, y `UnaryNeg`
+      sobre un `Vector` — los tres iteran `Vec<Value>` elemento a elemento hoy.
+    - Ninguna de estas está "mal" — dan el resultado correcto, y son las mismas que ya
+      pasaban por el boxing antes del Punto 1 (ninguna quedó *peor*). Simplemente no
+      son más rápidas todavía. No hace falta migrar las 20+ una por una: empezar por
+      los 4 dispatchers compartidos cubre la mayoría del uso real con el menor esfuerzo.
 - [ ] **Punto 3 — Fusión de `map` sin buffers intermedios en heap (Caso 1.4).** Soporte
       real para `map(x, xi => log(1.0 + exp(-abs(xi))) + sin(xi))` construyendo el
       resultado directo como `VectorData::from_f64` en un solo recorrido, reusando la
