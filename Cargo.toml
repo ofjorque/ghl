@@ -19,3 +19,15 @@ description = "Generalized Hypothesis Language (GHL): High-Performance Statistic
 repository = "https://github.com/ofjorque/ghl"
 readme = "README.md"
 
+# `cargo test`/`cargo build` use this profile by default. Full DWARF debug info
+# (the default `debug = true`) is expensive to link against a dependency tree this
+# heavy (polars-core/polars-lazy/faer) -- several workspace test binaries linking
+# in parallel with full debug info is what turns a `cargo test --workspace` into a
+# multi-GB RAM spike. `debug = "line-tables-only"` keeps file:line info in
+# panics/backtraces (the part actually used day to day) without the full type/
+# variable debug data, cutting link time and memory substantially. Only affects
+# dev/test builds -- `[profile.release]` (unset here, so it's Cargo's own
+# defaults) is untouched.
+[profile.dev]
+debug = "line-tables-only"
+
