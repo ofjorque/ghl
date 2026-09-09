@@ -477,49 +477,78 @@ real de los Puntos 2 y 3, no un ítem independiente más.
     completo del workspace pasan sin cambiar aserciones. Verificado de nuevo a mano con
     `ghl run` sobre `select`/`rename`/`drop`/`mutate`/`fill_na` — comportamiento idéntico
     al de antes de la migración.
-- [ ] **Punto 2 — SIMD real (AVX2/AVX-512/NEON) para dot product y reducciones sobre
-      `Vector` (Caso 1.1).** Ya desbloqueado por el Punto 1: `VectorData::column()`
-      expone el `Column`/`Series` de polars, y de ahí se puede sacar el slice contiguo
-      `&[f64]` (cuando no hay nulos) para pasárselo a `faer`/`pulp` (ya en el árbol de
-      dependencias, con SIMD portable) en vez de intrínsecos por arquitectura a mano.
-      Falta `dot(a, b)` en sí (no existe todavía, ni rápido ni lento).
-  - **Lista concreta de qué sigue en el camino lento (boxeado) después del Punto 1, para
-    que no se pierda cuáles funciones realmente faltan migrar** — el Punto 1 dejó el
-    camino rápido *disponible* (`VectorData::from_f64`/`.column()`), no lo activó en
-    ninguna de estas:
-    - **Los 4 dispatchers compartidos que casi todo lo demás llama, y que por eso son el
-      apalancamiento real** (migrar estos cuatro arregla la mayoría de las funciones de
-      abajo de una): `map_numeric_fn`/`map_string_fn` (recorren `Vec<Value>` elemento a
-      elemento, con recursión para vectores anidados) — usados por `log`/`log2`/`log10`/
-      `exp`/`sqrt`/`abs`/`floor`/`ceil`/`round`/`pow`/`clamp`/`str_upper`/`str_lower`/
-      `str_trim`/`str_len`/`str_contains`/`str_starts`/`str_ends`/`str_replace`/
-      `str_pad`; `cumulative` (usado por `cumsum`/`cumprod`/`cummax`/`cummin`);
-      `sort_vector` (usado por `sort_asc`/`sort_desc`).
-    - **Agregaciones que reducen sobre todo el Vector** (exactamente el tipo de operación
-      que Caso 1.1 mide): `mean`, `sum`, `var`/`std_dev`, `min`, `max`, `median`,
-      `first`, `last`, `n_distinct`.
-    - **Helpers de ventana/posición**: `lag`, `lead`, `rank`, `if_else`, `between`.
-    - **Aritmética/elementwise en `eval.rs`**: broadcasting de escalar contra `Vector`
-      (`+`/`-`/`*`/`/`), los operadores `.+`/`.-`/`.*`/`./` Vector-Vector, y `UnaryNeg`
-      sobre un `Vector` — los tres iteran `Vec<Value>` elemento a elemento hoy.
-    - Ninguna de estas está "mal" — dan el resultado correcto, y son las mismas que ya
-      pasaban por el boxing antes del Punto 1 (ninguna quedó *peor*). Simplemente no
-      son más rápidas todavía. No hace falta migrar las 20+ una por una: empezar por
-      los 4 dispatchers compartidos cubre la mayoría del uso real con el menor esfuerzo.
+- [x] **Punto 2 — SIMD real para `dot()` y reducciones sobre `Vector` (Caso 1.1) — hecho.**
+      `dot(a, b)` (nuevo, no existía ni rápido ni lento) usa `MatrixOps::dot` — `RowRef *
+      ColRef` de `faer` (`row/rowref.rs:63`/`col/colref.rs:67` para los constructores
+      `from_slice` sin copia, `linalg/mat_ops.rs:1005` para el `Mul` que internamente llama
+      a `crate::linalg::matmul::matmul` — el mismo kernel GEMM bloqueado/multinúcleo que ya
+      usa `MatrixOps::mul` de Track 1), no un loop a mano. `VectorData` (`vector_data.rs`)
+      ganó `as_f64_view()` (`&[f64]` sin copia vía `ChunkedArray::cont_slice()` cuando el
+      `Column` ya es `Float64`/un solo chunk/sin nulos; cast+rechunk como fallback si no —
+      sigue evitando el boxing celda por celda), `null_count()` (O(1)), `first_na()`
+      (detecta el primer nulo y su razón sin materializar `Vec<Value>`, solo cuando
+      `null_count() > 0`), y `value_at(i)` (lee una sola celda sin materializar todo).
+  - **Migradas al camino nativo sobre `Column`** (mismo patrón que `compute_agg` de
+    Fase 1, ya probado): `mean`, `sum`, `var` (con lo que `std_dev` sale gratis, sigue
+    delegando en `var`), `min`, `max`, `median`, `first`, `last`.
+  - **Decisión de diseño explícita, no un detalle menor:** `mean`/`sum`/`var`/`min`/`max`/
+    `median` siguen propagando la *razón específica* del primer NA encontrado (ej.
+    `NA:SensorDropout`), no un `NA(None)` genérico — a diferencia de `summarize()`'s
+    agregación por grupo (que sí descarta la razón a propósito, ahí "qué razón gana entre
+    filas de un grupo colapsado" no está definido). Acá no hay esa ambigüedad: un solo
+    `Vector`, un solo NA que encontrar. Este comportamiento ya existía antes de este punto
+    pero **no tenía ningún test que lo fijara** — se agregó
+    `test_mean_sum_preserve_na_reason_over_vector` para que no se pierda en silencio en
+    una futura migración.
+  - **Efecto secundario encontrado y aceptado, no ignorado:** `min()`/`max()` antes
+    forzaban `F64` sin importar el tipo de entrada (`min([1,2,3])` daba `1.0`, no `1`);
+    ahora preservan el dtype nativo del `Column` igual que `sum()` ya hacía y que
+    `summarize()` ya hace — `min([1,2,3])` da `1` (I64). No había ningún test que fijara
+    el comportamiento viejo, y el nuevo es más consistente con el resto del lenguaje, así
+    que se dejó así a propósito en vez de forzar F64 artificialmente para "no cambiar
+    nada".
+  - **`n_distinct()` — explícitamente NO migrado en este punto.** El actual usa
+    `format!("{:?}", it)` sobre los items boxeados como clave de dedup, lo que
+    **distingue razones de NA distintas** como valores distintos (`NA:A` ≠ `NA:B`). El
+    `.n_unique()` nativo de polars no sabe nada del side-channel de razones — migrarlo
+    ingenuamente perdería esa distinción en silencio. Queda en el camino boxeado
+    (correcto, no rápido) hasta que se decida si esa distinción vale la pena preservar
+    acá también.
+  - Tests nuevos: `test_dot_product_real_computation`,
+    `test_dot_product_rejects_mismatched_lengths`,
+    `test_dot_product_propagates_na_with_reason`,
+    `test_mean_sum_preserve_na_reason_over_vector` (`lib.rs`). Las 54 pruebas de
+    `ghl-runtime` y el test suite completo del workspace pasan sin cambiar aserciones
+    preexistentes. Verificado de punta a punta con `ghl run`.
+  - **Medido (`spike_vector_dot_latency.rs`, 10⁷ elementos — la escala que pide Caso
+    1.1):** `dot()` a mano sobre `Vec<Value>` boxeado, 138-144ms → `dot()` real (`faer`,
+    `VectorData::as_f64_view`), 9.7-9.9ms — **~14-15x**, estable en 3 corridas.
+  - **Lista actualizada de qué sigue en el camino lento (boxeado)** — lo que quedó
+    explícitamente afuera de este punto (ver arriba para el detalle de por qué cada uno):
+    - `n_distinct()` (distinción de razones de NA, ver arriba).
+    - Los 4 dispatchers compartidos — territorio del **Punto 3**: `map_numeric_fn`/
+      `map_string_fn` (`log`/`sqrt`/`exp`/etc., `str_upper`/etc.), `cumulative`
+      (`cumsum`/`cumprod`/`cummax`/`cummin`), `sort_vector` (`sort_asc`/`sort_desc`).
+    - `lag`, `lead`, `rank`, `if_else`, `between`.
+    - Aritmética/elementwise en `eval.rs`: broadcasting de escalar contra `Vector`, los
+      operadores `.+`/`.-`/`.*`/`./` Vector-Vector, y `UnaryNeg` sobre un `Vector`.
+    - Ninguna de estas quedó peor que antes — dan el resultado correcto, simplemente no
+      están en el camino rápido todavía.
 - [ ] **Punto 3 — Fusión de `map` sin buffers intermedios en heap (Caso 1.4).** Soporte
       real para `map(x, xi => log(1.0 + exp(-abs(xi))) + sin(xi))` construyendo el
       resultado directo como `VectorData::from_f64` en un solo recorrido, reusando la
       maquinaria de acceso a slice contiguo del Punto 2.
-- [ ] **Punto 4 — Superficie de sintaxis:** `random_uniform(n)`, `dot(a, b)`, `map(x, f)`
-      como funciones libres/pipe (`x |> map(f)`), **no** `.dot(&b)`/`x.map(...)` como
-      escribe `benchmarks/suites/01-vector-and-matrix-algebra.md` hoy: GHL no tiene
-      sintaxis de método (`.foo()`) en absoluto, solo pipes y funciones libres — ese doc
-      va a necesitar la misma reescritura que ya le hizo Fase 1 al de DataFrames
-      ("Mismatch de sintaxis del doc"). `random_uniform` además roza a propósito con
-      Fase 5 ("PRNG reproducible bit-a-bit... con `PRNG::seed(seed)`") — una versión
-      mínima ahora (`rand::thread_rng()`, no reproducible entre corridas) es aceptable
-      para desbloquear los benchmarks de Suite 01, con la reproducibilidad real quedando
-      para Fase 5.
+- [ ] **Punto 4 — Superficie de sintaxis:** `random_uniform(n)`, `map(x, f)` como
+      funciones libres/pipe (`x |> map(f)`), **no** `.map(...)` como escribe
+      `benchmarks/suites/01-vector-and-matrix-algebra.md` hoy: GHL no tiene sintaxis de
+      método (`.foo()`) en absoluto, solo pipes y funciones libres — ese doc va a
+      necesitar la misma reescritura que ya le hizo Fase 1 al de DataFrames ("Mismatch de
+      sintaxis del doc"). `dot(a, b)` ya salió del Punto 2 (función libre, como corresponde
+      — el `.dot(&b)` del doc va a necesitar la reescritura igual). `random_uniform` además
+      roza a propósito con Fase 5 ("PRNG reproducible bit-a-bit... con `PRNG::seed(seed)`")
+      — una versión mínima ahora (`rand::thread_rng()`, no reproducible entre corridas) es
+      aceptable para desbloquear los benchmarks de Suite 01, con la reproducibilidad real
+      quedando para Fase 5.
 
 ## Fase 4 — Paralelismo transversal (RFC 05)
 Se apoya en `rayon` (Fase 0); habilita el resto de casos de Suite 03.

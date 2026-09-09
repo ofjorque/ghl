@@ -19,6 +19,7 @@
 
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
+use ghl_diagnostics::Diagnostic;
 use polars_core::prelude::*;
 
 use crate::na_reasons::NaReasonTable;
@@ -86,6 +87,90 @@ impl VectorData {
 
     pub fn na_reasons(&self) -> &Arc<NaReasonTable> {
         &self.na_reasons
+    }
+
+    /// O(1) — Arrow tracks this in the array metadata, no scan needed.
+    pub fn null_count(&self) -> usize {
+        self.column.null_count()
+    }
+
+    /// Reads a single cell without materializing the whole vector (`first()`/`last()`
+    /// used to pay a full `O(n)` `Deref` just to return one element) -- still
+    /// reason-aware, same as reading through the fully materialized `Vec<Value>` would be.
+    /// Deliberately *not* named `get` -- `VectorData` derefs to `Vec<Value>`, whose own
+    /// `.get()` returns `Option<&Value>` and is already relied on elsewhere (`rank()`,
+    /// `if_else()`'s `broadcast_get`); an inherent method of the same name would have
+    /// silently shadowed that Deref-provided one at every existing call site instead of
+    /// just the ones meant to use this.
+    pub fn value_at(&self, index: usize) -> Option<Value> {
+        let av = self.column.get(index).ok()?;
+        Some(polars_bridge::any_value_to_value(&av, VECTOR_COL, index, &self.na_reasons))
+    }
+
+    /// If this vector has any null, returns `Some(Value::NA(reason))` for the *first* one
+    /// found (by row position), preserving that cell's recorded `NA:reason` if it has one.
+    /// Returns `None` when there are no nulls at all. `null_count()` (O(1)) is checked
+    /// first, so the boolean scan below (still no per-cell `Value` boxing -- it walks a
+    /// `BooleanChunked`, not `Vec<Value>`) only runs when it's actually needed. This is
+    /// what lets `mean()`/`sum()`/`dot()`/etc. keep propagating a *specific* NA reason
+    /// (TODO.md Fase 3, Punto 2 -- an explicit decision, not an oversight: unlike
+    /// `summarize()`'s per-group aggregation, a single `Vector` has no "which group's
+    /// reason wins" ambiguity to hide behind).
+    pub fn first_na(&self) -> Option<Value> {
+        if self.column.null_count() == 0 {
+            return None;
+        }
+        let mask = self.column.is_null();
+        let row = (0..mask.len()).find(|&i| mask.get(i) == Some(true))?;
+        let reason = self.na_reasons.get(VECTOR_COL, row).map(|s| s.to_string());
+        Some(Value::NA(reason))
+    }
+
+    /// A flat `&[f64]` view for numeric fast paths (`dot()`, and future SIMD reductions),
+    /// avoiding `Vec<Value>` boxing entirely either way. Callers must have already checked
+    /// `null_count() == 0` (`first_na()` returns `None`) -- this does not itself handle
+    /// NA propagation, by design, so the Kleene-with-reason logic stays in one place at
+    /// the call site rather than duplicated here.
+    ///
+    /// Fast path (common case: already `Float64`, one Arrow chunk, no nulls): zero-copy,
+    /// borrows straight from the underlying buffer. Slower fallback (e.g. an `Int64`
+    /// vector, or one with more than one chunk): casts to `Float64` and/or rechunks --
+    /// real work, but still far cheaper than boxing through `Vec<Value>`, since it never
+    /// allocates a `Value` enum per cell.
+    pub fn as_f64_view(&self) -> Result<NumericView<'_>, Diagnostic> {
+        if self.column.dtype() == &DataType::Float64 {
+            if let Ok(ca) = self.column.f64() {
+                if let Ok(slice) = ca.cont_slice() {
+                    return Ok(NumericView::Borrowed(slice));
+                }
+            }
+        }
+        let casted = self.column.cast(&DataType::Float64).map_err(|e| {
+            Diagnostic::compute_error("C0202", format!("expected a numeric Vector: {e}"))
+        })?;
+        let ca = casted.f64().map_err(|e| {
+            Diagnostic::compute_error("C0210", format!("internal error extracting f64 data: {e}"))
+        })?;
+        let rechunked = ca.rechunk();
+        let slice = rechunked.cont_slice().map_err(|e| {
+            Diagnostic::compute_error("C0210", format!("internal error: expected no nulls after null_count() check: {e}"))
+        })?;
+        Ok(NumericView::Owned(slice.to_vec()))
+    }
+}
+
+/// See `VectorData::as_f64_view`.
+pub enum NumericView<'a> {
+    Borrowed(&'a [f64]),
+    Owned(Vec<f64>),
+}
+
+impl NumericView<'_> {
+    pub fn as_slice(&self) -> &[f64] {
+        match self {
+            NumericView::Borrowed(s) => s,
+            NumericView::Owned(v) => v,
+        }
     }
 }
 

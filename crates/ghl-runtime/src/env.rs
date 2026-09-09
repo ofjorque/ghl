@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
+use polars_core::prelude::PolarsError;
+use crate::polars_bridge;
 use crate::value::Value;
 use crate::vector_data::VectorData;
 
@@ -184,6 +186,7 @@ impl RuntimeEnv {
 
         // Dense linear algebra (TODO.md Fase 3, faer-backed) -- accessor functions
         // instead of field syntax, since GHL's grammar has no `.field` access.
+        env.set("dot".into(),          Value::NativeFn(native_dot));
         env.set("qr".into(),           Value::NativeFn(native_qr));
         env.set("qr_q".into(),         Value::NativeFn(native_qr_q));
         env.set("qr_r".into(),         Value::NativeFn(native_qr_r));
@@ -268,6 +271,31 @@ impl RuntimeEnv {
 
 // Built-in Native Functions
 
+/// Shared native-reduce path for `mean`/`sum`/`min`/`max`/`median` (TODO.md Fase 3, Track
+/// 2, Punto 2): reduces on `VectorData`'s underlying `Column` directly (Arrow-vectorized,
+/// no `Vec<Value>` boxing) instead of the boxed loop the pre-Punto-2 versions used.
+/// Kleene NA propagation (RFC 02 sect2.4) preserves the *specific* reason of the first NA
+/// found (`VectorData::first_na`, an O(1) check in the common no-NA case) -- an explicit
+/// decision documented in TODO.md, not an oversight: unlike `summarize()`'s per-group
+/// aggregation, a single `Vector` has no "which group's reason wins" ambiguity to hide
+/// behind, so there's no reason to throw the specific reason away here.
+fn vector_native_reduce(vd: &crate::vector_data::VectorData, kind: &str) -> Result<Value, Diagnostic> {
+    if let Some(na) = vd.first_na() {
+        return Ok(na);
+    }
+    let column = vd.column();
+    let reduce_err = |e: PolarsError| Diagnostic::compute_error("C0210", format!("`{kind}()` failed: {e}"));
+    let scalar = match kind {
+        "mean" => column.mean_reduce(),
+        "sum" => column.sum_reduce(),
+        "min" => column.min_reduce(),
+        "max" => column.max_reduce(),
+        "median" => column.median_reduce(),
+        other => unreachable!("vector_native_reduce: unknown kind `{other}`"),
+    }.map_err(reduce_err)?;
+    Ok(polars_bridge::any_value_to_plain_value(scalar.value()))
+}
+
 pub(crate) fn native_mean(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let vec_val = args.first().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`mean()` requires at least 1 argument")
@@ -275,29 +303,11 @@ pub(crate) fn native_mean(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match vec_val {
         Value::ColRef(name) => Ok(Value::AggSpec { kind: "mean".into(), col: Some(name.clone()) }),
-        Value::Vector(items) => {
-            if items.is_empty() {
+        Value::Vector(vd) => {
+            if vd.is_empty() {
                 return Ok(Value::NA(Some("EmptyVector".into())));
             }
-
-            let mut sum = 0.0;
-            let mut count = 0;
-
-            for item in items.iter() {
-                if let Value::NA(r) = item {
-                    // Under GHL Kleene semantics: NA propagates through mean unless skip_na is active
-                    return Ok(Value::NA(r.clone()));
-                } else if let Some(x) = item.as_f64() {
-                    sum += x;
-                    count += 1;
-                }
-            }
-
-            if count == 0 {
-                Ok(Value::NA(None))
-            } else {
-                Ok(Value::F64(sum / count as f64))
-            }
+            vector_native_reduce(vd, "mean")
         }
         _ => Err(Diagnostic::compute_error(
             "C0202",
@@ -313,26 +323,13 @@ pub(crate) fn native_sum(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match vec_val {
         Value::ColRef(name) => Ok(Value::AggSpec { kind: "sum".into(), col: Some(name.clone()) }),
-        Value::Vector(items) => {
-            let mut sum = 0.0;
-            let mut has_float = false;
-
-            for item in items.iter() {
-                if let Value::NA(r) = item {
-                    return Ok(Value::NA(r.clone()));
-                } else if let Some(x) = item.as_f64() {
-                    if matches!(item, Value::F64(_)) {
-                        has_float = true;
-                    }
-                    sum += x;
-                }
+        Value::Vector(vd) => {
+            if vd.is_empty() {
+                // Matches the old boxed loop's `sum = 0.0; has_float = false` starting
+                // state: an empty sum is the additive identity, not a missing value.
+                return Ok(Value::I64(0));
             }
-
-            if has_float {
-                Ok(Value::F64(sum))
-            } else {
-                Ok(Value::I64(sum as i64))
-            }
+            vector_native_reduce(vd, "sum")
         }
         _ => Err(Diagnostic::compute_error(
             "C0202",
@@ -348,28 +345,19 @@ pub(crate) fn native_var(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match vec_val {
         Value::ColRef(name) => Ok(Value::AggSpec { kind: "var".into(), col: Some(name.clone()) }),
-        Value::Vector(items) => {
-            if items.len() < 2 {
+        Value::Vector(vd) => {
+            if vd.len() < 2 {
                 return Err(Diagnostic::statistical_warning(
                     "SW0002",
                     "Sample variance requires at least N=2 observations (N-1 degrees of freedom)",
                 ));
             }
-
-            let mut numbers = Vec::with_capacity(items.len());
-            for item in items.iter() {
-                if let Value::NA(r) = item {
-                    return Ok(Value::NA(r.clone()));
-                } else if let Some(x) = item.as_f64() {
-                    numbers.push(x);
-                }
+            if let Some(na) = vd.first_na() {
+                return Ok(na);
             }
-
-            let mean = numbers.iter().sum::<f64>() / numbers.len() as f64;
-            let sum_sq = numbers.iter().map(|x| (x - mean).powi(2)).sum::<f64>();
-            let var = sum_sq / (numbers.len() - 1) as f64;
-
-            Ok(Value::F64(var))
+            let reduce_err = |e: PolarsError| Diagnostic::compute_error("C0210", format!("`var()` failed: {e}"));
+            let scalar = vd.column().var_reduce(1).map_err(reduce_err)?;
+            Ok(polars_bridge::any_value_to_plain_value(scalar.value()))
         }
         _ => Err(Diagnostic::compute_error(
             "C0202",
@@ -397,26 +385,11 @@ pub(crate) fn native_min(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match vec_val {
         Value::ColRef(name) => Ok(Value::AggSpec { kind: "min".into(), col: Some(name.clone()) }),
-        Value::Vector(items) => {
-            let mut min_val = f64::INFINITY;
-            let mut found = false;
-
-            for item in items.iter() {
-                if let Value::NA(r) = item {
-                    return Ok(Value::NA(r.clone()));
-                } else if let Some(x) = item.as_f64() {
-                    if x < min_val {
-                        min_val = x;
-                        found = true;
-                    }
-                }
+        Value::Vector(vd) => {
+            if vd.is_empty() {
+                return Ok(Value::NA(None));
             }
-
-            if found {
-                Ok(Value::F64(min_val))
-            } else {
-                Ok(Value::NA(None))
-            }
+            vector_native_reduce(vd, "min")
         }
         _ => Err(Diagnostic::compute_error("C0202", "`min()` expects a Vector")),
     }
@@ -429,28 +402,48 @@ pub(crate) fn native_max(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match vec_val {
         Value::ColRef(name) => Ok(Value::AggSpec { kind: "max".into(), col: Some(name.clone()) }),
-        Value::Vector(items) => {
-            let mut max_val = f64::NEG_INFINITY;
-            let mut found = false;
-
-            for item in items.iter() {
-                if let Value::NA(r) = item {
-                    return Ok(Value::NA(r.clone()));
-                } else if let Some(x) = item.as_f64() {
-                    if x > max_val {
-                        max_val = x;
-                        found = true;
-                    }
-                }
+        Value::Vector(vd) => {
+            if vd.is_empty() {
+                return Ok(Value::NA(None));
             }
-
-            if found {
-                Ok(Value::F64(max_val))
-            } else {
-                Ok(Value::NA(None))
-            }
+            vector_native_reduce(vd, "max")
         }
         _ => Err(Diagnostic::compute_error("C0202", "`max()` expects a Vector")),
+    }
+}
+
+/// `dot(a, b)` — dot product of two equal-length numeric `Vector`s (TODO.md Fase 3, Track
+/// 2, Punto 2, Caso 1.1). Real SIMD via `MatrixOps::dot` (faer's blocked GEMM kernel via
+/// `RowRef * ColRef`), not a hand-rolled loop -- `VectorData::as_f64_view` gets to that
+/// kernel's input without boxing through `Vec<Value>` either way (zero-copy when both
+/// vectors are already `Float64`, single-chunk, no nulls; a cast/rechunk otherwise, still
+/// far cheaper than per-cell `Value` boxing). Kleene NA propagation: a NA anywhere in
+/// either vector makes the whole dot product NA, preserving that cell's specific reason
+/// (`VectorData::first_na`), same rationale as `mean()`/`sum()`/etc. above.
+fn native_dot(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let a = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`dot()` requires 2 arguments"))?;
+    let b = args.get(1).ok_or_else(|| Diagnostic::compute_error("C0201", "`dot()` requires 2 arguments"))?;
+
+    match (a, b) {
+        (Value::Vector(va), Value::Vector(vb)) => {
+            if va.len() != vb.len() {
+                return Err(Diagnostic::statistical_error(
+                    "S0412",
+                    format!("`dot()`: vectors have different lengths ({} vs {})", va.len(), vb.len()),
+                ));
+            }
+            if let Some(na) = va.first_na().or_else(|| vb.first_na()) {
+                return Ok(na);
+            }
+            let view_a = va.as_f64_view()?;
+            let view_b = vb.as_f64_view()?;
+            let result = crate::matrix::MatrixOps::dot(view_a.as_slice(), view_b.as_slice())?;
+            Ok(Value::F64(result))
+        }
+        (l, r) => Err(Diagnostic::compute_error(
+            "C0202",
+            format!("`dot()` expects two Vectors, found `{}` and `{}`", l.type_name(), r.type_name()),
+        )),
     }
 }
 
@@ -470,7 +463,7 @@ pub(crate) fn native_first(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`first()` requires 1 argument"))?;
     match v {
         Value::ColRef(name) => Ok(Value::AggSpec { kind: "first".into(), col: Some(name.clone()) }),
-        Value::Vector(items) => Ok(items.first().cloned().unwrap_or(Value::NA(None))),
+        Value::Vector(vd) => Ok(vd.value_at(0).unwrap_or(Value::NA(None))),
         other => Err(Diagnostic::compute_error("C0202", format!("`first()` expects a Vector, found `{}`", other.type_name()))),
     }
 }
@@ -479,7 +472,7 @@ pub(crate) fn native_last(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`last()` requires 1 argument"))?;
     match v {
         Value::ColRef(name) => Ok(Value::AggSpec { kind: "last".into(), col: Some(name.clone()) }),
-        Value::Vector(items) => Ok(items.last().cloned().unwrap_or(Value::NA(None))),
+        Value::Vector(vd) => Ok(vd.value_at(vd.len().saturating_sub(1)).unwrap_or(Value::NA(None))),
         other => Err(Diagnostic::compute_error("C0202", format!("`last()` expects a Vector, found `{}`", other.type_name()))),
     }
 }
@@ -488,22 +481,11 @@ pub(crate) fn native_median(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`median()` requires 1 argument"))?;
     match v {
         Value::ColRef(name) => Ok(Value::AggSpec { kind: "median".into(), col: Some(name.clone()) }),
-        Value::Vector(items) => {
-            let mut nums: Vec<f64> = Vec::with_capacity(items.len());
-            for it in items.iter() {
-                if let Value::NA(r) = it {
-                    return Ok(Value::NA(r.clone()));
-                } else if let Some(x) = it.as_f64() {
-                    nums.push(x);
-                }
-            }
-            if nums.is_empty() {
+        Value::Vector(vd) => {
+            if vd.is_empty() {
                 return Ok(Value::NA(None));
             }
-            nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            let mid = nums.len() / 2;
-            let med = if nums.len() % 2 == 0 { (nums[mid - 1] + nums[mid]) / 2.0 } else { nums[mid] };
-            Ok(Value::F64(med))
+            vector_native_reduce(vd, "median")
         }
         other => Err(Diagnostic::compute_error("C0202", format!("`median()` expects a Vector, found `{}`", other.type_name()))),
     }

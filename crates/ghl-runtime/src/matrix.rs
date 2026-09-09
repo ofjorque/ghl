@@ -212,6 +212,23 @@ impl MatrixOps {
         let values: Vec<f64> = eig.S().column_vector().iter().copied().collect();
         Ok((values, from_faer_mat(eig.U())))
     }
+
+    /// Dot product of two equal-length vectors (TODO.md Fase 3, Track 2, Punto 2 --
+    /// Caso 1.1). `RowRef * ColRef` dispatches to the same blocked GEMM kernel
+    /// `mul()`/`Mat * Mat` already uses (`crate::linalg::matmul::matmul` internally),
+    /// which is real SIMD, not a hand-rolled loop -- and `RowRef::from_slice`/
+    /// `ColRef::from_slice` build those views without copying `a`/`b` at all.
+    pub fn dot(a: &[f64], b: &[f64]) -> Result<f64, Diagnostic> {
+        if a.len() != b.len() {
+            return Err(Diagnostic::statistical_error(
+                "S0412",
+                format!("`dot()`: vectors have different lengths ({} vs {})", a.len(), b.len()),
+            ));
+        }
+        let row = faer::RowRef::from_slice(a);
+        let col = faer::ColRef::from_slice(b);
+        Ok(row * col)
+    }
 }
 
 /// Shared symmetry check for `cholesky()`/`eigen()` -- both require a symmetric input and

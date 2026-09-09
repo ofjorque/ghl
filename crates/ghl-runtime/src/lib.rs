@@ -320,6 +320,64 @@ mod tests {
     }
 
     #[test]
+    fn test_dot_product_real_computation() {
+        // TODO.md Fase 3, Track 2, Punto 2 -- [1,2,3] . [4,5,6] = 4+10+18 = 32.
+        let code = r#"
+            let a = [1.0, 2.0, 3.0];
+            let b = [4.0, 5.0, 6.0];
+            let d = dot(a, b);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("d"), Some(Value::F64(32.0)));
+    }
+
+    #[test]
+    fn test_dot_product_rejects_mismatched_lengths() {
+        let code = r#"
+            let a = [1.0, 2.0, 3.0];
+            let b = [4.0, 5.0];
+            let d = dot(a, b);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("mismatched lengths must fail");
+        assert_eq!(err.code, "S0412");
+    }
+
+    #[test]
+    fn test_dot_product_propagates_na_with_reason() {
+        let code = r#"
+            let a = [1.0, NA:SensorDropout, 3.0];
+            let b = [4.0, 5.0, 6.0];
+            let d = dot(a, b);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("d"), Some(Value::NA(Some("SensorDropout".into()))));
+    }
+
+    #[test]
+    fn test_mean_sum_preserve_na_reason_over_vector() {
+        // Regression lock for TODO.md Fase 3 Punto 2's explicit design decision: a
+        // standalone mean()/sum() over a Vector propagates the *specific* NA reason (not
+        // a generic NA(None)) -- this was true before Punto 2's native-reduce migration
+        // too, but was never actually asserted by a test until now.
+        let code = r#"
+            let v = [1.0, NA:SensorDropout, 3.0];
+            let m = mean(v);
+            let s = sum(v);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("m"), Some(Value::NA(Some("SensorDropout".into()))));
+        assert_eq!(interp.env.get("s"), Some(Value::NA(Some("SensorDropout".into()))));
+    }
+
+    #[test]
     fn test_eval_singular_matrix_emits_s0101() {
         // Collinear matrix: rows are multiples (det = 0)
         let code = r#"
