@@ -978,11 +978,25 @@ inventar sintaxis de path nueva; se decide en el plan de cada punto.
       clona `Vec`/`HashMap` en casi cada verbo, es lo opuesto a CoW.
 
 ## Fase 6 — Modelado estadístico avanzado (`benchmarks/suites/03`)
-Depende de Fase 5 (RNG/distribuciones/arenas) y de Fase 3 (solver matricial).
+Depende de Fase 5 (RNG/distribuciones/arenas) y de Fase 3 (solver matricial). **Depende
+también, probablemente para 2 de sus 3 casos, del hallazgo de iteración de Fase 7** — el
+umbral real medido de recursión sin crash en release está entre 1.000-1.500 niveles con
+la función más barata posible; el Caso 3.1 (100.000 iteraciones) está claramente por
+encima, y el Caso 3.4 (500 iteraciones, pero con mucho más trabajo por nivel que la
+función usada para medir) queda en zona de riesgo real, no confirmado a salvo. Solo el
+Caso 3.2 (IRLS, ~10-50 iteraciones típicas) tiene margen razonable. Ver el ítem de
+Fase 7 para el detalle de la medición.
 
-- [ ] Gibbs sampler jerárquico de ejemplo (Caso 3.1) corriendo de punta a punta.
-- [ ] IRLS para GLM / regresión logística sobre N=1M, P=40 (Caso 3.2).
-- [ ] Algoritmo EM para mezclas gaussianas con log-sum-exp estable (Caso 3.4).
+- [ ] Gibbs sampler jerárquico de ejemplo (Caso 3.1) corriendo de punta a punta. **Bloqueado**
+      por el hallazgo de iteración de Fase 7 (100.000 iteraciones, muy por encima del
+      umbral medido de ~1.000-1.500).
+- [ ] IRLS para GLM / regresión logística sobre N=1M, P=40 (Caso 3.2). Probablemente no
+      bloqueado (pocas iteraciones hasta converger), pero no confirmado con la
+      complejidad real del algoritmo.
+- [ ] Algoritmo EM para mezclas gaussianas con log-sum-exp estable (Caso 3.4). **En
+      riesgo** — 500 iteraciones está cerca del umbral medido con una función mínima;
+      una iteración real de EM (más trabajo por nivel) probablemente baja el umbral
+      efectivo por debajo de 500.
 
 ## Fase 7 — Sistema de módulos y superficie de sintaxis estática
 El token `use` ya existe en el lexer (`crates/ghl-syntax/src/lexer.rs`) pero el parser
@@ -995,23 +1009,42 @@ no lo maneja — bloquea cualquier ejemplo de la documentación que use `use std
       referencias (`&`, `&mut`) y `Option`/`Result` con `.unwrap()` — aparecen en
       los ejemplos de los RFCs pero son un cambio grande al sistema de tipos;
       decidir alcance real antes de implementar.
-- [ ] **Iteración real sin overflow de la pila nativa** — encontrado al investigar Fase 5
+- [ ] **Iteración real sin overflow de la pila nativa — hallazgo más grave de lo que
+      quedó documentado al principio, corregido tras medir con precisión (no solo a
+      100.000, el primer número probado).** Encontrado al investigar Fase 5
       (PRNG/distribuciones), no en el alcance de sus 4 puntos pero bloquea escribir
       Gibbs sampler/EM idiomático en GHL (Suite 03, Casos 3.1/3.4: "se evalúa la
       capacidad de escribir el algoritmo directamente"). GHL **no tiene ningún
       constructo de iteración** (`for`/`while` no existen en `ghl-syntax/src/ast.rs`) y
       el único mecanismo de repetición, la recursión de funciones, **no tiene
       tail-call optimization** — `call_value`'s rama `Closure` (`eval.rs`) llama a
-      `self.eval_expr(&body)` de forma directa, no en cola. Confirmado con un crash
-      real, no solo teórico: una función recursiva de 100.000 llamadas (la escala
-      exacta del Caso 3.1) revienta el intérprete hoy (`thread 'main' has overflowed
-      its stack`). No bloquea PRNG/distribuciones en sí, que pueden exponerse como
-      funciones nativas de una sola llamada (mismo patrón que `random_uniform`/
-      `bootstrap_mean`) sin que el usuario escriba un loop en GHL — se retoma cuando
-      Fase 6 lo necesite de verdad para los ejemplos de punta a punta. **Bloquea
-      directamente el Punto 3 de Fase 5 (Arenas)** — no se puede tener "bucles
-      iterativos con cero allocs por iteración" sin tener bucles; encontrado *después*
-      de fijar el orden interno de Fase 5, corregido ahí también.
+      `self.eval_expr(&body)` de forma directa, no en cola.
+    - **Umbral real medido** (función recursiva mínima, `count_down(n)`, un solo `if` +
+      una llamada recursiva — el caso más barato posible en pila por nivel): en el CLI
+      de **release**, `n=1000` corre bien, `n=1500` ya revienta
+      (`thread 'main' has overflowed its stack`) — el cruce real está entre 1.000 y
+      1.500, no a 100.000 como sugería la primera medición (que solo confirmó que
+      100.000 — muy por encima del umbral real — también revienta, sin acotar dónde
+      empezaba el problema). En el binario de **debug** el umbral es todavía más bajo:
+      revienta ya entre `n=50` (anda) y `n=100` (revienta).
+    - **Esto cambia la evaluación de qué tan bloqueado queda Fase 6 en su conjunto, no
+      solo el Caso 3.1:** el Gibbs sampler (100.000 iteraciones) está muy por encima
+      del umbral, claramente bloqueado. El EM del Caso 3.4 (500 iteraciones) queda
+      **en zona de riesgo real**, no claramente a salvo — 500 < 1.000 con la función
+      mínima de prueba, pero cada iteración real de EM hace mucho más trabajo por nivel
+      (más operaciones matriciales, más llamadas a `eval_expr` anidadas) que un `if` +
+      una resta, lo que consume más pila por nivel de recursión GHL y baja el umbral
+      efectivo — no hay garantía de que 500 iteraciones reales quepan. El IRLS del
+      Caso 3.2 (~10-50 iteraciones típicas hasta converger) es el único con margen
+      razonable, aunque tampoco medido con la complejidad real del algoritmo.
+    - No bloquea PRNG/distribuciones en sí, que pueden exponerse como funciones
+      nativas de una sola llamada (mismo patrón que `random_uniform`/`bootstrap_mean`)
+      sin que el usuario escriba un loop en GHL. **Bloquea directamente el Punto 3 de
+      Fase 5 (Arenas)** — no se puede tener "bucles iterativos con cero allocs por
+      iteración" sin tener bucles — y, dado el umbral real medido, probablemente
+      bloquea **la mayoría de Fase 6** también, no solo el Caso 3.1 como se pensó al
+      principio (ver la dependencia agregada en Fase 6). Encontrado *después* de fijar
+      el orden interno de Fase 5, corregido ahí también.
 
 ## Fase 8 — Backend AOT y distribución (`benchmarks/suites/04`, RFC 03 §3.2)
 Puede avanzar en paralelo a partir de Fase 0; no depende de las fases de datos/estadística.
