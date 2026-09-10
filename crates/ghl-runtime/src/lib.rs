@@ -1353,6 +1353,55 @@ mod tests {
     }
 
     #[test]
+    fn test_while_loop_accumulates_via_assignment() {
+        // The "real" fix the recursion-depth finding was ultimately asking for: actual
+        // imperative iteration + mutable reassignment, not just TCO over recursion.
+        let code = r#"
+            let mut i = 0;
+            let mut acc = 0;
+            while i < 10 {
+                acc = acc + i;
+                i = i + 1;
+            };
+            let result = acc;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("result"), Some(Value::I64(45)));
+    }
+
+    #[test]
+    fn test_assign_rejects_undeclared_variable() {
+        // Interpreter-level check (RuntimeEnv::assign returns false) -- exercised
+        // directly, independent of whether the type checker ran first.
+        let code = r#"x = 1;"#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("undeclared assignment must fail");
+        assert_eq!(err.code, "C0101");
+    }
+
+    #[test]
+    fn test_while_handles_deep_iteration_without_stack_growth() {
+        // Unlike the TCO trampoline (eval.rs), a `while` loop never recurses into Rust
+        // to begin with, so it was never at risk of the ~1,000-1,500 crash threshold
+        // TCO was built to work around -- this is a structurally different, simpler
+        // fix, not just another way to reach the same result.
+        let code = r#"
+            let mut i = 0;
+            while i < 2000000 {
+                i = i + 1;
+            };
+            let result = i;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("result"), Some(Value::I64(2_000_000)));
+    }
+
+    #[test]
     fn test_eval_dataframe_filter_predicate() {
         let code = r#"
             let df = dataframe {

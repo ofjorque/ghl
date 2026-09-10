@@ -150,6 +150,56 @@ mod tests {
     }
 
     #[test]
+    fn test_typecheck_reject_non_mut_assignment() {
+        // The first real use of `is_mut` (tracked since Fase 0, never enforced until
+        // now) -- reassigning a `let` binding declared without `mut` must be rejected.
+        let code = r#"
+            let x = 1;
+            x = 2;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh");
+        assert!(res.is_err(), "Assigning to a non-mut binding must be rejected");
+        let diags = res.unwrap_err();
+        assert!(diags.iter().any(|d| d.code == "C0104"));
+    }
+
+    #[test]
+    fn test_typecheck_reject_assign_to_undeclared() {
+        let code = r#"x = 1;"#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh");
+        assert!(res.is_err(), "Assigning to an undeclared variable must be rejected");
+        let diags = res.unwrap_err();
+        assert!(diags.iter().any(|d| d.code == "C0101"));
+    }
+
+    #[test]
+    fn test_typecheck_allow_mut_assignment() {
+        let code = r#"
+            let mut x = 1;
+            x = 2;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh");
+        assert!(res.is_ok(), "Assigning to a mut binding of the same type must be allowed");
+    }
+
+    #[test]
+    fn test_typecheck_reject_while_non_bool_condition() {
+        let code = r#"
+            while 5 {
+                1;
+            };
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh");
+        assert!(res.is_err(), "A non-bool while condition must be rejected");
+        let diags = res.unwrap_err();
+        assert!(diags.iter().any(|d| d.code == "C0102"));
+    }
+
+    #[test]
     fn test_typecheck_vector_na_preserves_int() {
         // Anti-Python: NA does not degrade Vector[I64] to Vector[F64]
         let code = r#"let v: Vector[i64] = [1, 2, NA, NA:SensorDropout, 5];"#;

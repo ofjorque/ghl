@@ -154,12 +154,22 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 .then_ignore(just(Token::Semicolon))
                 .map_with_span(|e, span| Stmt::new(StmtKind::Return(e), span));
 
+            // `name = value;` -- reassignment, distinct from `let name = value;`. Must
+            // be tried before `expr_stmt` below: a bare identifier also parses as a
+            // valid (if pointless as a statement) expression, so without this ordering
+            // `expr_stmt` would consume the identifier and then choke on the `=`.
+            let assign_stmt = select! { Token::Ident(name) => name }
+                .then_ignore(just(Token::Eq))
+                .then(expr.clone())
+                .then_ignore(just(Token::Semicolon))
+                .map_with_span(|(name, value), span| Stmt::new(StmtKind::Assign { name, value }, span));
+
             let expr_stmt = expr
                 .clone()
                 .then_ignore(just(Token::Semicolon))
                 .map_with_span(|e, span| Stmt::new(StmtKind::Expr(e), span));
 
-            let_stmt.or(return_stmt).or(expr_stmt)
+            let_stmt.or(return_stmt).or(assign_stmt).or(expr_stmt)
         };
 
         // Block: { stmt*; expr? }
@@ -234,6 +244,23 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 )
             });
 
+        // While expression: while cond block
+        let while_expr = just(Token::While)
+            .map_with_span(|_, span| span)
+            .then(expr.clone())
+            .then(block.clone())
+            .map(|((while_span, cond), body)| {
+                let start = while_span.start;
+                let end = body.span.end;
+                Expr::new(
+                    ExprKind::While {
+                        cond: Box::new(cond),
+                        body: Box::new(body),
+                    },
+                    start..end,
+                )
+            });
+
         let atom = val
             .or(parenthesized)
             .or(vector_literal)
@@ -243,6 +270,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .or(block)
             .or(if_expr)
             .or(match_expr)
+            .or(while_expr)
             .boxed();
 
         // Call argument: either `name = expr` (named) or a plain positional `expr`.
@@ -488,11 +516,19 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         .then_ignore(just(Token::Semicolon).or_not())
         .map_with_span(|e, span| Stmt::new(StmtKind::Return(e), span));
 
+    // See the same rule in `expr_parser()`'s block-statement grammar for why this must
+    // be tried before `expr_stmt`.
+    let assign_stmt = select! { Token::Ident(name) => name }
+        .then_ignore(just(Token::Eq))
+        .then(expr_parser())
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map_with_span(|(name, value), span| Stmt::new(StmtKind::Assign { name, value }, span));
+
     let expr_stmt = expr_parser()
         .then_ignore(just(Token::Semicolon).or_not())
         .map_with_span(|expr, span| Stmt::new(StmtKind::Expr(expr), span));
 
-    fn_stmt.or(let_stmt).or(return_stmt).or(expr_stmt)
+    fn_stmt.or(let_stmt).or(return_stmt).or(assign_stmt).or(expr_stmt)
 }
 
 pub fn program_parser() -> impl Parser<Token, Program, Error = Simple<Token>> {

@@ -134,6 +134,47 @@ impl TypeChecker {
                     self.check_expr(e);
                 }
             }
+
+            StmtKind::Assign { name, value } => {
+                let value_ty = self.check_expr(value);
+                match self.env.lookup(name) {
+                    None => {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0101",
+                                format!("Cannot assign to undefined variable `{}`", name),
+                            )
+                            .with_location(&self.source_file, stmt.span.start, stmt.span.end)
+                            .with_help("Declare it first with `let mut`."),
+                        );
+                    }
+                    Some(info) if !info.is_mut => {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0104",
+                                format!("Cannot assign to `{}`: not declared as `mut`", name),
+                            )
+                            .with_location(&self.source_file, stmt.span.start, stmt.span.end)
+                            .with_help(format!("Declare it as `let mut {} = ...;` to allow reassignment.", name)),
+                        );
+                    }
+                    Some(info) => {
+                        let declared_ty = info.ty.clone();
+                        if value_ty.unify(&declared_ty).is_none() {
+                            self.diagnostics.push(
+                                Diagnostic::compute_error(
+                                    "C0102",
+                                    format!(
+                                        "Type mismatch assigning to `{}`: expected `{}`, found `{}`",
+                                        name, declared_ty, value_ty
+                                    ),
+                                )
+                                .with_location(&self.source_file, stmt.span.start, stmt.span.end),
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -419,6 +460,21 @@ impl TypeChecker {
                 } else {
                     Type::Unit
                 }
+            }
+
+            ExprKind::While { cond, body } => {
+                let cond_ty = self.check_expr(cond);
+                if cond_ty != Type::Bool && cond_ty != Type::Any {
+                    self.diagnostics.push(
+                        Diagnostic::compute_error(
+                            "C0102",
+                            format!("`while` condition must evaluate to `bool`, found `{}`", cond_ty),
+                        )
+                        .with_location(&self.source_file, cond.span.start, cond.span.end),
+                    );
+                }
+                self.check_expr(body);
+                Type::Unit
             }
 
             ExprKind::Match { expr: matched, arms } => {

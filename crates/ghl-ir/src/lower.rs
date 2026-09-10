@@ -276,6 +276,13 @@ impl LoweringContext {
                 };
                 Ok(HirStatement::Return(val))
             }
+            StmtKind::Assign { name, value } => {
+                let value_hir = self.lower_expr(value)?;
+                Ok(HirStatement::Assign {
+                    name: name.clone(),
+                    value: value_hir,
+                })
+            }
             _ => Err(Diagnostic::compute_error(
                 "C0305",
                 "Statement not supported in scalar JIT function body",

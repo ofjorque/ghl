@@ -80,6 +80,16 @@ impl Interpreter {
                 self.pending_return = Some(val.clone());
                 Ok(val)
             }
+            StmtKind::Assign { name, value } => {
+                let val = self.eval_expr(value)?;
+                if !self.env.assign(name, val.clone()) {
+                    return Err(Diagnostic::compute_error(
+                        "C0101",
+                        format!("Cannot assign to undefined variable `{}`", name),
+                    ));
+                }
+                Ok(val)
+            }
         }
     }
 
@@ -285,6 +295,22 @@ impl Interpreter {
                 } else {
                     Ok(Value::Unit)
                 }
+            }
+
+            ExprKind::While { cond, body } => {
+                // A native Rust loop -- no recursion of any kind, so unlike function
+                // calls this never risks the native stack regardless of iteration
+                // count (TODO.md Fase 7).
+                while self.eval_expr(cond)?.as_bool() == Some(true) {
+                    self.eval_expr(body)?;
+                    if self.pending_return.is_some() {
+                        // Same short-circuit `Block` already does: a `return` inside
+                        // the loop body must stop the loop too, not just that
+                        // iteration's block.
+                        break;
+                    }
+                }
+                Ok(Value::Unit)
             }
 
             ExprKind::Match { expr: target, arms } => {

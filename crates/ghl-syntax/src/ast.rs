@@ -135,6 +135,10 @@ pub enum ExprKind {
         expr: Box<Expr>,
         arms: Vec<MatchArm>,
     },
+    While {
+        cond: Box<Expr>,
+        body: Box<Expr>,
+    },
     DataFrameLit(Vec<(String, Expr)>),
     MatrixLit {
         rows: Vec<Vec<Expr>>,
@@ -180,6 +184,12 @@ pub enum StmtKind {
     },
     Expr(Expr),
     Return(Option<Expr>),
+    /// `name = value;` -- reassigns an existing `let mut` binding in place
+    /// (`RuntimeEnv::assign`), not a new declaration.
+    Assign {
+        name: String,
+        value: Expr,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

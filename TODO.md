@@ -1103,6 +1103,52 @@ no lo maneja — bloquea cualquier ejemplo de la documentación que use `use std
       (incluyendo los tests de `return` ya existentes, confirmando que las dos señales
       -- `pending_return` y el trampolín -- conviven sin interferirse). Verificado de
       punta a punta con `ghl run` en debug y release.
+- [x] **`while` real + reasignación de variables — la solución de raíz, agregada
+      después de que el usuario cuestionara por qué TCO (arriba) no era eso mismo.**
+      La respuesta inicial subestimó cuánto de esto ya estaba construido: el lexer ya
+      tenía los tokens `While`/`For` reservados sin gramática
+      (`ghl-syntax/src/lexer.rs`), `RuntimeEnv` ya tenía `assign(name, val) -> bool`
+      (recorre los scopes y actualiza in-place, `env.rs`) sin nadie que lo llamara, el
+      checker ya trackeaba `is_mut` por variable sin usarlo para nada, y la capa de
+      HIR/codegen **ya tenía `HirStatement::Assign` completo** (con su lowering de
+      Cranelift ya escrito) esperando un nodo de AST que lo alimentara. La pieza que
+      realmente faltaba era angosta: dos nodos de AST (`ExprKind::While`,
+      `StmtKind::Assign`), su gramática de parser (verificada empíricamente que
+      `assign_stmt` no se confunde con una expresión suelta, probado antes de tocar el
+      checker/evaluador), y el evaluador de `while` — que, al ser un loop nativo de
+      Rust sin ninguna recursión, **no tiene el problema de pila que TCO tuvo que
+      resolver con un trampolín** — confirmado con un test propio a 2.000.000 de
+      iteraciones corriendo en 3,5s en un build de *debug*, contra el 1m52s que TCO
+      tardó en *release* a la misma profundidad (el costo de TCO era re-fusionar el
+      scope global en cada iteración de la recursión; `while` no recursa, no paga eso).
+    - `x = expr;` exige que `x` ya exista y sea `let mut` — primer uso real de
+      `is_mut` en todo el proyecto (nuevo código de error `C0104`, "no declarado como
+      mut"; asignar a una variable inexistente sigue dando `C0101`).
+    - `HirStatement::Assign` (HIR/Cranelift) se conectó gratis (`ghl-ir/src/lower.rs`)
+      — un `let mut`/reasignación ahora sí se compila a JIT si aparece. `While` en HIR
+      **no se agregó a propósito** — mismo criterio que el bug de `return` en el JIT:
+      cae al `Err` genérico de "expresión no soportada" que ya existía, el CLI ya lo
+      maneja con gracia (badge de JIT ausente, ejecución real sin cambios) — construir
+      loops de Cranelift no es load-bearing todavía.
+    - **Queda afuera, a propósito:** `for x in iter { ... }` (el token existe, el
+      diseño de qué es iterable no); `break`/`continue` (sin tokens en el lexer
+      todavía — el patrón acumulador de Gibbs/EM/IRLS no los necesita, la condición
+      del propio `while` alcanza); azúcar como `+=`/`-=`.
+    - Tests nuevos: `test_while_loop_accumulates_via_assignment`,
+      `test_assign_rejects_undeclared_variable`,
+      `test_while_handles_deep_iteration_without_stack_growth` (`ghl-runtime/src/lib.rs`);
+      `test_typecheck_reject_non_mut_assignment`,
+      `test_typecheck_reject_assign_to_undeclared`,
+      `test_typecheck_allow_mut_assignment`,
+      `test_typecheck_reject_while_non_bool_condition` (`ghl-types/src/lib.rs`). 106
+      pruebas de `ghl-runtime`, 12 de `ghl-types`, workspace completo sin regresiones.
+      Verificado de punta a punta con `ghl run`: acumulador `while` real (da `45`),
+      error de mutabilidad claro (no crash), y confirmado que un script con `while`
+      no revienta el JIT.
+    - **Con esto, el Gibbs sampler de Suite 03 (Caso 3.1) puede escribirse en su forma
+      imperativa real** (`while`/reasignación), mucho más parecida al doc aspiracional
+      original que el estilo acumulador recursivo que TCO habilitó — ambos caminos
+      quedan disponibles, ninguno obsoleto por el otro.
 - [x] **`return` — dos bugs reales encontrados analizando qué cuenta como "posición de
       cola" para el TCO de arriba, arreglados antes de seguir con el TCO en sí (ninguno
       es sobre TCO, los dos son correctness lisa y llana).**
