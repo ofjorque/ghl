@@ -27,19 +27,26 @@
 //!
 //! Uso: `cargo run --release --example spike_irls_latency -p ghl-runtime`
 
-use std::collections::HashMap;
 use std::time::Instant;
+use polars_core::prelude::*;
 use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
+use ghl_runtime::na_reasons::NaReasonTable;
 use ghl_runtime::{Blueprint, FittedGlm, Interpreter, Value};
 use ghl_syntax::parser::parse;
 
 const N: usize = 1_000_000;
 const P_PREDICTORS: usize = 40;
 
+/// Unlike `lib.rs`'s test-only `vector_f64` (fine at N=8,000), `items.iter()` on a
+/// `Value::Vector` here would `Deref` through `VectorData` to its lazily-materialized
+/// `Vec<Value>` cache -- boxing all 1M cells (160 bytes each) *before* this benchmark's
+/// own NEKO fast path even runs, silently reintroducing the exact cost this benchmark
+/// exists to measure the absence of. `as_f64_view()` (same fast path NEKO's `bake()` now
+/// uses) reads `random_normal`'s already-`Float64`, no-NA output with zero boxing.
 fn vector_f64(v: &Value) -> Vec<f64> {
     match v {
-        Value::Vector(items) => items.iter().map(|x| x.as_f64().unwrap()).collect(),
+        Value::Vector(vd) => vd.as_f64_view().expect("random_normal output is numeric").as_slice().to_vec(),
         other => panic!("Expected Vector, found {other:?}"),
     }
 }
@@ -147,34 +154,36 @@ fn main() {
         y.push(if rng.random::<f64>() < p { 1.0 } else { 0.0 });
     }
 
-    // 3. Arma el HashMap<String, Vec<Value>> que `Blueprint::bake` espera directamente
-    // en Rust (evita que el tiempo de construcción de un DataFrame/`dataframe {...}` se
-    // mezcle con el tiempo del solver, que es lo que este benchmark mide).
-    let mut data: HashMap<String, Vec<Value>> = HashMap::new();
-    data.insert("y".to_string(), y.into_iter().map(Value::F64).collect());
-    let term_names: Vec<String> = (1..=P_PREDICTORS).map(|j| format!("x{j}")).collect();
-    // `mem::take` + `into_iter` en vez de `.iter().map(...).collect()`: consume cada
-    // columna f64 (8MB a N=1M) a medida que la boxea, en vez de mantener las 40 columnas
-    // sin boxear vivas al mismo tiempo que sus 40 copias boxeadas de 160 bytes/celda.
+    // 3. Arma el `DataFrame` real que `Blueprint::bake` consume directamente -- desde el
+    // fix de representación de datos de NEKO, `bake()` ya no pasa por
+    // `HashMap<String, Vec<Value>>` boxeado (160 bytes/celda), así que construir el
+    // benchmark así ya no tendría sentido: cada columna se arma directo como
+    // `Float64Chunked` (mismo camino sin boxing que `VectorData::from_f64` usa para
+    // `random_normal`), consumiendo cada `Vec<f64>` a medida que se envuelve
+    // (`mem::take`) para no mantener dos copias de las 40 columnas vivas a la vez.
     let mut predictors = predictors;
+    let term_names: Vec<String> = (1..=P_PREDICTORS).map(|j| format!("x{j}")).collect();
+    let mut columns: Vec<Column> = Vec::with_capacity(P_PREDICTORS + 1);
+    columns.push(Float64Chunked::from_vec(PlSmallStr::from_static("y"), y).into_series().into());
     for (j, name) in term_names.iter().enumerate() {
         let col = std::mem::take(&mut predictors[j]);
-        data.insert(name.clone(), col.into_iter().map(Value::F64).collect());
+        columns.push(Float64Chunked::from_vec(PlSmallStr::from_string(name.clone()), col).into_series().into());
     }
     drop(predictors);
+    let frame = DataFrame::new_infer_height(columns).expect("well-formed equal-length f64 columns");
+    let na_reasons = NaReasonTable::new();
 
     let blueprint = Blueprint::new("y".to_string(), term_names.clone());
 
     // 4. Mide el ajuste completo a escala real.
     let start = Instant::now();
-    let fit = FittedGlm::fit_logistic(blueprint, &term_names, &data).expect("IRLS converges");
+    let fit = FittedGlm::fit_logistic(blueprint, &frame, &na_reasons).expect("IRLS converges");
     let elapsed = start.elapsed();
-    // `data` (el `HashMap<String, Vec<Value>>` boxeado, ~160 bytes/celda -- ver el
-    // comentario de más arriba) ya cumplió su propósito: `fit.x_data` es la copia
-    // desboxeada que `bake()` extrajo de ahí. Soltarlo antes de medir el ensamblado
-    // seq/par evita que sus ~6.5GB sigan compitiendo por ancho de banda de memoria
-    // durante esa medición -- que es justo lo que se quiere aislar acá.
-    drop(data);
+    // `frame` (el `DataFrame` de entrada, ~330MB a N=1M/P=41 -- ya no ~6.5GB, ver el
+    // comentario de arriba) ya cumplió su propósito: `fit.x_data` es la copia que
+    // `bake()` extrajo de ahí. Soltarlo antes de medir el ensamblado seq/par evita que
+    // siga compitiendo por ancho de banda de memoria durante esa medición.
+    drop(frame);
 
     println!("=== Ajuste completo (fit_logistic) ===");
     println!("  tiempo total:      {elapsed:>10.3?}");

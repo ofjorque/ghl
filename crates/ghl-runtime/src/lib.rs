@@ -1557,6 +1557,35 @@ mod tests {
     }
 
     #[test]
+    fn test_fit_ols_with_integer_predictor_column() {
+        // `Blueprint::bake`'s fast path (post NEKO data-representation fix) checks
+        // `column.dtype() == Float64` and casts otherwise -- unlike the old boxed
+        // `Value::as_f64()` path, which coerced I64/F64 alike without a dtype branch.
+        // `x1`/`x2` here are integer literals (`[1, 2, ...]`, no `.0`), which GHL infers
+        // as an `Int64` column (`value_column_to_polars`'s dtype-widening policy) -- this
+        // must still fit correctly via the cast-and-rechunk fallback in
+        // `column_as_f64_view`, not silently truncate or zero out.
+        let code = r#"
+            let df = dataframe {
+                x1: [1, 2, 3, 4, 5, 6],
+                x2: [2, 1, 4, 3, 6, 5],
+                y:  [5.0, 8.0, 7.0, 10.0, 9.0, 12.0]
+            };
+            let model = fit(y ~ x1 + x2, df);
+            let coefficients = coef(model);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let coefs = vector_f64(&interp.env.get("coefficients").unwrap());
+        assert_eq!(coefs.len(), 3);
+        assert!((coefs[0] - 5.0).abs() < 1e-6, "b0 should be 5.0, got {}", coefs[0]);
+        assert!((coefs[1] - 2.0).abs() < 1e-6, "b1 should be 2.0, got {}", coefs[1]);
+        assert!((coefs[2] - -1.0).abs() < 1e-6, "b2 should be -1.0, got {}", coefs[2]);
+    }
+
+    #[test]
     fn test_neko_na_disposition_in_augment() {
         let code = r#"
             let df = dataframe {

@@ -1074,11 +1074,16 @@ piden (ver detalle en Fase 7).
           — consistente con estar acotado por ancho de banda de memoria, no por cómputo).
           La brecha entre ambas mediciones no se explica por NUMA (un solo nodo en este
           sandbox) ni por retener `data` vivo (se probó soltarlo antes de medir, sin
-          cambio) — lectura más plausible: la churn de asignación del pipeline completo a
-          N=1M dejaba el heap en un estado que penaliza más al camino paralelo. **No se
-          investigó más a fondo** (fuera del alcance de este caso) — documentado tal cual
-          salió, no promediado ni descartado, para que quien ajuste `PARALLEL_THRESHOLD`
-          más adelante parta de un número real y no de un supuesto.
+          cambio) — lectura más plausible en su momento: la churn de asignación del
+          pipeline completo a N=1M dejaba el heap en un estado que penaliza más al camino
+          paralelo. **Actualización, tras el fix de representación de datos de NEKO más
+          abajo:** esa lectura quedó descartada por el dato, no solo sin confirmar — con
+          el pico de memoria de este mismo benchmark bajado de ~6.9GB a ~736MB (ver más
+          abajo), el mismo ~0.6-0.65x persiste igual de estable. La presión de memoria no
+          era la causa. **Sigue sin investigarse más a fondo** (fuera del alcance de
+          ambos casos) — documentado tal cual salió, no promediado ni descartado, para que
+          quien ajuste `PARALLEL_THRESHOLD` más adelante parta de un número real y no de
+          un supuesto (ni del supuesto original, ni de esta corrección).
       - Tests nuevos en `lib.rs`: `test_fit_logistic_recovers_known_coefficients` (N=8.000,
         β verdadero conocido, tolerancia estadística), `test_fit_logistic_rejects_non_binary_response`,
         `test_fit_logistic_rejects_insufficient_df`, `test_fit_logistic_na_disposition_matches_ols_pattern`,
@@ -1105,6 +1110,76 @@ piden (ver detalle en Fase 7).
         de este caso solo evalúa "eficiencia del solver + estabilidad + sintaxis de
         fórmulas", y el patrón ya establecido para esto en todo el proyecto (`fit()`/OLS)
         es una función nativa de una sola llamada, no un script GHL.
+- [x] **Optimizar la representación de datos de NEKO (`Blueprint::bake`) — hecho.** El
+      pico de memoria de ~6.9GB medido arriba para el Caso 3.2 no era del algoritmo de
+      IRLS: `bake()` recibía los datos como `HashMap<String, Vec<Value>>`, un `Value`
+      boxeado (`size_of::<Value>() == 160` bytes) por celda — a 41 columnas×1M filas,
+      ~6.5GB solo por esta representación, cuando el dato real (`f64`) pesa ~328MB.
+      Resuelto ahora en vez de esperar a que otro caso de Fase 6 (Gibbs, EM) se topara
+      con el mismo techo — decidido explícitamente con el usuario como infraestructura
+      que toca a todo lo que sigue, no solo a IRLS.
+      - **El material rápido ya existía en el proyecto**, nadie había conectado NEKO a
+        él: `Value::DataFrame` ya está respaldado por `polars_core::DataFrame` (columnas
+        `Float64Chunked` contiguas, tipadas) desde su propia migración; el único camino
+        real a `bake()` (`native_fit_ols`/`native_fit_logistic`, y `predict()`/
+        `augment()` de ambos modelos — 6 call sites en total, confirmado por grep) pasaba
+        por `polars_bridge::dataframe_to_columns_and_data`, un shim de compatibilidad
+        **documentado como tal en su propio comentario** ("predates the polars
+        migration") que boxeaba cada celda. Este proyecto ya había resuelto el mismo
+        problema exacto para `Value::Vector` en Fase 3/4 (`VectorData::as_f64_view()`) —
+        el fix acá es aplicar ese mismo patrón a columnas de `DataFrame`, no inventar uno
+        nuevo.
+      - `VectorData::as_f64_view`'s lógica se extrajo a una función libre reusable,
+        `vector_data::column_as_f64_view(&Column)`, para no depender de envolver cada
+        columna en un `VectorData` (que además ata el `NaReasonTable` a un nombre de
+        columna fijo, incompatible con columnas reales con nombre propio).
+      - `Blueprint::bake` pasa a leer `&DataFrame`/`&NaReasonTable` directo: **camino
+        rápido** (caso común, ninguna columna involucrada tiene nulos —
+        `column.null_count() == 0`, O(1)) usa `column_as_f64_view` sin boxear nada, cero
+        branching de disposición por fila; **camino de reserva** (alguna columna sí tiene
+        nulos) recorre fila por fila leyendo `AnyValue` (vive en el stack) en vez de un
+        `Value` boxeado, con `na_reasons.get(col, fila)` directo para la razón — misma
+        semántica exacta de antes, sin el intermedio boxeado. El parámetro `_columns`
+        de la firma vieja ya estaba muerto (nunca usado en el cuerpo) — desapareció sin
+        reemplazo, no solo sin uso.
+      - `augment()` (`FittedModel`/`FittedGlm`) tenía el mismo problema por una razón
+        distinta: boxeaba el DataFrame **completo** (las P columnas originales) solo para
+        copiarlas sin cambios a un DataFrame nuevo, cuando el único trabajo real es
+        agregar 4 columnas derivadas de tamaño N. Arreglado con el mismo patrón que ya
+        usa `mutate()` (`io.rs`): `frame.clone()` (barato, buffers compartidos por Arc) +
+        `DataFrame::with_column()` por columna nueva — el costo pasa de O(n·p) a O(n),
+        independiente de P. `dataframe_to_columns_and_data`, sin llamadores tras esto, se
+        eliminó junto con el comentario de módulo desactualizado que la rodeaba.
+      - **Medido de nuevo, mismo `spike_irls_latency.rs`, misma escala (N=1.000.000,
+        P=40), antes/después:**
+        - Memoria pico: **~6.9GB → ~736MB** (`/usr/bin/time -v`), ~9.4x menos — coincide
+          con lo esperado (~328MB del DataFrame + ~328MB de `x_data` + buffers chicos).
+        - Ajuste completo: **8.7s → 4.6-4.8s** (~1.9x más rápido) — ya no hay que
+          des-boxear 41M celdas antes de ajustar.
+        - **Hallazgo al re-medir, corrige una lectura anterior:** el benchmark en sí
+          también boxeaba sin necesidad — su propio helper `vector_f64` (extraía
+          `x1..x40` del intérprete tras generarlos con `random_normal`) leía vía el
+          `Deref` de `VectorData` a `Vec<Value>`, materializando 160 bytes/celda para
+          las 40 columnas *antes* de que el fix de `bake()` siquiera entrara en juego —
+          arreglado para usar `as_f64_view()` también. Y con la memoria ya baja, el
+          hallazgo del Caso 3.2 de que el ensamblado paralelo sale ~0.6-0.65x (más
+          lento, no más rápido) **se mantiene igual de estable** — la hipótesis de
+          "churn de asignación del pipeline completo" con la que se había explicado eso
+          queda descartada por el dato, no solo sin confirmar (ver nota agregada arriba,
+          en el Caso 3.2). La causa real sigue sin investigarse, documentado así.
+      - Test nuevo en `lib.rs`: `test_fit_ols_with_integer_predictor_column` — una
+        columna predictora `Int64` (no `Float64`) ajusta igual de bien, cubriendo el
+        riesgo real de que el camino rápido chequea `column.dtype() == Float64`
+        explícitamente (a diferencia del `Value::as_f64()` viejo, que coercía cualquier
+        dtype sin ese chequeo).
+      - Todos los tests existentes (116, incluyendo los 9 nuevos de Caso 3.2) pasaron sin
+        cambios — no llaman `.bake()`/`fit_ols()`/`fit_logistic()` directo en Rust, solo
+        vía el intérprete/función nativa, así que el cambio de firma interna no les tocó.
+      - Verificado de punta a punta con el CLI de release: OLS con predictor `Int64`,
+        GLM con el camino rápido (`summary`/`tidy`/`glance`/`augment`/`predict`), OLS con
+        NA real (`NA:SensorDropout`, camino de reserva — confirma que `augment()` sigue
+        mostrando la razón original correcta tras reusar el `Arc<NaReasonTable>` tal
+        cual), y el caso de respuesta no-binaria (`S0204` limpio).
 - [ ] Algoritmo EM para mezclas gaussianas con log-sum-exp estable (Caso 3.4). Ya no en
       riesgo por profundidad de recursión (500 iteraciones ≈ 28ms estimado, mismo
       requisito de estilo sin `return`).

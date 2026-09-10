@@ -1,20 +1,20 @@
 //! La capa de conversión en los bordes entre `Value` (dinámico, GHL) y
 //! `polars_core::frame::DataFrame` (columnar, tipado) — TODO.md, Fase 0.
 //!
-//! Dos únicas operaciones cruzan esta frontera hoy:
+//! Dos operaciones cruzan esta frontera hoy:
 //! - [`build_dataframe`]: construcción — el literal `dataframe { col: [...], ... }` y,
 //!   más adelante, `read_csv`/`parse_csv`, arman un DataFrame real a partir de columnas
 //!   `Vec<Value>` de GHL.
 //! - [`pull_column_as_values`]: extracción — `pull(df, col)` saca una columna de vuelta
 //!   a un `Value::Vector` de GHL puro.
 //!
-//! Todo lo demás (los ~30 verbos de `io.rs`) opera directo sobre el `DataFrame` de
-//! polars sin pasar por `Value` en absoluto — ese es exactamente el punto de adoptarlo
-//! (Fase 0, Opción A) en vez de reboxear cada celda en cada verbo.
-//!
-//! Este módulo todavía no está enchufado a `Value::DataFrame` (esa variante sigue con
-//! su forma `HashMap`-based); es la implementación real y probada de la conversión,
-//! lista para que la reescritura de `io.rs` (Fase 1) la use al reemplazar la variante.
+//! Todo lo demás (los ~30 verbos de `io.rs`, y desde el fix de representación de datos
+//! de NEKO, también `Blueprint::bake`/`FittedModel`/`FittedGlm` en `neko.rs`/`glm.rs`)
+//! opera directo sobre el `DataFrame` de polars sin pasar por `Value` en absoluto — ese
+//! es exactamente el punto de adoptarlo (Fase 0, Opción A) en vez de reboxear cada celda
+//! en cada verbo. `f64_opt_column`/`bool_column`/`string_column` son el mismo idioma de
+//! [`value_column_to_polars`] expuesto para un nombre de columna fijo, para agregar
+//! columnas derivadas (ej. `augment()`) sin pasar por `Vec<Value>`.
 
 use std::sync::Arc;
 
@@ -88,6 +88,26 @@ pub(crate) fn value_column_to_polars(name: &str, values: &[Value]) -> Column {
     };
 
     series.into()
+}
+
+/// Construye una columna `f64` nullable con un nombre dado -- mismo idioma
+/// `collect::<Float64Chunked>()` que ya usa la rama f64 de [`value_column_to_polars`],
+/// para un único nombre fijo en vez de inferir dtype de un `Vec<Value>`. La usan
+/// `FittedModel::augment`/`FittedGlm::augment` (`neko.rs`/`glm.rs`) para agregar
+/// `.fitted`/`.residual` sin reboxear el resto del DataFrame a través de `Vec<Value>`.
+pub(crate) fn f64_opt_column(name: &str, data: Vec<Option<f64>>) -> Column {
+    data.into_iter().collect::<Float64Chunked>().with_name(name.into()).into_series().into()
+}
+
+/// Como [`f64_opt_column`] pero para `bool`, sin nulos (`.used_in_fit` nunca es NA).
+pub(crate) fn bool_column(name: &str, data: Vec<bool>) -> Column {
+    data.into_iter().map(Some).collect::<BooleanChunked>().with_name(name.into()).into_series().into()
+}
+
+/// Como [`f64_opt_column`] pero para `String`, sin nulos (`.na_reason` siempre es un
+/// texto -- `"none"`/`"unspecified"`/la razón real -- nunca `NA`).
+pub(crate) fn string_column(name: &str, data: Vec<String>) -> Column {
+    data.into_iter().map(Some).collect::<StringChunked>().with_name(name.into()).into_series().into()
 }
 
 /// Extrae una columna de un `DataFrame` de polars de vuelta a `Vec<Value>` de GHL,
@@ -181,24 +201,6 @@ pub(crate) fn any_value_to_plain_value(av: &AnyValue) -> Value {
         // como texto en vez de perder el dato silenciosamente.
         other => Value::String(format!("{other}")),
     }
-}
-
-/// Compatibility shim for NEKO's statistical-modeling code (`neko.rs`), which predates
-/// the polars migration and works in terms of `(Vec<String>, HashMap<String, Vec<Value>>)`
-/// rather than the DataFrame directly. Its numerics (Cholesky-based OLS, IRLS-adjacent
-/// baking of the design matrix) are out of scope for this migration — this shim lets it
-/// keep working unchanged rather than rewriting model-fitting internals in the same pass
-/// as the DataFrame backend swap.
-pub fn dataframe_to_columns_and_data(
-    frame: &DataFrame,
-    na_reasons: &NaReasonTable,
-) -> Result<(Vec<String>, std::collections::HashMap<String, Vec<Value>>), Diagnostic> {
-    let columns: Vec<String> = frame.get_column_names().iter().map(|s| s.to_string()).collect();
-    let mut data = std::collections::HashMap::with_capacity(columns.len());
-    for col in &columns {
-        data.insert(col.clone(), pull_column_as_values(frame, na_reasons, col)?);
-    }
-    Ok((columns, data))
 }
 
 #[cfg(test)]

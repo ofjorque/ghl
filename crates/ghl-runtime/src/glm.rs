@@ -11,11 +11,13 @@
 //! the parallelized O(n*p^2) assembly, `sandwich_vcov` for robust covariance, and
 //! `normal_cdf` for p-values.
 
-use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps, Sparkline};
+use polars_core::frame::DataFrame;
 use rayon::prelude::*;
 use crate::matrix::MatrixOps;
+use crate::na_reasons::NaReasonTable;
 use crate::neko::{assemble_weighted_normal_equations, normal_cdf, sandwich_vcov, Blueprint, RowDisposition, VcovKind};
 use crate::value::Value;
 use crate::vector_data::VectorData;
@@ -80,10 +82,10 @@ impl FittedGlm {
     /// counts, ...) are a separate, unrequested feature (TODO.md).
     pub fn fit_logistic(
         blueprint: Blueprint,
-        columns: &[String],
-        data: &HashMap<String, Vec<Value>>,
+        frame: &DataFrame,
+        na_reasons: &NaReasonTable,
     ) -> Result<Self, Diagnostic> {
-        let (x_data, y_data, dispositions, n, p) = blueprint.bake(columns, data)?;
+        let (x_data, y_data, dispositions, n, p) = blueprint.bake(frame, na_reasons)?;
 
         if n <= p {
             return Err(Diagnostic::statistical_error(
@@ -337,49 +339,45 @@ impl FittedGlm {
     pub fn augment(&self, orig_df: &Value) -> Result<Value, Diagnostic> {
         match orig_df {
             Value::DataFrame { frame, na_reasons } => {
-                let (columns, data) = crate::polars_bridge::dataframe_to_columns_and_data(frame, na_reasons)?;
-                let mut new_columns = columns.clone();
-                new_columns.push(".fitted".to_string());
-                new_columns.push(".residual".to_string());
-                new_columns.push(".used_in_fit".to_string());
-                new_columns.push(".na_reason".to_string());
-
-                let mut new_data = data.clone();
-                let mut fitted_col = Vec::new();
-                let mut res_col = Vec::new();
-                let mut used_col = Vec::new();
-                let mut reason_col = Vec::new();
+                let mut fitted_col = Vec::with_capacity(self.dispositions.len());
+                let mut res_col = Vec::with_capacity(self.dispositions.len());
+                let mut used_col = Vec::with_capacity(self.dispositions.len());
+                let mut reason_col = Vec::with_capacity(self.dispositions.len());
 
                 let mut fit_idx = 0;
                 for disp in &self.dispositions {
                     match disp {
                         RowDisposition::Included => {
-                            fitted_col.push(Value::F64(self.fitted_values[fit_idx]));
-                            res_col.push(Value::F64(self.residuals[fit_idx]));
-                            used_col.push(Value::Bool(true));
-                            reason_col.push(Value::String("none".to_string()));
+                            fitted_col.push(Some(self.fitted_values[fit_idx]));
+                            res_col.push(Some(self.residuals[fit_idx]));
+                            used_col.push(true);
+                            reason_col.push("none".to_string());
                             fit_idx += 1;
                         }
                         RowDisposition::DroppedNA { reason, .. } => {
-                            fitted_col.push(Value::NA(None));
-                            res_col.push(Value::NA(None));
-                            used_col.push(Value::Bool(false));
-                            let r_str = reason.clone().unwrap_or_else(|| "unspecified".to_string());
-                            reason_col.push(Value::String(r_str));
+                            fitted_col.push(None);
+                            res_col.push(None);
+                            used_col.push(false);
+                            reason_col.push(reason.clone().unwrap_or_else(|| "unspecified".to_string()));
                         }
                     }
                 }
 
-                new_data.insert(".fitted".to_string(), fitted_col);
-                new_data.insert(".residual".to_string(), res_col);
-                new_data.insert(".used_in_fit".to_string(), used_col);
-                new_data.insert(".na_reason".to_string(), reason_col);
+                let mut new_frame = frame.clone();
+                new_frame.with_column(crate::polars_bridge::f64_opt_column(".fitted", fitted_col)).map_err(|e| {
+                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                })?;
+                new_frame.with_column(crate::polars_bridge::f64_opt_column(".residual", res_col)).map_err(|e| {
+                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                })?;
+                new_frame.with_column(crate::polars_bridge::bool_column(".used_in_fit", used_col)).map_err(|e| {
+                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                })?;
+                new_frame.with_column(crate::polars_bridge::string_column(".na_reason", reason_col)).map_err(|e| {
+                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                })?;
 
-                let cols: Vec<(String, Vec<Value>)> = new_columns.iter()
-                    .map(|c| (c.clone(), new_data.remove(c).unwrap_or_default()))
-                    .collect();
-                let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&cols)?;
-                Ok(Value::DataFrame { frame, na_reasons })
+                Ok(Value::DataFrame { frame: new_frame, na_reasons: Arc::clone(na_reasons) })
             }
             _ => Err(Diagnostic::compute_error(
                 "C0201",
@@ -393,8 +391,7 @@ impl FittedGlm {
     pub fn predict(&self, newdata: &Value) -> Result<Value, Diagnostic> {
         match newdata {
             Value::DataFrame { frame, na_reasons } => {
-                let (columns, data) = crate::polars_bridge::dataframe_to_columns_and_data(frame, na_reasons)?;
-                let (x_data, _, _, n, p) = self.blueprint.bake(&columns, &data)?;
+                let (x_data, _, _, n, p) = self.blueprint.bake(frame, na_reasons)?;
                 let mut predictions = Vec::with_capacity(n);
 
                 for i in 0..n {

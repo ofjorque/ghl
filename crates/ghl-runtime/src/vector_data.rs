@@ -183,25 +183,33 @@ impl VectorData {
     /// real work, but still far cheaper than boxing through `Vec<Value>`, since it never
     /// allocates a `Value` enum per cell.
     pub fn as_f64_view(&self) -> Result<NumericView<'_>, Diagnostic> {
-        if self.column.dtype() == &DataType::Float64 {
-            if let Ok(ca) = self.column.f64() {
-                if let Ok(slice) = ca.cont_slice() {
-                    return Ok(NumericView::Borrowed(slice));
-                }
+        column_as_f64_view(&self.column)
+    }
+}
+
+/// Same logic as `VectorData::as_f64_view`, factored out as a free function so any
+/// `Column` can use this fast path -- not just one already wrapped in a `VectorData`.
+/// `Blueprint::bake` (`neko.rs`) reuses this directly on `DataFrame` columns, the same
+/// way this migration already solved the identical boxed-`Value` problem for `Vector`.
+pub(crate) fn column_as_f64_view(column: &Column) -> Result<NumericView<'_>, Diagnostic> {
+    if column.dtype() == &DataType::Float64 {
+        if let Ok(ca) = column.f64() {
+            if let Ok(slice) = ca.cont_slice() {
+                return Ok(NumericView::Borrowed(slice));
             }
         }
-        let casted = self.column.cast(&DataType::Float64).map_err(|e| {
-            Diagnostic::compute_error("C0202", format!("expected a numeric Vector: {e}"))
-        })?;
-        let ca = casted.f64().map_err(|e| {
-            Diagnostic::compute_error("C0210", format!("internal error extracting f64 data: {e}"))
-        })?;
-        let rechunked = ca.rechunk();
-        let slice = rechunked.cont_slice().map_err(|e| {
-            Diagnostic::compute_error("C0210", format!("internal error: expected no nulls after null_count() check: {e}"))
-        })?;
-        Ok(NumericView::Owned(slice.to_vec()))
     }
+    let casted = column.cast(&DataType::Float64).map_err(|e| {
+        Diagnostic::compute_error("C0202", format!("expected a numeric column: {e}"))
+    })?;
+    let ca = casted.f64().map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("internal error extracting f64 data: {e}"))
+    })?;
+    let rechunked = ca.rechunk();
+    let slice = rechunked.cont_slice().map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("internal error: expected no nulls after null_count() check: {e}"))
+    })?;
+    Ok(NumericView::Owned(slice.to_vec()))
 }
 
 /// See `VectorData::as_f64_view`.

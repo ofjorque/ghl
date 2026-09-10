@@ -1,10 +1,12 @@
-use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps, Sparkline};
+use polars_core::prelude::*;
 use rayon::prelude::*;
 use crate::matrix::MatrixOps;
+use crate::na_reasons::NaReasonTable;
 use crate::value::Value;
-use crate::vector_data::VectorData;
+use crate::vector_data::{column_as_f64_view, VectorData};
 
 /// Positional row disposition tracking complete cases analysis.
 /// Distinguishes between included rows and the exact cause of omission.
@@ -56,30 +58,66 @@ impl Blueprint {
 
     /// Bakes a DataFrame into design matrix X and response y.
     /// Preserves row disposition for all rows.
+    ///
+    /// Reads straight from the real `polars_core::DataFrame`/`NaReasonTable` pair instead
+    /// of a boxed `HashMap<String, Vec<Value>>` -- that boxed shape cost `size_of::<Value>()
+    /// == 160` bytes/cell (measured Fase 3/4), ~6.5GB at N=1M/P=41, and caused a real
+    /// OOM-kill before this fix. Same `as_f64_view()` idiom Fase 3/4 already built for
+    /// `Value::Vector` (`vector_data::column_as_f64_view`), applied here to DataFrame
+    /// columns instead of a lone Vector.
     pub fn bake(
         &self,
-        _columns: &[String],
-        data: &HashMap<String, Vec<Value>>,
+        frame: &DataFrame,
+        na_reasons: &NaReasonTable,
     ) -> Result<(Vec<f64>, Vec<f64>, Vec<RowDisposition>, usize, usize), Diagnostic> {
-        let resp_vec = data.get(&self.response).ok_or_else(|| {
+        let resp_col = frame.column(&self.response).map_err(|_| {
             Diagnostic::statistical_error(
                 "S0202",
                 format!("Response variable `{}` not found in DataFrame", self.response),
             )
         })?;
+        let term_cols: Vec<&Column> = self
+            .terms
+            .iter()
+            .map(|term| {
+                frame.column(term).map_err(|_| {
+                    Diagnostic::statistical_error(
+                        "S0203",
+                        format!("Predictor variable `{}` not found in DataFrame", term),
+                    )
+                })
+            })
+            .collect::<Result<_, _>>()?;
 
-        for term in &self.terms {
-            if !data.contains_key(term) {
-                return Err(Diagnostic::statistical_error(
-                    "S0203",
-                    format!("Predictor variable `{}` not found in DataFrame", term),
-                ));
-            }
-        }
-
-        let total_rows = resp_vec.len();
+        let total_rows = frame.height();
         let p = self.terms.len() + 1; // Intercept + terms
 
+        let any_nulls = resp_col.null_count() > 0 || term_cols.iter().any(|c| c.null_count() > 0);
+
+        if !any_nulls {
+            // Fast path (the common case): every involved column is fully populated, so
+            // there's no row disposition to compute at all -- zero `Value` boxing, zero
+            // per-row branching.
+            let y_view = column_as_f64_view(resp_col)?;
+            let term_views = term_cols
+                .iter()
+                .map(|c| column_as_f64_view(c))
+                .collect::<Result<Vec<_>, _>>()?;
+            let y_data = y_view.as_slice().to_vec();
+            let mut x_rows = Vec::with_capacity(total_rows * p);
+            for i in 0..total_rows {
+                x_rows.push(1.0);
+                for view in &term_views {
+                    x_rows.push(view.as_slice()[i]);
+                }
+            }
+            return Ok((x_rows, y_data, vec![RowDisposition::Included; total_rows], total_rows, p));
+        }
+
+        // Fallback path: at least one involved column has nulls. Still no `Vec<Value>`
+        // boxing -- reads each cell as an `AnyValue` (stack-resident) and looks up its NA
+        // reason directly in `na_reasons`, the same mechanism `any_value_to_value` uses,
+        // just without ever materializing a `Value` for it.
         let mut dispositions = Vec::with_capacity(total_rows);
         let mut x_rows = Vec::new();
         let mut y_vals = Vec::new();
@@ -87,47 +125,42 @@ impl Blueprint {
         for i in 0..total_rows {
             let mut row_disp = RowDisposition::Included;
 
-            // Check response
-            if let Some(resp_val) = resp_vec.get(i) {
-                if resp_val.is_na() {
-                    row_disp = RowDisposition::DroppedNA {
-                        col: self.response.clone(),
-                        reason: resp_val.na_reason().map(|s| s.to_string()),
-                    };
-                }
+            let resp_av = resp_col.get(i).expect("row index is always in bounds");
+            if resp_av.is_null() {
+                row_disp = RowDisposition::DroppedNA {
+                    col: self.response.clone(),
+                    reason: na_reasons.get(&self.response, i).map(|s| s.to_string()),
+                };
             }
 
-            // Check predictors
-            for term in &self.terms {
-                if let Some(val) = data.get(term).and_then(|v| v.get(i)) {
-                    if val.is_na() {
-                        let term_reason = val.na_reason().map(|s| s.to_string());
-                        if row_disp == RowDisposition::Included {
+            for (term, col) in self.terms.iter().zip(&term_cols) {
+                let av = col.get(i).expect("row index is always in bounds");
+                if av.is_null() {
+                    let term_reason = na_reasons.get(term, i).map(|s| s.to_string());
+                    if row_disp == RowDisposition::Included {
+                        row_disp = RowDisposition::DroppedNA {
+                            col: term.clone(),
+                            reason: term_reason,
+                        };
+                    } else if let RowDisposition::DroppedNA { reason: ref curr_reason, .. } = row_disp {
+                        if curr_reason.is_none() && term_reason.is_some() {
                             row_disp = RowDisposition::DroppedNA {
                                 col: term.clone(),
                                 reason: term_reason,
                             };
-                        } else if let RowDisposition::DroppedNA { reason: ref curr_reason, .. } = row_disp {
-                            if curr_reason.is_none() && term_reason.is_some() {
-                                row_disp = RowDisposition::DroppedNA {
-                                    col: term.clone(),
-                                    reason: term_reason,
-                                };
-                            }
                         }
                     }
                 }
             }
 
             if row_disp == RowDisposition::Included {
-                let y = resp_vec[i].as_f64().unwrap_or(0.0);
-                y_vals.push(y);
+                y_vals.push(any_value_as_f64(&resp_av));
 
                 // Row of X: [1.0, term_1, term_2, ...]
                 x_rows.push(1.0);
-                for term in &self.terms {
-                    let val = data.get(term).unwrap()[i].as_f64().unwrap_or(0.0);
-                    x_rows.push(val);
+                for col in &term_cols {
+                    let av = col.get(i).expect("row index is always in bounds");
+                    x_rows.push(any_value_as_f64(&av));
                 }
             }
 
@@ -136,6 +169,28 @@ impl Blueprint {
 
         let n = y_vals.len();
         Ok((x_rows, y_vals, dispositions, n, p))
+    }
+}
+
+/// Coerces a single DataFrame cell to `f64`, mirroring exactly the coercion
+/// `Value::as_f64()` already applies once a cell has been boxed (`AnyValue` -> numeric
+/// `Value` variant -> `as_f64()`, `polars_bridge::any_value_to_plain_value`): any integer
+/// width or `Float32`/`Float64` converts, anything else (bool, string, ...) falls back to
+/// `0.0`. Used only by `Blueprint::bake`'s fallback path, to read a cell's numeric value
+/// without ever boxing it into a `Value` first.
+fn any_value_as_f64(av: &AnyValue) -> f64 {
+    match av {
+        AnyValue::Int8(n) => *n as f64,
+        AnyValue::Int16(n) => *n as f64,
+        AnyValue::Int32(n) => *n as f64,
+        AnyValue::Int64(n) => *n as f64,
+        AnyValue::UInt8(n) => *n as f64,
+        AnyValue::UInt16(n) => *n as f64,
+        AnyValue::UInt32(n) => *n as f64,
+        AnyValue::UInt64(n) => *n as f64,
+        AnyValue::Float32(x) => *x as f64,
+        AnyValue::Float64(x) => *x,
+        _ => 0.0,
     }
 }
 
@@ -173,10 +228,10 @@ impl FittedModel {
     /// Fits an OLS model from a formula blueprint and data.
     pub fn fit_ols(
         blueprint: Blueprint,
-        columns: &[String],
-        data: &HashMap<String, Vec<Value>>,
+        frame: &DataFrame,
+        na_reasons: &NaReasonTable,
     ) -> Result<Self, Diagnostic> {
-        let (x_data, y_data, dispositions, n, p) = blueprint.bake(columns, data)?;
+        let (x_data, y_data, dispositions, n, p) = blueprint.bake(frame, na_reasons)?;
 
         if n <= p {
             return Err(Diagnostic::statistical_error(
@@ -417,52 +472,56 @@ impl FittedModel {
     }
 
     /// Returns the original DataFrame augmented with .fitted, .residual, .used_in_fit, .na_reason.
+    ///
+    /// Only the 4 new columns (O(n)) are built -- the original P columns are never reboxed
+    /// through `Vec<Value>` (that used to cost O(n*p) for data the fit never even touches
+    /// here, since it's already fitted). Same `frame.clone()` (cheap, Arc-shared column
+    /// buffers) + `DataFrame::with_column` idiom `mutate()` already uses (`io.rs`).
     pub fn augment(&self, orig_df: &Value) -> Result<Value, Diagnostic> {
         match orig_df {
             Value::DataFrame { frame, na_reasons } => {
-                let (columns, data) = crate::polars_bridge::dataframe_to_columns_and_data(frame, na_reasons)?;
-                let mut new_columns = columns.clone();
-                new_columns.push(".fitted".to_string());
-                new_columns.push(".residual".to_string());
-                new_columns.push(".used_in_fit".to_string());
-                new_columns.push(".na_reason".to_string());
-
-                let mut new_data = data.clone();
-                let mut fitted_col = Vec::new();
-                let mut res_col = Vec::new();
-                let mut used_col = Vec::new();
-                let mut reason_col = Vec::new();
+                let mut fitted_col = Vec::with_capacity(self.dispositions.len());
+                let mut res_col = Vec::with_capacity(self.dispositions.len());
+                let mut used_col = Vec::with_capacity(self.dispositions.len());
+                let mut reason_col = Vec::with_capacity(self.dispositions.len());
 
                 let mut fit_idx = 0;
                 for disp in &self.dispositions {
                     match disp {
                         RowDisposition::Included => {
-                            fitted_col.push(Value::F64(self.fitted_values[fit_idx]));
-                            res_col.push(Value::F64(self.residuals[fit_idx]));
-                            used_col.push(Value::Bool(true));
-                            reason_col.push(Value::String("none".to_string()));
+                            fitted_col.push(Some(self.fitted_values[fit_idx]));
+                            res_col.push(Some(self.residuals[fit_idx]));
+                            used_col.push(true);
+                            reason_col.push("none".to_string());
                             fit_idx += 1;
                         }
                         RowDisposition::DroppedNA { reason, .. } => {
-                            fitted_col.push(Value::NA(None));
-                            res_col.push(Value::NA(None));
-                            used_col.push(Value::Bool(false));
-                            let r_str = reason.clone().unwrap_or_else(|| "unspecified".to_string());
-                            reason_col.push(Value::String(r_str));
+                            fitted_col.push(None);
+                            res_col.push(None);
+                            used_col.push(false);
+                            reason_col.push(reason.clone().unwrap_or_else(|| "unspecified".to_string()));
                         }
                     }
                 }
 
-                new_data.insert(".fitted".to_string(), fitted_col);
-                new_data.insert(".residual".to_string(), res_col);
-                new_data.insert(".used_in_fit".to_string(), used_col);
-                new_data.insert(".na_reason".to_string(), reason_col);
+                let mut new_frame = frame.clone();
+                new_frame.with_column(crate::polars_bridge::f64_opt_column(".fitted", fitted_col)).map_err(|e| {
+                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                })?;
+                new_frame.with_column(crate::polars_bridge::f64_opt_column(".residual", res_col)).map_err(|e| {
+                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                })?;
+                new_frame.with_column(crate::polars_bridge::bool_column(".used_in_fit", used_col)).map_err(|e| {
+                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                })?;
+                new_frame.with_column(crate::polars_bridge::string_column(".na_reason", reason_col)).map_err(|e| {
+                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                })?;
 
-                let cols: Vec<(String, Vec<Value>)> = new_columns.iter()
-                    .map(|c| (c.clone(), new_data.remove(c).unwrap_or_default()))
-                    .collect();
-                let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&cols)?;
-                Ok(Value::DataFrame { frame, na_reasons })
+                // The 4 new columns never carry a real NA reason (`.fitted`/`.residual`
+                // are `NA(None)` when dropped, `.used_in_fit`/`.na_reason` are never NA
+                // themselves) -- the original table's entries are still valid as-is.
+                Ok(Value::DataFrame { frame: new_frame, na_reasons: Arc::clone(na_reasons) })
             }
             _ => Err(Diagnostic::compute_error(
                 "C0201",
@@ -475,8 +534,7 @@ impl FittedModel {
     pub fn predict(&self, newdata: &Value) -> Result<Value, Diagnostic> {
         match newdata {
             Value::DataFrame { frame, na_reasons } => {
-                let (columns, data) = crate::polars_bridge::dataframe_to_columns_and_data(frame, na_reasons)?;
-                let (x_data, _, _, n, p) = self.blueprint.bake(&columns, &data)?;
+                let (x_data, _, _, n, p) = self.blueprint.bake(frame, na_reasons)?;
                 let mut predictions = Vec::with_capacity(n);
 
                 for i in 0..n {

@@ -1832,10 +1832,8 @@ fn native_fit_ols(args: Vec<Value>) -> Result<Value, Diagnostic> {
             ));
         }
     };
-    let (columns, data) = crate::polars_bridge::dataframe_to_columns_and_data(frame, na_reasons)?;
-
     let blueprint = crate::neko::Blueprint::new(response, terms);
-    let model = crate::neko::FittedModel::fit_ols(blueprint, &columns, &data)?;
+    let model = crate::neko::FittedModel::fit_ols(blueprint, frame, na_reasons)?;
     Ok(Value::ModelFit(Box::new(model)))
 }
 
@@ -1871,10 +1869,8 @@ fn native_fit_logistic(args: Vec<Value>) -> Result<Value, Diagnostic> {
             ));
         }
     };
-    let (columns, data) = crate::polars_bridge::dataframe_to_columns_and_data(frame, na_reasons)?;
-
     let blueprint = crate::neko::Blueprint::new(response, terms);
-    let model = crate::glm::FittedGlm::fit_logistic(blueprint, &columns, &data)?;
+    let model = crate::glm::FittedGlm::fit_logistic(blueprint, frame, na_reasons)?;
     Ok(Value::GlmFit(Box::new(model)))
 }
 
