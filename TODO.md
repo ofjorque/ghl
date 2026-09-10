@@ -864,8 +864,44 @@ en absoluto — mismo tipo de mismatch que ya se resolvió para `Vector::random_
 `a.dot(&b)` en Fase 3, Punto 4. La resolución consistente es funciones libres, no
 inventar sintaxis de path nueva; se decide en el plan de cada punto.
 
-- [ ] PRNG reproducible bit-a-bit entre plataformas (`rand_xoshiro` o equivalente),
-      con `PRNG::seed(seed)`.
+- [x] **PRNG reproducible bit-a-bit — hecho, con una decisión de diseño real.** El
+      enunciado aspiracional (`PRNG::seed(seed)`, un objeto que se muta en cada sorteo)
+      no es expresable en GHL hoy: no hay reasignación de variables (`is_mut` existe en
+      `StmtKind::Let` pero ningún `ExprKind::Assign` lo usa — campo vestigial) ni
+      tuplas/destructuring para un estilo `let (val, rng2) = draw(rng)`. En vez de
+      inventar cualquiera de las dos cosas solo para esto, **la semilla es un argumento
+      explícito de cada función nativa que genera aleatoriedad** — sin objeto persistente,
+      sin mutación, sin alias.
+    - `random_uniform(n, seed)` — segundo argumento opcional (mismo patrón de aridad
+      opcional que `round(v, digits)`). Mismo `seed` y `n` → mismo `Vector` byte a byte,
+      en cualquier corrida. Sin `seed`: comportamiento default sin cambios.
+    - `bootstrap_mean(v, n_replicas, seed)` — tercer argumento opcional. Como las
+      réplicas corren en paralelo vía rayon, un simple swap a un generador sembrado
+      compartido **no alcanza** para reproducibilidad real: el resultado podría depender
+      de qué réplica cae en qué hilo. Arreglado asignando a cada réplica su propio
+      generador **antes** de lanzar el loop paralelo, vía
+      `Xoshiro256PlusPlus::jump()` (avanza el estado el equivalente a 2^128 sorteos,
+      produce streams estadísticamente independientes sin overlap — el mecanismo
+      estándar para paralelizar esta familia de generadores; combinar `seed + índice` a
+      mano habría arriesgado correlacionar streams vecinos). Verificado con
+      `test_bootstrap_mean_seeded_independent_of_thread_count`: forzar el pool de rayon
+      a 1 hilo (`ThreadPoolBuilder::num_threads(1)`) da el mismo resultado que el pool
+      default — la prueba real de que no depende del scheduling.
+    - `rand_xoshiro`/`rand_distr`/`statrs`/`bumpalo` ya estaban en
+      `ghl-runtime/Cargo.toml` desde Fase 0, sin usar — este punto usa `rand_xoshiro`
+      por primera vez.
+    - **Queda afuera, a propósito:** un objeto `PRNG` persistente con estado (se retoma
+      si el Punto 2 de verdad necesita componer sorteos heterogéneos desde una sola
+      semilla en un mismo script); verificación de reproducibilidad **entre
+      plataformas** (Linux/macOS/Windows, x86/ARM) — no se puede probar en este sandbox
+      (solo Linux x86_64), documentado como esperado por diseño (Xoshiro256++ es
+      aritmética entera pura) pero no verificado cruzado.
+    - Tests nuevos en `lib.rs`: `test_random_uniform_seeded_is_reproducible`,
+      `test_random_uniform_without_seed_still_unseeded`,
+      `test_bootstrap_mean_seeded_is_reproducible`,
+      `test_bootstrap_mean_seeded_independent_of_thread_count`. Las 86 pruebas de
+      `ghl-runtime` y el workspace completo pasan sin regresiones. Verificado de punta a
+      punta con `ghl run`.
 - [ ] Biblioteca de distribuciones (`Normal`, `Gamma`, ...) con `.sample(&mut rng)`
       (`statrs`/`rand_distr` o implementación propia).
 - [ ] Arenas regionales (`bumpalo`) para bucles iterativos (MCMC/bootstrap) con

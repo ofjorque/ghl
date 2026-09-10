@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
 use polars_core::prelude::{IdxCa, IdxSize, PlSmallStr, PolarsError};
-use rand::RngExt;
+use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
 use crate::eval::Interpreter;
 use crate::polars_bridge;
@@ -428,13 +428,29 @@ pub(crate) fn native_max(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// far cheaper than per-cell `Value` boxing). Kleene NA propagation: a NA anywhere in
 /// either vector makes the whole dot product NA, preserving that cell's specific reason
 /// (`VectorData::first_na`), same rationale as `mean()`/`sum()`/etc. above.
+///
+/// TODO.md Fase 5, Punto 1: seeds a `Xoshiro256PlusPlus` (already in `ghl-runtime`'s
+/// dependencies since Fase 0, unused until now) from an explicit `i64` -- the "PRNG" here
+/// is a plain value passed as an argument, not a persistent stateful object GHL scripts
+/// hold onto and mutate (`PRNG::seed(seed)`'s aspirational style in Suite 03's own doc):
+/// GHL has no variable reassignment (`is_mut` exists on `StmtKind::Let` but nothing ever
+/// reads it -- there's no `ExprKind::Assign` at all) and no tuples/destructuring for a
+/// `let (val, rng2) = draw(rng)` style either, so a mutating-handle PRNG object isn't
+/// expressible today without a much bigger language change than "add reproducibility".
+/// An explicit per-call seed sidesteps that entirely, and is naturally
+/// parallel-friendly (see `native_bootstrap_mean` below) since nothing is shared/mutated
+/// across calls.
+fn seeded_rng(seed: i64) -> rand_xoshiro::Xoshiro256PlusPlus {
+    rand_xoshiro::Xoshiro256PlusPlus::seed_from_u64(seed as u64)
+}
+
 /// `random_uniform(n)` — a `Vector[f64]` of `n` values drawn uniformly from `[0, 1)`
 /// (TODO.md Fase 3, Track 2, Punto 4, Suite 01's own reference examples). Built straight
 /// via `VectorData::from_f64`, no boxing, matching every other numeric-fast-path
-/// constructor from Punto 1-3. **Not** reproducible across runs (`rand::rng()` is the
-/// thread-local, OS-seeded generator) -- real bit-for-bit reproducibility
-/// (`PRNG::seed(seed)`) is Fase 5's job (RFC 03 §2.2); this unblocks Suite 01's benchmarks
-/// now without pretending to solve that.
+/// constructor from Punto 1-3. Optional second argument `random_uniform(n, seed)` (same
+/// optional-arity pattern as `round(v, digits)`) makes it bit-for-bit reproducible: same
+/// `seed` and `n` always produce the same `Vector`, in any run. Without a `seed`, still
+/// `rand::rng()` (thread-local, OS-seeded) -- not reproducible, unchanged from before.
 fn native_random_uniform(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let n = args.first().and_then(|v| v.as_i64()).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`random_uniform()` requires an integer length argument")
@@ -445,8 +461,16 @@ fn native_random_uniform(args: Vec<Value>) -> Result<Value, Diagnostic> {
             format!("`random_uniform()` length must be non-negative, found {n}"),
         ));
     }
-    let mut rng = rand::rng();
-    let data: Vec<f64> = (0..n).map(|_| rng.random::<f64>()).collect();
+    let data: Vec<f64> = match args.get(1).and_then(|v| v.as_i64()) {
+        Some(seed) => {
+            let mut rng = seeded_rng(seed);
+            (0..n).map(|_| rng.random::<f64>()).collect()
+        }
+        None => {
+            let mut rng = rand::rng();
+            (0..n).map(|_| rng.random::<f64>()).collect()
+        }
+    };
     Ok(Value::Vector(VectorData::from_f64(data)))
 }
 
@@ -463,8 +487,21 @@ fn native_random_uniform(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// borrowed `&[f64]`, taken once, shared read-only across every rayon task -- no replica
 /// ever copies the base sample, and no replica materializes its resampled subset either
 /// (only a running `f64` sum), so memory use stays O(n + n_replicas), not O(n *
-/// n_replicas). Not reproducible across runs, same as `random_uniform` -- real seeded
-/// reproducibility is Fase 5's job.
+/// n_replicas).
+///
+/// TODO.md Fase 5, Punto 1: optional fourth-turned-third argument `bootstrap_mean(v,
+/// n_replicas, seed)` makes this bit-for-bit reproducible -- and, since replicas run in
+/// parallel, *independent of thread count/scheduling* too, which a naive `rand::rng()`
+/// swap alone wouldn't give: two runs of the same seeded call could still assign
+/// different random streams to different replicas depending on how rayon happens to
+/// schedule them. Fixed by assigning each replica its own generator via
+/// `Xoshiro256PlusPlus::jump()` *before* the parallel loop starts -- `.jump()` advances
+/// the state by the equivalent of 2^128 draws, producing statistically independent,
+/// non-overlapping streams (the standard way to parallelize this generator family;
+/// naively combining `seed + replica_index` risks correlating neighboring streams
+/// instead). Replica `i`'s stream is fixed by `i` alone, not by which thread happens to
+/// run it, so 1 thread and 16 threads produce the same `Vector` of means. Without a
+/// `seed`, unchanged: each task calls `rand::rng()` same as before.
 fn native_bootstrap_mean(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let vd = match args.first() {
         Some(Value::Vector(vd)) => vd,
@@ -498,18 +535,44 @@ fn native_bootstrap_mean(args: Vec<Value>) -> Result<Value, Diagnostic> {
         return Err(Diagnostic::statistical_error("S0412", "`bootstrap_mean()` requires a non-empty Vector"));
     }
 
-    let means: Vec<f64> = (0..n_replicas as usize)
-        .into_par_iter()
-        .map(|_| {
-            let mut rng = rand::rng();
-            let mut acc = 0.0;
-            for _ in 0..n {
-                let idx: usize = rng.random_range(0..n);
-                acc += base[idx];
+    let n_replicas = n_replicas as usize;
+    let means: Vec<f64> = match args.get(2).and_then(|v| v.as_i64()) {
+        Some(seed) => {
+            // Assign each replica an independent, non-overlapping stream *before*
+            // handing them to rayon -- see the doc comment above for why this (rather
+            // than a shared/mutated generator, or combining seed+index by hand) is what
+            // makes the result independent of thread count and scheduling.
+            let mut cursor = seeded_rng(seed);
+            let mut sub_rngs = Vec::with_capacity(n_replicas);
+            for _ in 0..n_replicas {
+                sub_rngs.push(cursor.clone());
+                cursor.jump();
             }
-            acc / n as f64
-        })
-        .collect();
+            sub_rngs
+                .into_par_iter()
+                .map(|mut rng| {
+                    let mut acc = 0.0;
+                    for _ in 0..n {
+                        let idx: usize = rng.random_range(0..n);
+                        acc += base[idx];
+                    }
+                    acc / n as f64
+                })
+                .collect()
+        }
+        None => (0..n_replicas)
+            .into_par_iter()
+            .map(|_| {
+                let mut rng = rand::rng();
+                let mut acc = 0.0;
+                for _ in 0..n {
+                    let idx: usize = rng.random_range(0..n);
+                    acc += base[idx];
+                }
+                acc / n as f64
+            })
+            .collect(),
+    };
 
     Ok(Value::Vector(VectorData::from_f64(means)))
 }

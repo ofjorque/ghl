@@ -840,6 +840,88 @@ mod tests {
     }
 
     #[test]
+    fn test_random_uniform_seeded_is_reproducible() {
+        // TODO.md Fase 5, Punto 1: same seed + n -> byte-identical Vector, any run.
+        let code = r#"
+            let a = random_uniform(1000, 42);
+            let b = random_uniform(1000, 42);
+            let c = random_uniform(1000, 7);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let a = vector_f64(&interp.env.get("a").unwrap());
+        let b = vector_f64(&interp.env.get("b").unwrap());
+        let c = vector_f64(&interp.env.get("c").unwrap());
+        assert_eq!(a, b, "same seed must produce byte-identical output");
+        assert_ne!(a, c, "different seeds must produce different output");
+    }
+
+    #[test]
+    fn test_random_uniform_without_seed_still_unseeded() {
+        // Confirms the optional third argument didn't change the existing, already-
+        // tested default (thread-local, non-reproducible) behavior.
+        let code = r#"
+            let a = random_uniform(1000);
+            let b = random_uniform(1000);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let a = vector_f64(&interp.env.get("a").unwrap());
+        let b = vector_f64(&interp.env.get("b").unwrap());
+        assert_ne!(a, b, "unseeded calls must not be reproducible");
+    }
+
+    #[test]
+    fn test_bootstrap_mean_seeded_is_reproducible() {
+        let code = r#"
+            let v = random_uniform(1000, 1);
+            let a = bootstrap_mean(v, 500, 99);
+            let b = bootstrap_mean(v, 500, 99);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(
+            vector_f64(&interp.env.get("a").unwrap()),
+            vector_f64(&interp.env.get("b").unwrap()),
+            "same seed must produce byte-identical bootstrap replicas"
+        );
+    }
+
+    #[test]
+    fn test_bootstrap_mean_seeded_independent_of_thread_count() {
+        // The real test of "reproducible bit-a-bit": which replica gets which stream
+        // must be fixed by its index (via Xoshiro256PlusPlus::jump()), not by which
+        // thread happens to run it -- so 1 thread and rayon's default pool must agree.
+        let code = r#"
+            let v = random_uniform(1000, 1);
+            let means = bootstrap_mean(v, 500, 99);
+        "#;
+        let program = parse(code).expect("syntax ok");
+
+        let mut interp_default = Interpreter::new();
+        interp_default.eval_program(&program).expect("evaluation ok");
+        let default_pool_result = vector_f64(&interp_default.env.get("means").unwrap());
+
+        let single_thread_pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        let single_thread_result = single_thread_pool.install(|| {
+            let mut interp_single = Interpreter::new();
+            interp_single.eval_program(&program).expect("evaluation ok");
+            vector_f64(&interp_single.env.get("means").unwrap())
+        });
+
+        assert_eq!(
+            default_pool_result, single_thread_result,
+            "seeded bootstrap_mean must not depend on thread count/scheduling"
+        );
+    }
+
+    #[test]
     fn test_bootstrap_mean_produces_requested_number_of_replicas() {
         // TODO.md Fase 4, punto (c), Suite 03's Caso 3.3. Base sample [1..5], real mean 3.0.
         // Each replica is itself a mean of values resampled *from* the base, so it must
