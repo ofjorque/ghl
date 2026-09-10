@@ -85,6 +85,7 @@ impl RuntimeEnv {
         // NEKO Statistical Modeling Verbs
         env.set("fit".into(), Value::NativeFn(native_fit_ols));
         env.set("ols".into(), Value::NativeFn(native_fit_ols));
+        env.set("fit_logistic".into(), Value::NativeFn(native_fit_logistic));
         env.set("summary".into(), Value::NativeFn(native_summary));
         env.set("tidy".into(), Value::NativeFn(native_tidy));
         env.set("glance".into(), Value::NativeFn(native_glance));
@@ -1838,6 +1839,45 @@ fn native_fit_ols(args: Vec<Value>) -> Result<Value, Diagnostic> {
     Ok(Value::ModelFit(Box::new(model)))
 }
 
+/// `fit_logistic(y ~ x1 + ... + xP, df)` -- IRLS-fit binary logistic regression
+/// (TODO.md Fase 6, Caso 3.2). Same argument shape/validation as `native_fit_ols`
+/// above, deliberately not unified into one function with a family argument: the two
+/// share `Blueprint`/`Blueprint::bake()` already, but a `Value::GlmFit` result needs
+/// its own diagnostics (`glm::FittedGlm`), not OLS's.
+fn native_fit_logistic(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`fit_logistic()` requires Formula and DataFrame arguments: `fit_logistic(model, df)`",
+        ));
+    }
+
+    let (response, terms) = match &args[0] {
+        Value::Formula { response, terms } => (response.clone(), terms.clone()),
+        other => {
+            return Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("First argument of `fit_logistic()` must be a Formula, found `{}`", other.type_name()),
+            ));
+        }
+    };
+
+    let (frame, na_reasons) = match &args[1] {
+        Value::DataFrame { frame, na_reasons } => (frame, na_reasons),
+        other => {
+            return Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("Second argument of `fit_logistic()` must be a DataFrame, found `{}`", other.type_name()),
+            ));
+        }
+    };
+    let (columns, data) = crate::polars_bridge::dataframe_to_columns_and_data(frame, na_reasons)?;
+
+    let blueprint = crate::neko::Blueprint::new(response, terms);
+    let model = crate::glm::FittedGlm::fit_logistic(blueprint, &columns, &data)?;
+    Ok(Value::GlmFit(Box::new(model)))
+}
+
 fn native_summary(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`summary()` requires a ModelFit or printable object")
@@ -1845,6 +1885,10 @@ fn native_summary(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match model_val {
         Value::ModelFit(m) => {
+            println!("{}", m);
+            Ok(Value::Unit)
+        }
+        Value::GlmFit(m) => {
             println!("{}", m);
             Ok(Value::Unit)
         }
@@ -1862,6 +1906,7 @@ fn native_tidy(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match model_val {
         Value::ModelFit(m) => Ok(m.tidy()),
+        Value::GlmFit(m) => Ok(m.tidy()),
         other => Err(Diagnostic::statistical_error(
             "S0200",
             format!("`tidy()` requires a ModelFit, found `{}`", other.type_name()),
@@ -1876,6 +1921,7 @@ fn native_glance(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match model_val {
         Value::ModelFit(m) => Ok(m.glance()),
+        Value::GlmFit(m) => Ok(m.glance()),
         other => Err(Diagnostic::statistical_error(
             "S0200",
             format!("`glance()` requires a ModelFit, found `{}`", other.type_name()),
@@ -1893,6 +1939,7 @@ fn native_augment(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match &args[0] {
         Value::ModelFit(m) => m.augment(&args[1]),
+        Value::GlmFit(m) => m.augment(&args[1]),
         other => Err(Diagnostic::statistical_error(
             "S0200",
             format!("First argument of `augment()` must be a ModelFit, found `{}`", other.type_name()),
@@ -1910,6 +1957,7 @@ fn native_predict(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match &args[0] {
         Value::ModelFit(m) => m.predict(&args[1]),
+        Value::GlmFit(m) => m.predict(&args[1]),
         other => Err(Diagnostic::statistical_error(
             "S0200",
             format!("First argument of `predict()` must be a ModelFit, found `{}`", other.type_name()),
@@ -1924,6 +1972,9 @@ fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match model_val {
         Value::ModelFit(m) => {
+            Ok(Value::Vector(VectorData::from_f64(m.residuals.clone())))
+        }
+        Value::GlmFit(m) => {
             Ok(Value::Vector(VectorData::from_f64(m.residuals.clone())))
         }
         other => Err(Diagnostic::statistical_error(
@@ -1942,10 +1993,27 @@ fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Value::ModelFit(m) => {
             Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone())))
         }
+        Value::GlmFit(m) => {
+            Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone())))
+        }
         other => Err(Diagnostic::statistical_error(
             "S0200",
             format!("`coef()` requires a ModelFit, found `{}`", other.type_name()),
         )),
+    }
+}
+
+fn vcov_kind_from_arg(args: &[Value]) -> crate::neko::VcovKind {
+    if let Some(k_str) = args.get(1).and_then(|v| v.as_str()) {
+        match k_str.to_uppercase().as_str() {
+            "HC0" => crate::neko::VcovKind::HC0,
+            "HC1" => crate::neko::VcovKind::HC1,
+            "HC2" => crate::neko::VcovKind::HC2,
+            "HC3" => crate::neko::VcovKind::HC3,
+            _ => crate::neko::VcovKind::Classical,
+        }
+    } else {
+        crate::neko::VcovKind::Classical
     }
 }
 
@@ -1956,24 +2024,16 @@ fn native_vcov(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     match model_val {
         Value::ModelFit(m) => {
-            let kind = if let Some(k_str) = args.get(1).and_then(|v| v.as_str()) {
-                match k_str.to_uppercase().as_str() {
-                    "HC0" => crate::neko::VcovKind::HC0,
-                    "HC1" => crate::neko::VcovKind::HC1,
-                    "HC2" => crate::neko::VcovKind::HC2,
-                    "HC3" => crate::neko::VcovKind::HC3,
-                    _ => crate::neko::VcovKind::Classical,
-                }
-            } else {
-                crate::neko::VcovKind::Classical
-            };
+            let kind = vcov_kind_from_arg(&args);
             let p = m.blueprint.term_names.len();
-            let vcov_data = m.compute_vcov(kind);
-            Ok(Value::Matrix {
-                rows: p,
-                cols: p,
-                data: vcov_data,
-            })
+            let vcov_data = m.compute_vcov(kind)?;
+            Ok(Value::Matrix { rows: p, cols: p, data: vcov_data })
+        }
+        Value::GlmFit(m) => {
+            let kind = vcov_kind_from_arg(&args);
+            let p = m.blueprint.term_names.len();
+            let vcov_data = m.compute_vcov(kind)?;
+            Ok(Value::Matrix { rows: p, cols: p, data: vcov_data })
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",

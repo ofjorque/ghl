@@ -994,8 +994,117 @@ piden (ver detalle en Fase 7).
       escribiendo el loop sin `return`) — sigue pendiente el resto: distribuciones
       multivariadas/jerárquicas reales, no solo `random_normal`/`random_gamma`
       univariadas (Fase 5, Punto 2).
-- [ ] IRLS para GLM / regresión logística sobre N=1M, P=40 (Caso 3.2). No bloqueado por
-      recursión (pocas iteraciones hasta converger) ni lo estuvo nunca.
+- [x] **IRLS para GLM / regresión logística sobre N=1M, P=40 (Caso 3.2) — hecho.** No
+      estuvo bloqueado por recursión (pocas iteraciones hasta converger), ni lo estuvo
+      nunca.
+      - **Hallazgo grande al investigar antes de diseñar (pedido explícito): ya existía
+        un motor de regresión completo, NEKO** (`crates/ghl-runtime/src/neko.rs`, RFC en
+        `docs/design/11-neko-statistical-modeling-framework.md`), con soporte de
+        fórmulas `y ~ x1 + ...` de punta a punta. Reusado tal cual, sin cambios:
+        `Blueprint::bake()` (construcción de matriz de diseño + trazabilidad de NA por
+        fila), `MatrixOps::solve` (Fase 3, LU vía faer) para el sistema ponderado de cada
+        iteración de IRLS, y `normal_cdf`/`erf` (subidos a `pub(crate)` para reusarse
+        desde el nuevo `glm.rs`) para los z-estadísticos.
+      - **Bug real encontrado de paso en NEKO, no relacionado con IRLS — arreglado en la
+        misma pasada, no dejado anotado para después.** El RFC especifica la fórmula
+        sandwich real para HC0-HC3 (`V_HC = (X^TX)^{-1}(Σw_i·X_i^TX_i)(X^TX)^{-1}`,
+        ponderada por residuo/leverage), pero `FittedModel::compute_vcov` no la
+        implementaba así: HC0/HC2/HC3 daban exactamente lo mismo que Classical (solo
+        HC1 aplicaba una corrección escalar de grados de libertad). Causa raíz:
+        `FittedModel` nunca guardaba la matriz de diseño `X` cruda después de ajustar —
+        sin `X` fila por fila no hay forma de calcular leverage ni el "meat" ponderado
+        por observación. Fix: se agregó `x_data: Vec<f64>` a `FittedModel`, y se
+        factorizó un helper compartido `sandwich_vcov(...)` que implementa la fórmula
+        real (con leverage `h_ii` para HC2/HC3) — **reusado tal cual por
+        `FittedGlm::compute_vcov`** (con `(X^TWX)^{-1}` como "bread" y `(y-μ)²` como
+        peso, en vez del "bread"/peso de OLS) para que la vcov robusta de GLM entrara en
+        la misma pasada en vez de quedar afuera arbitrariamente. Tests:
+        `test_vcov_hc0_differs_from_classical_under_heteroskedasticity`,
+        `test_vcov_hc2_hc3_differ_via_leverage`, `test_glm_vcov_hc0_differs_from_classical`.
+      - **`FittedGlm` (nuevo `glm.rs`) deliberadamente NO es una reutilización de
+        `FittedModel`:** los diagnósticos de OLS (`r_squared`, `f_stat`, t-stats con
+        corrección de grados de libertad) no tienen un análogo correcto en regresión
+        logística — forzarlos habría sido exactamente el "estado silencioso" que este
+        proyecto evita en cada punto. `FittedGlm` reporta sus propios diagnósticos
+        (deviance, pseudo-R² de McFadden, AIC/BIC, z-estadísticos de Wald,
+        `iterations`), reusando de NEKO solo lo que es máquina compartida real.
+      - IRLS: `β` inicial en 0, `MAX_ITER=25`/`TOL=1e-8` en `max|Δβ|`, sigmoid numéricamente
+        estable (evita overflow de `exp()` para `η` muy negativo), `W=max(μ(1-μ), 1e-10)`
+        (evita `X^TWX` singular cuando `μ` satura). Si no converge en 25 iteraciones →
+        error explícito `S0205`, no un ajuste parcial devuelto en silencio — esto
+        efectivamente disparó durante las pruebas sobre un dataset de juguete
+        (cuasi-)separable, confirmando que el comportamiento es el diseñado, no un bug.
+        Respuesta no-binaria → `S0204`. `n<=p` → reusa `S0201` de OLS.
+      - **Ensamblado de `X^T W X`/`X^T W z` paralelizado con rayon (`fold`+`reduce` por
+        encima de `PARALLEL_THRESHOLD=50.000`, umbral ya medido en Fase 4), factorizado
+        como helper compartido `assemble_weighted_normal_equations` — y aplicado también
+        a `fit_ols`**, que hasta ahora ensamblaba su normal-equations con un triple loop
+        secuencial sin paralelizar (`neko.rs`, nunca hizo falta a las escalas usadas
+        hasta ahora). Pedido explícito del usuario al revisar el plan: no dejar esto
+        "para después" si la pieza ya se estaba construyendo al lado.
+        Test de regresión: `test_fit_ols_parallel_assembly_matches_sequential_reference`.
+      - **`Value::GlmFit(Box<FittedGlm>)`** nuevo, y las 8 nativas de NEKO
+        (`summary`/`tidy`/`glance`/`augment`/`predict`/`residuals`/`coef`/`vcov`) ganan
+        una rama para despachar sobre él — mismo verbo de GHL funciona sobre un ajuste
+        OLS o logístico sin que el script sepa cuál es cuál (confirmado con
+        `test_glm_generic_verbs_dispatch_on_either_model_type` y de punta a punta con el
+        CLI de release).
+      - **Medido (`examples/spike_irls_latency.rs`, N=1.000.000, P=40 predictores
+        continuos, datos generados con el `random_normal` sembrado real de GHL vía el
+        intérprete — no un CSV intermedio):**
+        - Ajuste completo: **8.7s**, converge en **5 iteraciones**, coeficientes
+          recuperados a `max|β_est-β_true| = 0.0044` del valor verdadero (estabilidad
+          numérica confirmada a escala completa, no solo en el toy dataset de los tests).
+        - Memoria pico real medida con `/usr/bin/time -v`: **~6.9GB** a esta escala — casi
+          toda de `HashMap<String, Vec<Value>>` que `Blueprint::bake` consume
+          (`size_of::<Value>() == 160` bytes/celda × 41 columnas × 1M filas ≈ 6.5GB). La
+          primera corrida a N=1M sin las optimizaciones de abajo terminó en un **OOM-kill
+          real** (`exit 137`) en este sandbox de 15GB (con ~9GB disponibles al momento de
+          medir) — se arregló liberando `interp`/`predictors`/`data` tan pronto como cada
+          uno deja de hacer falta, no reduciendo N. Esto también documenta un límite real
+          de escalabilidad de la representación de datos de NEKO (no introducido por este
+          trabajo, preexistente para `fit_ols` también) — no se rediseña acá, es un punto
+          aparte de mayor alcance.
+        - Ensamblado paralelo vs. secuencial (pesos reales del ajuste convergido, best-of-5
+          alternando orden): **paralelo salió ~0.72x — más lento, no más rápido** — en esta
+          corrida de punta a punta, reproducible entre corridas. Un microbenchmark aislado
+          del mismo algoritmo exacto (mismo N/p, datos sintéticos, proceso limpio sin la
+          huella de memoria del resto del pipeline) sí midió una mejora real (~1.2x a
+          p=41, con retornos decrecientes al subir p: 1.47x/p=10, 1.07x/p=100, 1.01x/p=300
+          — consistente con estar acotado por ancho de banda de memoria, no por cómputo).
+          La brecha entre ambas mediciones no se explica por NUMA (un solo nodo en este
+          sandbox) ni por retener `data` vivo (se probó soltarlo antes de medir, sin
+          cambio) — lectura más plausible: la churn de asignación del pipeline completo a
+          N=1M dejaba el heap en un estado que penaliza más al camino paralelo. **No se
+          investigó más a fondo** (fuera del alcance de este caso) — documentado tal cual
+          salió, no promediado ni descartado, para que quien ajuste `PARALLEL_THRESHOLD`
+          más adelante parta de un número real y no de un supuesto.
+      - Tests nuevos en `lib.rs`: `test_fit_logistic_recovers_known_coefficients` (N=8.000,
+        β verdadero conocido, tolerancia estadística), `test_fit_logistic_rejects_non_binary_response`,
+        `test_fit_logistic_rejects_insufficient_df`, `test_fit_logistic_na_disposition_matches_ols_pattern`,
+        `test_glm_generic_verbs_dispatch_on_either_model_type`, `test_glm_vcov_hc0_differs_from_classical`,
+        más los tres tests del fix de NEKO listados arriba.
+      - Verificado de punta a punta con el CLI de release: `fit_logistic(y ~ x1 + x2, df)`
+        sobre un dataset chico real, con `summary()`/`tidy()`/`glance()`/`augment()`/
+        `predict()` sobre el resultado, y el caso de respuesta no-binaria (`S0204` limpio,
+        no un crash).
+      - **Hallazgo de lenguaje encontrado y no arreglado (fuera de alcance, documentado en
+        vez de ignorado):** GHL no tiene todavía un operador de comparación elementwise
+        sobre `Vector` — `u < p` con ambos `Vector` falla con `C0202`
+        (`eval_binary_op`'s rama `Lt`/`LtEq`/`Gt`/`GtEq` en `eval.rs` solo acepta
+        operandos escalares vía `.as_f64()`). Esto bloqueó simular una respuesta Bernoulli
+        puramente en GHL para los tests/benchmark — se generó esa pieza específica en
+        Rust directamente, manteniendo el ajuste en sí (`fit_logistic`/`coef`/etc.) yendo
+        por el camino real de la función nativa.
+      - **Qué queda afuera, a propósito (decisiones de diseño/alcance, no piezas a medio
+        construir):** otras familias GLM (Poisson, binomial de conteos) — cada una tiene
+        su propia función de varianza/link/deviance, es una feature nueva que nadie pidió
+        todavía, se agrega si Fase 6 la necesita de verdad; y expresar el loop de IRLS en
+        GHL puro con `while` — a diferencia del Gibbs sampler del Caso 3.1 (que pide
+        explícitamente "capacidad de escribir el algoritmo directamente"), el enunciado
+        de este caso solo evalúa "eficiencia del solver + estabilidad + sintaxis de
+        fórmulas", y el patrón ya establecido para esto en todo el proyecto (`fit()`/OLS)
+        es una función nativa de una sola llamada, no un script GHL.
 - [ ] Algoritmo EM para mezclas gaussianas con log-sum-exp estable (Caso 3.4). Ya no en
       riesgo por profundidad de recursión (500 iteraciones ≈ 28ms estimado, mismo
       requisito de estilo sin `return`).

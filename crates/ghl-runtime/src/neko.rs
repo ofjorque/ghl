@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps, Sparkline};
+use rayon::prelude::*;
 use crate::matrix::MatrixOps;
 use crate::value::Value;
 use crate::vector_data::VectorData;
@@ -162,6 +163,10 @@ pub struct FittedModel {
     pub fitted_values: Vec<f64>,
     pub residuals: Vec<f64>,
     pub inv_xtx: Vec<f64>,
+    /// Row-major design matrix (n×p), kept so `compute_vcov` can build the real HC0-HC3
+    /// sandwich estimator later -- it was previously discarded after the fit, which is
+    /// exactly why HC0/HC2/HC3 couldn't be computed correctly at all (see `compute_vcov`).
+    pub x_data: Vec<f64>,
 }
 
 impl FittedModel {
@@ -191,27 +196,14 @@ impl FittedModel {
             ));
         }
 
-        // 1. Compute X^T X (p x p)
-        let mut xtx = vec![0.0; p * p];
-        for j in 0..p {
-            for k in 0..p {
-                let mut sum = 0.0;
-                for i in 0..n {
-                    sum += x_data[i * p + j] * x_data[i * p + k];
-                }
-                xtx[j * p + k] = sum;
-            }
-        }
-
-        // 2. Compute X^T y (p x 1)
-        let mut xty = vec![0.0; p];
-        for j in 0..p {
-            let mut sum = 0.0;
-            for i in 0..n {
-                sum += x_data[i * p + j] * y_data[i];
-            }
-            xty[j] = sum;
-        }
+        // 1-2. Compute X^T X (p x p) and X^T y (p x 1) -- parallelized above
+        // PARALLEL_THRESHOLD (shared with `glm::FittedGlm::fit_logistic`'s identical
+        // per-IRLS-iteration assembly, weight=1.0/target=y here instead of weight=W/
+        // target=z). Never parallelized before this point -- never needed to be, at
+        // the scale OLS was used at so far, but IRLS repeats this same O(n*p^2) cost
+        // MAX_ITER times, which is what actually justified writing this once and
+        // sharing it instead of leaving OLS's copy sequential.
+        let (xtx, xty) = assemble_weighted_normal_equations(n, p, &x_data, None, &y_data);
 
         // 3. Solve (X^T X) * beta = X^T y
         let beta = MatrixOps::solve(p, &xtx, &xty)?;
@@ -351,33 +343,30 @@ impl FittedModel {
             fitted_values,
             residuals,
             inv_xtx,
+            x_data,
         })
     }
 
-    /// Computes the covariance matrix for a given VcovKind.
-    pub fn compute_vcov(&self, kind: VcovKind) -> Vec<f64> {
+    /// Computes the covariance matrix for a given VcovKind. `HC0`-`HC3` use the real
+    /// sandwich estimator (`sandwich_vcov`, shared with `glm::FittedGlm`) -- they used
+    /// to just rescale `s2 * inv_xtx` differently (HC0/HC2/HC3 were numerically
+    /// identical to Classical, HC1 only applied a scalar df correction), which isn't
+    /// the RFC's own formula (`docs/design/11-neko-statistical-modeling-framework.md`
+    /// §5) and isn't real heteroskedasticity-robust inference -- `FittedModel` didn't
+    /// even retain the design matrix needed to compute it correctly until now.
+    pub fn compute_vcov(&self, kind: VcovKind) -> Result<Vec<f64>, Diagnostic> {
         let p = self.blueprint.term_names.len();
-        let s2 = self.residual_se.powi(2);
-        let mut vcov = vec![0.0; p * p];
 
         match kind {
             VcovKind::Classical => {
-                for i in 0..(p * p) {
-                    vcov[i] = s2 * self.inv_xtx[i];
-                }
+                let s2 = self.residual_se.powi(2);
+                Ok(self.inv_xtx.iter().map(|&v| v * s2).collect())
             }
             VcovKind::HC0 | VcovKind::HC1 | VcovKind::HC2 | VcovKind::HC3 => {
-                let df_corr = match kind {
-                    VcovKind::HC1 => self.n_obs as f64 / self.df_resid as f64,
-                    _ => 1.0,
-                };
-                for i in 0..(p * p) {
-                    vcov[i] = s2 * self.inv_xtx[i] * df_corr;
-                }
+                let sq_resid: Vec<f64> = self.residuals.iter().map(|e| e * e).collect();
+                sandwich_vcov(p, self.n_obs, self.df_resid, &self.x_data, &sq_resid, &self.inv_xtx, kind)
             }
         }
-
-        vcov
     }
 
     /// Returns a structured DataFrame projecting tidy model estimates.
@@ -590,11 +579,13 @@ fn compute_p_value(t_abs: f64, df: usize) -> f64 {
     p.clamp(0.0, 1.0)
 }
 
-fn normal_cdf(x: f64) -> f64 {
+/// `pub(crate)`: reused directly by `glm::FittedGlm` for Wald z-statistic p-values
+/// (asymptotically normal, unlike OLS's t-statistics -- no df correction needed).
+pub(crate) fn normal_cdf(x: f64) -> f64 {
     0.5 * (1.0 + erf(x / std::f64::consts::SQRT_2))
 }
 
-fn erf(x: f64) -> f64 {
+pub(crate) fn erf(x: f64) -> f64 {
     let a1 = 0.254829592;
     let a2 = -0.284496736;
     let a3 = 1.421413741;
@@ -609,4 +600,126 @@ fn erf(x: f64) -> f64 {
     let y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * (-abs_x * abs_x).exp();
 
     sign * y
+}
+
+/// Assembles the (possibly weighted) normal equations `X^T W X` (p×p) and `X^T W t`
+/// (p×1) for a row-major design matrix -- shared between `FittedModel::fit_ols`
+/// (`weights = None`, i.e. all 1.0, `t = y`) and `glm::FittedGlm::fit_logistic` (each
+/// IRLS iteration: `weights = Some(&W)`, `t = z`, the working response). Parallelized
+/// with rayon above `crate::eval::PARALLEL_THRESHOLD` (same threshold measured in Fase
+/// 4) via `fold`+`reduce` (each parallel task accumulates into its own local p×p/p×1
+/// buffer across many rows, not once per row, then the per-task buffers are summed --
+/// avoids allocating a fresh buffer per row the way a naive `map` + `reduce` would).
+/// Below the threshold, a single sequential pass. This is what actually answers Caso
+/// 3.2's "eficiencia del solver matricial": IRLS repeats this exact O(n*p^2) assembly
+/// once per iteration, so at N=1,000,000/P=40 this dominates the whole fit's cost far
+/// more than the O(p^3) `MatrixOps::solve` step that follows it.
+pub(crate) fn assemble_weighted_normal_equations(
+    n: usize,
+    p: usize,
+    x_data: &[f64],
+    weights: Option<&[f64]>,
+    target: &[f64],
+) -> (Vec<f64>, Vec<f64>) {
+    let accumulate = |acc: &mut (Vec<f64>, Vec<f64>), i: usize| {
+        let row = &x_data[i * p..(i + 1) * p];
+        let w = weights.map(|w| w[i]).unwrap_or(1.0);
+        let t = target[i];
+        for a in 0..p {
+            acc.1[a] += w * row[a] * t;
+            for b in 0..p {
+                acc.0[a * p + b] += w * row[a] * row[b];
+            }
+        }
+    };
+
+    if n >= crate::eval::PARALLEL_THRESHOLD {
+        (0..n)
+            .into_par_iter()
+            .fold(
+                || (vec![0.0; p * p], vec![0.0; p]),
+                |mut acc, i| {
+                    accumulate(&mut acc, i);
+                    acc
+                },
+            )
+            .reduce(
+                || (vec![0.0; p * p], vec![0.0; p]),
+                |mut a, b| {
+                    for i in 0..p * p {
+                        a.0[i] += b.0[i];
+                    }
+                    for i in 0..p {
+                        a.1[i] += b.1[i];
+                    }
+                    a
+                },
+            )
+    } else {
+        let mut acc = (vec![0.0; p * p], vec![0.0; p]);
+        for i in 0..n {
+            accumulate(&mut acc, i);
+        }
+        acc
+    }
+}
+
+/// Shared heteroskedasticity-consistent "sandwich" covariance estimator
+/// (`V = inv_bread · meat · inv_bread`, RFC §5), used by both `FittedModel::compute_vcov`
+/// (OLS: `inv_bread = (X^TX)^{-1}`, weight = squared residual) and
+/// `glm::FittedGlm::compute_vcov` (IRLS: `inv_bread = (X^TWX)^{-1}`, weight = squared
+/// score `(y-mu)^2`) -- same math either way, only the "bread" and per-observation
+/// weight differ, so it isn't duplicated between the two model types. `kind` must be
+/// one of `HC0`/`HC1`/`HC2`/`HC3` (`Classical` doesn't go through this -- each caller
+/// computes it directly, since it's just `s2 * inv_bread` with no sandwich at all).
+pub(crate) fn sandwich_vcov(
+    p: usize,
+    n: usize,
+    df_resid: usize,
+    x_data: &[f64],
+    sq_score: &[f64],
+    inv_bread: &[f64],
+    kind: VcovKind,
+) -> Result<Vec<f64>, Diagnostic> {
+    let mut meat = vec![0.0; p * p];
+    for i in 0..n {
+        let row = &x_data[i * p..(i + 1) * p];
+        let w_i = match kind {
+            VcovKind::HC0 | VcovKind::HC1 => sq_score[i],
+            VcovKind::HC2 | VcovKind::HC3 => {
+                // Leverage h_ii = row_i^T * inv_bread * row_i, using the already-
+                // computed inverse "bread" matrix -- no separate hat-matrix pass needed.
+                let mut h_ii = 0.0;
+                for a in 0..p {
+                    let mut tmp = 0.0;
+                    for b in 0..p {
+                        tmp += inv_bread[a * p + b] * row[b];
+                    }
+                    h_ii += row[a] * tmp;
+                }
+                match kind {
+                    VcovKind::HC2 => sq_score[i] / (1.0 - h_ii),
+                    VcovKind::HC3 => sq_score[i] / (1.0 - h_ii).powi(2),
+                    _ => unreachable!(),
+                }
+            }
+            VcovKind::Classical => unreachable!("Classical is handled by the caller directly, never reaches sandwich_vcov"),
+        };
+        for a in 0..p {
+            for b in 0..p {
+                meat[a * p + b] += w_i * row[a] * row[b];
+            }
+        }
+    }
+
+    if kind == VcovKind::HC1 {
+        let corr = n as f64 / df_resid as f64;
+        for v in meat.iter_mut() {
+            *v *= corr;
+        }
+    }
+
+    let (_, _, bread_meat) = MatrixOps::mul(p, p, inv_bread, p, p, &meat)?;
+    let (_, _, sandwich) = MatrixOps::mul(p, p, &bread_meat, p, p, inv_bread)?;
+    Ok(sandwich)
 }

@@ -218,6 +218,14 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "fit_logistic".into(),
+            Type::Function {
+                params: vec![Type::Formula, Type::Any],
+                ret: Box::new(Type::ModelFit),
+            },
+            false,
+        );
+        env.insert(
             "summary".into(),
             Type::Function {
                 params: vec![Type::Any],

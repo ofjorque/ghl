@@ -8,6 +8,7 @@ pub mod matrix;
 pub mod env;
 pub mod eval;
 pub mod neko;
+pub mod glm;
 pub mod io;
 pub mod na_reasons;
 pub mod polars_bridge;
@@ -17,6 +18,7 @@ pub use value::Value;
 pub use env::RuntimeEnv;
 pub use eval::Interpreter;
 pub use neko::{Blueprint, FittedModel, RowDisposition, VcovKind};
+pub use glm::FittedGlm;
 
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::Program;
@@ -32,6 +34,8 @@ mod tests {
     use super::*;
     use ghl_syntax::parser::parse;
     use crate::polars_bridge;
+    use rand::{RngExt, SeedableRng};
+    use crate::vector_data::VectorData;
 
     /// Test helper: extract a column's values from a `Value::DataFrame`, panicking with
     /// a clear message if `v` isn't one or the column doesn't exist — keeps assertions
@@ -1630,6 +1634,244 @@ mod tests {
         } else {
             panic!("Expected Matrix for vcov");
         }
+    }
+
+    #[test]
+    fn test_vcov_hc0_differs_from_classical_under_heteroskedasticity() {
+        // Before the sandwich_vcov fix, HC0 was numerically identical to Classical
+        // (both were just s2 * inv_xtx) -- with residual variance that clearly grows
+        // with x, the real HC0 sandwich estimator must disagree with Classical.
+        let code = r#"
+            let df = dataframe {
+                x: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+                y: [2.1, 3.9, 6.3, 7.7, 10.5, 11.5, 15.0, 13.0, 22.0, 2.0]
+            };
+            let model = fit(y ~ x, df);
+            let v_classical = vcov(model, "Classical");
+            let v_hc0 = vcov(model, "HC0");
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let var_x_classical = matrix_data(&interp.env.get("v_classical").unwrap())[3];
+        let var_x_hc0 = matrix_data(&interp.env.get("v_hc0").unwrap())[3];
+        assert!(
+            (var_x_classical - var_x_hc0).abs() > 1e-6 * var_x_classical.max(1.0),
+            "HC0 ({var_x_hc0}) must differ from Classical ({var_x_classical}) under heteroskedasticity"
+        );
+    }
+
+    #[test]
+    fn test_vcov_hc2_hc3_differ_via_leverage() {
+        // A far outlier in x gives that row very high leverage -- before the fix,
+        // HC0/HC2/HC3 were all identical (none of them used leverage at all). With a
+        // real high-leverage point, HC2 (divides by 1-h_ii) and HC3 (divides by
+        // (1-h_ii)^2) must diverge from HC0 and from each other.
+        let code = r#"
+            let df = dataframe {
+                x: [1.0, 2.0, 3.0, 4.0, 5.0, 100.0],
+                y: [2.5, 3.5, 7.0, 7.5, 11.0, 150.0]
+            };
+            let model = fit(y ~ x, df);
+            let v_hc0 = vcov(model, "HC0");
+            let v_hc2 = vcov(model, "HC2");
+            let v_hc3 = vcov(model, "HC3");
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let var_x_hc0 = matrix_data(&interp.env.get("v_hc0").unwrap())[3];
+        let var_x_hc2 = matrix_data(&interp.env.get("v_hc2").unwrap())[3];
+        let var_x_hc3 = matrix_data(&interp.env.get("v_hc3").unwrap())[3];
+        assert!((var_x_hc0 - var_x_hc2).abs() > 1e-6 * var_x_hc0.max(1.0), "HC2 must differ from HC0 via leverage");
+        assert!((var_x_hc2 - var_x_hc3).abs() > 1e-6 * var_x_hc2.max(1.0), "HC3 must differ from HC2");
+    }
+
+    #[test]
+    fn test_fit_ols_parallel_assembly_matches_sequential_reference() {
+        // N=60,000 is above PARALLEL_THRESHOLD (50,000, Fase 4), so this exercises
+        // assemble_weighted_normal_equations' rayon fold+reduce path, not just the
+        // sequential one every other OLS test uses. y is an exact linear function of
+        // x1/x2 with zero noise, so the recovered coefficients must match the true
+        // ones tightly -- not just "close", a real correctness check of the parallel
+        // accumulation, not merely "it runs".
+        let code = r#"
+            let x1 = random_uniform(60000, 1);
+            let x2 = random_uniform(60000, 2);
+            let y = 5.0 + x1 * 2.0 - x2;
+            let df = dataframe { x1: x1, x2: x2, y: y };
+            let model = fit(y ~ x1 + x2, df);
+            let coefficients = coef(model);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let coefs = vector_f64(&interp.env.get("coefficients").unwrap());
+        assert_eq!(coefs.len(), 3);
+        assert!((coefs[0] - 5.0).abs() < 1e-6, "b0 should be 5.0, got {}", coefs[0]);
+        assert!((coefs[1] - 2.0).abs() < 1e-6, "b1 should be 2.0, got {}", coefs[1]);
+        assert!((coefs[2] - -1.0).abs() < 1e-6, "b2 should be -1.0, got {}", coefs[2]);
+    }
+
+    #[test]
+    fn test_fit_logistic_recovers_known_coefficients() {
+        // GHL has no elementwise Vector comparison operator yet (`u < p` errors with
+        // "Inequality comparison requires numeric operands" -- confirmed by reading
+        // eval_binary_op's Lt/LtEq/Gt/GtEq arm, which only accepts scalar `as_f64()`
+        // operands), so the Bernoulli response can't be simulated in GHL script alone.
+        // Predictors are generated via GHL's own seeded random_normal (reusing Fase 5's
+        // reproducibility machinery); the response is drawn in Rust from the true
+        // model, then injected back into the same Interpreter's env before fitting --
+        // the fit itself still goes through the real fit_logistic()/coef() native call
+        // path, not a direct Rust call into FittedGlm.
+        let true_b0 = -0.5_f64;
+        let true_b1 = 1.5_f64;
+        let true_b2 = -0.8_f64;
+        let n = 8000;
+
+        let gen_code = format!(
+            r#"
+            let x1 = random_normal({n}, 0.0, 1.0, 10);
+            let x2 = random_normal({n}, 0.0, 1.0, 11);
+        "#
+        );
+        let program = parse(&gen_code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let x1 = vector_f64(&interp.env.get("x1").unwrap());
+        let x2 = vector_f64(&interp.env.get("x2").unwrap());
+
+        let mut rng = rand_xoshiro::Xoshiro256PlusPlus::seed_from_u64(12345);
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                let eta = true_b0 + true_b1 * x1[i] + true_b2 * x2[i];
+                let p = 1.0 / (1.0 + (-eta).exp());
+                if rng.random::<f64>() < p { 1.0 } else { 0.0 }
+            })
+            .collect();
+        interp.env.set("y".to_string(), Value::Vector(VectorData::from_f64(y)));
+
+        let fit_code = r#"
+            let df = dataframe { x1: x1, x2: x2, y: y };
+            let model = fit_logistic(y ~ x1 + x2, df);
+            let coefficients = coef(model);
+            let its = glance(model);
+        "#;
+        let program = parse(fit_code).expect("syntax ok");
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let coefs = vector_f64(&interp.env.get("coefficients").unwrap());
+        assert_eq!(coefs.len(), 3);
+        assert!((coefs[0] - true_b0).abs() < 0.15, "b0 {} too far from {}", coefs[0], true_b0);
+        assert!((coefs[1] - true_b1).abs() < 0.15, "b1 {} too far from {}", coefs[1], true_b1);
+        assert!((coefs[2] - true_b2).abs() < 0.15, "b2 {} too far from {}", coefs[2], true_b2);
+    }
+
+    #[test]
+    fn test_fit_logistic_rejects_non_binary_response() {
+        let code = r#"
+            let df = dataframe {
+                x: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                y: [0.0, 1.0, 2.0, 0.0, 1.0, 0.0]
+            };
+            let model = fit_logistic(y ~ x, df);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("non-binary response must fail");
+        assert_eq!(err.code, "S0204");
+    }
+
+    #[test]
+    fn test_fit_logistic_rejects_insufficient_df() {
+        let code = r#"
+            let df = dataframe {
+                x1: [1.0, 2.0],
+                x2: [1.0, 2.0],
+                y: [0.0, 1.0]
+            };
+            let model = fit_logistic(y ~ x1 + x2, df);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("insufficient df must fail");
+        assert_eq!(err.code, "S0201");
+    }
+
+    #[test]
+    fn test_fit_logistic_na_disposition_matches_ols_pattern() {
+        // y deliberately doesn't separate cleanly by x (overlapping classes) -- a
+        // cleanly-separating toy dataset makes the MLE not exist at all (coefficients
+        // diverge), which is a real non-convergence, not a bug, but isn't what this
+        // test is checking (the NA-disposition/augment() mechanics, not IRLS itself).
+        let code = r#"
+            let df = dataframe {
+                x: [1.0, 2.0, NA, 4.0, 5.0, 6.0, 7.0, 8.0],
+                y: [0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0]
+            };
+            let model = fit_logistic(y ~ x, df);
+            let aug = augment(model, df);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let aug = interp.env.get("aug").expect("aug exists");
+        let used = df_column(&aug, ".used_in_fit");
+        assert_eq!(used[2], Value::Bool(false), "the NA row must be marked unused");
+        assert_eq!(used[0], Value::Bool(true));
+    }
+
+    #[test]
+    fn test_glm_generic_verbs_dispatch_on_either_model_type() {
+        let code = r#"
+            let df1 = dataframe {
+                x: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                y: [5.0, 8.0, 7.0, 10.0, 9.0, 12.0]
+            };
+            let ols_model = fit(y ~ x, df1);
+            let ols_coefs = coef(ols_model);
+
+            let df2 = dataframe {
+                x: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+                y: [0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0]
+            };
+            let glm_model = fit_logistic(y ~ x, df2);
+            let glm_coefs = coef(glm_model);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(vector_f64(&interp.env.get("ols_coefs").unwrap()).len(), 2);
+        assert_eq!(vector_f64(&interp.env.get("glm_coefs").unwrap()).len(), 2);
+    }
+
+    #[test]
+    fn test_glm_vcov_hc0_differs_from_classical() {
+        let code = r#"
+            let df = dataframe {
+                x: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+                y: [0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0]
+            };
+            let model = fit_logistic(y ~ x, df);
+            let v_classical = vcov(model, "Classical");
+            let v_hc0 = vcov(model, "HC0");
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let var_x_classical = matrix_data(&interp.env.get("v_classical").unwrap())[3];
+        let var_x_hc0 = matrix_data(&interp.env.get("v_hc0").unwrap())[3];
+        assert!(
+            (var_x_classical - var_x_hc0).abs() > 1e-9 * var_x_classical.max(1.0),
+            "GLM HC0 ({var_x_hc0}) must differ from Classical ({var_x_classical})"
+        );
     }
 
     #[test]
