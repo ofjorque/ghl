@@ -846,6 +846,24 @@ Cierra (con matices, ver abajo) la lista pendiente desde Fase 3 Punto 2: `map_nu
 ## Fase 5 — RNG + distribuciones + arenas (`benchmarks/suites/03`, RFC 03 §2.2)
 Requisito para todo el modelado estadístico de la Suite 03.
 
+**Orden revisado y confirmado explícitamente** (misma discusión que Fase 3 Track 2):
+"más estructural primero" acá tenía dos lecturas posibles — dependencia interna de la
+fase (PRNG antes que Distribuciones, que necesitan un generador para samplear) o
+profundidad arquitectónica (CoW/ARC afecta todo el intérprete, no solo lo estadístico).
+Se eligió la primera: PRNG → Distribuciones → Arenas → CoW, dejando el cambio más grande
+e invasivo (CoW) al final, informado por dónde el profiling real de Fase 6 (corriendo
+Gibbs/bootstrap/GLM/EM de verdad) muestre que duele — no apostado a ciegas antes de tener
+evidencia medida.
+
+**Investigación previa (antes de tocar código):** `rand_xoshiro`, `rand_distr`, `statrs`
+y `bumpalo` ya estaban declarados en `ghl-runtime/Cargo.toml` desde Fase 0 — ninguno se
+usa todavía en el código (`grep` no encontró referencias). Y la sintaxis que el propio
+doc de Suite 03 usa para esto (`PRNG::seed(seed)`, `Normal::new(...).sample(&mut rng)`)
+**no existe en GHL**: el parser no tiene soporte de sintaxis `Tipo::método(...)` (path)
+en absoluto — mismo tipo de mismatch que ya se resolvió para `Vector::random_uniform`/
+`a.dot(&b)` en Fase 3, Punto 4. La resolución consistente es funciones libres, no
+inventar sintaxis de path nueva; se decide en el plan de cada punto.
+
 - [ ] PRNG reproducible bit-a-bit entre plataformas (`rand_xoshiro` o equivalente),
       con `PRNG::seed(seed)`.
 - [ ] Biblioteca de distribuciones (`Normal`, `Gamma`, ...) con `.sample(&mut rng)`
@@ -873,6 +891,20 @@ no lo maneja — bloquea cualquier ejemplo de la documentación que use `use std
       referencias (`&`, `&mut`) y `Option`/`Result` con `.unwrap()` — aparecen en
       los ejemplos de los RFCs pero son un cambio grande al sistema de tipos;
       decidir alcance real antes de implementar.
+- [ ] **Iteración real sin overflow de la pila nativa** — encontrado al investigar Fase 5
+      (PRNG/distribuciones), no en el alcance de sus 4 puntos pero bloquea escribir
+      Gibbs sampler/EM idiomático en GHL (Suite 03, Casos 3.1/3.4: "se evalúa la
+      capacidad de escribir el algoritmo directamente"). GHL **no tiene ningún
+      constructo de iteración** (`for`/`while` no existen en `ghl-syntax/src/ast.rs`) y
+      el único mecanismo de repetición, la recursión de funciones, **no tiene
+      tail-call optimization** — `call_value`'s rama `Closure` (`eval.rs`) llama a
+      `self.eval_expr(&body)` de forma directa, no en cola. Confirmado con un crash
+      real, no solo teórico: una función recursiva de 100.000 llamadas (la escala
+      exacta del Caso 3.1) revienta el intérprete hoy (`thread 'main' has overflowed
+      its stack`). No bloquea PRNG/distribuciones en sí, que pueden exponerse como
+      funciones nativas de una sola llamada (mismo patrón que `random_uniform`/
+      `bootstrap_mean`) sin que el usuario escriba un loop en GHL — se retoma cuando
+      Fase 6 lo necesite de verdad para los ejemplos de punta a punta.
 
 ## Fase 8 — Backend AOT y distribución (`benchmarks/suites/04`, RFC 03 §3.2)
 Puede avanzar en paralelo a partir de Fase 0; no depende de las fases de datos/estadística.
