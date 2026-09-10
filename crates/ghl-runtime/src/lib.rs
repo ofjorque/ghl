@@ -922,6 +922,164 @@ mod tests {
     }
 
     #[test]
+    fn test_random_normal_seeded_is_reproducible() {
+        let code = r#"
+            let a = random_normal(1000, 5.0, 2.0, 42);
+            let b = random_normal(1000, 5.0, 2.0, 42);
+            let c = random_normal(1000, 5.0, 2.0, 7);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let a = vector_f64(&interp.env.get("a").unwrap());
+        let b = vector_f64(&interp.env.get("b").unwrap());
+        let c = vector_f64(&interp.env.get("c").unwrap());
+        assert_eq!(a, b, "same seed must produce byte-identical output");
+        assert_ne!(a, c, "different seeds must produce different output");
+    }
+
+    #[test]
+    fn test_random_gamma_seeded_is_reproducible() {
+        let code = r#"
+            let a = random_gamma(1000, 3.0, 2.0, 42);
+            let b = random_gamma(1000, 3.0, 2.0, 42);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(
+            vector_f64(&interp.env.get("a").unwrap()),
+            vector_f64(&interp.env.get("b").unwrap())
+        );
+    }
+
+    #[test]
+    fn test_random_normal_matches_expected_mean_and_sd() {
+        let code = r#"
+            let v = random_normal(200000, 5.0, 2.0, 1);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let v = vector_f64(&interp.env.get("v").unwrap());
+        let n = v.len() as f64;
+        let mean: f64 = v.iter().sum::<f64>() / n;
+        let var: f64 = v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
+        assert!((mean - 5.0).abs() < 0.05, "sample mean {mean} too far from 5.0");
+        assert!((var.sqrt() - 2.0).abs() < 0.05, "sample sd {} too far from 2.0", var.sqrt());
+    }
+
+    #[test]
+    fn test_random_gamma_matches_expected_mean() {
+        // Mean of Gamma(shape, rate) is shape / rate -- this is also the test that
+        // guards the shape-rate parameterization choice: shape-scale would give a
+        // systematically different (shape * rate) sample mean instead.
+        let code = r#"
+            let v = random_gamma(200000, 3.0, 2.0, 1);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let v = vector_f64(&interp.env.get("v").unwrap());
+        let mean: f64 = v.iter().sum::<f64>() / v.len() as f64;
+        assert!((mean - 1.5).abs() < 0.05, "sample mean {mean} too far from shape/rate = 1.5");
+    }
+
+    #[test]
+    fn test_random_normal_rejects_non_positive_sd() {
+        let code = r#"
+            let v = random_normal(10, 0.0, -1.0);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("non-positive sd must fail");
+        assert_eq!(err.code, "C0201");
+    }
+
+    #[test]
+    fn test_random_gamma_rejects_non_positive_shape() {
+        let code = r#"
+            let v = random_gamma(10, -1.0, 1.0);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("non-positive shape must fail");
+        assert_eq!(err.code, "C0201");
+    }
+
+    #[test]
+    fn test_normal_pdf_cdf_match_known_values() {
+        let code = r#"
+            let p = normal_pdf(0.0, 0.0, 1.0);
+            let c = normal_cdf(0.0, 0.0, 1.0);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert!((interp.env.get("p").unwrap().as_f64().unwrap() - 0.398_942_280_4).abs() < 1e-6);
+        assert!((interp.env.get("c").unwrap().as_f64().unwrap() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_gamma_pdf_cdf_match_known_values() {
+        // shape=1.0 reduces Gamma(shape, rate) to Exponential(rate), whose closed-form
+        // pdf/cdf are easy to check by hand: pdf(x) = rate*e^(-rate*x), cdf(x) = 1-e^(-rate*x).
+        let code = r#"
+            let p = gamma_pdf(1.0, 1.0, 1.0);
+            let c = gamma_cdf(0.693147180560, 1.0, 1.0);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert!((interp.env.get("p").unwrap().as_f64().unwrap() - std::f64::consts::E.recip()).abs() < 1e-6);
+        assert!((interp.env.get("c").unwrap().as_f64().unwrap() - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_random_normal_parallel_path_matches_sequential_reference() {
+        // Above PARALLEL_THRESHOLD (50,000): exercises sample_distribution's chunked
+        // parallel path, not just its sequential fast path.
+        let code = r#"
+            let v = random_normal(60000, 0.0, 1.0, 42);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        let v = vector_f64(&interp.env.get("v").unwrap());
+        assert_eq!(v.len(), 60_000);
+
+        let mean: f64 = v.iter().sum::<f64>() / v.len() as f64;
+        assert!(mean.abs() < 0.05, "sample mean {mean} too far from 0.0");
+    }
+
+    #[test]
+    fn test_random_normal_seeded_independent_of_thread_count() {
+        let code = r#"
+            let v = random_normal(60000, 0.0, 1.0, 42);
+        "#;
+        let program = parse(code).expect("syntax ok");
+
+        let mut interp_default = Interpreter::new();
+        interp_default.eval_program(&program).expect("evaluation ok");
+        let default_pool_result = vector_f64(&interp_default.env.get("v").unwrap());
+
+        let single_thread_pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        let single_thread_result = single_thread_pool.install(|| {
+            let mut interp_single = Interpreter::new();
+            interp_single.eval_program(&program).expect("evaluation ok");
+            vector_f64(&interp_single.env.get("v").unwrap())
+        });
+
+        assert_eq!(
+            default_pool_result, single_thread_result,
+            "seeded random_normal must not depend on thread count/scheduling"
+        );
+    }
+
+    #[test]
     fn test_bootstrap_mean_produces_requested_number_of_replicas() {
         // TODO.md Fase 4, punto (c), Suite 03's Caso 3.3. Base sample [1..5], real mean 3.0.
         // Each replica is itself a mean of values resampled *from* the base, so it must

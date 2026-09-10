@@ -603,7 +603,9 @@ impl TypeEnv {
 
         // Dense linear algebra (TODO.md Fase 3, faer-backed)
         for name in [
-            "dot", "map", "random_uniform", "bootstrap_mean", "qr", "qr_q", "qr_r", "cholesky",
+            "dot", "map", "random_uniform", "bootstrap_mean",
+            "random_normal", "random_gamma", "normal_pdf", "normal_cdf", "gamma_pdf", "gamma_cdf",
+            "qr", "qr_q", "qr_r", "cholesky",
             "svd", "svd_u", "svd_s", "svd_v",
             "eigen", "eigen_values", "eigen_vectors",
         ] {

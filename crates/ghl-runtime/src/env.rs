@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
 use polars_core::prelude::{IdxCa, IdxSize, PlSmallStr, PolarsError};
 use rand::{RngExt, SeedableRng};
+use rand::distr::Distribution;
 use rayon::prelude::*;
+use statrs::distribution::{Continuous, ContinuousCDF, Gamma, Normal};
 use crate::eval::Interpreter;
 use crate::polars_bridge;
 use crate::value::Value;
@@ -195,6 +197,12 @@ impl RuntimeEnv {
         env.set("map".into(),          Value::NativeFnCtx(native_map));
         env.set("random_uniform".into(), Value::NativeFn(native_random_uniform));
         env.set("bootstrap_mean".into(), Value::NativeFn(native_bootstrap_mean));
+        env.set("random_normal".into(), Value::NativeFn(native_random_normal));
+        env.set("random_gamma".into(), Value::NativeFn(native_random_gamma));
+        env.set("normal_pdf".into(), Value::NativeFn(native_normal_pdf));
+        env.set("normal_cdf".into(), Value::NativeFn(native_normal_cdf));
+        env.set("gamma_pdf".into(), Value::NativeFn(native_gamma_pdf));
+        env.set("gamma_cdf".into(), Value::NativeFn(native_gamma_cdf));
         env.set("qr".into(),           Value::NativeFn(native_qr));
         env.set("qr_q".into(),         Value::NativeFn(native_qr_q));
         env.set("qr_r".into(),         Value::NativeFn(native_qr_r));
@@ -472,6 +480,183 @@ fn native_random_uniform(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
     };
     Ok(Value::Vector(VectorData::from_f64(data)))
+}
+
+/// Elements per chunk when parallelizing a seeded, per-element distribution sample (Fase
+/// 5, Punto 2). Deliberately *not* one `Xoshiro256PlusPlus::jump()` per output element
+/// (unlike `bootstrap_mean`, where each replica already does O(base_len) internal work,
+/// making an O(n_replicas) sequential jump-setup negligible): here each element is a
+/// single scalar draw, so an O(n) sequential setup before an O(n) parallel body would
+/// scale badly and cap the achievable speedup as n grows (Amdahl's law) -- an
+/// unavoidable trade-off of the same technique, not a hypothetical. Chunking to 1024
+/// elements per jump cuts the sequential setup to O(n/1024) while staying far below
+/// `PARALLEL_THRESHOLD` (50,000) itself, so there are always several chunks per thread
+/// for rayon to balance.
+const RNG_CHUNK_SIZE: usize = 1024;
+
+/// Shared by `random_normal`/`random_gamma`: draws `n` i.i.d. samples from `dist`,
+/// dispatching on size (`PARALLEL_THRESHOLD`, Fase 4 punto (a)) and on whether `seed` is
+/// `Some` exactly like `random_uniform`/`bootstrap_mean` already do. The seeded+parallel
+/// path assigns each *chunk* (not each element) its own `Xoshiro256PlusPlus` stream via
+/// `.jump()` before the parallel `par_chunks_mut` loop starts, so which chunk lands on
+/// which thread never affects the output -- same reproducibility guarantee as
+/// `bootstrap_mean`, just chunked instead of per-replica.
+fn sample_distribution<D: Distribution<f64> + Sync>(n: usize, dist: &D, seed: Option<i64>) -> Vec<f64> {
+    match seed {
+        Some(seed) => {
+            if n < crate::eval::PARALLEL_THRESHOLD {
+                let mut rng = seeded_rng(seed);
+                return (0..n).map(|_| dist.sample(&mut rng)).collect();
+            }
+            let num_chunks = n.div_ceil(RNG_CHUNK_SIZE);
+            let mut cursor = seeded_rng(seed);
+            let mut chunk_rngs = Vec::with_capacity(num_chunks);
+            for _ in 0..num_chunks {
+                chunk_rngs.push(cursor.clone());
+                cursor.jump();
+            }
+            let mut out = vec![0.0f64; n];
+            out.par_chunks_mut(RNG_CHUNK_SIZE)
+                .zip(chunk_rngs.into_par_iter())
+                .for_each(|(chunk, mut rng)| {
+                    for slot in chunk.iter_mut() {
+                        *slot = dist.sample(&mut rng);
+                    }
+                });
+            out
+        }
+        None => {
+            if n < crate::eval::PARALLEL_THRESHOLD {
+                let mut rng = rand::rng();
+                return (0..n).map(|_| dist.sample(&mut rng)).collect();
+            }
+            let mut out = vec![0.0f64; n];
+            out.par_chunks_mut(RNG_CHUNK_SIZE).for_each(|chunk| {
+                let mut rng = rand::rng();
+                for slot in chunk.iter_mut() {
+                    *slot = dist.sample(&mut rng);
+                }
+            });
+            out
+        }
+    }
+}
+
+/// `random_normal(n, mean, sd)` — a `Vector[f64]` of `n` samples from `Normal(mean, sd)`
+/// (TODO.md Fase 5, Punto 2). Optional fourth argument `random_normal(n, mean, sd, seed)`
+/// for bit-for-bit reproducibility, same convention as `random_uniform`/`bootstrap_mean`.
+/// Backed by `statrs::distribution::Normal` rather than `rand_distr`'s -- see
+/// `native_random_gamma` for why the choice actually matters for `Gamma` (not just here,
+/// where both crates agree on the parameterization); kept the same crate for both so
+/// there's one dependency to reason about instead of two.
+fn native_random_normal(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let n = args.first().and_then(|v| v.as_i64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`random_normal()` requires an integer length as its first argument")
+    })?;
+    if n < 0 {
+        return Err(Diagnostic::compute_error("C0201", format!("`random_normal()` length must be non-negative, found {n}")));
+    }
+    let mean = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`random_normal()` second argument (mean) must be numeric")
+    })?;
+    let sd = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`random_normal()` third argument (sd) must be numeric")
+    })?;
+    let dist = Normal::new(mean, sd).map_err(|e| Diagnostic::compute_error("C0201", format!("`random_normal()`: {e}")))?;
+    let seed = args.get(3).and_then(|v| v.as_i64());
+    let data = sample_distribution(n as usize, &dist, seed);
+    Ok(Value::Vector(VectorData::from_f64(data)))
+}
+
+/// `random_gamma(n, shape, rate)` — a `Vector[f64]` of `n` samples from `Gamma(shape,
+/// rate)`, **shape-rate** parameterization (`rate = 1/scale`), matching
+/// `statrs::distribution::Gamma::new` -- deliberately *not* shape-scale
+/// (`rand_distr::Gamma`'s convention). This isn't cosmetic: Suite 03's own Gibbs sampler
+/// reference computes `Gamma::new(1.0 + n/2.0, 1.0 + ssq/2.0)` to update a precision --
+/// the standard Normal-Gamma Bayesian conjugate update, which is shape-rate. Naming the
+/// GHL parameter `rate` (not `scale`) keeps this unambiguous; passing a scale value here
+/// by mistake would silently produce a statistically different distribution, not an
+/// error.
+fn native_random_gamma(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let n = args.first().and_then(|v| v.as_i64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`random_gamma()` requires an integer length as its first argument")
+    })?;
+    if n < 0 {
+        return Err(Diagnostic::compute_error("C0201", format!("`random_gamma()` length must be non-negative, found {n}")));
+    }
+    let shape = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`random_gamma()` second argument (shape) must be numeric")
+    })?;
+    let rate = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`random_gamma()` third argument (rate) must be numeric")
+    })?;
+    let dist = Gamma::new(shape, rate).map_err(|e| Diagnostic::compute_error("C0201", format!("`random_gamma()`: {e}")))?;
+    let seed = args.get(3).and_then(|v| v.as_i64());
+    let data = sample_distribution(n as usize, &dist, seed);
+    Ok(Value::Vector(VectorData::from_f64(data)))
+}
+
+/// `normal_pdf(x, mean, sd)` / `normal_cdf(x, mean, sd)` -- reuse the same
+/// `statrs::distribution::Normal` already instantiated for sampling, just calling
+/// `.pdf(x)`/`.cdf(x)` (its `Continuous`/`ContinuousCDF` impls) instead of `.sample(...)`.
+/// `x` is a scalar, same treatment as `mean`/`sd` -- no broadcasting over a `Vector` in
+/// this pass.
+fn native_normal_pdf(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let x = args.first().and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`normal_pdf()` requires a numeric first argument (x)")
+    })?;
+    let mean = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`normal_pdf()` second argument (mean) must be numeric")
+    })?;
+    let sd = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`normal_pdf()` third argument (sd) must be numeric")
+    })?;
+    let dist = Normal::new(mean, sd).map_err(|e| Diagnostic::compute_error("C0201", format!("`normal_pdf()`: {e}")))?;
+    Ok(Value::F64(dist.pdf(x)))
+}
+
+fn native_normal_cdf(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let x = args.first().and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`normal_cdf()` requires a numeric first argument (x)")
+    })?;
+    let mean = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`normal_cdf()` second argument (mean) must be numeric")
+    })?;
+    let sd = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`normal_cdf()` third argument (sd) must be numeric")
+    })?;
+    let dist = Normal::new(mean, sd).map_err(|e| Diagnostic::compute_error("C0201", format!("`normal_cdf()`: {e}")))?;
+    Ok(Value::F64(dist.cdf(x)))
+}
+
+/// `gamma_pdf(x, shape, rate)` / `gamma_cdf(x, shape, rate)` -- same shape-rate
+/// parameterization as `random_gamma()`, see its doc comment.
+fn native_gamma_pdf(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let x = args.first().and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`gamma_pdf()` requires a numeric first argument (x)")
+    })?;
+    let shape = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`gamma_pdf()` second argument (shape) must be numeric")
+    })?;
+    let rate = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`gamma_pdf()` third argument (rate) must be numeric")
+    })?;
+    let dist = Gamma::new(shape, rate).map_err(|e| Diagnostic::compute_error("C0201", format!("`gamma_pdf()`: {e}")))?;
+    Ok(Value::F64(dist.pdf(x)))
+}
+
+fn native_gamma_cdf(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let x = args.first().and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`gamma_cdf()` requires a numeric first argument (x)")
+    })?;
+    let shape = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`gamma_cdf()` second argument (shape) must be numeric")
+    })?;
+    let rate = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`gamma_cdf()` third argument (rate) must be numeric")
+    })?;
+    let dist = Gamma::new(shape, rate).map_err(|e| Diagnostic::compute_error("C0201", format!("`gamma_cdf()`: {e}")))?;
+    Ok(Value::F64(dist.cdf(x)))
 }
 
 /// `bootstrap_mean(v, n_replicas)` — a `Vector[f64]` of `n_replicas` bootstrap sample

@@ -902,10 +902,78 @@ inventar sintaxis de path nueva; se decide en el plan de cada punto.
       `test_bootstrap_mean_seeded_independent_of_thread_count`. Las 86 pruebas de
       `ghl-runtime` y el workspace completo pasan sin regresiones. Verificado de punta a
       punta con `ghl run`.
-- [ ] Biblioteca de distribuciones (`Normal`, `Gamma`, ...) con `.sample(&mut rng)`
-      (`statrs`/`rand_distr` o implementación propia).
+- [x] **Biblioteca de distribuciones (`Normal`, `Gamma`) — hecho, con una trampa de
+      parametrización real evitada.** `random_normal(n, mean, sd)`/`random_gamma(n,
+      shape, rate)`, mismo patrón que `random_uniform`: último argumento opcional es la
+      semilla (`random_normal(n, mean, sd, seed)`), salida vía `VectorData::from_f64`.
+    - **`statrs` elegido sobre `rand_distr`** (ambos estaban en `Cargo.toml` desde
+      Fase 0, sin usar) — no por descartar el segundo, sino porque con el mismo esfuerzo
+      de implementación `statrs` deja pdf/cdf usables gratis (ver abajo) y, más
+      importante: **`statrs::distribution::Gamma::new` toma `(shape, rate)`, mientras
+      `rand_distr::Gamma::new` toma `(shape, scale)`** (`scale = 1/rate`) — la misma
+      familia de distribución, dos convenciones distintas para el segundo parámetro. El
+      Gibbs sampler aspiracional del propio doc de Suite 03 actualiza una precisión con
+      `Gamma::new(1.0 + n/2.0, 1.0 + ssq/2.0)` — la fórmula de actualización conjugada
+      Normal-Gamma bayesiana estándar, que es shape-**rate**. `rand_distr` habría dado
+      resultados estadísticamente distintos con el mismo número pasado como segundo
+      argumento. El parámetro GHL se llama `rate` explícitamente (no `scale`) para que
+      esto no quede ambiguo — blindado con `test_random_gamma_matches_expected_mean`
+      (la media de `Gamma(shape, rate)` es `shape/rate`; con shape-scale hubiera dado
+      sistemáticamente otro valor).
+    - **`normal_pdf(x, mean, sd)`/`normal_cdf(x, mean, sd)`/`gamma_pdf(x, shape,
+      rate)`/`gamma_cdf(x, shape, rate)`** — agregados tras discusión con el usuario:
+      no eran trabajo nuevo real, `statrs::distribution::Normal`/`Gamma` ya
+      implementan `Continuous`/`ContinuousCDF` además de `Distribution<f64>`, así que
+      exponerlos es reusar el mismo constructor con otra llamada.
+    - **Paralelismo agregado** tras la misma discusión: la razón original para
+      omitirlo ("`random_uniform` tampoco lo tiene") no era una decisión de diseño,
+      era que `random_uniform` se construyó en Fase 3 antes de que
+      `PARALLEL_THRESHOLD` (Fase 4) existiera — mantenerlo así habría sido
+      inconsistente, no prudente. Con NA... no aplica acá (no hay NA de entrada, solo
+      parámetros escalares), así que el único eje es tamaño: por debajo de
+      `PARALLEL_THRESHOLD` (50.000), secuencial; por encima, paralelo vía
+      `rayon::par_chunks_mut`. **Diseño distinto al de `bootstrap_mean`, a propósito**:
+      ahí un `.jump()` por réplica era barato porque cada réplica ya hacía O(largo de
+      la base) de trabajo interno; acá cada elemento es un solo sorteo escalar, así que
+      un `.jump()` por elemento habría hecho el *setup* secuencial O(n) — con el mismo
+      orden que el propio trabajo paralelo, capando la ganancia real a medida que n
+      crece (ley de Amdahl, no hipotético). Se resolvió con **chunks de 1024
+      elementos**: un `.jump()` por chunk (no por elemento), cada chunk llena su propio
+      rango con un solo generador — mismo mecanismo de reproducibilidad
+      (`test_random_normal_seeded_independent_of_thread_count`, igual criterio que
+      Punto 1), pero con setup secuencial O(n/1024) en vez de O(n).
+    - Tests nuevos en `lib.rs` (10):
+      `test_random_normal_seeded_is_reproducible`,
+      `test_random_gamma_seeded_is_reproducible`,
+      `test_random_normal_matches_expected_mean_and_sd`,
+      `test_random_gamma_matches_expected_mean`,
+      `test_random_normal_rejects_non_positive_sd`,
+      `test_random_gamma_rejects_non_positive_shape`,
+      `test_normal_pdf_cdf_match_known_values`,
+      `test_gamma_pdf_cdf_match_known_values`,
+      `test_random_normal_parallel_path_matches_sequential_reference`,
+      `test_random_normal_seeded_independent_of_thread_count`. Las 96 pruebas de
+      `ghl-runtime` y el workspace completo pasan sin regresiones. Verificado de punta
+      a punta con `ghl run` (incluyendo el camino paralelo a N=100.000 y el error claro
+      de `sd <= 0`).
+    - **Queda afuera, a propósito:** otras distribuciones más allá de `Normal`/`Gamma`
+      (sin consumidor concreto todavía — se agregan si Fase 6 las pide de verdad); un
+      objeto `PRNG`/distribución persistente con estado — **no es una decisión de
+      alcance, es la misma pared técnica que ya bloquea Arenas** (Punto 3 de esta
+      fase): GHL no tiene reasignación de variables ni tuplas/destructuring hoy,
+      confirmado leyendo el parser (ver el ítem de Fase 7 sobre iteración, con el que
+      comparte la misma causa raíz).
 - [ ] Arenas regionales (`bumpalo`) para bucles iterativos (MCMC/bootstrap) con
       cero asignaciones de heap por iteración — sintaxis `arena::scope(|a| { ... })`.
+      **Bloqueado por un hallazgo de Fase 7** ("Iteración real sin overflow de la pila
+      nativa"), no reflejado acá hasta que se encontró: GHL no tiene ningún constructo
+      de iteración (`for`/`while`) y la recursión no tiene TCO (crash real confirmado a
+      100.000 llamadas) — no hay forma de construir "bucles iterativos... cero
+      asignaciones por iteración" sin resolver eso primero. No es una dependencia suave
+      dentro del orden interno de esta fase (PRNG → Distribuciones → Arenas → CoW,
+      elegido explícitamente por dependencia interna y no por profundidad
+      arquitectónica) — es una dependencia externa dura hacia Fase 7 que no estaba
+      documentada cuando se armó ese orden.
 - [ ] Modelo de memoria ARC + Copy-on-Write real (RFC 03 §2.1): hoy el intérprete
       clona `Vec`/`HashMap` en casi cada verbo, es lo opuesto a CoW.
 
@@ -940,7 +1008,10 @@ no lo maneja — bloquea cualquier ejemplo de la documentación que use `use std
       its stack`). No bloquea PRNG/distribuciones en sí, que pueden exponerse como
       funciones nativas de una sola llamada (mismo patrón que `random_uniform`/
       `bootstrap_mean`) sin que el usuario escriba un loop en GHL — se retoma cuando
-      Fase 6 lo necesite de verdad para los ejemplos de punta a punta.
+      Fase 6 lo necesite de verdad para los ejemplos de punta a punta. **Bloquea
+      directamente el Punto 3 de Fase 5 (Arenas)** — no se puede tener "bucles
+      iterativos con cero allocs por iteración" sin tener bucles; encontrado *después*
+      de fijar el orden interno de Fase 5, corregido ahí también.
 
 ## Fase 8 — Backend AOT y distribución (`benchmarks/suites/04`, RFC 03 §3.2)
 Puede avanzar en paralelo a partir de Fase 0; no depende de las fases de datos/estadística.
