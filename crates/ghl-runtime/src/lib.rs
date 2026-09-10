@@ -1216,6 +1216,92 @@ mod tests {
     }
 
     #[test]
+    fn test_return_short_circuits_if_branch() {
+        // The exact script that exposed the bug: return was a silent no-op -- both
+        // early(5) and early(-5) used to give 42.
+        let code = r#"
+            fn early(x) {
+                if x > 0 {
+                    return 999;
+                };
+                42
+            }
+            let a = early(5);
+            let b = early(-5);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("a"), Some(Value::I64(999)));
+        assert_eq!(interp.env.get("b"), Some(Value::I64(42)));
+    }
+
+    #[test]
+    fn test_return_short_circuits_nested_block() {
+        // return nested two levels deep (inside an if, inside another if) must still
+        // cut all the way up to the function boundary, not just its immediate block.
+        let code = r#"
+            fn classify(x) {
+                if x > 100 {
+                    if x > 1000 {
+                        return "huge";
+                    };
+                    return "big";
+                };
+                "small"
+            }
+            let a = classify(5000);
+            let b = classify(500);
+            let c = classify(5);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("a"), Some(Value::String("huge".to_string())));
+        assert_eq!(interp.env.get("b"), Some(Value::String("big".to_string())));
+        assert_eq!(interp.env.get("c"), Some(Value::String("small".to_string())));
+    }
+
+    #[test]
+    fn test_return_at_top_level_stops_program() {
+        let code = r#"
+            let a = 1;
+            return 0;
+            let b = 2;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("a"), Some(Value::I64(1)));
+        assert_eq!(interp.env.get("b"), None, "statement after a top-level return must not run");
+    }
+
+    #[test]
+    fn test_return_does_not_leak_into_caller() {
+        // A callee's internal return must not short-circuit the caller's own code
+        // that runs after the call returns -- pending_return has to be consumed at
+        // the function-call boundary, not left set.
+        let code = r#"
+            fn inner(x) {
+                if x > 0 {
+                    return 1;
+                };
+                0
+            }
+            fn outer() {
+                let a = inner(5);
+                let b = 100;
+                b
+            }
+            let result = outer();
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("result"), Some(Value::I64(100)));
+    }
+
+    #[test]
     fn test_eval_dataframe_filter_predicate() {
         let code = r#"
             let df = dataframe {

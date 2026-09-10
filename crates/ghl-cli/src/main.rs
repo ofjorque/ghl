@@ -95,26 +95,31 @@ fn main() {
                         std::process::exit(1);
                     }
 
-                    // 3. JIT Precompilation (Cranelift)
+                    // 3. JIT Precompilation (Cranelift) -- cosmetic only: its output is
+                    // never used for execution (step 4 always runs the tree-walking
+                    // interpreter regardless), just to print the "CRANELIFT JIT ▶" badge
+                    // below. A real Cranelift codegen bug (early `return` inside a
+                    // function terminates a block without starting a fresh one after --
+                    // TODO.md Fase 8) makes `compile_module` panic instead of returning
+                    // an `Err` for some programs; since nothing downstream depends on
+                    // this step succeeding, a panic here is caught and treated the same
+                    // as any other JIT failure (no badge, straight to execution) instead
+                    // of taking down `ghl run` entirely.
                     let jit_start = Instant::now();
-                    let jit_info = if let Ok(hir_module) = ghl_ir::lower_ast(&program) {
-                        if !hir_module.functions.is_empty() {
-                            if let Ok(mut jit) = ghl_codegen::JitEngine::new() {
-                                if jit.compile_module(&hir_module).is_ok() {
-                                    let elapsed = jit_start.elapsed().as_secs_f64() * 1000.0;
-                                    Some(format!("({} functions compiled in {:.2}ms)", hir_module.functions.len(), elapsed))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
+                    let default_hook = std::panic::take_hook();
+                    std::panic::set_hook(Box::new(|_| {})); // suppress this expected panic's own stderr dump
+                    let jit_attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let hir_module = ghl_ir::lower_ast(&program).ok()?;
+                        if hir_module.functions.is_empty() {
+                            return None;
                         }
-                    } else {
-                        None
-                    };
+                        let mut jit = ghl_codegen::JitEngine::new().ok()?;
+                        jit.compile_module(&hir_module).ok()?;
+                        let elapsed = jit_start.elapsed().as_secs_f64() * 1000.0;
+                        Some(format!("({} functions compiled in {:.2}ms)", hir_module.functions.len(), elapsed))
+                    }));
+                    std::panic::set_hook(default_hook);
+                    let jit_info = jit_attempt.unwrap_or(None);
 
                     // Telemetry indicator for interactive users
                     if caps.is_tty {

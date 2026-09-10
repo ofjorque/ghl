@@ -28,7 +28,7 @@ use std::time::Instant;
 use ghl_syntax::parser::parse;
 use ghl_runtime::value::Value;
 use ghl_runtime::vector_data::VectorData;
-use ghl_runtime::{Interpreter, RuntimeEnv};
+use ghl_runtime::Interpreter;
 
 const REPEATS: u32 = 5;
 
@@ -36,7 +36,7 @@ fn run(code: &str, base_vector: &VectorData) -> std::time::Duration {
     let program = parse(code).expect("syntax ok");
     let mut best = std::time::Duration::MAX;
     for _ in 0..REPEATS {
-        let mut interp = Interpreter { env: RuntimeEnv::with_prelude() };
+        let mut interp = Interpreter::new();
         // Clona el `VectorData` (barato, Arc por dentro -- Punto 1), no los datos crudos:
         // evita copiar el `Vec<f64>` base una vez por cada una de las `REPEATS * 2`
         // corridas, que era puro overhead de medición, no parte de lo que se quiere medir.

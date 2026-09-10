@@ -1045,6 +1045,57 @@ no lo maneja — bloquea cualquier ejemplo de la documentación que use `use std
       bloquea **la mayoría de Fase 6** también, no solo el Caso 3.1 como se pensó al
       principio (ver la dependencia agregada en Fase 6). Encontrado *después* de fijar
       el orden interno de Fase 5, corregido ahí también.
+- [x] **`return` — dos bugs reales encontrados analizando qué cuenta como "posición de
+      cola" para el TCO de arriba, arreglados antes de seguir con el TCO en sí (ninguno
+      es sobre TCO, los dos son correctness lisa y llana).**
+    - **`return` era un no-op silencioso en el intérprete.** `fn early(x) { if x > 0 {
+      return 999; }; 42 }`: `early(5)` y `early(-5)` daban **los dos 42**. El loop de
+      statements de `ExprKind::Block` (`eval.rs`) descartaba el resultado de cada
+      statement salvo el último y seguía al siguiente sin mirar si fue un `return` —
+      exactamente el tipo de "estado silencioso incorrecto" que RFC 00 dice evitar, más
+      grave que cualquier problema de performance visto en la sesión. Arreglado con un
+      campo nuevo y acotado en `Interpreter` (`pending_return: Option<Value>`) en vez de
+      envolver `Result<Value, Diagnostic>` en un tipo nuevo (que hubiera obligado a
+      tocar los ~40 brazos del `match` de `eval_expr`): `StmtKind::Return` lo setea,
+      `Block`'s loop lo chequea después de cada statement y corta (sin limpiarlo, para
+      que un `Block` *exterior* también lo detecte si el `return` estaba anidado más
+      adentro), `eval_program` hace lo mismo a nivel de programa, y `call_value`'s rama
+      `Closure` es el único lugar que lo limpia de verdad — el límite de función, para
+      que nunca se filtre al frame del llamador.
+    - **El JIT de Cranelift panickeaba con `return`** (`you cannot add an instruction to
+      a block already filled`, panic real, exit 101) — `HirStatement::Return` en
+      `ghl-codegen/src/compiler.rs` emite un terminador de bloque (`return_`) y no crea
+      un bloque nuevo después; si el `Block` HIR tiene más statements o su propia
+      expresión final, el siguiente intenta agregar instrucciones a un bloque ya
+      cerrado. Y `ghl run` siempre intenta compilar a JIT si el programa tiene
+      funciones (paso "3. JIT Precompilation", `ghl-cli/src/main.rs`) — **pero el
+      resultado del JIT no se usa para ejecutar nada**, solo para mostrar un badge
+      cosmético; la ejecución real siempre pasa por el intérprete (paso 4). Arreglar el
+      codegen de Cranelift en profundidad (recrear bloques después de cada terminador,
+      en `Block` y en `If`) es trabajo especulativo sobre un camino que hoy no es
+      load-bearing — le toca de verdad a **Fase 8** (AOT), cuando el JIT se conecte a
+      ejecución real; anotado ahí. Lo que se arregló acá es contener el síntoma: el
+      paso de JIT precompilation ahora envuelve la compilación en
+      `std::panic::catch_unwind` (con el hook de panic silenciado durante la llamada,
+      para no imprimir un stack trace de un panic ya contenido) — un panic se trata
+      igual que cualquier otro fallo de JIT ya manejado (`jit_info = None`, sigue a
+      ejecución normal sin el badge), en vez de tirar abajo `ghl run` entero.
+    - **Hallazgo relacionado, investigado y descartado de ser un bug:** el `;` parecía
+      obligatorio después de un `if`/`else` usado como statement no-final dentro de un
+      bloque `{ ... }` (`fn f(x) { if x>0 {1} else {2} 99 }` no parseaba sin `;` extra
+      después del `if`). Causa: hay **dos gramáticas de statement distintas** en
+      `ghl-syntax/src/parser.rs` — la de nivel top-level (`stmt_parser()`, `;`
+      opcional vía `.or_not()`) y la usada dentro de bloques (definida localmente en el
+      parser de bloques, `;` obligatorio, sin `.or_not()`). No es una feature rota, es
+      una regla más estricta puertas adentro de un bloque, simplemente inconsistente
+      con el nivel top-level — se deja como nota de consistencia, no arreglado acá.
+    - Tests nuevos en `lib.rs`: `test_return_short_circuits_if_branch` (el script
+      exacto que expuso el bug), `test_return_short_circuits_nested_block` (dos niveles
+      de anidamiento), `test_return_at_top_level_stops_program`,
+      `test_return_does_not_leak_into_caller` (la señal no se filtra al llamador). Las
+      100 pruebas de `ghl-runtime` y el workspace completo pasan sin regresiones.
+      Verificado de punta a punta con `ghl run` (debug y release): sin crash, exit 0,
+      `999`/`42` correctos.
 
 ## Fase 8 — Backend AOT y distribución (`benchmarks/suites/04`, RFC 03 §3.2)
 Puede avanzar en paralelo a partir de Fase 0; no depende de las fases de datos/estadística.
@@ -1053,6 +1104,16 @@ Puede avanzar en paralelo a partir de Fase 0; no depende de las fases de datos/e
       (`crates/ghl-cli/src/main.rs`), no hay código detrás. `ghl-codegen` solo
       tiene JIT vía Cranelift (`cranelift-jit`), falta emisión de objeto nativo
       (`cranelift-object` o similar) + linkeo a binario standalone.
+- [ ] **Bug de codegen real, encontrado en Fase 7 pero recién relevante acá:**
+      `HirStatement::Return` (`ghl-codegen/src/compiler.rs`) emite un terminador de
+      bloque Cranelift (`return_`) sin crear un bloque nuevo después — si hay más
+      código (en `Block` o en las ramas de `If` que saltan a su `merge_block`), el
+      compilador intenta agregar instrucciones a un bloque ya cerrado y panickea
+      (`you cannot add an instruction to a block already filled`). Hoy está contenido
+      con un `catch_unwind` a nivel de CLI (`ghl-cli/src/main.rs`) porque el JIT no se
+      usa para ejecutar nada todavía — acá sí importa de verdad: hay que recrear un
+      bloque nuevo después de cada terminador (`Block`'s loop de statements, y la
+      lógica de merge de `If`), no solo contener el síntoma.
 - [ ] Medir y optimizar hacia las metas de Suite 04: arranque <25ms, binario
       8-20MB, RSS base 3-8MB (AOT) / ~25MB (REPL).
 - [ ] Tiering de ejecución intérprete → JIT → AOT (RFC 03 §3.1) coherente con

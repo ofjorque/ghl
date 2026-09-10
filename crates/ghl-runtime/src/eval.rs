@@ -9,12 +9,22 @@ use crate::matrix::MatrixOps;
 
 pub struct Interpreter {
     pub env: RuntimeEnv,
+    /// Set by `StmtKind::Return` and read by every statement-sequencing loop (`Block`,
+    /// `eval_program`) to short-circuit the rest of the current sequence once a `return`
+    /// has fired -- see the doc comment on `ExprKind::Block`'s handling below for why a
+    /// dedicated field was chosen over threading a new `Result` variant through
+    /// `eval_expr`'s ~40-armed match. Cleared only at a function-call boundary
+    /// (`call_value`'s `Closure` arm) or at the end of `eval_program` -- everywhere in
+    /// between, it stays set and unconsumed so an outer, enclosing `Block` (a `return`
+    /// nested inside an `if`/`match`) also observes it and short-circuits in turn.
+    pending_return: Option<Value>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         Self {
             env: RuntimeEnv::with_prelude(),
+            pending_return: None,
         }
     }
 
@@ -22,7 +32,11 @@ impl Interpreter {
         let mut last_val = Value::Unit;
         for stmt in &program.statements {
             last_val = self.eval_stmt(stmt)?;
+            if self.pending_return.is_some() {
+                break;
+            }
         }
+        self.pending_return = None;
         Ok(last_val)
     }
 
@@ -52,11 +66,13 @@ impl Interpreter {
             }
             StmtKind::Expr(expr) => self.eval_expr(expr),
             StmtKind::Return(opt_expr) => {
-                if let Some(e) = opt_expr {
-                    self.eval_expr(e)
+                let val = if let Some(e) = opt_expr {
+                    self.eval_expr(e)?
                 } else {
-                    Ok(Value::Unit)
-                }
+                    Value::Unit
+                };
+                self.pending_return = Some(val.clone());
+                Ok(val)
             }
         }
     }
@@ -228,6 +244,18 @@ impl Interpreter {
                 self.env.push_scope();
                 for s in stmts {
                     self.eval_stmt(s)?;
+                    // A `return` fired inside this statement (directly, or nested
+                    // inside an `if`/`match` this statement evaluated) -- stop running
+                    // the rest of this block, and skip its own trailing expression too;
+                    // `pending_return` deliberately stays set (not `.take()`-n here) so
+                    // an outer Block containing this one also observes and short-
+                    // circuits, all the way up to the function-call boundary that
+                    // actually clears it.
+                    if let Some(val) = &self.pending_return {
+                        let val = val.clone();
+                        self.env.pop_scope();
+                        return Ok(val);
+                    }
                 }
                 let res = if let Some(e) = opt_expr {
                     self.eval_expr(e)?
@@ -331,6 +359,10 @@ impl Interpreter {
                 let old_env = std::mem::replace(&mut self.env, env);
                 let res = self.eval_expr(&body);
                 self.env = old_env;
+                // This call is the function boundary `pending_return` was waiting for
+                // -- consume it here (whether or not a `return` actually fired) so it
+                // never leaks into the caller's own remaining statements.
+                self.pending_return = None;
                 res
             }
             other => Err(Diagnostic::compute_error(
