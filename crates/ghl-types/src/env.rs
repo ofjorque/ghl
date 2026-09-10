@@ -226,6 +226,22 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "fit_gmm".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::I64],
+                ret: Box::new(Type::ModelFit),
+            },
+            false,
+        );
+        env.insert(
+            "gmm".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::I64],
+                ret: Box::new(Type::ModelFit),
+            },
+            false,
+        );
+        env.insert(
             "summary".into(),
             Type::Function {
                 params: vec![Type::Any],

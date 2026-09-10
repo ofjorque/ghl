@@ -221,12 +221,45 @@ fn run_gmm_em(X, K, D, max_iter) {
 ```
 
 ### Métricas de Rendimiento (`spike_em_gmm_latency`)
-- **Comando:** `cargo run --release --example spike_em_gmm_latency -p ghl-runtime -- 20 1000`
+- **Comando:** `cargo run --release --example spike_em_gmm_latency -p ghl-runtime --jobs 4 -- 20 1000`
 - **Configuración:** $K = 10$, $D = 20$, $N = 1.000$.
-- **Tiempo total (20 iteraciones):** `4.24 s`
-- **Latencia por iteración completa (E + M steps):** `~212 ms`
+
+#### 1. Implementación en Script GHL (Intérprete puro)
+- **Tiempo total (20 iteraciones):** `~3.50 s`
+- **Latencia por iteración completa (E + M steps):** `~175 ms`
+- **Rendimiento:** `5.7 iter/s`
 - **Estabilidad numérica:** `log_sum_exp` previene bajo flujo numérico o overflow durante todo el ciclo EM.
 - **Convergencia:** Recuperación de medias de clusters multivariados confirmada en prueba de integración.
+
+#### 2. Implementación Nativa NEKO (`fit_gmm` / Cockpit Visual)
+- **Tiempo total de ajuste (convergencia completa en 5 iteraciones):** **`5.27 ms`**
+- **Latencia por iteración:** **`~264 µs`** (`0.264 ms`)
+- **Speedup vs Script interpretado:** **`662.6x` más rápido**
+- **Proyecciones Tidyverse / NEKO:** Soporte nativo para `summary()`, `tidy()`, `glance()`, `augment()`, `predict()`, `coef()`.
+- **Cockpit Visual en Consola (`summary(model)`):**
+```text
+╭─ NEKO GMM: Gaussian Mixture Model ────── (U・ᴥ・U) EM CONVERGED in 5 iterations ─╮
+│ Components (K): 10                                                           │
+│ Dimensions (D): 20                                                           │
+│ Observations: 1000 observations                                              │
+│ Fit Metrics: Log-Likelihood = -30557.6138 | AIC = 61933.23 | BIC = 63940.50  │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Cluster      Weight   Est.Size  Means (first dimensions)                     │
+│ -------      ------   --------  -------------------------                    │
+│ #0           0.1000        100  [-13.362, -13.421, -13.363, ...]             │
+│ #1           0.1000        100  [-10.399, -10.432, -10.636, ...]             │
+│ #2           0.1000        100  [-7.594, -7.588, -7.462, ...]                │
+│ #3           0.1000        100  [-4.569, -4.373, -4.532, ...]                │
+│ #4           0.1000        100  [-1.421, -1.330, -1.697, ...]                │
+│ #5           0.1000        100  [1.397, 1.606, 1.464, ...]                   │
+│ #6           0.1000        100  [4.308, 4.332, 4.499, ...]                   │
+│ #7           0.1000        100  [7.661, 7.623, 7.514, ...]                   │
+│ #8           0.1000        100  [10.611, 10.432, 10.567, ...]                │
+│ #9           0.1000        100  [13.679, 13.544, 13.586, ...]                │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ (=^･ω･^=) Haru clustered all observations successfully!                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
 
 
 

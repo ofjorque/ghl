@@ -8,6 +8,7 @@ use ghl_types::ContrastScheme;
 use crate::env::RuntimeEnv;
 use crate::neko::FittedModel;
 use crate::glm::FittedGlm;
+use crate::gmm::FittedGmm;
 
 pub type NativeFunction = fn(Vec<Value>) -> Result<Value, Diagnostic>;
 
@@ -116,6 +117,8 @@ pub enum Value {
     /// regression (see `glm.rs`'s module doc). `summary`/`tidy`/`glance`/`augment`/
     /// `predict`/`residuals`/`coef`/`vcov` all dispatch on either variant transparently.
     GlmFit(Box<FittedGlm>),
+    /// Fitted Gaussian Mixture Model (EM clustering, NEKO framework)
+    GmmFit(Box<FittedGmm>),
     /// `qr(m)` result (TODO.md Fase 3) — accessed via `qr_q(result)`/`qr_r(result)`
     /// rather than field syntax, which GHL's grammar doesn't have.
     QrDecomp {
@@ -221,6 +224,7 @@ impl Value {
             Value::Formula { .. } => "Formula",
             Value::ModelFit(_) => "ModelFit",
             Value::GlmFit(_) => "GlmFit",
+            Value::GmmFit(_) => "GmmFit",
             Value::QrDecomp { .. } => "QrDecomp",
             Value::SvdDecomp { .. } => "SvdDecomp",
             Value::EigenDecomp { .. } => "EigenDecomp",
@@ -271,6 +275,7 @@ impl PartialEq for Value {
             ) => r1 == r2 && t1 == t2,
             (Value::ModelFit(m1), Value::ModelFit(m2)) => m1 == m2,
             (Value::GlmFit(m1), Value::GlmFit(m2)) => m1 == m2,
+            (Value::GmmFit(m1), Value::GmmFit(m2)) => m1 == m2,
             (
                 Value::QrDecomp { q: q1, r: r1 },
                 Value::QrDecomp { q: q2, r: r2 },
@@ -521,6 +526,7 @@ impl Value {
             }
             Value::ModelFit(m) => m.render_cockpit(caps),
             Value::GlmFit(m) => m.render_cockpit(caps),
+            Value::GmmFit(m) => m.render_cockpit(caps),
             Value::QrDecomp { q, r } => {
                 format!("QrDecomp {{\nQ =\n{}\nR =\n{}\n}}", q.render_styled(caps), r.render_styled(caps))
             }

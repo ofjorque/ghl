@@ -9,6 +9,7 @@ pub mod env;
 pub mod eval;
 pub mod neko;
 pub mod glm;
+pub mod gmm;
 pub mod io;
 pub mod na_reasons;
 pub mod polars_bridge;
@@ -19,6 +20,7 @@ pub use env::RuntimeEnv;
 pub use eval::Interpreter;
 pub use neko::{Blueprint, FittedModel, RowDisposition, VcovKind};
 pub use glm::FittedGlm;
+pub use gmm::FittedGmm;
 
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::Program;
@@ -2921,6 +2923,178 @@ mod tests {
         assert!((lo_y - (-3.0)).abs() < 0.2, "lo_y {} expected near -3.0", lo_y);
         assert!((hi_x - 4.0).abs() < 0.2, "hi_x {} expected near 4.0", hi_x);
         assert!((hi_y - 4.0).abs() < 0.2, "hi_y {} expected near 4.0", hi_y);
+    }
+
+    #[test]
+    fn test_neko_fit_gmm_recovers_clusters_and_verbs() {
+        use ghl_syntax::parse;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        use rand_distr::{Distribution, Normal};
+
+        let mut x_vals = Vec::new();
+        let mut y_vals = Vec::new();
+        let mut rng = StdRng::seed_from_u64(42);
+        let d0 = Normal::new(-3.0, 0.5).unwrap();
+        let d1 = Normal::new(4.0, 0.5).unwrap();
+        for _ in 0..50 {
+            x_vals.push(Value::F64(d0.sample(&mut rng)));
+            y_vals.push(Value::F64(d0.sample(&mut rng)));
+        }
+        for _ in 0..50 {
+            x_vals.push(Value::F64(d1.sample(&mut rng)));
+            y_vals.push(Value::F64(d1.sample(&mut rng)));
+        }
+
+        let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&[
+            ("x".to_string(), x_vals),
+            ("y".to_string(), y_vals),
+        ]).unwrap();
+
+        let ghl_code = r#"
+            let model = fit_gmm(df, 2, 50, 0.0001);
+
+            // Test Cockpit rendering
+            summary(model);
+
+            // Test Tidyverse / NEKO verbs
+            let td = tidy(model);
+            let gl = glance(model);
+            let aug = augment(model, df);
+            let pred = predict(model, df);
+            let centers = coef(model);
+        "#;
+
+        let program = parse(ghl_code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.env.set("df".to_string(), Value::DataFrame { frame, na_reasons });
+        interp.eval_program(&program).expect("eval ok");
+
+        // Verify model exists and is GmmFit
+        let model_val = interp.env.get("model").expect("model exists");
+        assert_eq!(model_val.type_name(), "GmmFit");
+
+        if let Value::GmmFit(ref gmm) = model_val {
+            assert_eq!(gmm.k, 2);
+            assert_eq!(gmm.dim, 2);
+            assert_eq!(gmm.n_obs, 100);
+            assert!(gmm.converged);
+            assert!(gmm.log_likelihood < 0.0);
+            assert!(gmm.aic > 0.0);
+
+            // Check recovered centers
+            let (m0_x, m0_y) = (gmm.means[0], gmm.means[1]);
+            let (m1_x, m1_y) = (gmm.means[2], gmm.means[3]);
+            let (lo_x, hi_x) = if m0_x < m1_x { (m0_x, m1_x) } else { (m1_x, m0_x) };
+            let (lo_y, hi_y) = if m0_y < m1_y { (m0_y, m1_y) } else { (m1_y, m0_y) };
+
+            assert!((lo_x - (-3.0)).abs() < 0.5, "GMM lo_x {} near -3.0", lo_x);
+            assert!((lo_y - (-3.0)).abs() < 0.5, "GMM lo_y {} near -3.0", lo_y);
+            assert!((hi_x - 4.0).abs() < 0.5, "GMM hi_x {} near 4.0", hi_x);
+            assert!((hi_y - 4.0).abs() < 0.5, "GMM hi_y {} near 4.0", hi_y);
+        } else {
+            panic!("Expected GmmFit, got {:?}", model_val);
+        }
+
+        // Verify tidy DataFrame
+        let td_val = interp.env.get("td").expect("td exists");
+        assert_eq!(td_val.type_name(), "DataFrame");
+        if let Value::DataFrame { frame, .. } = td_val {
+            assert_eq!(frame.height(), 2);
+            assert!(frame.column("component").is_ok());
+            assert!(frame.column("weight").is_ok());
+            assert!(frame.column("est_size").is_ok());
+            assert!(frame.column("mean_x").is_ok());
+            assert!(frame.column("mean_y").is_ok());
+        }
+
+        // Verify glance DataFrame
+        let gl_val = interp.env.get("gl").expect("gl exists");
+        assert_eq!(gl_val.type_name(), "DataFrame");
+        if let Value::DataFrame { frame, .. } = gl_val {
+            assert_eq!(frame.height(), 1);
+            assert!(frame.column("log_likelihood").is_ok());
+            assert!(frame.column("aic").is_ok());
+            assert!(frame.column("bic").is_ok());
+            assert!(frame.column("converged").is_ok());
+        }
+
+        // Verify augment DataFrame
+        let aug_val = interp.env.get("aug").expect("aug exists");
+        assert_eq!(aug_val.type_name(), "DataFrame");
+        if let Value::DataFrame { frame, .. } = aug_val {
+            assert_eq!(frame.height(), 100);
+            assert!(frame.column(".cluster").is_ok());
+            assert!(frame.column(".probability").is_ok());
+            assert!(frame.column("x").is_ok());
+            assert!(frame.column("y").is_ok());
+        }
+
+        // Verify predict Vector
+        let pred_val = interp.env.get("pred").expect("pred exists");
+        assert_eq!(pred_val.type_name(), "Vector");
+        if let Value::Vector(v) = pred_val {
+            assert_eq!(v.len(), 100);
+        }
+
+        // Verify coef Matrix
+        let centers_val = interp.env.get("centers").expect("centers exists");
+        assert_eq!(centers_val.type_name(), "Matrix");
+        if let Value::Matrix { rows, cols, .. } = centers_val {
+            assert_eq!(rows, 2);
+            assert_eq!(cols, 2);
+        }
+    }
+
+    #[test]
+    fn test_neko_fit_gmm_on_matrix_and_error_handling() {
+        use ghl_syntax::parse;
+
+        let ghl_code = r#"
+            let m = mat [
+                -3.0, -3.0 ;
+                -2.9, -3.1 ;
+                -3.1, -2.9 ;
+                 4.0,  4.0 ;
+                 3.9,  4.1 ;
+                 4.1,  3.9
+            ];
+
+            let model = fit_gmm(m, 2, 20);
+            let preds = predict(model, m);
+        "#;
+
+        let program = parse(ghl_code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("eval ok");
+
+        let model_val = interp.env.get("model").unwrap();
+        assert_eq!(model_val.type_name(), "GmmFit");
+        if let Value::GmmFit(ref gmm) = model_val {
+            assert_eq!(gmm.k, 2);
+            assert_eq!(gmm.dim, 2);
+            assert_eq!(gmm.n_obs, 6);
+            assert!(gmm.converged);
+        }
+
+        let preds_val = interp.env.get("preds").unwrap();
+        if let Value::Vector(v) = preds_val {
+            assert_eq!(v.len(), 6);
+            // First 3 should belong to one cluster, last 3 to the other
+            assert_eq!(v[0], v[1]);
+            assert_eq!(v[1], v[2]);
+            assert_eq!(v[3], v[4]);
+            assert_eq!(v[4], v[5]);
+            assert_ne!(v[0], v[3]);
+        }
+
+        // Test error on k = 0
+        let err_code = "let err_m = fit_gmm(m, 0);";
+        let err_prog = parse(err_code).expect("syntax ok");
+        let mut interp_err = Interpreter::new();
+        interp_err.env.set("m".to_string(), interp.env.get("m").unwrap());
+        let res = interp_err.eval_program(&err_prog);
+        assert!(res.is_err());
     }
 }
 

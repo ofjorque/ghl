@@ -110,6 +110,11 @@ pub(crate) fn string_column(name: &str, data: Vec<String>) -> Column {
     data.into_iter().map(Some).collect::<StringChunked>().with_name(name.into()).into_series().into()
 }
 
+/// Como [`f64_opt_column`] pero para `i64`, sin nulos (ej. `.cluster`).
+pub(crate) fn i64_column(name: &str, data: Vec<i64>) -> Column {
+    data.into_iter().map(Some).collect::<Int64Chunked>().with_name(name.into()).into_series().into()
+}
+
 /// Extrae una columna de un `DataFrame` de polars de vuelta a `Vec<Value>` de GHL,
 /// reconstruyendo `NA:razon` desde `na_reasons` donde exista una entrada — celdas nulas
 /// sin entrada quedan como `Value::NA(None)`.

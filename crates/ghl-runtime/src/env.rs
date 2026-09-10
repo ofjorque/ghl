@@ -86,6 +86,8 @@ impl RuntimeEnv {
         env.set("fit".into(), Value::NativeFn(native_fit_ols));
         env.set("ols".into(), Value::NativeFn(native_fit_ols));
         env.set("fit_logistic".into(), Value::NativeFn(native_fit_logistic));
+        env.set("fit_gmm".into(), Value::NativeFn(native_fit_gmm));
+        env.set("gmm".into(), Value::NativeFn(native_fit_gmm));
         env.set("summary".into(), Value::NativeFn(native_summary));
         env.set("tidy".into(), Value::NativeFn(native_tidy));
         env.set("glance".into(), Value::NativeFn(native_glance));
@@ -2394,6 +2396,35 @@ fn native_fit_logistic(args: Vec<Value>) -> Result<Value, Diagnostic> {
     Ok(Value::GlmFit(Box::new(model)))
 }
 
+fn native_fit_gmm(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.is_empty() {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`fit_gmm(data, k, [max_iter], [tol])` requires at least 2 arguments: data (DataFrame or Matrix) and k (number of clusters)",
+        ));
+    }
+    let k = match args.get(1) {
+        Some(Value::I64(n)) if *n > 0 => *n as usize,
+        Some(Value::F64(f)) if *f > 0.0 => *f as usize,
+        _ => return Err(Diagnostic::statistical_error(
+            "S0200",
+            "Second argument of `fit_gmm` must be a positive integer k (number of clusters)",
+        )),
+    };
+    let max_iter = match args.get(2) {
+        Some(Value::I64(n)) if *n > 0 => *n as usize,
+        Some(Value::F64(f)) if *f > 0.0 => *f as usize,
+        _ => 100,
+    };
+    let tol = match args.get(3) {
+        Some(Value::F64(f)) if *f > 0.0 => *f,
+        _ => 1e-4,
+    };
+
+    let model = crate::gmm::FittedGmm::fit(&args[0], k, Some(max_iter), Some(tol))?;
+    Ok(Value::GmmFit(Box::new(model)))
+}
+
 fn native_summary(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`summary()` requires a ModelFit or printable object")
@@ -2405,6 +2436,10 @@ fn native_summary(args: Vec<Value>) -> Result<Value, Diagnostic> {
             Ok(Value::Unit)
         }
         Value::GlmFit(m) => {
+            println!("{}", m);
+            Ok(Value::Unit)
+        }
+        Value::GmmFit(m) => {
             println!("{}", m);
             Ok(Value::Unit)
         }
@@ -2423,6 +2458,7 @@ fn native_tidy(args: Vec<Value>) -> Result<Value, Diagnostic> {
     match model_val {
         Value::ModelFit(m) => Ok(m.tidy()),
         Value::GlmFit(m) => Ok(m.tidy()),
+        Value::GmmFit(m) => Ok(m.tidy()),
         other => Err(Diagnostic::statistical_error(
             "S0200",
             format!("`tidy()` requires a ModelFit, found `{}`", other.type_name()),
@@ -2438,6 +2474,7 @@ fn native_glance(args: Vec<Value>) -> Result<Value, Diagnostic> {
     match model_val {
         Value::ModelFit(m) => Ok(m.glance()),
         Value::GlmFit(m) => Ok(m.glance()),
+        Value::GmmFit(m) => Ok(m.glance()),
         other => Err(Diagnostic::statistical_error(
             "S0200",
             format!("`glance()` requires a ModelFit, found `{}`", other.type_name()),
@@ -2456,6 +2493,7 @@ fn native_augment(args: Vec<Value>) -> Result<Value, Diagnostic> {
     match &args[0] {
         Value::ModelFit(m) => m.augment(&args[1]),
         Value::GlmFit(m) => m.augment(&args[1]),
+        Value::GmmFit(m) => m.augment(&args[1]),
         other => Err(Diagnostic::statistical_error(
             "S0200",
             format!("First argument of `augment()` must be a ModelFit, found `{}`", other.type_name()),
@@ -2474,6 +2512,7 @@ fn native_predict(args: Vec<Value>) -> Result<Value, Diagnostic> {
     match &args[0] {
         Value::ModelFit(m) => m.predict(&args[1]),
         Value::GlmFit(m) => m.predict(&args[1]),
+        Value::GmmFit(m) => m.predict(&args[1]),
         other => Err(Diagnostic::statistical_error(
             "S0200",
             format!("First argument of `predict()` must be a ModelFit, found `{}`", other.type_name()),
@@ -2511,6 +2550,13 @@ fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         Value::GlmFit(m) => {
             Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone())))
+        }
+        Value::GmmFit(m) => {
+            Ok(Value::Matrix {
+                rows: m.k,
+                cols: m.dim,
+                data: m.means.clone(),
+            })
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",

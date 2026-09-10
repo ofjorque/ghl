@@ -183,7 +183,7 @@ fn main() {
         Value::Matrix {
             rows: n_obs,
             cols: d_dim,
-            data: x_data,
+            data: x_data.clone(),
         },
     );
     interp.env.set("iterations".to_string(), Value::I64(num_iterations));
@@ -201,7 +201,7 @@ fn main() {
     println!("  - Dimensión 0 del cluster 0: {:>8.4}", mean_d0);
     println!("  - Convergencia y estabilidad: log_sum_exp previno bajo flujo/desbordamiento.");
 
-    println!("\nRendimiento:");
+    println!("\nRendimiento (GHL Script):");
     println!("  - Tiempo total:          {elapsed:?}");
     println!("  - Tiempo por iteración:  {:>8.3} ms", per_iter * 1000.0);
     println!("  - Rendimiento:           {:>8.1} iteraciones/segundo", iter_per_sec);
@@ -209,5 +209,37 @@ fn main() {
         let est_500 = per_iter * 500.0;
         println!("  - Estimado 500 iter:     {:>8.2} s", est_500);
     }
+
+    // 3. Ejecución Nativa de NEKO (fit_gmm) con Cockpit Visual
+    println!("\n================================================================================");
+    println!(" NEKO Native GMM (fit_gmm) & Terminal Cockpit");
+    println!("================================================================================");
+
+    let neko_code = r#"
+        let model = fit_gmm(X, 10, iterations, 0.00001);
+        summary(model);
+    "#;
+    let neko_prog = parse(neko_code).expect("Código GHL parseado con éxito");
+    let mut interp_neko = Interpreter::new();
+    interp_neko.env.set(
+        "X".to_string(),
+        Value::Matrix {
+            rows: n_obs,
+            cols: d_dim,
+            data: x_data,
+        },
+    );
+    interp_neko.env.set("iterations".to_string(), Value::I64(num_iterations));
+
+    let start_neko = Instant::now();
+    interp_neko.eval_program(&neko_prog).expect("Evaluación NEKO exitosa");
+    let elapsed_neko = start_neko.elapsed();
+    let per_iter_neko = elapsed_neko.as_secs_f64() / (num_iterations as f64);
+    let speedup = per_iter / per_iter_neko;
+
+    println!("\nRendimiento Comparativo (NEKO Nativo vs GHL Script):");
+    println!("  - Tiempo total NEKO:      {elapsed_neko:?}");
+    println!("  - Tiempo por iteración:   {:>8.3} ms ({:>8.1} µs)", per_iter_neko * 1000.0, per_iter_neko * 1_000_000.0);
+    println!("  - Speedup NEKO vs Script: {:>8.1}x más rápido", speedup);
     println!("================================================================================");
 }

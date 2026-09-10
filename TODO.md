@@ -1211,8 +1211,17 @@ piden (ver detalle en Fase 7).
       - **Pruebas y validación:** `test_transpose_and_identity`, `test_diag_vector_and_matrix`,
         `test_log_sum_exp_stability` y `test_em_gmm_end_to_end_and_recovers_clusters` (recupera
         medias verdaderas en datos sintéticos).
-      - **Medido (`spike_em_gmm_latency.rs`, K=10, D=20, N=1.000):** ~212 ms por iteración
+      - **Medido (`spike_em_gmm_latency.rs`, K=10, D=20, N=1.000):** ~175 ms por iteración
         completa (pasos E + M); estabilidad numérica 100% garantizada por `log_sum_exp`.
+      - **Integración Nativa en NEKO (`fit_gmm` / Cockpit Visual):**
+        - Modelo nativo `Value::GmmFit(Box<FittedGmm>)` integrado en el ecosistema NEKO (`gmm.rs`).
+        - Cockpit visual en terminal interactivo (`summary`) con Kaomojis `(=^･ω･^=)` / `(U・ᴥ・U)`,
+          métricas de convergencia, información AIC/BIC/$\log L$ y tabla resumen de clusters.
+        - Verbos Tidyverse / NEKO implementados: `summary()`, `tidy()`, `glance()`, `augment()`,
+          `predict()`, `coef()`. Acepta tanto `DataFrame` como `Matrix`.
+        - **Rendimiento nativo sub-milisegundo:** ~264 µs/iteración (5.27 ms ajuste completo para
+          K=10, D=20, N=1.000 con convergencia en 5 iteraciones), **`662.6x` más rápido** que el
+          script interpretado.
       - Documentación actualizada en `benchmarks/suites/03-statistical-modeling.md` con los
         4 casos de la suite medidos.
 
