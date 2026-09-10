@@ -507,13 +507,13 @@ real de los Puntos 2 y 3, no un ítem independiente más.
     el comportamiento viejo, y el nuevo es más consistente con el resto del lenguaje, así
     que se dejó así a propósito en vez de forzar F64 artificialmente para "no cambiar
     nada".
-  - **`n_distinct()` — explícitamente NO migrado en este punto.** El actual usa
-    `format!("{:?}", it)` sobre los items boxeados como clave de dedup, lo que
-    **distingue razones de NA distintas** como valores distintos (`NA:A` ≠ `NA:B`). El
-    `.n_unique()` nativo de polars no sabe nada del side-channel de razones — migrarlo
-    ingenuamente perdería esa distinción en silencio. Queda en el camino boxeado
-    (correcto, no rápido) hasta que se decida si esa distinción vale la pena preservar
-    acá también.
+  - **`n_distinct()` — en su momento explícitamente NO migrado, más tarde sí (ver bloque
+    "Migrar el resto de funciones..." más abajo).** El `format!("{:?}", it)` que usaba
+    para deduplicar resultó ser, al revisarlo de nuevo, un bug de correctness (no una
+    distinción intencional que preservar): contaba cada *razón* de NA distinta como un
+    valor distinto, algo que ningún otro lugar del lenguaje hace. Se migró a
+    `Column::n_unique()` nativo de polars, que colapsa cualquier NA a lo sumo a un valor
+    faltante — el fix correcto, no una pérdida de una distinción válida.
   - Tests nuevos: `test_dot_product_real_computation`,
     `test_dot_product_rejects_mismatched_lengths`,
     `test_dot_product_propagates_na_with_reason`,
@@ -523,17 +523,12 @@ real de los Puntos 2 y 3, no un ítem independiente más.
   - **Medido (`spike_vector_dot_latency.rs`, 10⁷ elementos — la escala que pide Caso
     1.1):** `dot()` a mano sobre `Vec<Value>` boxeado, 138-144ms → `dot()` real (`faer`,
     `VectorData::as_f64_view`), 9.7-9.9ms — **~14-15x**, estable en 3 corridas.
-  - **Lista actualizada de qué sigue en el camino lento (boxeado)** — lo que quedó
-    explícitamente afuera de este punto (ver arriba para el detalle de por qué cada uno):
-    - `n_distinct()` (distinción de razones de NA, ver arriba).
-    - Los 4 dispatchers compartidos — territorio del **Punto 3**: `map_numeric_fn`/
-      `map_string_fn` (`log`/`sqrt`/`exp`/etc., `str_upper`/etc.), `cumulative`
-      (`cumsum`/`cumprod`/`cummax`/`cummin`), `sort_vector` (`sort_asc`/`sort_desc`).
-    - `lag`, `lead`, `rank`, `if_else`, `between`.
-    - Aritmética/elementwise en `eval.rs`: broadcasting de escalar contra `Vector`, los
-      operadores `.+`/`.-`/`.*`/`./` Vector-Vector, y `UnaryNeg` sobre un `Vector`.
-    - Ninguna de estas quedó peor que antes — dan el resultado correcto, simplemente no
-      están en el camino rápido todavía.
+  - **Lista actualizada de qué sigue en el camino lento (boxeado)** — actualizada de
+    nuevo tras el bloque "Migrar el resto de funciones de `Vector`..." (ver más abajo,
+    después de Fase 4): a esta altura ya quedan migrados `map_numeric_fn`/`map_string_fn`,
+    `cumulative`, `sort_vector`, `rank`, `between`, `UnaryNeg` y `n_distinct` — de la lista
+    original solo siguen boxeados **`lag`/`lead`** e **`if_else`**, documentado
+    explícitamente por qué en ese mismo bloque (no en silencio).
 - [x] **Punto 3 — Fusión de `map` sin buffers intermedios en heap (Caso 1.4) — hecho.**
       `map(x, f)` no existía en absoluto (ni rápido ni lento) y **no se podía implementar
       como una función nativa común**: todas las ~100 funciones nativas de GHL son
@@ -750,7 +745,102 @@ Se apoya en `rayon` (Fase 0); habilita el resto de casos de Suite 03.
         que `random_uniform`, es trabajo de Fase 5).
 
 Con esto, Fase 4 queda cerrada por completo (los tres puntos: iteradores work-stealing
-sobre `Vector`, paralelismo de DataFrame verificado, y bootstrap paralelo).
+sobre `Vector`, paralelismo de DataFrame verificado, y bootstrap paralelo). **"Cerrada"
+acá es dentro del alcance que definió cada plan de punto — no significa que no haya
+quedado nada boxeado/secuencial en el lenguaje.** Al preguntarse eso directamente, la
+respuesta fue no: quedó una lista concreta de funciones de `Vector` (documentada desde el
+Punto 2 de Fase 3, commit `36ab513`) que nunca se migraron ni paralelizaron. El bloque de
+abajo cierra esa lista.
+
+### Migrar el resto de funciones de `Vector` al camino rápido/paralelo
+
+Cierra (con matices, ver abajo) la lista pendiente desde Fase 3 Punto 2: `map_numeric_fn`/
+`map_string_fn`, `cumulative`, `sort_vector`, `lag`/`lead`/`rank`/`if_else`/`between`,
+`UnaryNeg` sobre `Vector`, `n_distinct`.
+
+- [x] **Grupo A — camino rápido + paralelo (`VectorData::as_f64_view()`, reusa
+      `PARALLEL_THRESHOLD = 50.000` de Fase 4 punto (a); una función más cara por elemento
+      que una suma solo adelanta el cruce real, así que 50.000 sigue siendo conservador
+      acá, no incorrecto):**
+    - `map_numeric_fn` — cubre de una sola migración `log`/`log2`/`log10`/`exp`/`sqrt`/
+      `abs`/`floor`/`ceil`/`round`/`sin`/`cos`/`pow`/`clamp` (los últimos tres ya
+      currying-eaban su argumento extra hacia `map_numeric_fn`). Nuevo constructor
+      **`VectorData::from_f64_opt(Vec<Option<f64>>)`** en la salida (no `from_f64`): un
+      resultado puede dar `NaN` (`pow(-8.0, 0.5)`) aunque ningún elemento de entrada fuera
+      NA, así que la salida necesita mezclar `Some`/`None` sin pasar por `Vec<Value>`.
+    - `UnaryNeg` sobre `Vector` (`eval.rs`) — camino rápido **solo si el `Column` ya es
+      `Float64`**. Encontrado *antes* de escribir código: a diferencia de
+      `map_numeric_fn`/`cumulative` (que ya daban `F64` siempre, sin importar el tipo de
+      entrada), `UnaryNeg` **preserva el tipo original** (`-[1,2,3]` da `I64`, no `F64`).
+      Reconstruir desde `as_f64_view()` sin este chequeo habría coercionado todo vector
+      `I64` a `F64` en silencio. Vectores `Int64` (o con NA) siguen por el loop boxeado
+      existente, sin cambios — verificado con `test_unary_neg_preserves_i64_dtype`.
+    - `between()` — nuevo constructor **`VectorData::from_bool(Vec<bool>)`** para la
+      salida (siempre `Bool`, sin problema de tipo).
+    - `cumulative` (`cumsum`/`cumprod`/`cummax`/`cummin`) — sin NA en toda la entrada:
+      scan secuencial sobre `&[f64]`, salida vía `from_f64` (ya daba siempre `F64`, sin
+      cambio de comportamiento). **No se paralelizó**: un cumsum tiene dependencia
+      secuencial estricta entre elementos — paralelizarlo de verdad pide un algoritmo de
+      *parallel scan* dedicado, no `rayon::par_iter()`. Con NA presente: exactamente el
+      mismo loop boxeado de siempre (el comportamiento "un NA envenena todo lo que sigue"
+      no se tocó).
+- [x] **Grupo B — camino rápido vía permutación + gather nativo (preserva dtype sin
+      reconstruir desde floats):**
+    - `sort_vector` (`sort_asc`/`sort_desc`) — sin NA y dtype numérico: `as_f64_view()`
+      **solo para las claves de orden**, ordena un array de índices, y reordena la
+      `Column` **original** vía `.take(&idx_ca)` (mismo mecanismo que
+      `io.rs::take_rows` usa para `sample_n`) — preserva el dtype (`sort_asc([3,1,2])`
+      sigue dando `I64`, no `F64`; verificado con `test_sort_asc_preserves_i64_dtype`).
+      Nuevo constructor **`VectorData::from_column_no_na(Column)`**, wrapper directo sin
+      pasar por `Vec<f64>`/`Vec<Value>`. **Umbral paralelo medido aparte**
+      (`examples/spike_sort_threshold_latency.rs`): un sort es O(n log n) con más trabajo
+      por elemento que una suma, y el cruce real resultó mucho más bajo que el de
+      Fase 4(a) — `par_sort_unstable_by` todavía pierde a N=4.000 (~0.76x) pero ya gana a
+      N=5.000 (~1.06x), subiendo a ~1.46x (10K), ~2.48x (50K), ~3.29x (1M). Nueva
+      constante `PARALLEL_THRESHOLD_SORT = 5_000` (`eval.rs`), separada de
+      `PARALLEL_THRESHOLD` a propósito, no reusada a ciegas.
+    - `rank` — la salida ya era siempre `F64` (sin problema de tipo); solo se aceleró la
+      *lectura* (`as_f64_view()` + `total_cmp` en vez de `compare_values` genérico sobre
+      `Vec<Value>` materializado).
+- [x] **Grupo C — mejora parcial (lectura rápida, escritura sigue boxeada, a
+      propósito):** `map_string_fn` (`str_upper`/`str_lower`/`str_trim`/`str_len`/
+      `str_contains`/`str_starts`/`str_ends`/`str_replace`/`str_pad`) — lee directo desde
+      `column.str()`'s `ChunkedArray` (`Option<&str>` por celda) en vez de recursar sobre
+      el `Vec<Value>` materializado, pero la salida sigue por `Vec<Value>`/`from_values`
+      sin cambio: `f: impl Fn(&str) -> Value` puede devolver `String`, `Bool`
+      (`str_contains`) o `I64` (`str_len`) — no hay un `NumericView` equivalente para
+      strings, y construir esa infraestructura completa no está justificado por lo que
+      este proyecto mide (benchmarks numéricos, no de texto). Ganancia real pero menor
+      que el Grupo A.
+- [x] **Grupo D — delegación directa a polars (fix de correctness + performance a la
+      vez):** `n_distinct()` → `Column::n_unique()` en vez de `format!("{:?}", it)` +
+      `HashSet<String>`. La distinción de razones de NA que motivó no migrarlo en su
+      momento (Fase 3, Punto 2) resultó ser, al revisarla de nuevo, un bug real y no una
+      semántica a preservar — corregido, verificado con
+      `test_n_distinct_counts_different_na_reasons_as_one_missing_value`.
+- **Explícitamente afuera de este bloque, no en silencio:**
+    - `lag`/`lead` — una versión realmente zero-boxing necesitaría componer
+      `Column::slice()` (vista nativa sin copia) + extender con nulos + concatenar,
+      preservando cualquier dtype (no solo numérico) — sub-investigación de API de
+      polars no verificada todavía, y el costo actual no es un bug flagrante (una sola
+      pasada de materialización O(n), no una ineficiencia cuadrática ni un formateo de
+      Debug como tenía `n_distinct`).
+    - `if_else` — polimórfico de verdad (`yes`/`no` pueden ser cualquier tipo de
+      `Value`), un camino rápido solo cubriría el caso todo-numérico agregando
+      complejidad para un beneficio incierto — no es el tipo de operación que los
+      benchmarks de este proyecto miden en un hot loop.
+- Tests nuevos en `lib.rs` (11): `test_map_numeric_fn_fast_path_matches_boxed_reference`,
+  `test_pow_fast_path_produces_na_on_nan_without_input_na`,
+  `test_unary_neg_preserves_i64_dtype`, `test_between_fast_path`,
+  `test_cumsum_fast_path_matches_boxed_reference`,
+  `test_cumsum_na_poisons_rest_unaffected`, `test_sort_asc_preserves_i64_dtype`,
+  `test_sort_asc_fast_path_matches_boxed_reference`,
+  `test_rank_fast_path_matches_boxed_reference`,
+  `test_str_upper_fast_read_matches_reference`,
+  `test_n_distinct_counts_different_na_reasons_as_one_missing_value`. Las 82 pruebas de
+  `ghl-runtime` y el workspace completo pasan sin regresiones. Verificado de punta a
+  punta con `ghl run` (incluyendo confirmar visualmente `Vector[i64]` preservado en
+  `-iv` y `sort_asc`/`sort_desc` sobre un vector entero).
 
 ## Fase 5 — RNG + distribuciones + arenas (`benchmarks/suites/03`, RFC 03 §2.2)
 Requisito para todo el modelado estadístico de la Suite 03.

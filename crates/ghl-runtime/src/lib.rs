@@ -598,6 +598,219 @@ mod tests {
     }
 
     #[test]
+    fn test_map_numeric_fn_fast_path_matches_boxed_reference() {
+        // Migration of map_numeric_fn's dispatcher (covers log/exp/sqrt/abs/.../pow/
+        // clamp/sin/cos) to as_f64_view() -- a large, NA-free vector exercises the fast
+        // path, compared against a hand-computed reference.
+        let code = r#"
+            let v = random_uniform(60000);
+            let roots = sqrt(v);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let v = vector_f64(&interp.env.get("v").unwrap());
+        let roots = vector_f64(&interp.env.get("roots").unwrap());
+        assert_eq!(roots.len(), 60_000);
+        for i in 0..roots.len() {
+            assert!((roots[i] - v[i].sqrt()).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn test_pow_fast_path_produces_na_on_nan_without_input_na() {
+        // Exercises VectorData::from_f64_opt: pow(-8.0, 0.5) is NaN even though -8.0
+        // itself isn't NA -- the fast path must still emit a per-position NA for it.
+        let code = r#"
+            let v = [4.0, -8.0, 9.0];
+            let p = pow(v, 0.5);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        match interp.env.get("p").unwrap() {
+            Value::Vector(vd) => {
+                assert_eq!(vd.value_at(0), Some(Value::F64(2.0)));
+                assert!(matches!(vd.value_at(1), Some(Value::NA(_))), "expected NA at index 1, got {:?}", vd.value_at(1));
+                assert!((vd.value_at(2).unwrap().as_f64().unwrap() - 3.0).abs() < 1e-9);
+            }
+            other => panic!("Expected Vector, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_unary_neg_preserves_i64_dtype() {
+        // UnaryNeg's fast path only applies to already-Float64 vectors -- an Int64
+        // vector must fall through to the existing boxed loop and keep being Int64
+        // (reconstructing from as_f64_view() would have silently turned it into F64).
+        let code = r#"
+            let v = [1, 2, 3];
+            let neg = -v;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        match interp.env.get("neg").unwrap() {
+            Value::Vector(vd) => {
+                assert_eq!(vd.value_at(0), Some(Value::I64(-1)));
+                assert_eq!(vd.value_at(1), Some(Value::I64(-2)));
+                assert_eq!(vd.value_at(2), Some(Value::I64(-3)));
+            }
+            other => panic!("Expected Vector, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_between_fast_path() {
+        let code = r#"
+            let v = [1.0, 5.0, 10.0];
+            let in_range = between(v, 2.0, 8.0);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        match interp.env.get("in_range").unwrap() {
+            Value::Vector(vd) => {
+                assert_eq!(vd.value_at(0), Some(Value::Bool(false)));
+                assert_eq!(vd.value_at(1), Some(Value::Bool(true)));
+                assert_eq!(vd.value_at(2), Some(Value::Bool(false)));
+            }
+            other => panic!("Expected Vector, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_cumsum_fast_path_matches_boxed_reference() {
+        let code = r#"
+            let v = [1.0, 2.0, 3.0, 4.0];
+            let running = cumsum(v);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(vector_f64(&interp.env.get("running").unwrap()), vec![1.0, 3.0, 6.0, 10.0]);
+    }
+
+    #[test]
+    fn test_cumsum_na_poisons_rest_unaffected() {
+        // The NA-present path is untouched by this migration -- still falls back to
+        // cumulative()'s existing "one NA poisons everything after it" behavior.
+        let code = r#"
+            let v = [1.0, sqrt(-1.0), 3.0];
+            let running = cumsum(v);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        match interp.env.get("running").unwrap() {
+            Value::Vector(vd) => {
+                assert_eq!(vd.value_at(0), Some(Value::F64(1.0)));
+                assert!(matches!(vd.value_at(1), Some(Value::NA(_))));
+                assert!(matches!(vd.value_at(2), Some(Value::NA(_))), "NA must poison everything after it");
+            }
+            other => panic!("Expected Vector, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_sort_asc_preserves_i64_dtype() {
+        // sort_vector's fast path reorders the *original* Column via `.take()` rather
+        // than reconstructing from as_f64_view() -- Int64 in must mean Int64 out.
+        let code = r#"
+            let v = [3, 1, 2];
+            let sorted = sort_asc(v);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        match interp.env.get("sorted").unwrap() {
+            Value::Vector(vd) => {
+                assert_eq!(vd.value_at(0), Some(Value::I64(1)));
+                assert_eq!(vd.value_at(1), Some(Value::I64(2)));
+                assert_eq!(vd.value_at(2), Some(Value::I64(3)));
+            }
+            other => panic!("Expected Vector, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_sort_asc_fast_path_matches_boxed_reference() {
+        let code = r#"
+            let v = random_uniform(60000);
+            let sorted = sort_asc(v);
+            let rsorted = sort_desc(v);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let mut expected = vector_f64(&interp.env.get("v").unwrap());
+        expected.sort_by(|a, b| a.total_cmp(b));
+        assert_eq!(vector_f64(&interp.env.get("sorted").unwrap()), expected);
+
+        expected.reverse();
+        assert_eq!(vector_f64(&interp.env.get("rsorted").unwrap()), expected);
+    }
+
+    #[test]
+    fn test_rank_fast_path_matches_boxed_reference() {
+        let code = r#"
+            let v = [10.0, 30.0, 20.0, 30.0];
+            let ranks = rank(v);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        // 10 -> rank 1; 20 -> rank 2; the two 30s tie for ranks 3 and 4, averaged to 3.5.
+        assert_eq!(vector_f64(&interp.env.get("ranks").unwrap()), vec![1.0, 3.5, 2.0, 3.5]);
+    }
+
+    #[test]
+    fn test_str_upper_fast_read_matches_reference() {
+        let code = r#"
+            let v = ["hello", "World"];
+            let upper = str_upper(v);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        match interp.env.get("upper").unwrap() {
+            Value::Vector(vd) => {
+                assert_eq!(vd.value_at(0), Some(Value::String("HELLO".to_string())));
+                assert_eq!(vd.value_at(1), Some(Value::String("WORLD".to_string())));
+            }
+            other => panic!("Expected Vector, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_n_distinct_counts_different_na_reasons_as_one_missing_value() {
+        // Regression for the correctness bug this migration fixed: n_distinct used to
+        // Debug-format every Value (including the NA's reason string) into a
+        // HashSet<String>, so two NAs with different reasons counted as two distinct
+        // values. Column::n_unique() counts null as at most one distinct value.
+        let code = r#"
+            let empty = random_uniform(0);
+            let m = mean(empty);
+            let v = [1.0, sqrt(-1.0), m];
+            let n = n_distinct(v);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        // {1.0, NA} -- two distinct NA reasons ("NaN" and "EmptyVector") must still
+        // collapse to a single missing-value bucket, giving 2 total, not 3.
+        assert_eq!(interp.env.get("n").unwrap(), Value::I64(2));
+    }
+
+    #[test]
     fn test_random_uniform_produces_vector_of_requested_length_in_unit_interval() {
         // TODO.md Fase 3, Track 2, Punto 4: not reproducible across runs yet (that's
         // Fase 5's PRNG::seed job) -- what's checked here is shape and range only.

@@ -81,6 +81,51 @@ impl VectorData {
         }
     }
 
+    /// Builds from a flat `Vec<Option<f64>>` — zero `Value` boxing, but (unlike
+    /// `from_f64`) can represent nulls directly as real Arrow nulls, no `NaReasonTable`
+    /// entry (no reason string -- these are computed NaNs, not something with a
+    /// meaningful "why", same convention `map_numeric_fn`'s boxed path already used).
+    /// Needed because a numeric transform can produce a NaN result (`pow(-8.0, 0.5)`)
+    /// even when every input element was NA-free -- `from_f64` alone can't express that.
+    pub fn from_f64_opt(data: Vec<Option<f64>>) -> Self {
+        let mut ca: Float64Chunked = data.into_iter().collect();
+        ca.rename(PlSmallStr::from_static(VECTOR_COL));
+        VectorData {
+            column: ca.into_series().into(),
+            na_reasons: Arc::new(NaReasonTable::new()),
+            materialized: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// Builds from a flat `Vec<bool>` — the fast-path constructor for `Vector[Bool]`
+    /// results (`between()`) computed straight from a numeric `&[f64]` view, no `Value`
+    /// boxing.
+    pub fn from_bool(data: Vec<bool>) -> Self {
+        let column: Column = BooleanChunked::new(PlSmallStr::from_static(VECTOR_COL), data)
+            .into_series()
+            .into();
+        VectorData {
+            column,
+            na_reasons: Arc::new(NaReasonTable::new()),
+            materialized: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// Wraps an already-built `Column` directly, no `Vec<f64>`/`Vec<Value>` involved at
+    /// all. Used by `sort_vector`'s dtype-preserving fast path: reordering a `Column` via
+    /// `.take(&idx)` (same gather `io.rs::take_rows` uses for `sample_n`) keeps the
+    /// original dtype (`Int64` stays `Int64`) -- reconstructing from `as_f64_view()`
+    /// instead would have silently coerced every sorted `Int64` vector to `Float64`.
+    /// Only valid to call when the caller already knows there are no NAs to carry over
+    /// (the na-reason side-channel is left empty here).
+    pub(crate) fn from_column_no_na(column: Column) -> Self {
+        VectorData {
+            column,
+            na_reasons: Arc::new(NaReasonTable::new()),
+            materialized: Arc::new(OnceLock::new()),
+        }
+    }
+
     pub fn column(&self) -> &Column {
         &self.column
     }

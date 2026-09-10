@@ -1,5 +1,6 @@
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::*;
+use polars_core::prelude::DataType;
 use rayon::prelude::*;
 use crate::value::Value;
 use crate::vector_data::VectorData;
@@ -146,6 +147,22 @@ impl Interpreter {
                     Value::I64(n) => Ok(Value::I64(-n)),
                     Value::F64(x) => Ok(Value::F64(-x)),
                     Value::NA(r) => Ok(Value::NA(r)),
+                    // Fast path only when the Column is *already* Float64 -- `-[1, 2]`
+                    // (an Int64 Vector) must still come back as Int64, and
+                    // `as_f64_view()` would silently cast it to Float64 first, breaking
+                    // that (an Int64 literal is a real vector in a Vector[i64], so this
+                    // isn't just a hypothetical). Int64/mixed/NA-containing vectors fall
+                    // through to the boxed loop below, unchanged.
+                    Value::Vector(v) if v.null_count() == 0 && v.column().dtype() == &DataType::Float64 => {
+                        let view = v.as_f64_view()?;
+                        let base = view.as_slice();
+                        let data: Vec<f64> = if base.len() >= PARALLEL_THRESHOLD {
+                            base.par_iter().map(|&x| -x).collect()
+                        } else {
+                            base.iter().map(|&x| -x).collect()
+                        };
+                        Ok(Value::Vector(VectorData::from_f64(data)))
+                    }
                     Value::Vector(v) => {
                         let mut res = Vec::new();
                         for item in v.iter().cloned() {
@@ -626,7 +643,15 @@ fn callee_name(expr: &Expr) -> Option<&str> {
 /// (very slightly behind) the sequential one (~0.91x), and by N=75,000 it's already ahead
 /// (~1.23x) and only grows from there (~2.9x at N=5,000,000). 50,000 is the crossover
 /// picked from that data, not a guess.
-const PARALLEL_THRESHOLD: usize = 50_000;
+pub(crate) const PARALLEL_THRESHOLD: usize = 50_000;
+
+/// Crossover for `sort_vector`'s (`sort_asc`/`sort_desc`) parallel path -- measured
+/// separately from `PARALLEL_THRESHOLD` (see `examples/spike_sort_threshold_latency.rs`),
+/// not reused blindly: a sort is O(n log n) with real per-element comparison/swap work,
+/// a different cost shape than a flat O(n) elementwise op, and its real crossover lands
+/// much lower -- between N=4,000 (parallel still ~0.76x, i.e. slower) and N=5,000
+/// (~1.06x, i.e. break-even and climbing: ~1.46x at 10,000, ~3.29x at 1,000,000).
+pub(crate) const PARALLEL_THRESHOLD_SORT: usize = 5_000;
 
 /// Element-wise `op_fn` over two same-length `Vector`s, NA-propagating per element (an NA
 /// on either side at a position makes that position's result NA, unaffected positions

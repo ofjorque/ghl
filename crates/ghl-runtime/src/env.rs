@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
-use polars_core::prelude::PolarsError;
+use polars_core::prelude::{IdxCa, IdxSize, PlSmallStr, PolarsError};
 use rand::RngExt;
 use rayon::prelude::*;
 use crate::eval::Interpreter;
@@ -668,9 +668,18 @@ pub(crate) fn native_n_distinct(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`n_distinct()` requires 1 argument"))?;
     match v {
         Value::ColRef(name) => Ok(Value::AggSpec { kind: "n_distinct".into(), col: Some(name.clone()) }),
-        Value::Vector(items) => {
-            let seen: std::collections::HashSet<String> = items.iter().map(|it| format!("{:?}", it)).collect();
-            Ok(Value::I64(seen.len() as i64))
+        // Delegates straight to polars' own `Column::n_unique()` instead of
+        // `format!("{:?}", it)`-ing every element into a `HashSet<String>` -- a real
+        // correctness fix, not just a speedup: two NAs with different reasons
+        // (`NA(Some("EmptyVector"))` vs `NA(Some("NaN"))`) used to Debug-format
+        // differently and count as *two* distinct values, when semantically there's just
+        // one kind of "missing" here. `n_unique()` counts null as at most one distinct
+        // value, matching how every other statistics library treats it.
+        Value::Vector(vd) => {
+            let n = vd.column().n_unique().map_err(|e| {
+                Diagnostic::compute_error("C0210", format!("internal error computing `n_distinct()`: {e}"))
+            })?;
+            Ok(Value::I64(n as i64))
         }
         other => Err(Diagnostic::compute_error("C0202", format!("`n_distinct()` expects a Vector, found `{}`", other.type_name()))),
     }
@@ -991,10 +1000,36 @@ fn native_sample_frac(args: Vec<Value>) -> Result<Value, Diagnostic> {
 // Math helpers — scalar + `Vector[f64]`, NaN-safe (never panics; NaN -> NA)
 // =========================================================================
 
-fn map_numeric_fn(v: &Value, f: impl Fn(f64) -> f64 + Clone) -> Value {
+fn map_numeric_fn(v: &Value, f: impl Fn(f64) -> f64 + Clone + Sync) -> Value {
     match v {
         Value::NA(r) => Value::NA(r.clone()),
-        Value::Vector(items) => Value::Vector(VectorData::from_values(items.iter().map(|it| map_numeric_fn(it, f.clone())).collect())),
+        // Fast path: no NA in the input -> read/write straight through `&[f64]`, zero
+        // `Value` boxing. Can't use `VectorData::from_f64` for the output, though: `f`
+        // can still produce a NaN even from a clean input (`pow(-8.0, 0.5)`), so the
+        // output needs `from_f64_opt`'s `Option<f64>` to represent that per-element NA
+        // without falling back to the boxed path entirely.
+        Value::Vector(vd) if vd.null_count() == 0 => {
+            match vd.as_f64_view() {
+                Ok(view) => {
+                    let base = view.as_slice();
+                    let compute = |&x: &f64| -> Option<f64> {
+                        let y = f(x);
+                        if y.is_nan() { None } else { Some(y) }
+                    };
+                    let data: Vec<Option<f64>> = if base.len() >= crate::eval::PARALLEL_THRESHOLD {
+                        base.par_iter().map(compute).collect()
+                    } else {
+                        base.iter().map(compute).collect()
+                    };
+                    Value::Vector(VectorData::from_f64_opt(data))
+                }
+                // Not actually numeric (e.g. Vector[String]) -- fall through to the
+                // generic boxed path below, which already reports `NotNumeric` per
+                // element rather than failing the whole call.
+                Err(_) => Value::Vector(VectorData::from_values(vd.iter().map(|it| map_numeric_fn(it, f.clone())).collect())),
+            }
+        }
+        Value::Vector(vd) => Value::Vector(VectorData::from_values(vd.iter().map(|it| map_numeric_fn(it, f.clone())).collect())),
         other => match other.as_f64() {
             Some(x) => {
                 let y = f(x);
@@ -1067,6 +1102,16 @@ fn as_vector(v: &Value) -> Option<&Vec<Value>> {
     }
 }
 
+/// Like `as_vector`, but returns the `VectorData` itself instead of forcing it through
+/// `Deref` -- needed by fast paths that must check `null_count()`/`as_f64_view()` *before*
+/// paying for a full `Vec<Value>` materialization.
+fn as_vector_data(v: &Value) -> Option<&VectorData> {
+    match v {
+        Value::Vector(vd) => Some(vd),
+        _ => None,
+    }
+}
+
 fn cumulative(items: &[Value], init: f64, combine: impl Fn(f64, f64) -> f64) -> Vec<Value> {
     let mut acc = init;
     let mut out = Vec::with_capacity(items.len());
@@ -1087,32 +1132,57 @@ fn cumulative(items: &[Value], init: f64, combine: impl Fn(f64, f64) -> f64) -> 
     out
 }
 
+/// `cumsum`/`cumprod`/`cummax`/`cummin`'s dispatcher. Fast path only when there's no NA
+/// *anywhere* in the input: a cumulative scan has a strict sequential dependency (each
+/// value depends on the one before it), so this deliberately stays single-threaded --
+/// parallelizing a scan for real needs a dedicated parallel-scan algorithm, not just
+/// `rayon::par_iter()`, and isn't attempted here. With any NA present, falls back
+/// unchanged to `cumulative()`'s existing "one NA poisons everything after it" loop --
+/// that boxed path already handles NA-mixed input correctly, no change needed there.
+fn cumulative_fast(vd: &VectorData, init: f64, combine: impl Fn(f64, f64) -> f64) -> Value {
+    if vd.null_count() == 0 {
+        if let Ok(view) = vd.as_f64_view() {
+            let mut acc = init;
+            let data: Vec<f64> = view
+                .as_slice()
+                .iter()
+                .map(|&x| {
+                    acc = combine(acc, x);
+                    acc
+                })
+                .collect();
+            return Value::Vector(VectorData::from_f64(data));
+        }
+    }
+    Value::Vector(VectorData::from_values(cumulative(vd, init, combine)))
+}
+
 fn native_cumsum(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let items = args.first().and_then(as_vector).ok_or_else(|| {
+    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`cumsum()` requires a Vector argument")
     })?;
-    Ok(Value::Vector(VectorData::from_values(cumulative(items, 0.0, |a, b| a + b))))
+    Ok(cumulative_fast(vd, 0.0, |a, b| a + b))
 }
 
 fn native_cumprod(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let items = args.first().and_then(as_vector).ok_or_else(|| {
+    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`cumprod()` requires a Vector argument")
     })?;
-    Ok(Value::Vector(VectorData::from_values(cumulative(items, 1.0, |a, b| a * b))))
+    Ok(cumulative_fast(vd, 1.0, |a, b| a * b))
 }
 
 fn native_cummax(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let items = args.first().and_then(as_vector).ok_or_else(|| {
+    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`cummax()` requires a Vector argument")
     })?;
-    Ok(Value::Vector(VectorData::from_values(cumulative(items, f64::NEG_INFINITY, f64::max))))
+    Ok(cumulative_fast(vd, f64::NEG_INFINITY, f64::max))
 }
 
 fn native_cummin(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let items = args.first().and_then(as_vector).ok_or_else(|| {
+    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`cummin()` requires a Vector argument")
     })?;
-    Ok(Value::Vector(VectorData::from_values(cumulative(items, f64::INFINITY, f64::min))))
+    Ok(cumulative_fast(vd, f64::INFINITY, f64::min))
 }
 
 fn native_lag(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -1193,16 +1263,62 @@ fn native_between(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 
     match v {
+        // Fast path: no NA in the input, and the comparison itself can't produce a NaN
+        // (unlike map_numeric_fn's transforms) -- so the Bool output is unconditionally
+        // safe to build via `from_bool`, no `Option` needed.
+        Value::Vector(vd) if vd.null_count() == 0 => {
+            if let Ok(view) = vd.as_f64_view() {
+                let base = view.as_slice();
+                let data: Vec<bool> = if base.len() >= crate::eval::PARALLEL_THRESHOLD {
+                    base.par_iter().map(|&x| x >= lo && x <= hi).collect()
+                } else {
+                    base.iter().map(|&x| x >= lo && x <= hi).collect()
+                };
+                Ok(Value::Vector(VectorData::from_bool(data)))
+            } else {
+                Ok(Value::Vector(VectorData::from_values(vd.iter().map(|it| check(it, lo, hi)).collect())))
+            }
+        }
         Value::Vector(items) => Ok(Value::Vector(VectorData::from_values(items.iter().map(|it| check(it, lo, hi)).collect()))),
         other => Ok(check(other, lo, hi)),
     }
 }
 
 fn sort_vector(args: Vec<Value>, desc: bool, fn_name: &str) -> Result<Value, Diagnostic> {
-    let items = args.first().and_then(as_vector).ok_or_else(|| {
+    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
         Diagnostic::compute_error("C0201", format!("`{}()` requires a Vector argument", fn_name))
     })?;
-    let mut sorted = items.clone();
+
+    // Fast path: no NA, and the Vector is numeric -- get the sort order from a cheap
+    // `&[f64]` read, then reorder the *original* Column via `.take()` (the same native
+    // gather `io.rs::take_rows` uses for `sample_n`) instead of reconstructing from
+    // floats. This is what preserves dtype (`Int64` stays `Int64`) -- `sort_asc`/
+    // `sort_desc` return the *original values*, just reordered, so rebuilding from
+    // `as_f64_view()`'s f64s would have silently turned every sorted Int64 vector into
+    // Float64.
+    if vd.null_count() == 0 {
+        if let Ok(view) = vd.as_f64_view() {
+            let base = view.as_slice();
+            let n = base.len();
+            let mut idx: Vec<IdxSize> = (0..n as IdxSize).collect();
+            let cmp = |&a: &IdxSize, &b: &IdxSize| {
+                let ord = base[a as usize].total_cmp(&base[b as usize]);
+                if desc { ord.reverse() } else { ord }
+            };
+            if n >= crate::eval::PARALLEL_THRESHOLD_SORT {
+                idx.par_sort_unstable_by(cmp);
+            } else {
+                idx.sort_unstable_by(cmp);
+            }
+            let idx_ca = IdxCa::from_vec(PlSmallStr::EMPTY, idx);
+            let new_col = vd.column().take(&idx_ca).map_err(|e| {
+                Diagnostic::compute_error("C0210", format!("internal error reordering `{}()`'s result: {e}", fn_name))
+            })?;
+            return Ok(Value::Vector(VectorData::from_column_no_na(new_col)));
+        }
+    }
+
+    let mut sorted: Vec<Value> = vd.iter().cloned().collect();
     sorted.sort_by(|a, b| {
         let ord = crate::io::compare_values(Some(a), Some(b));
         if desc { ord.reverse() } else { ord }
@@ -1218,11 +1334,40 @@ fn native_sort_desc(args: Vec<Value>) -> Result<Value, Diagnostic> {
     sort_vector(args, true, "sort_desc")
 }
 
-/// Integer rank with ties resolved by averaging (matches R's default `rank()`).
+/// Integer rank with ties resolved by averaging (matches R's default `rank()`). Output is
+/// always `F64` regardless of the input's dtype (it's a rank, not the original values),
+/// so there's no dtype-preservation concern here like `sort_vector`'s -- only the *read*
+/// side needs to go fast: `as_f64_view()` + `total_cmp` when the input is NA-free and
+/// numeric, instead of `compare_values` over a fully materialized `Vec<Value>`.
 fn native_rank(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let items = args.first().and_then(as_vector).ok_or_else(|| {
+    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`rank()` requires a Vector argument")
     })?;
+
+    if vd.null_count() == 0 {
+        if let Ok(view) = vd.as_f64_view() {
+            let base = view.as_slice();
+            let n = base.len();
+            let mut order: Vec<usize> = (0..n).collect();
+            order.sort_by(|&a, &b| base[a].total_cmp(&base[b]));
+            let mut ranks = vec![0.0; n];
+            let mut i = 0;
+            while i < n {
+                let mut j = i;
+                while j + 1 < n && base[order[j + 1]] == base[order[i]] {
+                    j += 1;
+                }
+                let avg_rank = ((i + j) as f64 / 2.0) + 1.0;
+                for slot in order.iter().take(j + 1).skip(i) {
+                    ranks[*slot] = avg_rank;
+                }
+                i = j + 1;
+            }
+            return Ok(Value::Vector(VectorData::from_f64(ranks)));
+        }
+    }
+
+    let items: &Vec<Value> = vd;
     let n = items.len();
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_by(|&a, &b| crate::io::compare_values(items.get(a), items.get(b)));
@@ -1252,7 +1397,27 @@ fn native_rank(args: Vec<Value>) -> Result<Value, Diagnostic> {
 fn map_string_fn(v: &Value, f: impl Fn(&str) -> Value + Clone) -> Value {
     match v {
         Value::String(s) => f(s),
-        Value::Vector(items) => Value::Vector(VectorData::from_values(items.iter().map(|it| map_string_fn(it, f.clone())).collect())),
+        // Fast *read*: iterate the underlying `StringChunked` directly (`Option<&str>`
+        // per cell) instead of recursing through the fully `Deref`-materialized
+        // `Vec<Value>`. The *output* still goes through `Vec<Value>`/`from_values`
+        // unchanged -- `f: impl Fn(&str) -> Value` can return a `String` (`str_upper`), a
+        // `Bool` (`str_contains`) or an `I64` (`str_len`), so there's no single-dtype
+        // fast constructor for it the way `from_f64`/`from_bool` cover the numeric side.
+        // Real but smaller win than Group A's functions -- this project's benchmarks are
+        // numeric, not text, so a full zero-boxing string engine isn't justified here.
+        Value::Vector(vd) => match vd.column().str() {
+            Ok(ca) => {
+                let mut out = Vec::with_capacity(vd.len());
+                for i in 0..vd.len() {
+                    out.push(match ca.get(i) {
+                        Some(s) => f(s),
+                        None => vd.value_at(i).unwrap_or(Value::NA(None)),
+                    });
+                }
+                Value::Vector(VectorData::from_values(out))
+            }
+            Err(_) => Value::Vector(VectorData::from_values(vd.iter().map(|it| map_string_fn(it, f.clone())).collect())),
+        },
         Value::NA(r) => Value::NA(r.clone()),
         other => Value::NA(Some(format!("NotString:{}", other.type_name()))),
     }
