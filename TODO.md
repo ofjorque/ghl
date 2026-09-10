@@ -818,17 +818,18 @@ Cierra (con matices, ver abajo) la lista pendiente desde Fase 3 Punto 2: `map_nu
       momento (Fase 3, Punto 2) resultó ser, al revisarla de nuevo, un bug real y no una
       semántica a preservar — corregido, verificado con
       `test_n_distinct_counts_different_na_reasons_as_one_missing_value`.
-- **Explícitamente afuera de este bloque, no en silencio:**
-    - `lag`/`lead` — una versión realmente zero-boxing necesitaría componer
+**Explícitamente afuera de este bloque — pendiente de verdad, no una nota al pie:**
+- [ ] `lag`/`lead` — una versión realmente zero-boxing necesitaría componer
       `Column::slice()` (vista nativa sin copia) + extender con nulos + concatenar,
       preservando cualquier dtype (no solo numérico) — sub-investigación de API de
       polars no verificada todavía, y el costo actual no es un bug flagrante (una sola
       pasada de materialización O(n), no una ineficiencia cuadrática ni un formateo de
       Debug como tenía `n_distinct`).
-    - `if_else` — polimórfico de verdad (`yes`/`no` pueden ser cualquier tipo de
+- [ ] `if_else` — polimórfico de verdad (`yes`/`no` pueden ser cualquier tipo de
       `Value`), un camino rápido solo cubriría el caso todo-numérico agregando
       complejidad para un beneficio incierto — no es el tipo de operación que los
-      benchmarks de este proyecto miden en un hot loop.
+      benchmarks de este proyecto miden en un hot loop. Si se retoma, evaluar primero si
+      vale la pena vs. dejarlo como está.
 - Tests nuevos en `lib.rs` (11): `test_map_numeric_fn_fast_path_matches_boxed_reference`,
   `test_pow_fast_path_produces_na_on_nan_without_input_na`,
   `test_unary_neg_preserves_i64_dtype`, `test_between_fast_path`,
