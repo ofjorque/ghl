@@ -57,6 +57,17 @@ Este documento establece las directrices no negociables, estándares técnicos y
 5. **Tratamiento de NAs con Motivo Opcional (`NA` y `NA:Reason`):**
    - Todo dato faltante es fundamentalmente `NA`. La especificación de un motivo (`NA:NotObservable`, `NA:NoResponse`, etc.) es **100% opcional** y no intrusiva. Para cualquier función del sistema, un `NA` con motivo sigue siendo un `NA` con lógica ternaria de Kleene.
 
+### 2.1 Principios Operativos y Reglas de Oro de Implementación
+
+Al implementar o modificar código en el compilador o runtime de GHL, el agente debe seguir obligatoriamente estas directrices:
+
+1. **No a la sobreingeniería:** Mantener las soluciones directas, comprensibles y sin capas innecesarias de abstracción.
+2. **Reutilizar funciones existentes en lo posible:** Antes de concebir una nueva abstracción o función interna, apalancarse en la infraestructura y funciones ya presentes.
+3. **Pensar bien antes de eliminar cualquier función:** No descartar ni alterar interfaces públicas o internas sin justificación estricta.
+4. **Pruebas de paridad obligatorias:** Si una función o flujo debe ser modificado, escribir pruebas de regresión y paridad comparando explícitamente el comportamiento original contra el nuevo para asegurar 100% de compatibilidad.
+5. **Lenguaje generalista, no un DSL estadístico:** GHL busca ser un lenguaje de programación de propósito general para ciencia y estadística, no un DSL cerrado. Las operaciones deben modelarse como primitivas generales de colecciones, álgebra lineal o control de flujo cuando corresponda, evitando crear palabras clave o primitivas hiperespecíficas para un solo algoritmo.
+6. **Compilación y ejecución de pruebas con `--jobs 4`:** Al correr `cargo test`, `cargo build` o `cargo run`, utilizar `--jobs 4` para optimizar el uso de núcleos del procesador.
+
 ---
 
 ## 3. Estructura Documental y RFCs (`docs/design/`)

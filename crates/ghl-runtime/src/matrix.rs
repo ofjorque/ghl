@@ -229,6 +229,23 @@ impl MatrixOps {
         let col = faer::ColRef::from_slice(b);
         Ok(row * col)
     }
+
+    /// Transpose of a matrix: A (rows × cols) -> Aᵀ (cols × rows).
+    pub fn transpose(rows: usize, cols: usize, a: &[f64]) -> Result<(usize, usize, Vec<f64>), Diagnostic> {
+        if a.len() != rows * cols {
+            return Err(Diagnostic::statistical_error(
+                "S0412",
+                format!("`transpose()`: matrix is ({rows}x{cols}) but data has {} entries", a.len()),
+            ));
+        }
+        let mut out = vec![0.0; rows * cols];
+        for r in 0..rows {
+            for c in 0..cols {
+                out[c * rows + r] = a[r * cols + c];
+            }
+        }
+        Ok((cols, rows, out))
+    }
 }
 
 /// Shared symmetry check for `cholesky()`/`eigen()` -- both require a symmetric input and

@@ -989,11 +989,28 @@ tiempo de ejecución, no de crash: ~56µs por iteración medido a profundidad ex
 (2.000.000), lo que da estimados perfectamente razonables a las escalas que estos casos
 piden (ver detalle en Fase 7).
 
-- [ ] Gibbs sampler jerárquico de ejemplo (Caso 3.1) corriendo de punta a punta. Ya no
-      bloqueado por profundidad de recursión (100.000 iteraciones ≈ 5,6s estimado,
-      escribiendo el loop sin `return`) — sigue pendiente el resto: distribuciones
-      multivariadas/jerárquicas reales, no solo `random_normal`/`random_gamma`
-      univariadas (Fase 5, Punto 2).
+- [x] **Gibbs sampler jerárquico (Caso 3.1, Suite 03) — hecho, corriendo de punta a punta en GHL.**
+      El algoritmo se ejecuta como código GHL puro directamente sobre el intérprete de
+      `ghl-runtime`, sin depender de librerías en C++ ni requerir extensiones DSL ad-hoc.
+      - **Primitivas generales de colecciones y matrices agregadas:**
+        - `zeros(n)` (vector de ceros) y `zeros(rows, cols)` (matriz de ceros).
+        - `len(x)` polimórfico (`Vector`, `String`, `DataFrame`, `Matrix`).
+        - `get(collection, index)` (indexación por entero, gather vectorial `get(mu, groups)`,
+          acceso por índice en strings, y `get(matrix, r, c)`).
+        - `set(collection, index, val)` (actualización in-place/funcional de vector y matriz `set(m, r, c, val)`).
+        - `get_row(matrix, r)`, `set_row(matrix, r, vector)` y `get_col(matrix, c)`.
+        - `filter(vector, mask_booleana)` soportado nativamente en `native_filter`, usando
+          filtrado Arrow/Polars zero-copy `Column::filter`, preservando compatibilidad
+          completa con `filter(dataframe, ...)`.
+      - **Convergencia estadística verificada:** probada en `test_gibbs_sampler_runs_end_to_end_and_recovers_means`
+        (N=600, 3 grupos) y en el spike de benchmark (N=3.000, 3 grupos con medias reales
+        `[3.0, 8.0, -4.0]`, $\sigma=0.8$). Las medias posteriores convergen con error < 0.02.
+      - **Rendimiento medido (`spike_gibbs_mcmc_latency.rs`, N=3.000, 500 iteraciones):**
+        - Tiempo total: **24.22 ms**.
+        - Latencia por iteración: **~48.4 µs**.
+        - Rendimiento: **~20.640 iteraciones/segundo**.
+      - Documentación actualizada en `benchmarks/suites/03-statistical-modeling.md` con el
+        código ejecutable real de `gibbs.gh` y las métricas obtenidas.
 - [x] **IRLS para GLM / regresión logística sobre N=1M, P=40 (Caso 3.2) — hecho.** No
       estuvo bloqueado por recursión (pocas iteraciones hasta converger), ni lo estuvo
       nunca.
@@ -1093,14 +1110,14 @@ piden (ver detalle en Fase 7).
         sobre un dataset chico real, con `summary()`/`tidy()`/`glance()`/`augment()`/
         `predict()` sobre el resultado, y el caso de respuesta no-binaria (`S0204` limpio,
         no un crash).
-      - **Hallazgo de lenguaje encontrado y no arreglado (fuera de alcance, documentado en
-        vez de ignorado):** GHL no tiene todavía un operador de comparación elementwise
-        sobre `Vector` — `u < p` con ambos `Vector` falla con `C0202`
-        (`eval_binary_op`'s rama `Lt`/`LtEq`/`Gt`/`GtEq` en `eval.rs` solo acepta
-        operandos escalares vía `.as_f64()`). Esto bloqueó simular una respuesta Bernoulli
-        puramente en GHL para los tests/benchmark — se generó esa pieza específica en
-        Rust directamente, manteniendo el ajuste en sí (`fit_logistic`/`coef`/etc.) yendo
-        por el camino real de la función nativa.
+      - [x] **Comparación elementwise sobre `Vector` — implementada y probada.**
+        Los operadores binarios de comparación (`==`, `!=`, `<`, `<=`, `>`, `>=`) en
+        `eval.rs` y `checker.rs` ahora soportan `Vector` contra `Vector` (longitudes
+        coincidentes) y `Vector` contra `escalar` (broadcasting bidireccional), produciendo
+        un `Vector` de booleanos tipado (`VectorData` con `BooleanChunked` de Polars/Arrow).
+        Las comparaciones estrictamente escalares no sufrieron ninguna regresión
+        (`test_scalar_comparisons_parity_unchanged`). Verificado con
+        `test_vector_comparisons_elementwise`.
       - **Qué queda afuera, a propósito (decisiones de diseño/alcance, no piezas a medio
         construir):** otras familias GLM (Poisson, binomial de conteos) — cada una tiene
         su propia función de varianza/link/deviance, es una feature nueva que nadie pidió
@@ -1180,9 +1197,24 @@ piden (ver detalle en Fase 7).
         NA real (`NA:SensorDropout`, camino de reserva — confirma que `augment()` sigue
         mostrando la razón original correcta tras reusar el `Arc<NaReasonTable>` tal
         cual), y el caso de respuesta no-binaria (`S0204` limpio).
-- [ ] Algoritmo EM para mezclas gaussianas con log-sum-exp estable (Caso 3.4). Ya no en
-      riesgo por profundidad de recursión (500 iteraciones ≈ 28ms estimado, mismo
-      requisito de estilo sin `return`).
+- [x] **Algoritmo EM para mezclas gaussianas con log-sum-exp estable (Caso 3.4, Suite 03) — hecho.**
+      Implementado y ejecutado como código GHL puro sobre el runtime, cerrando el último
+      caso pendiente de la Suite 03 (100% de la Suite 03 completada).
+      - **Primitivas generales de álgebra lineal y cálculo numérico agregadas:**
+        - `log_sum_exp(v)`: evaluación numéricamente estable contra underflow/overflow.
+        - `transpose(m)` / `t(m)`: transposición matricial $M^T$.
+        - `identity(n)` / `eye(n)`: matriz identidad $I_n$.
+        - `diag(x)`: construcción diagonal (desde Vector) y extracción diagonal (desde Matrix).
+      - **Vectorización real en el M-step:** La acumulación ponderada de observaciones para
+        todos los clusters y dimensiones se evalúa mediante un único producto matricial
+        GEMM bloqueado `transpose(Gamma) * X` (faer), aprovechando el hardware multinúcleo.
+      - **Pruebas y validación:** `test_transpose_and_identity`, `test_diag_vector_and_matrix`,
+        `test_log_sum_exp_stability` y `test_em_gmm_end_to_end_and_recovers_clusters` (recupera
+        medias verdaderas en datos sintéticos).
+      - **Medido (`spike_em_gmm_latency.rs`, K=10, D=20, N=1.000):** ~212 ms por iteración
+        completa (pasos E + M); estabilidad numérica 100% garantizada por `log_sum_exp`.
+      - Documentación actualizada en `benchmarks/suites/03-statistical-modeling.md` con los
+        4 casos de la suite medidos.
 
 ## Fase 7 — Sistema de módulos y superficie de sintaxis estática
 El token `use` ya existe en el lexer (`crates/ghl-syntax/src/lexer.rs`) pero el parser

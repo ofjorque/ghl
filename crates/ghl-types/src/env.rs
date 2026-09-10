@@ -616,6 +616,8 @@ impl TypeEnv {
             "qr", "qr_q", "qr_r", "cholesky",
             "svd", "svd_u", "svd_s", "svd_v",
             "eigen", "eigen_values", "eigen_vectors",
+            "zeros", "len", "get", "set", "get_row", "set_row", "get_col",
+            "transpose", "t", "identity", "eye", "diag", "log_sum_exp",
         ] {
             env.insert(
                 name.into(),

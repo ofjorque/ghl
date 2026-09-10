@@ -789,45 +789,51 @@ impl Interpreter {
             }
 
             // Comparisons (<, <=, >, >=, ==, !=)
-            BinaryOp::Eq => {
-                // Kleene logic: equality against NA is NA (unknown)
-                if left.is_na() {
-                    return Ok(left);
+            BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
+                if matches!(&left, Value::Vector(_)) || matches!(&right, Value::Vector(_)) {
+                    return eval_vector_comparison(op, left, right);
                 }
-                if right.is_na() {
-                    return Ok(right);
-                }
-                Ok(Value::Bool(left == right))
-            }
-
-            BinaryOp::NotEq => {
-                if left.is_na() {
-                    return Ok(left);
-                }
-                if right.is_na() {
-                    return Ok(right);
-                }
-                Ok(Value::Bool(left != right))
-            }
-
-            BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
-                if left.is_na() {
-                    return Ok(left);
-                }
-                if right.is_na() {
-                    return Ok(right);
-                }
-                if let (Some(a), Some(b)) = (left.as_f64(), right.as_f64()) {
-                    let cmp = match op {
-                        BinaryOp::Lt => a < b,
-                        BinaryOp::LtEq => a <= b,
-                        BinaryOp::Gt => a > b,
-                        BinaryOp::GtEq => a >= b,
-                        _ => unreachable!(),
-                    };
-                    Ok(Value::Bool(cmp))
-                } else {
-                    Err(Diagnostic::compute_error("C0202", "Inequality comparison requires numeric operands"))
+                match op {
+                    BinaryOp::Eq => {
+                        // Kleene logic: equality against NA is NA (unknown)
+                        if left.is_na() {
+                            return Ok(left);
+                        }
+                        if right.is_na() {
+                            return Ok(right);
+                        }
+                        Ok(Value::Bool(left == right))
+                    }
+                    BinaryOp::NotEq => {
+                        if left.is_na() {
+                            return Ok(left);
+                        }
+                        if right.is_na() {
+                            return Ok(right);
+                        }
+                        Ok(Value::Bool(left != right))
+                    }
+                    BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
+                        if left.is_na() {
+                            return Ok(left);
+                        }
+                        if right.is_na() {
+                            return Ok(right);
+                        }
+                        if let (Some(a), Some(b)) = (left.as_f64(), right.as_f64()) {
+                            let cmp = match op {
+                                BinaryOp::Lt => a < b,
+                                BinaryOp::LtEq => a <= b,
+                                BinaryOp::Gt => a > b,
+                                BinaryOp::GtEq => a >= b,
+                                _ => unreachable!(),
+                            };
+                            Ok(Value::Bool(cmp))
+                        } else {
+                            Err(Diagnostic::compute_error("C0202", "Inequality comparison requires numeric operands"))
+                        }
+                    }
+                    _ => unreachable!(),
                 }
             }
         }
@@ -915,6 +921,176 @@ fn vector_elementwise_op(v1: &VectorData, v2: &VectorData, op_fn: fn(f64, f64) -
     }
     Ok(Value::Vector(VectorData::from_values(res)))
 }
+
+fn eval_vector_comparison(op: BinaryOp, left: Value, right: Value) -> Result<Value, Diagnostic> {
+    match (left, right) {
+        (Value::Vector(v1), Value::Vector(v2)) => {
+            if v1.len() != v2.len() {
+                return Err(Diagnostic::statistical_error(
+                    "S0412",
+                    format!("Vector length mismatch in element-wise comparison: {} vs {}", v1.len(), v2.len()),
+                ));
+            }
+            if v1.null_count() == 0 && v2.null_count() == 0 {
+                if let (Ok(view1), Ok(view2)) = (v1.as_f64_view(), v2.as_f64_view()) {
+                    let (a, b) = (view1.as_slice(), view2.as_slice());
+                    let cmp_fn: fn(f64, f64) -> bool = match op {
+                        BinaryOp::Eq => |x, y| x == y,
+                        BinaryOp::NotEq => |x, y| x != y,
+                        BinaryOp::Lt => |x, y| x < y,
+                        BinaryOp::LtEq => |x, y| x <= y,
+                        BinaryOp::Gt => |x, y| x > y,
+                        BinaryOp::GtEq => |x, y| x >= y,
+                        _ => unreachable!(),
+                    };
+                    let bools: Vec<bool> = if a.len() >= PARALLEL_THRESHOLD {
+                        a.par_iter().zip(b.par_iter()).map(|(&x, &y)| cmp_fn(x, y)).collect()
+                    } else {
+                        a.iter().zip(b.iter()).map(|(&x, &y)| cmp_fn(x, y)).collect()
+                    };
+                    return Ok(Value::Vector(VectorData::from_bool(bools)));
+                }
+            }
+            let mut out = Vec::with_capacity(v1.len());
+            for (i1, i2) in v1.iter().zip(v2.iter()) {
+                if i1.is_na() {
+                    out.push(i1.clone());
+                } else if i2.is_na() {
+                    out.push(i2.clone());
+                } else {
+                    let res = match op {
+                        BinaryOp::Eq => i1 == i2,
+                        BinaryOp::NotEq => i1 != i2,
+                        BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
+                            if let (Some(x), Some(y)) = (i1.as_f64(), i2.as_f64()) {
+                                match op {
+                                    BinaryOp::Lt => x < y,
+                                    BinaryOp::LtEq => x <= y,
+                                    BinaryOp::Gt => x > y,
+                                    BinaryOp::GtEq => x >= y,
+                                    _ => unreachable!(),
+                                }
+                            } else {
+                                return Err(Diagnostic::compute_error("C0202", "Inequality comparison requires numeric operands"));
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+                    out.push(Value::Bool(res));
+                }
+            }
+            Ok(Value::Vector(VectorData::from_values(out)))
+        }
+        (Value::Vector(v), scalar) => {
+            if scalar.is_na() {
+                let out = vec![scalar; v.len()];
+                return Ok(Value::Vector(VectorData::from_values(out)));
+            }
+            if v.null_count() == 0 {
+                if let (Some(s), Ok(view)) = (scalar.as_f64(), v.as_f64_view()) {
+                    let a = view.as_slice();
+                    let cmp_fn: fn(f64, f64) -> bool = match op {
+                        BinaryOp::Eq => |x, y| x == y,
+                        BinaryOp::NotEq => |x, y| x != y,
+                        BinaryOp::Lt => |x, y| x < y,
+                        BinaryOp::LtEq => |x, y| x <= y,
+                        BinaryOp::Gt => |x, y| x > y,
+                        BinaryOp::GtEq => |x, y| x >= y,
+                        _ => unreachable!(),
+                    };
+                    let bools: Vec<bool> = if a.len() >= PARALLEL_THRESHOLD {
+                        a.par_iter().map(|&x| cmp_fn(x, s)).collect()
+                    } else {
+                        a.iter().map(|&x| cmp_fn(x, s)).collect()
+                    };
+                    return Ok(Value::Vector(VectorData::from_bool(bools)));
+                }
+            }
+            let mut out = Vec::with_capacity(v.len());
+            for item in v.iter() {
+                if item.is_na() {
+                    out.push(item.clone());
+                } else {
+                    let res = match op {
+                        BinaryOp::Eq => item == &scalar,
+                        BinaryOp::NotEq => item != &scalar,
+                        BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
+                            if let (Some(x), Some(s)) = (item.as_f64(), scalar.as_f64()) {
+                                match op {
+                                    BinaryOp::Lt => x < s,
+                                    BinaryOp::LtEq => x <= s,
+                                    BinaryOp::Gt => x > s,
+                                    BinaryOp::GtEq => x >= s,
+                                    _ => unreachable!(),
+                                }
+                            } else {
+                                return Err(Diagnostic::compute_error("C0202", "Inequality comparison requires numeric operands"));
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+                    out.push(Value::Bool(res));
+                }
+            }
+            Ok(Value::Vector(VectorData::from_values(out)))
+        }
+        (scalar, Value::Vector(v)) => {
+            if scalar.is_na() {
+                let out = vec![scalar; v.len()];
+                return Ok(Value::Vector(VectorData::from_values(out)));
+            }
+            if v.null_count() == 0 {
+                if let (Some(s), Ok(view)) = (scalar.as_f64(), v.as_f64_view()) {
+                    let b = view.as_slice();
+                    let cmp_fn: fn(f64, f64) -> bool = match op {
+                        BinaryOp::Eq => |x, y| x == y,
+                        BinaryOp::NotEq => |x, y| x != y,
+                        BinaryOp::Lt => |x, y| x < y,
+                        BinaryOp::LtEq => |x, y| x <= y,
+                        BinaryOp::Gt => |x, y| x > y,
+                        BinaryOp::GtEq => |x, y| x >= y,
+                        _ => unreachable!(),
+                    };
+                    let bools: Vec<bool> = if b.len() >= PARALLEL_THRESHOLD {
+                        b.par_iter().map(|&y| cmp_fn(s, y)).collect()
+                    } else {
+                        b.iter().map(|&y| cmp_fn(s, y)).collect()
+                    };
+                    return Ok(Value::Vector(VectorData::from_bool(bools)));
+                }
+            }
+            let mut out = Vec::with_capacity(v.len());
+            for item in v.iter() {
+                if item.is_na() {
+                    out.push(item.clone());
+                } else {
+                    let res = match op {
+                        BinaryOp::Eq => &scalar == item,
+                        BinaryOp::NotEq => &scalar != item,
+                        BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
+                            if let (Some(s), Some(y)) = (scalar.as_f64(), item.as_f64()) {
+                                match op {
+                                    BinaryOp::Lt => s < y,
+                                    BinaryOp::LtEq => s <= y,
+                                    BinaryOp::Gt => s > y,
+                                    BinaryOp::GtEq => s >= y,
+                                    _ => unreachable!(),
+                                }
+                            } else {
+                                return Err(Diagnostic::compute_error("C0202", "Inequality comparison requires numeric operands"));
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+                    out.push(Value::Bool(res));
+                }
+            }
+            Ok(Value::Vector(VectorData::from_values(out)))
+        }
+        _ => unreachable!(),
+    }
+}
+
 
 /// True for any `Value` that represents a deferred `filter()` predicate rather than a
 /// real computed value — the leaf `ColPredicate`/`IsNaPredicate` and the combinators

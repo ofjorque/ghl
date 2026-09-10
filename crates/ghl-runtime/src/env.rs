@@ -215,6 +215,19 @@ impl RuntimeEnv {
         env.set("eigen".into(),        Value::NativeFn(native_eigen));
         env.set("eigen_values".into(), Value::NativeFn(native_eigen_values));
         env.set("eigen_vectors".into(), Value::NativeFn(native_eigen_vectors));
+        env.set("zeros".into(),        Value::NativeFn(native_zeros));
+        env.set("len".into(),          Value::NativeFn(native_len));
+        env.set("get".into(),          Value::NativeFn(native_get));
+        env.set("set".into(),          Value::NativeFn(native_set));
+        env.set("get_row".into(),      Value::NativeFn(native_get_row));
+        env.set("set_row".into(),      Value::NativeFn(native_set_row));
+        env.set("get_col".into(),      Value::NativeFn(native_get_col));
+        env.set("transpose".into(),    Value::NativeFn(native_transpose));
+        env.set("t".into(),            Value::NativeFn(native_transpose));
+        env.set("identity".into(),     Value::NativeFn(native_identity));
+        env.set("eye".into(),          Value::NativeFn(native_identity));
+        env.set("diag".into(),         Value::NativeFn(native_diag));
+        env.set("log_sum_exp".into(),  Value::NativeFn(native_log_sum_exp));
 
         // Vector / window helpers
         env.set("cumsum".into(),    Value::NativeFn(native_cumsum));
@@ -1757,11 +1770,11 @@ fn native_str_pad(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Err(Diagnostic::compute_error("C0201", "`filter()` requires a DataFrame"));
+        return Err(Diagnostic::compute_error("C0201", "`filter()` requires a DataFrame or Vector as its first argument"));
     }
 
-    let df = args[0].clone();
-    match df {
+    let target = args[0].clone();
+    match target {
         Value::DataFrame { frame, na_reasons } => {
             if args.len() < 2 {
                 return Ok(Value::DataFrame { frame, na_reasons });
@@ -1799,9 +1812,516 @@ fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 ),
             ))
         }
+        Value::Vector(vd) => {
+            if args.len() < 2 {
+                return Ok(Value::Vector(vd));
+            }
+            let predicate = &args[1];
+            if let Value::Vector(mask) = predicate {
+                if mask.len() != vd.len() {
+                    return Err(Diagnostic::compute_error(
+                        "C0202",
+                        format!(
+                            "`filter()` on Vector: mask length ({}) must match vector length ({})",
+                            mask.len(),
+                            vd.len()
+                        ),
+                    ));
+                }
+                // Arrow fast path: if mask is Boolean ChunkedArray
+                if let Ok(ca) = mask.column().bool() {
+                    if let Ok(filtered_col) = vd.column().filter(ca) {
+                        let mut new_reasons = crate::na_reasons::NaReasonTable::new();
+                        if vd.null_count() > 0 {
+                            let mut new_row = 0;
+                            for old_row in 0..vd.len() {
+                                if ca.get(old_row) == Some(true) {
+                                    if let Some(r) = vd.na_reasons().get("__ghl_vector__", old_row) {
+                                        new_reasons.set("__ghl_vector__", new_row, r.to_string());
+                                    }
+                                    new_row += 1;
+                                }
+                            }
+                        }
+                        return Ok(Value::Vector(VectorData::from_column_and_reasons(
+                            filtered_col,
+                            std::sync::Arc::new(new_reasons),
+                        )));
+                    }
+                }
+                // Fallback for non-Arrow boolean chunked or mixed values
+                let keep_indices: Vec<usize> = mask.iter().enumerate()
+                    .filter(|(_, m)| m.as_bool() == Some(true))
+                    .map(|(i, _)| i)
+                    .collect();
+                let mut out_vals = Vec::with_capacity(keep_indices.len());
+                for &idx in &keep_indices {
+                    if let Some(val) = vd.value_at(idx) {
+                        out_vals.push(val);
+                    }
+                }
+                return Ok(Value::Vector(VectorData::from_values(out_vals)));
+            }
+            Err(Diagnostic::compute_error(
+                "C0202",
+                format!("`filter()` on a Vector expects a boolean Vector mask, found `{}`", predicate.type_name()),
+            ))
+        }
         other => Ok(other),
     }
 }
+
+fn native_zeros(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.len() {
+        1 => {
+            let n = args[0].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`zeros(n)` requires an integer length argument")
+            })?;
+            if n < 0 {
+                return Err(Diagnostic::compute_error("C0201", format!("`zeros()` length must be non-negative, found {n}")));
+            }
+            Ok(Value::Vector(VectorData::from_f64(vec![0.0; n as usize])))
+        }
+        2 => {
+            let r = args[0].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`zeros(rows, cols)` requires integer dimensions")
+            })?;
+            let c = args[1].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`zeros(rows, cols)` requires integer dimensions")
+            })?;
+            if r < 0 || c < 0 {
+                return Err(Diagnostic::compute_error("C0201", format!("`zeros()` dimensions must be non-negative, found ({r}, {c})")));
+            }
+            let rows = r as usize;
+            let cols = c as usize;
+            Ok(Value::Matrix {
+                rows,
+                cols,
+                data: vec![0.0; rows * cols],
+            })
+        }
+        _ => Err(Diagnostic::compute_error("C0201", "`zeros()` expects 1 argument (vector length) or 2 arguments (matrix rows, cols)")),
+    }
+}
+
+fn native_len(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`len()` requires 1 argument")
+    })?;
+    match val {
+        Value::Vector(vd) => Ok(Value::I64(vd.len() as i64)),
+        Value::String(s) => Ok(Value::I64(s.chars().count() as i64)),
+        Value::DataFrame { frame, .. } => Ok(Value::I64(frame.height() as i64)),
+        Value::Matrix { rows, .. } => Ok(Value::I64(*rows as i64)),
+        other => Err(Diagnostic::compute_error(
+            "C0202",
+            format!("`len()` expects a Vector, String, DataFrame, or Matrix, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+fn native_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.len() {
+        2 => {
+            let collection = &args[0];
+            let index = &args[1];
+            match (collection, index) {
+                (Value::Vector(vd), Value::I64(idx)) => {
+                    let i = *idx;
+                    if i < 0 || (i as usize) >= vd.len() {
+                        return Err(Diagnostic::compute_error(
+                            "C0203",
+                            format!("Index out of bounds in `get(vector, idx)`: index {i} for vector of length {}", vd.len()),
+                        ));
+                    }
+                    Ok(vd.value_at(i as usize).unwrap_or(Value::NA(None)))
+                }
+                (Value::Vector(vd), Value::Vector(indices)) => {
+                    // Gather operation: v[indices]
+                    if vd.null_count() == 0 {
+                        if let Ok(view) = vd.as_f64_view() {
+                            let slice = view.as_slice();
+                            let mut gathered = Vec::with_capacity(indices.len());
+                            for idx_val in indices.iter() {
+                                let i = idx_val.as_i64().ok_or_else(|| {
+                                    Diagnostic::compute_error("C0202", "`get()` with index vector expects integer indices")
+                                })?;
+                                if i < 0 || (i as usize) >= slice.len() {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0203",
+                                        format!("Index out of bounds in `get()`: index {i} for vector of length {}", slice.len()),
+                                    ));
+                                }
+                                gathered.push(slice[i as usize]);
+                            }
+                            return Ok(Value::Vector(VectorData::from_f64(gathered)));
+                        }
+                    }
+                    let mut gathered = Vec::with_capacity(indices.len());
+                    for idx_val in indices.iter() {
+                        let i = idx_val.as_i64().ok_or_else(|| {
+                            Diagnostic::compute_error("C0202", "`get()` with index vector expects integer indices")
+                        })?;
+                        if i < 0 || (i as usize) >= vd.len() {
+                            return Err(Diagnostic::compute_error(
+                                "C0203",
+                                format!("Index out of bounds in `get()`: index {i} for vector of length {}", vd.len()),
+                            ));
+                        }
+                        gathered.push(vd.value_at(i as usize).unwrap_or(Value::NA(None)));
+                    }
+                    Ok(Value::Vector(VectorData::from_values(gathered)))
+                }
+                (Value::String(s), Value::I64(idx)) => {
+                    let i = *idx;
+                    let len = s.chars().count();
+                    if i < 0 || (i as usize) >= len {
+                        return Err(Diagnostic::compute_error(
+                            "C0203",
+                            format!("Index out of bounds in `get(string, idx)`: index {i} for string of length {len}"),
+                        ));
+                    }
+                    let ch = s.chars().nth(i as usize).unwrap();
+                    Ok(Value::String(ch.to_string()))
+                }
+                (c, i) => Err(Diagnostic::compute_error(
+                    "C0202",
+                    format!("`get()` requires a (Vector, index) or (String, index), found (`{}`, `{}`)", c.type_name(), i.type_name()),
+                )),
+            }
+        }
+        3 => {
+            // Matrix get: get(m, row, col)
+            let matrix = &args[0];
+            let row = args[1].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`get(matrix, row, col)` requires integer row index")
+            })?;
+            let col = args[2].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`get(matrix, row, col)` requires integer col index")
+            })?;
+            if let Value::Matrix { rows, cols, data } = matrix {
+                let r = row as usize;
+                let c = col as usize;
+                if row < 0 || r >= *rows || col < 0 || c >= *cols {
+                    return Err(Diagnostic::compute_error(
+                        "C0203",
+                        format!("Matrix index out of bounds in `get(m, {row}, {col})`: matrix is ({rows}x{cols})"),
+                    ));
+                }
+                Ok(Value::F64(data[r * cols + c]))
+            } else {
+                Err(Diagnostic::compute_error(
+                    "C0202",
+                    format!("`get()` with 3 arguments requires a Matrix, found `{}`", matrix.type_name()),
+                ))
+            }
+        }
+        _ => Err(Diagnostic::compute_error("C0201", "`get()` expects 2 arguments (collection, index) or 3 arguments (matrix, row, col)")),
+    }
+}
+
+fn native_set(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.len() {
+        3 => {
+            // set(vector, index, val)
+            let collection = &args[0];
+            let idx = args[1].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`set(vector, index, val)` requires an integer index")
+            })?;
+            let val = &args[2];
+            if let Value::Vector(vd) = collection {
+                let i = idx as usize;
+                if idx < 0 || i >= vd.len() {
+                    return Err(Diagnostic::compute_error(
+                        "C0203",
+                        format!("Index out of bounds in `set(vector, {idx}, val)`: vector length is {}", vd.len()),
+                    ));
+                }
+                if vd.null_count() == 0 {
+                    if let (Ok(view), Some(fval)) = (vd.as_f64_view(), val.as_f64()) {
+                        let mut data = view.as_slice().to_vec();
+                        data[i] = fval;
+                        return Ok(Value::Vector(VectorData::from_f64(data)));
+                    }
+                }
+                let values: Vec<Value> = (0..vd.len())
+                    .map(|k| if k == i { val.clone() } else { vd.value_at(k).unwrap_or(Value::NA(None)) })
+                    .collect();
+                Ok(Value::Vector(VectorData::from_values(values)))
+            } else {
+                Err(Diagnostic::compute_error(
+                    "C0202",
+                    format!("`set()` with 3 arguments requires a Vector, found `{}`", collection.type_name()),
+                ))
+            }
+        }
+        4 => {
+            // set(matrix, row, col, val)
+            let matrix = &args[0];
+            let row = args[1].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`set(matrix, row, col, val)` requires integer row index")
+            })?;
+            let col = args[2].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`set(matrix, row, col, val)` requires integer col index")
+            })?;
+            let val = args[3].as_f64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`set(matrix, row, col, val)` requires numeric value")
+            })?;
+            if let Value::Matrix { rows, cols, data } = matrix {
+                let r = row as usize;
+                let c = col as usize;
+                if row < 0 || r >= *rows || col < 0 || c >= *cols {
+                    return Err(Diagnostic::compute_error(
+                        "C0203",
+                        format!("Matrix index out of bounds in `set(m, {row}, {col}, val)`: matrix is ({rows}x{cols})"),
+                    ));
+                }
+                let mut new_data = data.clone();
+                new_data[r * cols + c] = val;
+                Ok(Value::Matrix {
+                    rows: *rows,
+                    cols: *cols,
+                    data: new_data,
+                })
+            } else {
+                Err(Diagnostic::compute_error(
+                    "C0202",
+                    format!("`set()` with 4 arguments requires a Matrix, found `{}`", matrix.type_name()),
+                ))
+            }
+        }
+        _ => Err(Diagnostic::compute_error("C0201", "`set()` expects 3 arguments (vector, index, val) or 4 arguments (matrix, row, col, val)")),
+    }
+}
+
+fn native_get_row(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error("C0201", "`get_row()` requires a Matrix and an integer row index"));
+    }
+    let matrix = &args[0];
+    let row_idx = args[1].as_i64().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`get_row()` requires an integer row index")
+    })?;
+    if let Value::Matrix { rows, cols, data } = matrix {
+        let r = row_idx as usize;
+        if row_idx < 0 || r >= *rows {
+            return Err(Diagnostic::compute_error(
+                "C0203",
+                format!("Row index out of bounds in `get_row(m, {row_idx})`: matrix has {rows} rows"),
+            ));
+        }
+        let start = r * cols;
+        let slice = &data[start..start + cols];
+        Ok(Value::Vector(VectorData::from_f64(slice.to_vec())))
+    } else {
+        Err(Diagnostic::compute_error(
+            "C0202",
+            format!("`get_row()` requires a Matrix, found `{}`", matrix.type_name()),
+        ))
+    }
+}
+
+fn native_set_row(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 3 {
+        return Err(Diagnostic::compute_error("C0201", "`set_row()` requires a Matrix, an integer row index, and a Vector"));
+    }
+    let matrix = &args[0];
+    let row_idx = args[1].as_i64().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`set_row()` requires an integer row index")
+    })?;
+    let vec_val = &args[2];
+    if let (Value::Matrix { rows, cols, data }, Value::Vector(vd)) = (matrix, vec_val) {
+        let r = row_idx as usize;
+        if row_idx < 0 || r >= *rows {
+            return Err(Diagnostic::compute_error(
+                "C0203",
+                format!("Row index out of bounds in `set_row(m, {row_idx}, vec)`: matrix has {rows} rows"),
+            ));
+        }
+        if vd.len() != *cols {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!("`set_row()` dimension mismatch: matrix has {} columns, but vector has length {}", cols, vd.len()),
+            ));
+        }
+        let mut new_data = data.clone();
+        let start = r * cols;
+        if vd.null_count() == 0 {
+            if let Ok(view) = vd.as_f64_view() {
+                new_data[start..start + cols].copy_from_slice(view.as_slice());
+                return Ok(Value::Matrix {
+                    rows: *rows,
+                    cols: *cols,
+                    data: new_data,
+                });
+            }
+        }
+        for (j, item) in vd.iter().enumerate() {
+            new_data[start + j] = item.as_f64().unwrap_or(0.0);
+        }
+        Ok(Value::Matrix {
+            rows: *rows,
+            cols: *cols,
+            data: new_data,
+        })
+    } else {
+        Err(Diagnostic::compute_error(
+            "C0202",
+            format!("`set_row()` requires (Matrix, integer, Vector), found (`{}`, `{}`, `{}`)",
+                args[0].type_name(), args[1].type_name(), args[2].type_name()
+            ),
+        ))
+    }
+}
+
+fn native_get_col(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error("C0201", "`get_col()` requires a Matrix and an integer column index"));
+    }
+    let matrix = &args[0];
+    let col_idx = args[1].as_i64().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`get_col()` requires an integer column index")
+    })?;
+    if let Value::Matrix { rows, cols, data } = matrix {
+        let c = col_idx as usize;
+        if col_idx < 0 || c >= *cols {
+            return Err(Diagnostic::compute_error(
+                "C0203",
+                format!("Column index out of bounds in `get_col(m, {col_idx})`: matrix has {cols} columns"),
+            ));
+        }
+        let mut col_data = Vec::with_capacity(*rows);
+        for i in 0..*rows {
+            col_data.push(data[i * cols + c]);
+        }
+        Ok(Value::Vector(VectorData::from_f64(col_data)))
+    } else {
+        Err(Diagnostic::compute_error(
+            "C0202",
+            format!("`get_col()` requires a Matrix, found `{}`", matrix.type_name()),
+        ))
+    }
+}
+
+fn native_transpose(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let m = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`transpose()` requires a Matrix")
+    })?;
+    match m {
+        Value::Matrix { rows, cols, data } => {
+            let (new_rows, new_cols, new_data) = crate::matrix::MatrixOps::transpose(*rows, *cols, data)?;
+            Ok(Value::Matrix {
+                rows: new_rows,
+                cols: new_cols,
+                data: new_data,
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0202",
+            format!("`transpose()` requires a Matrix, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+fn native_identity(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let n_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`identity()` requires an integer dimension n")
+    })?;
+    let n = n_val.as_i64().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`identity()` requires an integer dimension n")
+    })?;
+    if n < 0 {
+        return Err(Diagnostic::compute_error("C0201", format!("`identity()` dimension must be non-negative, found {n}")));
+    }
+    let dim = n as usize;
+    let mut data = vec![0.0; dim * dim];
+    for i in 0..dim {
+        data[i * dim + i] = 1.0;
+    }
+    Ok(Value::Matrix { rows: dim, cols: dim, data })
+}
+
+fn native_diag(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let x = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`diag()` requires 1 argument (Vector or Matrix)")
+    })?;
+    match x {
+        Value::Vector(vd) => {
+            let n = vd.len();
+            let mut data = vec![0.0; n * n];
+            if vd.null_count() == 0 {
+                if let Ok(view) = vd.as_f64_view() {
+                    let slice = view.as_slice();
+                    for i in 0..n {
+                        data[i * n + i] = slice[i];
+                    }
+                    return Ok(Value::Matrix { rows: n, cols: n, data });
+                }
+            }
+            for i in 0..n {
+                let v = vd.value_at(i).and_then(|val| val.as_f64()).unwrap_or(0.0);
+                data[i * n + i] = v;
+            }
+            Ok(Value::Matrix { rows: n, cols: n, data })
+        }
+        Value::Matrix { rows, cols, data } => {
+            let n = (*rows).min(*cols);
+            let mut diag_vals = Vec::with_capacity(n);
+            for i in 0..n {
+                diag_vals.push(data[i * cols + i]);
+            }
+            Ok(Value::Vector(VectorData::from_f64(diag_vals)))
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0202",
+            format!("`diag()` requires a Vector or Matrix, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+fn native_log_sum_exp(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let v = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`log_sum_exp()` requires a Vector")
+    })?;
+    match v {
+        Value::Vector(vd) => {
+            if vd.is_empty() {
+                return Ok(Value::F64(f64::NEG_INFINITY));
+            }
+            if vd.null_count() == 0 {
+                if let Ok(view) = vd.as_f64_view() {
+                    let slice = view.as_slice();
+                    let max_val = slice.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                    if max_val.is_infinite() && max_val < 0.0 {
+                        return Ok(Value::F64(f64::NEG_INFINITY));
+                    }
+                    let sum_exp: f64 = slice.iter().map(|&x| (x - max_val).exp()).sum();
+                    return Ok(Value::F64(max_val + sum_exp.ln()));
+                }
+            }
+            let mut max_val = f64::NEG_INFINITY;
+            let mut vals = Vec::with_capacity(vd.len());
+            for i in 0..vd.len() {
+                if let Some(x) = vd.value_at(i).and_then(|val| val.as_f64()) {
+                    if x > max_val {
+                        max_val = x;
+                    }
+                    vals.push(x);
+                }
+            }
+            if vals.is_empty() || (max_val.is_infinite() && max_val < 0.0) {
+                return Ok(Value::F64(f64::NEG_INFINITY));
+            }
+            let sum_exp: f64 = vals.iter().map(|&x| (x - max_val).exp()).sum();
+            Ok(Value::F64(max_val + sum_exp.ln()))
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0202",
+            format!("`log_sum_exp()` requires a Vector, found `{}`", other.type_name()),
+        )),
+    }
+}
+
 
 // NEKO Native Invocations
 

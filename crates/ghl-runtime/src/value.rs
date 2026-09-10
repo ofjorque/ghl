@@ -177,6 +177,7 @@ impl Value {
     pub fn as_i64(&self) -> Option<i64> {
         match self {
             Value::I64(n) => Some(*n),
+            Value::F64(x) if x.fract() == 0.0 && *x >= (i64::MIN as f64) && *x <= (i64::MAX as f64) => Some(*x as i64),
             _ => None,
         }
     }

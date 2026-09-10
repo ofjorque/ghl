@@ -367,10 +367,20 @@ impl TypeChecker {
                                 .with_help("Use `is_na(x)` or pattern matching with `match` instead."),
                             );
                         }
-                        Type::Bool
+                        if t_lhs.is_vector() || t_rhs.is_vector() {
+                            Type::Vector(Box::new(Type::Bool))
+                        } else {
+                            Type::Bool
+                        }
                     }
 
-                    BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => Type::Bool,
+                    BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
+                        if t_lhs.is_vector() || t_rhs.is_vector() {
+                            Type::Vector(Box::new(Type::Bool))
+                        } else {
+                            Type::Bool
+                        }
+                    }
                     BinaryOp::And | BinaryOp::Or => Type::Bool,
                 }
             }

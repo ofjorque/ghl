@@ -126,6 +126,15 @@ impl VectorData {
         }
     }
 
+    pub(crate) fn from_column_and_reasons(column: Column, na_reasons: Arc<NaReasonTable>) -> Self {
+        VectorData {
+            column,
+            na_reasons,
+            materialized: Arc::new(OnceLock::new()),
+        }
+    }
+
+
     pub fn column(&self) -> &Column {
         &self.column
     }
