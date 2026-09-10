@@ -5,6 +5,7 @@
 pub mod types;
 pub mod env;
 pub mod checker;
+pub mod modules;
 
 pub use types::Type;
 pub use env::{TypeEnv, SymbolInfo};
@@ -236,6 +237,49 @@ mod tests {
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0102"));
     }
+
+    #[test]
+    fn test_typecheck_use_and_qualified_paths() {
+        let code = r#"
+            use std::dataframe::read_parquet;
+            use std::stats::distributions::{random_normal, normal_pdf};
+            use std::linalg::*;
+            use std::linalg::transpose as t;
+
+            let y = std::math::sqrt(16.0);
+            let const_pi = std::math::pi;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh");
+        assert!(res.is_ok(), "Type checking should pass for use and qualified paths: {:?}", res.err());
+        let env = res.unwrap();
+        assert!(env.lookup("read_parquet").is_some());
+        assert!(env.lookup("random_normal").is_some());
+        assert!(env.lookup("normal_pdf").is_some());
+        assert!(env.lookup("dot").is_some());
+        assert!(env.lookup("t").is_some());
+    }
+
+    #[test]
+    fn test_typecheck_reject_invalid_module() {
+        let code = r#"use std::fake_mod::something;"#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh");
+        assert!(res.is_err());
+        let diags = res.unwrap_err();
+        assert!(diags.iter().any(|d| d.code == "C0105"));
+    }
+
+    #[test]
+    fn test_typecheck_reject_invalid_module_item() {
+        let code = r#"use std::math::nonexistent_fn;"#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh");
+        assert!(res.is_err());
+        let diags = res.unwrap_err();
+        assert!(diags.iter().any(|d| d.code == "C0106"));
+    }
 }
+
 
 

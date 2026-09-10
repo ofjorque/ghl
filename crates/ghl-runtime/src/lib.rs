@@ -14,6 +14,7 @@ pub mod io;
 pub mod na_reasons;
 pub mod polars_bridge;
 pub mod vector_data;
+pub mod modules;
 
 pub use value::Value;
 pub use env::RuntimeEnv;
@@ -3096,6 +3097,101 @@ mod tests {
         let res = interp_err.eval_program(&err_prog);
         assert!(res.is_err());
     }
+
+    #[test]
+    fn test_modules_use_single_and_alias() {
+        let code = r#"
+            use std::math::sqrt;
+            use std::linalg::transpose as t;
+
+            let root = sqrt(49.0);
+            let m = mat [ 1.0, 2.0 ; 3.0, 4.0 ];
+            let tm = t(m);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("eval ok");
+
+        assert_eq!(interp.env.get("root"), Some(Value::F64(7.0)));
+        let tm = interp.env.get("tm").unwrap();
+        match tm {
+            Value::Matrix { rows, cols, data } => {
+                assert_eq!((rows, cols), (2, 2));
+                assert_eq!(data, vec![1.0, 3.0, 2.0, 4.0]);
+            }
+            _ => panic!("Expected matrix"),
+        }
+    }
+
+    #[test]
+    fn test_modules_use_group_and_glob() {
+        let code = r#"
+            use std::stats::distributions::{random_normal, normal_pdf};
+            use std::linalg::*;
+
+            let pdf_val = normal_pdf(0.0, 0.0, 1.0);
+            let id = identity(3);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("eval ok");
+
+        let pdf = interp.env.get("pdf_val").unwrap().as_f64().unwrap();
+        assert!((pdf - 0.39894228).abs() < 1e-4);
+
+        let id = interp.env.get("id").unwrap();
+        match id {
+            Value::Matrix { rows, cols, .. } => {
+                assert_eq!((rows, cols), (3, 3));
+            }
+            _ => panic!("Expected identity matrix"),
+        }
+    }
+
+    #[test]
+    fn test_modules_qualified_path_call_and_constants() {
+        let code = r#"
+            let root = std::math::sqrt(100.0);
+            let area = std::math::pi * 2.0 * 2.0;
+            let piped = 16.0 |> std::math::sqrt;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("eval ok");
+
+        assert_eq!(interp.env.get("root"), Some(Value::F64(10.0)));
+        assert_eq!(interp.env.get("piped"), Some(Value::F64(4.0)));
+        let area = interp.env.get("area").unwrap().as_f64().unwrap();
+        assert!((area - (std::f64::consts::PI * 4.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_modules_block_scoped_use() {
+        let code = r#"
+            let scoped = {
+                use std::math::sqrt;
+                sqrt(64.0)
+            };
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("eval ok");
+
+        assert_eq!(interp.env.get("scoped"), Some(Value::F64(8.0)));
+        // sqrt inside block was scoped
+    }
+
+    #[test]
+    fn test_modules_reject_invalid_module_or_item() {
+        let bad_mod = "use std::not_a_module::foo;";
+        let prog1 = parse(bad_mod).expect("syntax ok");
+        assert!(Interpreter::new().eval_program(&prog1).is_err());
+
+        let bad_item = "use std::math::nonexistent;";
+        let prog2 = parse(bad_item).expect("syntax ok");
+        assert!(Interpreter::new().eval_program(&prog2).is_err());
+    }
 }
+
 
 

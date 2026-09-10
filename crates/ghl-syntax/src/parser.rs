@@ -50,7 +50,30 @@ pub fn fn_param_parser() -> impl Parser<Token, FnParam, Error = Simple<Token>> +
 
 pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone {
     recursive(|expr| {
-        let val = select! {
+        let path_segment = select! {
+            Token::Ident(id) => id,
+            Token::Col => "col".to_string(),
+            Token::DataFrame => "dataframe".to_string(),
+            Token::Mat => "mat".to_string(),
+        };
+
+        let multi_segment_path = path_segment
+            .then(just(Token::PathSep).ignore_then(path_segment).repeated().at_least(1))
+            .map_with_span(|(first, rest), span| {
+                let mut segments = vec![first];
+                segments.extend(rest);
+                Expr::new(ExprKind::Path(segments), span)
+            });
+
+        let single_ident = select! {
+            Token::Ident(id) => ExprKind::Ident(id),
+            Token::Col => ExprKind::Ident("col".into()),
+        }
+        .map_with_span(Expr::new);
+
+        let ident_or_path = multi_segment_path.or(single_ident);
+
+        let lit_val = select! {
             Token::IntLit(n) => ExprKind::Lit(Literal::Int(n)),
             Token::FloatLit(s) => ExprKind::Lit(Literal::Float(s.parse::<f64>().unwrap_or(0.0))),
             Token::StringLit(s) => ExprKind::Lit(Literal::String(s)),
@@ -59,10 +82,10 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             Token::NA => ExprKind::Lit(Literal::NA(None)),
             Token::NAReason(r) => ExprKind::Lit(Literal::NA(Some(r))),
             Token::Underscore => ExprKind::Placeholder,
-            Token::Col => ExprKind::Ident("col".into()),
-            Token::Ident(id) => ExprKind::Ident(id),
         }
         .map_with_span(Expr::new);
+
+        let val = lit_val.or(ident_or_path);
 
         let parenthesized = expr
             .clone()
@@ -169,7 +192,9 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 .then_ignore(just(Token::Semicolon))
                 .map_with_span(|e, span| Stmt::new(StmtKind::Expr(e), span));
 
-            let_stmt.or(return_stmt).or(assign_stmt).or(expr_stmt)
+            let use_stmt = use_stmt_parser();
+
+            use_stmt.or(let_stmt).or(return_stmt).or(assign_stmt).or(expr_stmt)
         };
 
         // Block: { stmt*; expr? }
@@ -463,6 +488,53 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
     })
 }
 
+pub fn use_stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone {
+    let ident_name = select! {
+        Token::Ident(name) => name,
+        Token::Col => "col".to_string(),
+        Token::DataFrame => "dataframe".to_string(),
+        Token::Mat => "mat".to_string(),
+    };
+
+    let use_item = ident_name
+        .then(just(Token::As).ignore_then(ident_name).or_not())
+        .map(|(name, alias)| UseItem { name, alias });
+
+    let group_or_glob = just(Token::Star)
+        .map(|_| UseKind::Glob)
+        .or(
+            use_item
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace))
+                .map(UseKind::Items),
+        );
+
+    // Form 1: use a::b::{c, d} or use a::b::*
+    let complex_use = ident_name
+        .separated_by(just(Token::PathSep))
+        .at_least(1)
+        .then_ignore(just(Token::PathSep))
+        .then(group_or_glob);
+
+    // Form 2: use a::b::c (as alias)?
+    let simple_use = ident_name
+        .separated_by(just(Token::PathSep))
+        .at_least(1)
+        .then(just(Token::As).ignore_then(ident_name).or_not())
+        .map(|(mut segments, alias)| {
+            let item_name = segments.pop().expect("at_least(1)");
+            (segments, UseKind::Items(vec![UseItem { name: item_name, alias }]))
+        });
+
+    just(Token::Use)
+        .ignore_then(complex_use.or(simple_use))
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map_with_span(|(path, kind), span| {
+            Stmt::new(StmtKind::Use(UseStmt { path, kind }), span)
+        })
+}
+
 pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone {
     let fn_stmt = just(Token::Fn)
         .ignore_then(select! {
@@ -528,7 +600,9 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         .then_ignore(just(Token::Semicolon).or_not())
         .map_with_span(|expr, span| Stmt::new(StmtKind::Expr(expr), span));
 
-    fn_stmt.or(let_stmt).or(return_stmt).or(assign_stmt).or(expr_stmt)
+    let use_stmt = use_stmt_parser();
+
+    use_stmt.or(fn_stmt).or(let_stmt).or(return_stmt).or(assign_stmt).or(expr_stmt)
 }
 
 pub fn program_parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
@@ -792,4 +866,90 @@ mod tests {
             _ => panic!("Expected let statement"),
         }
     }
+
+    #[test]
+    fn test_parse_use_statements() {
+        let code = r#"
+            use std::dataframe::read_parquet;
+            use std::stats::distributions::{random_normal, normal_pdf};
+            use std::linalg::*;
+            use std::linalg::transpose as t;
+            let y = std::math::sqrt(16.0);
+        "#;
+        let program = parse(code).expect("Should parse use statements and paths");
+        assert_eq!(program.statements.len(), 5);
+
+        // 1. Single item
+        match &program.statements[0].kind {
+            StmtKind::Use(use_stmt) => {
+                assert_eq!(use_stmt.path, vec!["std", "dataframe"]);
+                match &use_stmt.kind {
+                    UseKind::Items(items) => {
+                        assert_eq!(items.len(), 1);
+                        assert_eq!(items[0].name, "read_parquet");
+                        assert_eq!(items[0].alias, None);
+                    }
+                    _ => panic!("Expected items"),
+                }
+            }
+            _ => panic!("Expected use statement"),
+        }
+
+        // 2. Grouped items
+        match &program.statements[1].kind {
+            StmtKind::Use(use_stmt) => {
+                assert_eq!(use_stmt.path, vec!["std", "stats", "distributions"]);
+                match &use_stmt.kind {
+                    UseKind::Items(items) => {
+                        assert_eq!(items.len(), 2);
+                        assert_eq!(items[0].name, "random_normal");
+                        assert_eq!(items[1].name, "normal_pdf");
+                    }
+                    _ => panic!("Expected items"),
+                }
+            }
+            _ => panic!("Expected use statement"),
+        }
+
+        // 3. Glob
+        match &program.statements[2].kind {
+            StmtKind::Use(use_stmt) => {
+                assert_eq!(use_stmt.path, vec!["std", "linalg"]);
+                assert_eq!(use_stmt.kind, UseKind::Glob);
+            }
+            _ => panic!("Expected use statement"),
+        }
+
+        // 4. Alias
+        match &program.statements[3].kind {
+            StmtKind::Use(use_stmt) => {
+                assert_eq!(use_stmt.path, vec!["std", "linalg"]);
+                match &use_stmt.kind {
+                    UseKind::Items(items) => {
+                        assert_eq!(items.len(), 1);
+                        assert_eq!(items[0].name, "transpose");
+                        assert_eq!(items[0].alias, Some("t".to_string()));
+                    }
+                    _ => panic!("Expected items"),
+                }
+            }
+            _ => panic!("Expected use statement"),
+        }
+
+        // 5. Qualified path in expression
+        match &program.statements[4].kind {
+            StmtKind::Let { init, .. } => match &init.kind {
+                ExprKind::Call { callee, args } => {
+                    assert_eq!(
+                        callee.kind,
+                        ExprKind::Path(vec!["std".into(), "math".into(), "sqrt".into()])
+                    );
+                    assert_eq!(args.len(), 1);
+                }
+                _ => panic!("Expected Call expression"),
+            },
+            _ => panic!("Expected let statement"),
+        }
+    }
 }
+

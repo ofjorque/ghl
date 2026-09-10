@@ -121,6 +121,11 @@ impl LoweringContext {
                 let ty = self.lookup_var(name).unwrap_or(HirType::I64);
                 Ok(HirExpr::Var(name.clone(), ty))
             }
+            ExprKind::Path(segments) => {
+                let name = segments.join("::");
+                let ty = self.lookup_var(&name).unwrap_or(HirType::I64);
+                Ok(HirExpr::Var(name, ty))
+            }
             ExprKind::Binary { op, lhs, rhs } => {
                 let lhs_hir = self.lower_expr(lhs)?;
                 let rhs_hir = self.lower_expr(rhs)?;
@@ -176,6 +181,7 @@ impl LoweringContext {
             ExprKind::Call { callee, args } => {
                 let func_name = match &callee.kind {
                     ExprKind::Ident(id) => id.clone(),
+                    ExprKind::Path(segments) => segments.join("::"),
                     _ => {
                         return Err(Diagnostic::compute_error(
                             "C0303",
@@ -222,6 +228,9 @@ impl LoweringContext {
                 self.push_scope();
                 let mut hir_stmts = Vec::new();
                 for stmt in stmts {
+                    if matches!(&stmt.kind, StmtKind::Use(_)) {
+                        continue;
+                    }
                     hir_stmts.push(self.lower_stmt(stmt)?);
                 }
 
@@ -282,6 +291,10 @@ impl LoweringContext {
                     name: name.clone(),
                     value: value_hir,
                 })
+            }
+            StmtKind::Use(_) => {
+                // Static imports are handled during symbol resolution
+                Ok(HirStatement::Expr(HirExpr::Literal(HirLiteral::I64(0), HirType::Unit)))
             }
             _ => Err(Diagnostic::compute_error(
                 "C0305",

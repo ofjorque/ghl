@@ -90,6 +90,47 @@ impl Interpreter {
                 }
                 Ok(val)
             }
+            StmtKind::Use(use_stmt) => {
+                if !crate::modules::is_valid_module_path(&use_stmt.path) {
+                    return Err(Diagnostic::compute_error(
+                        "C0105",
+                        format!("Cannot find module `{}`", use_stmt.path.join("::")),
+                    ));
+                }
+
+                match &use_stmt.kind {
+                    UseKind::Glob => {
+                        let items = crate::modules::get_module_items(&use_stmt.path).ok_or_else(|| {
+                            Diagnostic::compute_error(
+                                "C0105",
+                                format!("Module `{}` cannot be glob imported", use_stmt.path.join("::")),
+                            )
+                        })?;
+                        for (name, val) in items {
+                            self.env.set(name, val);
+                        }
+                    }
+                    UseKind::Items(items) => {
+                        for item in items {
+                            let mut full_path = use_stmt.path.clone();
+                            full_path.push(item.name.clone());
+                            let val = crate::modules::lookup_module_item(&full_path).ok_or_else(|| {
+                                Diagnostic::compute_error(
+                                    "C0106",
+                                    format!(
+                                        "Cannot find item `{}` in module `{}`",
+                                        item.name,
+                                        use_stmt.path.join("::")
+                                    ),
+                                )
+                            })?;
+                            let bound_name = item.alias.as_deref().unwrap_or(&item.name);
+                            self.env.set(bound_name.to_string(), val);
+                        }
+                    }
+                }
+                Ok(Value::Unit)
+            }
         }
     }
 
@@ -242,6 +283,10 @@ impl Interpreter {
                         })?;
                         self.call_value(callee_val, vec![val])
                     }
+                    ExprKind::Path(_) => {
+                        let callee_val = self.eval_expr(target)?;
+                        self.call_value(callee_val, vec![val])
+                    }
                     _ => self.eval_expr(target),
                 }
             }
@@ -367,6 +412,19 @@ impl Interpreter {
             }
 
             ExprKind::Placeholder => Ok(Value::Unit),
+
+            ExprKind::Path(segments) => {
+                if let Some(val) = crate::modules::lookup_module_item(segments) {
+                    Ok(val)
+                } else {
+                    let full_name = segments.join("::");
+                    self.env.get(&full_name).or_else(|| {
+                        if col_ctx { Some(Value::ColRef(full_name.clone())) } else { None }
+                    }).ok_or_else(|| {
+                        Diagnostic::compute_error("C0101", format!("Undefined path `{}`", full_name))
+                    })
+                }
+            }
         }
     }
 
@@ -475,6 +533,10 @@ impl Interpreter {
                         let callee_val = self.env.get(name).ok_or_else(|| {
                             Diagnostic::compute_error("C0101", format!("Undefined function `{}`", name))
                         })?;
+                        Ok(TailOutcome::TailCall { callee: callee_val, args: vec![val] })
+                    }
+                    ExprKind::Path(_) => {
+                        let callee_val = self.eval_expr(target)?;
                         Ok(TailOutcome::TailCall { callee: callee_val, args: vec![val] })
                     }
                     _ => Ok(TailOutcome::Value(self.eval_expr(target)?)),
@@ -845,6 +907,7 @@ use ghl_syntax::ast::is_column_context_verb;
 fn callee_name(expr: &Expr) -> Option<&str> {
     match &expr.kind {
         ExprKind::Ident(name) => Some(name.as_str()),
+        ExprKind::Path(segments) => segments.last().map(|s| s.as_str()),
         _ => None,
     }
 }

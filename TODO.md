@@ -1229,13 +1229,22 @@ piden (ver detalle en Fase 7).
 El token `use` ya existe en el lexer (`crates/ghl-syntax/src/lexer.rs`) pero el parser
 no lo maneja — bloquea cualquier ejemplo de la documentación que use `use std::...::{...}`.
 
-- [ ] `use std::modulo::{A, B};` — resolución de módulos/namespacing real.
-- [ ] Namespacing de la stdlib bajo `std::dataframe`, `std::stats::distributions`,
-      `std::stats::rng`, etc. (hoy todo son funciones globales sin namespace).
-- [ ] Evaluar si hacen falta genéricos estáticos (`Vector<f64>`, `Matrix<f64>`),
-      referencias (`&`, `&mut`) y `Option`/`Result` con `.unwrap()` — aparecen en
-      los ejemplos de los RFCs pero son un cambio grande al sistema de tipos;
-      decidir alcance real antes de implementar.
+- [x] **`use std::modulo::{A, B};` — resolución de módulos/namespacing real — implementado.**
+      Soporte completo en AST (`UseStmt`, `UseKind`, `UseItem`, `ExprKind::Path`), parser chumsky
+      (formas simple `use a::b::c;`, con alias `use a::b::c as d;`, agrupada `use a::b::{c, d};`,
+      y glob `use a::b::*;`), tanto a nivel de archivo como dentro de bloques `{ ... }`.
+- [x] **Namespacing de la stdlib bajo módulos canónicos `std::*` — implementado.**
+      - `std::dataframe` (I/O parquet/csv, verbos de wrangling `select`, `filter`, `mutate`, `arrange`, agrupamiento `group_by`, `summarize`, joins, `NA:reason`).
+      - `std::linalg` (álgebra lineal faer, `dot`, `transpose`/`t`, `qr`, `cholesky`, `svd`, `eigen`, matrices `identity`, `diag`, `zeros`).
+      - `std::stats` (estadística descriptiva, más submódulos `distributions`, `rng`, `models` con NEKO `ols`, `fit_logistic`, `fit_gmm`).
+      - `std::math` (funciones escalares/vectorizadas `sqrt`, `log`, `exp`, trigonometría, `log_sum_exp`, constantes `pi`, `e`).
+      - `std::io` (I/O de archivos y consola `read_file`, `write_file`, `print`, `println`).
+      - `std::plot` (Grammar of Graphics, capas `geom_*`, mapeo `aes`, `labs`, `show`, `save`).
+      - Rutas calificadas directas operativas en expresiones y pipelines (ej. `let y = std::math::sqrt(16.0);`, `16.0 |> std::math::sqrt`).
+      - Detección estática en `TypeChecker` (códigos `C0105`, `C0106`, `C0101` para módulos/ítems inválidos).
+      - Prevención de masking silencioso (anti-R, anti-Python): imports aislados, sin polución de namespace global; compatibilidad 100% con el prelude existente para scripts rápidos.
+- [x] **Evaluación de genéricos estáticos y referencias en la superficie:**
+      `Vector[T]` y `Matrix[T]` ya están formalizados y probados en el sistema de tipos (`TypeAnnotation::Generic`). Las referencias de memoria (`&mut`) son innecesarias a nivel de usuario en GHL porque el modelo de memoria es inmutable/funcional con CoW (Fase 1/3) y las ausencias se modelan semánticamente con `NA:Reason` (RFC 02) evitando la proliferación de `Option/Result` ruidosos.
 - [x] **Iteración real sin overflow de la pila nativa — TCO implementado para
       recursión en posición de cola, con un alcance deliberadamente acotado (no
       "iteración real" completa — sigue sin haber `for`/`while`).** Hallazgo original

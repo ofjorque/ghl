@@ -154,6 +154,26 @@ pub enum ExprKind {
         name: String,
         value: Box<Expr>,
     },
+    /// Qualified path, e.g. `std::math::sqrt` or `std::linalg::eye`
+    Path(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseItem {
+    pub name: String,
+    pub alias: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UseKind {
+    Items(Vec<UseItem>),
+    Glob,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseStmt {
+    pub path: Vec<String>,
+    pub kind: UseKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -190,6 +210,7 @@ pub enum StmtKind {
         name: String,
         value: Expr,
     },
+    Use(UseStmt),
 }
 
 #[derive(Debug, Clone, PartialEq)]

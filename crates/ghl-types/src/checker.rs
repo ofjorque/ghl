@@ -6,6 +6,7 @@ use crate::env::TypeEnv;
 fn callee_name(expr: &Expr) -> Option<&str> {
     match &expr.kind {
         ExprKind::Ident(name) => Some(name.as_str()),
+        ExprKind::Path(segments) => segments.last().map(|s| s.as_str()),
         _ => None,
     }
 }
@@ -171,6 +172,60 @@ impl TypeChecker {
                                 )
                                 .with_location(&self.source_file, stmt.span.start, stmt.span.end),
                             );
+                        }
+                    }
+                }
+            }
+            StmtKind::Use(use_stmt) => {
+                if !crate::modules::is_valid_module_path(&use_stmt.path) {
+                    self.diagnostics.push(
+                        Diagnostic::compute_error(
+                            "C0105",
+                            format!("Cannot find module `{}`", use_stmt.path.join("::")),
+                        )
+                        .with_location(&self.source_file, stmt.span.start, stmt.span.end)
+                        .with_help("Verify the module name and path in the standard library."),
+                    );
+                    return;
+                }
+
+                match &use_stmt.kind {
+                    ghl_syntax::ast::UseKind::Glob => {
+                        if let Some(items) = crate::modules::get_module_items(&use_stmt.path) {
+                            for (name, ty) in items {
+                                self.env.insert(name, ty, false);
+                            }
+                        } else {
+                            self.diagnostics.push(
+                                Diagnostic::compute_error(
+                                    "C0105",
+                                    format!("Module `{}` cannot be glob imported", use_stmt.path.join("::")),
+                                )
+                                .with_location(&self.source_file, stmt.span.start, stmt.span.end),
+                            );
+                        }
+                    }
+                    ghl_syntax::ast::UseKind::Items(items) => {
+                        for item in items {
+                            let mut full_path = use_stmt.path.clone();
+                            full_path.push(item.name.clone());
+                            if let Some(ty) = crate::modules::lookup_module_item(&full_path) {
+                                let bound_name = item.alias.as_deref().unwrap_or(&item.name);
+                                self.env.insert(bound_name.to_string(), ty, false);
+                            } else {
+                                self.diagnostics.push(
+                                    Diagnostic::compute_error(
+                                        "C0106",
+                                        format!(
+                                            "Cannot find item `{}` in module `{}`",
+                                            item.name,
+                                            use_stmt.path.join("::")
+                                        ),
+                                    )
+                                    .with_location(&self.source_file, stmt.span.start, stmt.span.end)
+                                    .with_help("Check spelling or see available items in the standard library documentation."),
+                                );
+                            }
                         }
                     }
                 }
@@ -531,6 +586,29 @@ impl TypeChecker {
             ExprKind::Placeholder => Type::Any,
 
             ExprKind::NamedArg { value, .. } => self.check_expr_ctx(value, col_ctx),
+
+            ExprKind::Path(segments) => {
+                if let Some(ty) = crate::modules::lookup_module_item(segments) {
+                    ty
+                } else {
+                    let full_name = segments.join("::");
+                    if let Some(info) = self.env.lookup(&full_name) {
+                        info.ty.clone()
+                    } else if col_ctx {
+                        Type::Any
+                    } else {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0101",
+                                format!("Undefined path `{}`", full_name),
+                            )
+                            .with_location(&self.source_file, expr.span.start, expr.span.end)
+                            .with_help("Verify the module and function name, or import it with `use`."),
+                        );
+                        Type::Any
+                    }
+                }
+            }
         }
     }
 
