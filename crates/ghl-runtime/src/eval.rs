@@ -7,6 +7,12 @@ use crate::vector_data::VectorData;
 use crate::env::RuntimeEnv;
 use crate::matrix::MatrixOps;
 
+/// See `Interpreter::eval_expr_tail`.
+enum TailOutcome {
+    Value(Value),
+    TailCall { callee: Value, args: Vec<Value> },
+}
+
 pub struct Interpreter {
     pub env: RuntimeEnv,
     /// Set by `StmtKind::Return` and read by every statement-sequencing loop (`Block`,
@@ -338,32 +344,175 @@ impl Interpreter {
         }
     }
 
+    /// Evaluates `expr` knowing its value will become the enclosing function call's own
+    /// return value with no further computation on top -- a *tail position*. Only
+    /// `Block`'s trailing expression, `If`'s two branches, and `Match`'s arm bodies
+    /// pass this flag through to their own final sub-expression (mirroring exactly
+    /// where GHL's grammar allows a function body to "end"); a `Call`/`Pipe`-to-call
+    /// found there, instead of being invoked immediately (which is what fully-`Ok`-ing
+    /// out via `eval_expr` would do, recursing into Rust), is reported back as a
+    /// `TailCall` for `call_value`'s trampoline to run as a loop iteration instead --
+    /// this is what lets self/mutual GHL recursion run at unbounded depth without
+    /// growing the native stack (TODO.md Fase 7's recursion-depth finding).
+    ///
+    /// `return expr;` is deliberately NOT included: `StmtKind::Return` still evaluates
+    /// `expr` with the ordinary, non-tail `eval_expr`, so `return recurse(n - 1);`
+    /// does not get this optimization, only the `return`-free idiomatic form
+    /// (`if base_case { v } else { recurse(...) }`) does -- see TODO.md for why this
+    /// scope line was drawn deliberately, not discovered as a limitation later.
+    /// Everywhere else (`Binary`, `UnaryNeg`, literals, ...) a nested call can never
+    /// itself be the function's return value without more computation happening on top
+    /// (`1 + recurse(n - 1)` needs `recurse`'s result before `+` can run), so those
+    /// fall through to plain `eval_expr` unchanged, non-tail, same stack cost as today.
+    fn eval_expr_tail(&mut self, expr: &Expr) -> Result<TailOutcome, Diagnostic> {
+        match &expr.kind {
+            ExprKind::Block { stmts, expr: opt_expr } => {
+                self.env.push_scope();
+                for s in stmts {
+                    self.eval_stmt(s)?;
+                    if let Some(val) = &self.pending_return {
+                        let val = val.clone();
+                        self.env.pop_scope();
+                        return Ok(TailOutcome::Value(val));
+                    }
+                }
+                let outcome = match opt_expr {
+                    Some(e) => self.eval_expr_tail(e)?,
+                    None => TailOutcome::Value(Value::Unit),
+                };
+                self.env.pop_scope();
+                Ok(outcome)
+            }
+
+            ExprKind::If { cond, then_branch, else_branch } => {
+                let cond_val = self.eval_expr(cond)?;
+                if cond_val.as_bool() == Some(true) {
+                    self.eval_expr_tail(then_branch)
+                } else if let Some(el) = else_branch {
+                    self.eval_expr_tail(el)
+                } else {
+                    Ok(TailOutcome::Value(Value::Unit))
+                }
+            }
+
+            ExprKind::Match { expr: target, arms } => {
+                let target_val = self.eval_expr(target)?;
+
+                for arm in arms {
+                    let mut arm_env = self.env.clone();
+                    let matches = match_pattern(&arm.pattern, &target_val, &mut arm_env);
+
+                    if matches {
+                        if let Some(guard) = &arm.guard {
+                            let old_env = std::mem::replace(&mut self.env, arm_env.clone());
+                            let guard_res = self.eval_expr(guard)?;
+                            self.env = old_env;
+
+                            if guard_res.as_bool() != Some(true) {
+                                continue;
+                            }
+                        }
+
+                        let old_env = std::mem::replace(&mut self.env, arm_env);
+                        let body_res = self.eval_expr_tail(&arm.body);
+                        self.env = old_env;
+                        return body_res;
+                    }
+                }
+
+                Ok(TailOutcome::Value(Value::Unit))
+            }
+
+            ExprKind::Call { callee, args } => {
+                let callee_val = self.eval_expr(callee)?;
+                let arg_ctx = callee_name(callee).is_some_and(is_column_context_verb);
+                let mut evaluated_args = Vec::with_capacity(args.len());
+                for a in args {
+                    evaluated_args.push(self.eval_expr_ctx(a, arg_ctx)?);
+                }
+                Ok(TailOutcome::TailCall { callee: callee_val, args: evaluated_args })
+            }
+
+            ExprKind::Pipe { expr: src, target } => {
+                let val = self.eval_expr(src)?;
+                match &target.kind {
+                    ExprKind::Call { callee, args } => {
+                        let arg_ctx = callee_name(callee).is_some_and(is_column_context_verb);
+                        let mut call_args = vec![val];
+                        for arg in args {
+                            call_args.push(self.eval_expr_ctx(arg, arg_ctx)?);
+                        }
+                        let callee_val = self.eval_expr(callee)?;
+                        Ok(TailOutcome::TailCall { callee: callee_val, args: call_args })
+                    }
+                    ExprKind::Ident(name) => {
+                        let callee_val = self.env.get(name).ok_or_else(|| {
+                            Diagnostic::compute_error("C0101", format!("Undefined function `{}`", name))
+                        })?;
+                        Ok(TailOutcome::TailCall { callee: callee_val, args: vec![val] })
+                    }
+                    _ => Ok(TailOutcome::Value(self.eval_expr(target)?)),
+                }
+            }
+
+            _ => Ok(TailOutcome::Value(self.eval_expr(expr)?)),
+        }
+    }
+
     fn call_value(&mut self, callee: Value, args: Vec<Value>) -> Result<Value, Diagnostic> {
         match callee {
             Value::NativeFn(func) => func(args),
             Value::NativeFnCtx(func) => func(self, args),
-            Value::Closure { params, body, mut env } => {
-                // Inherit any newly defined globals into the closure environment
-                if let Some(global_scope) = self.env.scopes.first() {
-                    for (k, v) in global_scope {
-                        if env.get(k).is_none() {
-                            env.set(k.clone(), v.clone());
+            Value::Closure { params, body, env } => {
+                // Trampoline: a self/mutual-recursive GHL call in tail position (see
+                // `eval_expr_tail`) comes back as `TailOutcome::TailCall` instead of
+                // being invoked via a nested `call_value` -- swapping in the next
+                // closure's params/body/env and looping here, instead of recursing
+                // into Rust, is what lets GHL recursion run at unbounded depth without
+                // growing the native stack (TODO.md Fase 7's recursion-depth finding).
+                let caller_env = std::mem::replace(&mut self.env, env);
+                let mut cur_params = params;
+                let mut cur_body = body;
+                let mut cur_args = args;
+                let result = loop {
+                    // Inherit any newly defined globals into the closure environment
+                    if let Some(global_scope) = caller_env.scopes.first() {
+                        for (k, v) in global_scope {
+                            if self.env.get(k).is_none() {
+                                self.env.set(k.clone(), v.clone());
+                            }
                         }
                     }
-                }
 
-                env.push_scope();
-                for (p, a) in params.iter().zip(args.into_iter()) {
-                    env.set(p.clone(), a);
-                }
-                let old_env = std::mem::replace(&mut self.env, env);
-                let res = self.eval_expr(&body);
-                self.env = old_env;
+                    self.env.push_scope();
+                    for (p, a) in cur_params.iter().zip(cur_args.into_iter()) {
+                        self.env.set(p.clone(), a);
+                    }
+
+                    match self.eval_expr_tail(&cur_body) {
+                        Err(e) => break Err(e),
+                        Ok(TailOutcome::Value(v)) => break Ok(v),
+                        Ok(TailOutcome::TailCall { callee: Value::Closure { params: p2, body: b2, env: e2 }, args: next_args }) => {
+                            self.env = e2;
+                            cur_params = p2;
+                            cur_body = b2;
+                            cur_args = next_args;
+                        }
+                        Ok(TailOutcome::TailCall { callee: other, args: next_args }) => {
+                            // Tail chain ends in something that isn't a GHL closure
+                            // (a native function, etc.) -- nothing left to trampoline,
+                            // make an ordinary (bounded) call and that's the result.
+                            self.env = caller_env.clone();
+                            break self.call_value(other, next_args);
+                        }
+                    }
+                };
+                self.env = caller_env;
                 // This call is the function boundary `pending_return` was waiting for
                 // -- consume it here (whether or not a `return` actually fired) so it
                 // never leaks into the caller's own remaining statements.
                 self.pending_return = None;
-                res
+                result
             }
             other => Err(Diagnostic::compute_error(
                 "C0203",

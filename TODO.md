@@ -965,38 +965,40 @@ inventar sintaxis de path nueva; se decide en el plan de cada punto.
       comparte la misma causa raíz).
 - [ ] Arenas regionales (`bumpalo`) para bucles iterativos (MCMC/bootstrap) con
       cero asignaciones de heap por iteración — sintaxis `arena::scope(|a| { ... })`.
-      **Bloqueado por un hallazgo de Fase 7** ("Iteración real sin overflow de la pila
-      nativa"), no reflejado acá hasta que se encontró: GHL no tiene ningún constructo
-      de iteración (`for`/`while`) y la recursión no tiene TCO (crash real confirmado a
-      100.000 llamadas) — no hay forma de construir "bucles iterativos... cero
-      asignaciones por iteración" sin resolver eso primero. No es una dependencia suave
-      dentro del orden interno de esta fase (PRNG → Distribuciones → Arenas → CoW,
-      elegido explícitamente por dependencia interna y no por profundidad
-      arquitectónica) — es una dependencia externa dura hacia Fase 7 que no estaba
-      documentada cuando se armó ese orden.
+      **El bloqueo duro ya se resolvió** (Fase 7: TCO implementado para recursión en
+      posición de cola — GHL ya puede "iterar" vía recursión sin reventar la pila a
+      profundidades reales). Lo que sigue pendiente es el objetivo propio de este
+      punto, que TCO **no resuelve de pasada**: "cero asignaciones de heap por
+      iteración". El trampolín de TCO sigue asignando por iteración (`push_scope()`
+      crea un `HashMap` nuevo, y el paso de "inherit globals" reconstruye entradas en
+      el env cada vez — medido, ~56µs/iteración a 2.000.000 de profundidad, ver el
+      ítem de Fase 7) — arreglar eso de verdad es justamente lo que las arenas
+      regionales prometen, así que este punto sigue siendo trabajo real, ahora
+      desbloqueado para poder construirse y probarse sin la pared de antes.
 - [ ] Modelo de memoria ARC + Copy-on-Write real (RFC 03 §2.1): hoy el intérprete
       clona `Vec`/`HashMap` en casi cada verbo, es lo opuesto a CoW.
 
 ## Fase 6 — Modelado estadístico avanzado (`benchmarks/suites/03`)
-Depende de Fase 5 (RNG/distribuciones/arenas) y de Fase 3 (solver matricial). **Depende
-también, probablemente para 2 de sus 3 casos, del hallazgo de iteración de Fase 7** — el
-umbral real medido de recursión sin crash en release está entre 1.000-1.500 niveles con
-la función más barata posible; el Caso 3.1 (100.000 iteraciones) está claramente por
-encima, y el Caso 3.4 (500 iteraciones, pero con mucho más trabajo por nivel que la
-función usada para medir) queda en zona de riesgo real, no confirmado a salvo. Solo el
-Caso 3.2 (IRLS, ~10-50 iteraciones típicas) tiene margen razonable. Ver el ítem de
-Fase 7 para el detalle de la medición.
+Depende de Fase 5 (RNG/distribuciones/arenas) y de Fase 3 (solver matricial). **El
+bloqueo de iteración de Fase 7 que preocupaba acá ya se resolvió** (TCO para recursión
+en posición de cola) — con una condición de estilo explícita, no automática: los tres
+casos de abajo necesitan escribirse **sin `return`**, apoyándose en la expresión final
+implícita de `if`/`Block` (`return expr;` no gana TCO, ver el ítem de Fase 7). Escritos
+así, la profundidad de iteración deja de ser un bloqueo — el costo real pasa a ser de
+tiempo de ejecución, no de crash: ~56µs por iteración medido a profundidad extrema
+(2.000.000), lo que da estimados perfectamente razonables a las escalas que estos casos
+piden (ver detalle en Fase 7).
 
-- [ ] Gibbs sampler jerárquico de ejemplo (Caso 3.1) corriendo de punta a punta. **Bloqueado**
-      por el hallazgo de iteración de Fase 7 (100.000 iteraciones, muy por encima del
-      umbral medido de ~1.000-1.500).
-- [ ] IRLS para GLM / regresión logística sobre N=1M, P=40 (Caso 3.2). Probablemente no
-      bloqueado (pocas iteraciones hasta converger), pero no confirmado con la
-      complejidad real del algoritmo.
-- [ ] Algoritmo EM para mezclas gaussianas con log-sum-exp estable (Caso 3.4). **En
-      riesgo** — 500 iteraciones está cerca del umbral medido con una función mínima;
-      una iteración real de EM (más trabajo por nivel) probablemente baja el umbral
-      efectivo por debajo de 500.
+- [ ] Gibbs sampler jerárquico de ejemplo (Caso 3.1) corriendo de punta a punta. Ya no
+      bloqueado por profundidad de recursión (100.000 iteraciones ≈ 5,6s estimado,
+      escribiendo el loop sin `return`) — sigue pendiente el resto: distribuciones
+      multivariadas/jerárquicas reales, no solo `random_normal`/`random_gamma`
+      univariadas (Fase 5, Punto 2).
+- [ ] IRLS para GLM / regresión logística sobre N=1M, P=40 (Caso 3.2). No bloqueado por
+      recursión (pocas iteraciones hasta converger) ni lo estuvo nunca.
+- [ ] Algoritmo EM para mezclas gaussianas con log-sum-exp estable (Caso 3.4). Ya no en
+      riesgo por profundidad de recursión (500 iteraciones ≈ 28ms estimado, mismo
+      requisito de estilo sin `return`).
 
 ## Fase 7 — Sistema de módulos y superficie de sintaxis estática
 El token `use` ya existe en el lexer (`crates/ghl-syntax/src/lexer.rs`) pero el parser
@@ -1009,9 +1011,10 @@ no lo maneja — bloquea cualquier ejemplo de la documentación que use `use std
       referencias (`&`, `&mut`) y `Option`/`Result` con `.unwrap()` — aparecen en
       los ejemplos de los RFCs pero son un cambio grande al sistema de tipos;
       decidir alcance real antes de implementar.
-- [ ] **Iteración real sin overflow de la pila nativa — hallazgo más grave de lo que
-      quedó documentado al principio, corregido tras medir con precisión (no solo a
-      100.000, el primer número probado).** Encontrado al investigar Fase 5
+- [x] **Iteración real sin overflow de la pila nativa — TCO implementado para
+      recursión en posición de cola, con un alcance deliberadamente acotado (no
+      "iteración real" completa — sigue sin haber `for`/`while`).** Hallazgo original
+      encontrado al investigar Fase 5
       (PRNG/distribuciones), no en el alcance de sus 4 puntos pero bloquea escribir
       Gibbs sampler/EM idiomático en GHL (Suite 03, Casos 3.1/3.4: "se evalúa la
       capacidad de escribir el algoritmo directamente"). GHL **no tiene ningún
@@ -1045,6 +1048,61 @@ no lo maneja — bloquea cualquier ejemplo de la documentación que use `use std
       bloquea **la mayoría de Fase 6** también, no solo el Caso 3.1 como se pensó al
       principio (ver la dependencia agregada en Fase 6). Encontrado *después* de fijar
       el orden interno de Fase 5, corregido ahí también.
+    - **TCO implementado, con `return` arreglado primero** (commit `6852487`) porque
+      analizar qué cuenta como "posición de cola" exigía que `return` funcionara de
+      verdad. Cubre la posición de cola **implícita**: la expresión final de un
+      `Block`, las dos ramas de un `If`, el cuerpo de un arm de `Match` (el estilo ya
+      idiomático en los scripts de esta sesión, `if cond { base } else { recurse(...) }`)
+      — nuevo tipo `TailOutcome` (`Value` | `TailCall { callee, args }`) y método
+      `eval_expr_tail` (`eval.rs`) que, en vez de invocar la llamada final de un cuerpo
+      de función, la devuelve sin evaluar. `call_value`'s rama `Closure` pasa de una
+      llamada recursiva de Rust a un loop explícito (trampolín): si el resultado es un
+      `TailCall` hacia otra `Closure`, pisa `params`/`body`/`env` y vuelve al principio
+      del loop — cero crecimiento de la pila nativa sin importar cuántas veces se
+      repita. Si la cola termina en algo que no es una `Closure` GHL (función nativa),
+      se hace una llamada normal y ahí termina la cadena.
+    - **`return expr;` NO gana TCO, a propósito** — sigue evaluando `expr` sin cola
+      (`return recurse(n-1);` sigue reventando al umbral de siempre). Mezclar la señal
+      `pending_return` con el trampolín de tail-call en la misma pasada agregaba una
+      interacción real sin un caso concreto que la motivara — documentado, no en
+      silencio. La recursión **no en cola** (`1 + recurse(n-1)`, cualquier expresión que
+      envuelva la llamada) tampoco gana nada — verificado que sigue reventando
+      exactamente al mismo umbral que antes (~1.000-1.500 en release, confirmado con
+      `recurse(1000)`/`recurse(1500)`/`recurse(2000)`), confirmando que el fix es
+      selectivo y no "arregló todo por casualidad".
+    - **Verificado a escala real, con un hallazgo de performance honesto:**
+      `count_down(2.000.000)` (vs. el umbral viejo de ~1.500) completa sin crash en el
+      CLI de release — pero tarda **1m52s**, no instantáneo. Causa medida, no adivinada:
+      cada iteración del trampolín re-fusiona el scope global completo (~100 funciones
+      del prelude + bindings top-level) en el env de la clausura destino
+      (`call_value`'s paso "inherit globals", ya existía antes de este punto, nunca se
+      había ejercitado a este volumen porque la pila reventaba primero). Esto es
+      exactamente el tipo de costo que motivó dejar **CoW/ARC** (Fase 5, Punto 4) para
+      el final "informado por dónde el profiling real de Fase 6 muestre que duele" —
+      ahora hay evidencia real, no especulativa, de dónde duele. A la escala que Suite
+      03 realmente pide esto no es un problema: 100.000 iteraciones (Caso 3.1) ≈ 5,6s
+      extrapolado, 500 (Caso 3.4) ≈ 28ms — perfectamente aceptable; el hallazgo importa
+      para profundidades mucho más extremas que las de los casos reales, no para ellos.
+    - **Reevaluación de Fase 6 a la luz de esto:** el Gibbs sampler (Caso 3.1, 100.000
+      iteraciones) y el EM (Caso 3.4, 500 iteraciones) ahora son viables en cuanto a
+      profundidad de recursión — **si se escriben en estilo cola sin `return`**, un
+      requisito de estilo explícito, no asumido. El IRLS (Caso 3.2, ~10-50 iteraciones)
+      ya tenía margen de sobra con o sin este punto.
+    - **Hallazgo menor de paso, no perseguido:** el type checker infiere tipos
+      incompatibles (`i64` vs `f64`, `C0102`) para `if n<=0 { 0 } else { 1 +
+      recurse(n-1) }` con literales enteros sin decimal — se resuelve escribiendo
+      `0.0`/`1.0` explícitos; no investigado más a fondo, anotado para si aparece de
+      nuevo.
+    - Tests nuevos en `lib.rs` (profundidad 10.000 -- suficiente para probar el
+      trampolín sin que un build de debug tarde varios segundos por test; el número de
+      escala real, 2.000.000, se verificó aparte contra el binario de release, no en el
+      test suite): `test_tail_recursive_function_handles_deep_recursion`,
+      `test_mutual_tail_recursion_handles_deep_recursion` (dos funciones que se llaman
+      entre sí en cola), `test_tail_call_via_pipe_is_optimized` (`x |> f()` como cola).
+      Las 103 pruebas de `ghl-runtime` y el workspace completo pasan sin regresiones
+      (incluyendo los tests de `return` ya existentes, confirmando que las dos señales
+      -- `pending_return` y el trampolín -- conviven sin interferirse). Verificado de
+      punta a punta con `ghl run` en debug y release.
 - [x] **`return` — dos bugs reales encontrados analizando qué cuenta como "posición de
       cola" para el TCO de arriba, arreglados antes de seguir con el TCO en sí (ninguno
       es sobre TCO, los dos son correctness lisa y llana).**

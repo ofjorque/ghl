@@ -1302,6 +1302,57 @@ mod tests {
     }
 
     #[test]
+    fn test_tail_recursive_function_handles_deep_recursion() {
+        // TODO.md Fase 7: without TCO this crashes the native stack around ~1,000-1,500
+        // levels in release (measured). 10,000 is ~7-10x that -- enough to decisively
+        // prove the trampoline in a debug-profile unit test without the multi-second
+        // runtime deeper depths take unoptimized (each recursive lookup clones the
+        // whole captured closure env, prelude included -- see the separate release-mode
+        // spike for the real, much deeper number reported in TODO.md).
+        let code = r#"
+            fn count_down(n) {
+                if n <= 0 { 0 } else { count_down(n - 1) }
+            }
+            let result = count_down(10000);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("result"), Some(Value::I64(0)));
+    }
+
+    #[test]
+    fn test_mutual_tail_recursion_handles_deep_recursion() {
+        let code = r#"
+            fn is_even(n) {
+                if n <= 0 { true } else { is_odd(n - 1) }
+            }
+            fn is_odd(n) {
+                if n <= 0 { false } else { is_even(n - 1) }
+            }
+            let result = is_even(10000);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("result"), Some(Value::Bool(true)));
+    }
+
+    #[test]
+    fn test_tail_call_via_pipe_is_optimized() {
+        let code = r#"
+            fn count_down(n) {
+                if n <= 0 { 0 } else { (n - 1) |> count_down() }
+            }
+            let result = count_down(10000);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("result"), Some(Value::I64(0)));
+    }
+
+    #[test]
     fn test_eval_dataframe_filter_predicate() {
         let code = r#"
             let df = dataframe {
