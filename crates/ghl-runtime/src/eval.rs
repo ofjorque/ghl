@@ -204,7 +204,7 @@ impl Interpreter {
                 Ok(Value::Matrix {
                     rows: r_count,
                     cols: c_count,
-                    data,
+                    data: std::sync::Arc::new(data),
                 })
             }
 
@@ -547,7 +547,7 @@ impl Interpreter {
         }
     }
 
-    fn call_value(&mut self, callee: Value, args: Vec<Value>) -> Result<Value, Diagnostic> {
+    pub(crate) fn call_value(&mut self, callee: Value, args: Vec<Value>) -> Result<Value, Diagnostic> {
         match callee {
             Value::NativeFn(func) => func(args),
             Value::NativeFnCtx(func) => func(self, args),
@@ -562,34 +562,46 @@ impl Interpreter {
                 let mut cur_params = params;
                 let mut cur_body = body;
                 let mut cur_args = args;
-                let result = loop {
-                    // Inherit any newly defined globals into the closure environment
-                    if let Some(global_scope) = caller_env.scopes.first() {
-                        for (k, v) in global_scope {
-                            if self.env.get(k).is_none() {
-                                self.env.set(k.clone(), v.clone());
-                            }
+                // Inherit any newly defined globals into the closure environment once before loop
+                if let Some(global_scope) = caller_env.scopes.first() {
+                    for (k, v) in global_scope {
+                        if self.env.get(k).is_none() {
+                            self.env.set(k.clone(), v.clone());
                         }
                     }
+                }
 
+                let result = loop {
                     self.env.push_scope();
                     for (p, a) in cur_params.iter().zip(cur_args.into_iter()) {
                         self.env.set(p.clone(), a);
                     }
 
                     match self.eval_expr_tail(&cur_body) {
-                        Err(e) => break Err(e),
-                        Ok(TailOutcome::Value(v)) => break Ok(v),
-                        Ok(TailOutcome::TailCall { callee: Value::Closure { params: p2, body: b2, env: e2 }, args: next_args }) => {
+                        Err(e) => {
+                            self.env.pop_scope();
+                            break Err(e);
+                        }
+                        Ok(TailOutcome::Value(v)) => {
+                            self.env.pop_scope();
+                            break Ok(v);
+                        }
+                        Ok(TailOutcome::TailCall { callee: Value::Closure { params: p2, body: b2, env: mut e2 }, args: next_args }) => {
+                            self.env.pop_scope();
+                            if let Some(global_scope) = caller_env.scopes.first() {
+                                for (k, v) in global_scope {
+                                    if e2.get(k).is_none() {
+                                        e2.set(k.clone(), v.clone());
+                                    }
+                                }
+                            }
                             self.env = e2;
                             cur_params = p2;
                             cur_body = b2;
                             cur_args = next_args;
                         }
                         Ok(TailOutcome::TailCall { callee: other, args: next_args }) => {
-                            // Tail chain ends in something that isn't a GHL closure
-                            // (a native function, etc.) -- nothing left to trampoline,
-                            // make an ordinary (bounded) call and that's the result.
+                            self.env.pop_scope();
                             self.env = caller_env.clone();
                             break self.call_value(other, next_args);
                         }
@@ -683,7 +695,7 @@ impl Interpreter {
                         Value::Matrix { rows: r2, cols: c2, data: d2 },
                     ) => {
                         let (r, c, d) = MatrixOps::elementwise(r1, c1, &d1, r2, c2, &d2, op_fn, "matrix op")?;
-                        Ok(Value::Matrix { rows: r, cols: c, data: d })
+                        Ok(Value::Matrix { rows: r, cols: c, data: std::sync::Arc::new(d) })
                     }
                     (Value::Vector(v1), Value::Vector(v2)) => vector_elementwise_op(&v1, &v2, op_fn),
                     (l, r) => Err(Diagnostic::compute_error(
@@ -721,7 +733,7 @@ impl Interpreter {
                     ) = (&left, &right)
                     {
                         let (r, c, d) = MatrixOps::mul(*r1, *c1, d1, *r2, *c2, d2)?;
-                        return Ok(Value::Matrix { rows: r, cols: c, data: d });
+                        return Ok(Value::Matrix { rows: r, cols: c, data: std::sync::Arc::new(d) });
                     }
                 }
 

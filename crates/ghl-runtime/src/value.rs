@@ -31,7 +31,7 @@ pub enum Value {
     Matrix {
         rows: usize,
         cols: usize,
-        data: Vec<f64>,
+        data: std::sync::Arc<Vec<f64>>,
     },
     /// Backed by a real `polars_core::frame::DataFrame` (TODO.md Fase 0/1) — `frame`
     /// carries the columnar/typed data, `na_reasons` is the side-channel for GHL's
@@ -155,9 +155,20 @@ pub enum Value {
     /// second argument). `crate::eval::Interpreter::call_value` is the only thing that
     /// knows how to do that, so a function needing it takes `&mut Interpreter` too.
     NativeFnCtx(fn(&mut crate::eval::Interpreter, Vec<Value>) -> Result<Value, Diagnostic>),
+    /// Regional memory arena (RFC 03 §2.2) backed by `bumpalo`
+    Arena(std::sync::Arc<std::sync::Mutex<crate::arena::ArenaState>>),
 }
 
 impl Value {
+    /// Convenient constructor for `Value::Matrix` wrapping data in `Arc`.
+    pub fn matrix(rows: usize, cols: usize, data: Vec<f64>) -> Self {
+        Value::Matrix {
+            rows,
+            cols,
+            data: std::sync::Arc::new(data),
+        }
+    }
+
     pub fn is_na(&self) -> bool {
         matches!(self, Value::NA(_))
     }
@@ -234,6 +245,7 @@ impl Value {
             Value::Closure { .. } => "Function",
             Value::NativeFn(_) => "NativeFunction",
             Value::NativeFnCtx(_) => "NativeFunction",
+            Value::Arena(_) => "Arena",
         }
     }
 }
@@ -304,6 +316,7 @@ impl PartialEq for Value {
                 Value::SortSpec { col: c2, desc: d2 },
             ) => c1 == c2 && d1 == d2,
             (Value::NamedArg(n1, v1), Value::NamedArg(n2, v2)) => n1 == n2 && v1 == v2,
+            (Value::Arena(a1), Value::Arena(a2)) => std::sync::Arc::ptr_eq(a1, a2),
             _ => false,
         }
     }
@@ -559,6 +572,10 @@ impl Value {
             }
             Value::NativeFn(_) => "<native_fn>".to_string(),
             Value::NativeFnCtx(_) => "<native_fn>".to_string(),
+            Value::Arena(a) => {
+                let bytes = a.lock().map(|st| st.allocated_bytes()).unwrap_or(0);
+                format!("<Arena ({} bytes allocated)>", bytes)
+            }
         }
     }
 }

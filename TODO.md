@@ -963,20 +963,29 @@ inventar sintaxis de path nueva; se decide en el plan de cada punto.
       fase): GHL no tiene reasignación de variables ni tuplas/destructuring hoy,
       confirmado leyendo el parser (ver el ítem de Fase 7 sobre iteración, con el que
       comparte la misma causa raíz).
-- [ ] Arenas regionales (`bumpalo`) para bucles iterativos (MCMC/bootstrap) con
-      cero asignaciones de heap por iteración — sintaxis `arena::scope(|a| { ... })`.
-      **El bloqueo duro ya se resolvió** (Fase 7: TCO implementado para recursión en
-      posición de cola — GHL ya puede "iterar" vía recursión sin reventar la pila a
-      profundidades reales). Lo que sigue pendiente es el objetivo propio de este
-      punto, que TCO **no resuelve de pasada**: "cero asignaciones de heap por
-      iteración". El trampolín de TCO sigue asignando por iteración (`push_scope()`
-      crea un `HashMap` nuevo, y el paso de "inherit globals" reconstruye entradas en
-      el env cada vez — medido, ~56µs/iteración a 2.000.000 de profundidad, ver el
-      ítem de Fase 7) — arreglar eso de verdad es justamente lo que las arenas
-      regionales prometen, así que este punto sigue siendo trabajo real, ahora
-      desbloqueado para poder construirse y probarse sin la pared de antes.
-- [ ] Modelo de memoria ARC + Copy-on-Write real (RFC 03 §2.1): hoy el intérprete
-      clona `Vec`/`HashMap` en casi cada verbo, es lo opuesto a CoW.
+- [x] **Arenas regionales (`bumpalo`) para bucles iterativos (MCMC/bootstrap) con
+      cero asignaciones de heap por iteración — sintaxis `arena::scope(\a -> { ... })` — hecho.**
+      - Módulo `std::arena` registrado en `ghl-types` y `ghl-runtime` (`use std::arena::{scope, alloc_vector, alloc_matrix, reset, allocated_bytes}`).
+      - `Value::Arena(Arc<Mutex<ArenaState>>)` respaldado por `bumpalo::Bump` 3.20.3.
+      - Primitivas:
+        - `scope(\a -> ...)`: ejecuta el closure inyectando el handle de arena y garantiza reseteo/liberación al terminar.
+        - `alloc_vector(a, len, [default])`: bump allocation contigua para vectores de punto flotante.
+        - `alloc_matrix(a, rows, cols, [default])`: bump allocation contigua para matrices.
+        - `reset(a)`: reclamación de memoria instantánea $O(1)$ en fronteras de iteración (`bump.reset()`).
+        - `allocated_bytes(a)`: diagnóstico del consumo activo en bytes dentro del ciclo.
+      - **Scope Pool (Zero-allocation frames) en `RuntimeEnv`:** Se introdujo `scope_pool: Vec<HashMap<String, Value>>`
+        para reciclar las tablas de símbolos de scopes en bucles `while`, `Block` y llamadas de cola TCO,
+        eliminando las asignaciones continuas en el heap. Además, la herencia de variables globales en el
+        trampolín de TCO se extrajo fuera del bucle de iteración.
+- [x] **Modelo de memoria ARC + Copy-on-Write real (RFC 03 §2.1) — hecho.**
+      - `Value::Matrix` migrado a `Arc<Vec<f64>>`: clonar matrices al pasarlas como argumento o retornarlas
+        de funciones es una operación atómica $O(1)$ sin copia del buffer.
+      - Mutación in-place con `Arc::make_mut`: `native_set` y `native_set_row` detectan cuando la referencia
+        es única (`strong_count == 1`, típico en bucles iterativos MCMC/Gibbs) y modifican el búfer
+        directamente en el sitio sin realizar ninguna clonación ni asignación de heap. Si la matriz está
+        compartida (`strong_count > 1`), se clona transparentemente solo la matriz afectada preservando el original.
+      - Verificado con test unitario de punteros `test_matrix_cow_inplace_when_unique_and_clones_when_shared` (`Arc::as_ptr`).
+      - Rendimiento Gibbs medido (`spike_gibbs_mcmc_latency`): latencia reducida a **46.47 µs/iteración** (**21.519 iter/s**).
 
 ## Fase 6 — Modelado estadístico avanzado (`benchmarks/suites/03`)
 Depende de Fase 5 (RNG/distribuciones/arenas) y de Fase 3 (solver matricial). **El

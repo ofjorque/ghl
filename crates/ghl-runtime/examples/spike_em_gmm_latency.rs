@@ -183,7 +183,7 @@ fn main() {
         Value::Matrix {
             rows: n_obs,
             cols: d_dim,
-            data: x_data.clone(),
+            data: std::sync::Arc::new(x_data.clone()),
         },
     );
     interp.env.set("iterations".to_string(), Value::I64(num_iterations));
@@ -226,7 +226,7 @@ fn main() {
         Value::Matrix {
             rows: n_obs,
             cols: d_dim,
-            data: x_data,
+            data: std::sync::Arc::new(x_data),
         },
     );
     interp_neko.env.set("iterations".to_string(), Value::I64(num_iterations));

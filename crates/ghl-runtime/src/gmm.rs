@@ -87,7 +87,7 @@ impl FittedGmm {
                     }
                 }
 
-                (row_major, n, d, valid_col_names)
+                (std::sync::Arc::new(row_major), n, d, valid_col_names)
             }
             other => {
                 return Err(Diagnostic::statistical_error(
@@ -396,7 +396,7 @@ impl FittedGmm {
                         data.push(val);
                     }
                 }
-                (data, n, self.dim)
+                (std::sync::Arc::new(data), n, self.dim)
             }
             other => {
                 return Err(Diagnostic::compute_error(

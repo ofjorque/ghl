@@ -82,6 +82,10 @@ pub fn get_module_item_names(path: &[String]) -> Option<Vec<&'static str>> {
             "show", "save", "scatter", "hist", "histogram", "boxplot",
         ]),
 
+        ["std", "arena"] => Some(vec![
+            "scope", "alloc_vector", "alloc_matrix", "reset", "allocated_bytes",
+        ]),
+
         _ => None,
     }
 }
@@ -101,6 +105,7 @@ pub fn is_valid_module_path(path: &[String]) -> bool {
             | ["std", "math"]
             | ["std", "io"]
             | ["std", "plot"]
+            | ["std", "arena"]
     )
 }
 

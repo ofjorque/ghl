@@ -15,6 +15,7 @@ pub mod na_reasons;
 pub mod polars_bridge;
 pub mod vector_data;
 pub mod modules;
+pub mod arena;
 
 pub use value::Value;
 pub use env::RuntimeEnv;
@@ -169,7 +170,7 @@ mod tests {
 
     fn matrix_data(v: &Value) -> Vec<f64> {
         match v {
-            Value::Matrix { data, .. } => data.clone(),
+            Value::Matrix { data, .. } => data.to_vec(),
             other => panic!("Expected Matrix, found {other:?}"),
         }
     }
@@ -2906,7 +2907,7 @@ mod tests {
             Value::Matrix {
                 rows: n as usize,
                 cols: d as usize,
-                data: x_data,
+                data: std::sync::Arc::new(x_data),
             },
         );
         interp.eval_program(&program).expect("eval ok");
@@ -3117,7 +3118,7 @@ mod tests {
         match tm {
             Value::Matrix { rows, cols, data } => {
                 assert_eq!((rows, cols), (2, 2));
-                assert_eq!(data, vec![1.0, 3.0, 2.0, 4.0]);
+                assert_eq!(data.as_slice(), &[1.0, 3.0, 2.0, 4.0]);
             }
             _ => panic!("Expected matrix"),
         }
@@ -3190,6 +3191,123 @@ mod tests {
         let bad_item = "use std::math::nonexistent;";
         let prog2 = parse(bad_item).expect("syntax ok");
         assert!(Interpreter::new().eval_program(&prog2).is_err());
+    }
+
+    #[test]
+    fn test_matrix_cow_inplace_when_unique_and_clones_when_shared() {
+        use std::sync::Arc;
+
+        // 1. In-place mutation when unique (strong_count == 1)
+        let m = Value::matrix(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
+        let orig_ptr = if let Value::Matrix { ref data, .. } = m {
+            Arc::as_ptr(data)
+        } else {
+            panic!("Expected Matrix");
+        };
+
+        // Mutate in-place via native_set
+        let m_updated = crate::env::RuntimeEnv::with_prelude();
+        let set_fn = m_updated.get("set").unwrap();
+        let mutated = if let Value::NativeFn(f) = set_fn {
+            f(vec![m, Value::I64(0), Value::I64(0), Value::F64(99.0)]).unwrap()
+        } else {
+            panic!("Expected NativeFn");
+        };
+
+        let new_ptr = if let Value::Matrix { ref data, .. } = mutated {
+            Arc::as_ptr(data)
+        } else {
+            panic!("Expected Matrix");
+        };
+
+        // Pointer must be identical: zero copies, zero allocations!
+        assert_eq!(orig_ptr, new_ptr, "Matrix with strong_count==1 must mutate in-place without reallocation");
+
+        // 2. Clone-on-write when shared (strong_count > 1)
+        let m_shared = mutated.clone(); // strong_count becomes 2
+        let shared_ptr = if let Value::Matrix { ref data, .. } = m_shared {
+            Arc::as_ptr(data)
+        } else {
+            panic!("Expected Matrix");
+        };
+
+        let mutated2 = if let Value::NativeFn(f) = set_fn {
+            f(vec![mutated, Value::I64(1), Value::I64(1), Value::F64(555.0)]).unwrap()
+        } else {
+            panic!("Expected NativeFn");
+        };
+
+        let mutated2_ptr = if let Value::Matrix { ref data, .. } = mutated2 {
+            Arc::as_ptr(data)
+        } else {
+            panic!("Expected Matrix");
+        };
+
+        // Since it was shared, Arc::make_mut cloned the buffer!
+        assert_ne!(shared_ptr, mutated2_ptr, "Matrix with strong_count > 1 must clone buffer on write");
+        // And the shared original keeps its previous values unchanged
+        if let Value::Matrix { ref data, .. } = m_shared {
+            assert_eq!(data[0], 99.0);
+            assert_eq!(data[3], 4.0);
+        }
+        if let Value::Matrix { ref data, .. } = mutated2 {
+            assert_eq!(data[0], 99.0);
+            assert_eq!(data[3], 555.0);
+        }
+    }
+
+    #[test]
+    fn test_scope_pool_recycling_in_while_loops() {
+        let code = r#"
+            let mut i = 0;
+            let mut acc = 0;
+            while i < 100 {
+                let temp = i * 2;
+                acc = acc + temp;
+                i = i + 1;
+            };
+            acc
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let res = interp.eval_program(&program).expect("eval ok");
+        assert_eq!(res, Value::I64(9900));
+
+        // The scope_pool in interp.env must have recycled scope capacity available
+        assert!(!interp.env.scope_pool.is_empty());
+    }
+
+    #[test]
+    fn test_regional_arena_lifecycle_and_reset() {
+        let code = r#"
+            use std::arena::{scope, alloc_vector, alloc_matrix, reset, allocated_bytes};
+
+            let res = scope(\a -> {
+                let v = alloc_vector(a, 50, 2.5);
+                let m = alloc_matrix(a, 10, 10, 1.0);
+                let bytes_before = allocated_bytes(a);
+                reset(a);
+                let bytes_after = allocated_bytes(a);
+                [bytes_before, bytes_after, sum(v)]
+            });
+            res
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let res = interp.eval_program(&program).expect("eval ok");
+
+        if let Value::Vector(vd) = res {
+            assert_eq!(vd.len(), 3);
+            let b_before = vd.value_at(0).unwrap().as_i64().unwrap_or(0);
+            let b_after = vd.value_at(1).unwrap().as_i64().unwrap_or(0);
+            let v_sum = vd.value_at(2).unwrap().as_f64().unwrap_or(0.0);
+
+            assert!(b_before > 0, "Arena must allocate bytes for vector and matrix");
+            assert_eq!(b_after, 0, "reset(a) must instantly reclaim memory (O(1))");
+            assert_eq!(v_sum, 50.0 * 2.5, "alloc_vector values must be valid and computable by verbs");
+        } else {
+            panic!("Expected vector result from arena scope, found {res:?}");
+        }
     }
 }
 

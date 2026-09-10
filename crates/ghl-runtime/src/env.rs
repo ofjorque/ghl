@@ -13,12 +13,14 @@ use crate::vector_data::VectorData;
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeEnv {
     pub scopes: Vec<HashMap<String, Value>>,
+    pub scope_pool: Vec<HashMap<String, Value>>,
 }
 
 impl RuntimeEnv {
     pub fn new() -> Self {
         Self {
             scopes: vec![HashMap::new()],
+            scope_pool: Vec::new(),
         }
     }
 
@@ -262,16 +264,31 @@ impl RuntimeEnv {
             Ok(Value::Unit)
         }));
 
+        // Regional Memory Arenas (RFC 03 §2.2)
+        env.set("scope".into(),           Value::NativeFnCtx(native_arena_scope));
+        env.set("alloc_vector".into(),    Value::NativeFn(native_alloc_vector));
+        env.set("alloc_matrix".into(),    Value::NativeFn(native_alloc_matrix));
+        env.set("reset".into(),           Value::NativeFn(native_arena_reset));
+        env.set("allocated_bytes".into(), Value::NativeFn(native_arena_allocated_bytes));
+
         env
     }
 
     pub fn push_scope(&mut self) {
-        self.scopes.push(HashMap::new());
+        if let Some(mut recycled) = self.scope_pool.pop() {
+            recycled.clear();
+            self.scopes.push(recycled);
+        } else {
+            self.scopes.push(HashMap::new());
+        }
     }
 
     pub fn pop_scope(&mut self) {
         if self.scopes.len() > 1 {
-            self.scopes.pop();
+            if let Some(mut popped) = self.scopes.pop() {
+                popped.clear();
+                self.scope_pool.push(popped);
+            }
         }
     }
 
@@ -1899,7 +1916,7 @@ fn native_zeros(args: Vec<Value>) -> Result<Value, Diagnostic> {
             Ok(Value::Matrix {
                 rows,
                 cols,
-                data: vec![0.0; rows * cols],
+                data: std::sync::Arc::new(vec![0.0; rows * cols]),
             })
         }
         _ => Err(Diagnostic::compute_error("C0201", "`zeros()` expects 1 argument (vector length) or 2 arguments (matrix rows, cols)")),
@@ -2022,15 +2039,15 @@ fn native_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 }
 
-fn native_set(args: Vec<Value>) -> Result<Value, Diagnostic> {
+fn native_set(mut args: Vec<Value>) -> Result<Value, Diagnostic> {
     match args.len() {
         3 => {
             // set(vector, index, val)
-            let collection = &args[0];
-            let idx = args[1].as_i64().ok_or_else(|| {
+            let val = args.pop().unwrap();
+            let idx = args.pop().unwrap().as_i64().ok_or_else(|| {
                 Diagnostic::compute_error("C0201", "`set(vector, index, val)` requires an integer index")
             })?;
-            let val = &args[2];
+            let collection = args.pop().unwrap();
             if let Value::Vector(vd) = collection {
                 let i = idx as usize;
                 if idx < 0 || i >= vd.len() {
@@ -2059,31 +2076,32 @@ fn native_set(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         4 => {
             // set(matrix, row, col, val)
-            let matrix = &args[0];
-            let row = args[1].as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`set(matrix, row, col, val)` requires integer row index")
-            })?;
-            let col = args[2].as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`set(matrix, row, col, val)` requires integer col index")
-            })?;
-            let val = args[3].as_f64().ok_or_else(|| {
+            let val = args.pop().unwrap().as_f64().ok_or_else(|| {
                 Diagnostic::compute_error("C0201", "`set(matrix, row, col, val)` requires numeric value")
             })?;
-            if let Value::Matrix { rows, cols, data } = matrix {
+            let col = args.pop().unwrap().as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`set(matrix, row, col, val)` requires integer col index")
+            })?;
+            let row = args.pop().unwrap().as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`set(matrix, row, col, val)` requires integer row index")
+            })?;
+            let matrix = args.pop().unwrap();
+            if let Value::Matrix { rows, cols, mut data } = matrix {
                 let r = row as usize;
                 let c = col as usize;
-                if row < 0 || r >= *rows || col < 0 || c >= *cols {
+                if row < 0 || r >= rows || col < 0 || c >= cols {
                     return Err(Diagnostic::compute_error(
                         "C0203",
                         format!("Matrix index out of bounds in `set(m, {row}, {col}, val)`: matrix is ({rows}x{cols})"),
                     ));
                 }
-                let mut new_data = data.clone();
-                new_data[r * cols + c] = val;
+                // CoW: in-place mutation if unique (strong_count == 1), clone-on-write if shared
+                let slice = std::sync::Arc::make_mut(&mut data);
+                slice[r * cols + c] = val;
                 Ok(Value::Matrix {
-                    rows: *rows,
-                    cols: *cols,
-                    data: new_data,
+                    rows,
+                    cols,
+                    data,
                 })
             } else {
                 Err(Diagnostic::compute_error(
@@ -2123,55 +2141,54 @@ fn native_get_row(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 }
 
-fn native_set_row(args: Vec<Value>) -> Result<Value, Diagnostic> {
+fn native_set_row(mut args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 3 {
         return Err(Diagnostic::compute_error("C0201", "`set_row()` requires a Matrix, an integer row index, and a Vector"));
     }
-    let matrix = &args[0];
-    let row_idx = args[1].as_i64().ok_or_else(|| {
+    let vec_val = args.pop().unwrap();
+    let row_idx = args.pop().unwrap().as_i64().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`set_row()` requires an integer row index")
     })?;
-    let vec_val = &args[2];
-    if let (Value::Matrix { rows, cols, data }, Value::Vector(vd)) = (matrix, vec_val) {
+    let matrix = args.pop().unwrap();
+    if let (Value::Matrix { rows, cols, mut data }, Value::Vector(vd)) = (matrix, vec_val) {
         let r = row_idx as usize;
-        if row_idx < 0 || r >= *rows {
+        if row_idx < 0 || r >= rows {
             return Err(Diagnostic::compute_error(
                 "C0203",
                 format!("Row index out of bounds in `set_row(m, {row_idx}, vec)`: matrix has {rows} rows"),
             ));
         }
-        if vd.len() != *cols {
+        if vd.len() != cols {
             return Err(Diagnostic::compute_error(
                 "C0202",
                 format!("`set_row()` dimension mismatch: matrix has {} columns, but vector has length {}", cols, vd.len()),
             ));
         }
-        let mut new_data = data.clone();
         let start = r * cols;
+        // CoW: in-place mutation if unique (strong_count == 1), clone-on-write if shared
+        let slice = std::sync::Arc::make_mut(&mut data);
         if vd.null_count() == 0 {
             if let Ok(view) = vd.as_f64_view() {
-                new_data[start..start + cols].copy_from_slice(view.as_slice());
+                slice[start..start + cols].copy_from_slice(view.as_slice());
                 return Ok(Value::Matrix {
-                    rows: *rows,
-                    cols: *cols,
-                    data: new_data,
+                    rows,
+                    cols,
+                    data,
                 });
             }
         }
         for (j, item) in vd.iter().enumerate() {
-            new_data[start + j] = item.as_f64().unwrap_or(0.0);
+            slice[start + j] = item.as_f64().unwrap_or(0.0);
         }
         Ok(Value::Matrix {
-            rows: *rows,
-            cols: *cols,
-            data: new_data,
+            rows,
+            cols,
+            data,
         })
     } else {
         Err(Diagnostic::compute_error(
             "C0202",
-            format!("`set_row()` requires (Matrix, integer, Vector), found (`{}`, `{}`, `{}`)",
-                args[0].type_name(), args[1].type_name(), args[2].type_name()
-            ),
+            format!("`set_row()` requires (Matrix, integer, Vector)"),
         ))
     }
 }
@@ -2215,7 +2232,7 @@ fn native_transpose(args: Vec<Value>) -> Result<Value, Diagnostic> {
             Ok(Value::Matrix {
                 rows: new_rows,
                 cols: new_cols,
-                data: new_data,
+                data: std::sync::Arc::new(new_data),
             })
         }
         other => Err(Diagnostic::compute_error(
@@ -2240,7 +2257,7 @@ fn native_identity(args: Vec<Value>) -> Result<Value, Diagnostic> {
     for i in 0..dim {
         data[i * dim + i] = 1.0;
     }
-    Ok(Value::Matrix { rows: dim, cols: dim, data })
+    Ok(Value::Matrix { rows: dim, cols: dim, data: std::sync::Arc::new(data) })
 }
 
 fn native_diag(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -2257,14 +2274,14 @@ fn native_diag(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     for i in 0..n {
                         data[i * n + i] = slice[i];
                     }
-                    return Ok(Value::Matrix { rows: n, cols: n, data });
+                    return Ok(Value::Matrix { rows: n, cols: n, data: std::sync::Arc::new(data) });
                 }
             }
             for i in 0..n {
                 let v = vd.value_at(i).and_then(|val| val.as_f64()).unwrap_or(0.0);
                 data[i * n + i] = v;
             }
-            Ok(Value::Matrix { rows: n, cols: n, data })
+            Ok(Value::Matrix { rows: n, cols: n, data: std::sync::Arc::new(data) })
         }
         Value::Matrix { rows, cols, data } => {
             let n = (*rows).min(*cols);
@@ -2555,7 +2572,7 @@ fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
             Ok(Value::Matrix {
                 rows: m.k,
                 cols: m.dim,
-                data: m.means.clone(),
+                data: std::sync::Arc::new(m.means.clone()),
             })
         }
         other => Err(Diagnostic::statistical_error(
@@ -2589,13 +2606,13 @@ fn native_vcov(args: Vec<Value>) -> Result<Value, Diagnostic> {
             let kind = vcov_kind_from_arg(&args);
             let p = m.blueprint.term_names.len();
             let vcov_data = m.compute_vcov(kind)?;
-            Ok(Value::Matrix { rows: p, cols: p, data: vcov_data })
+            Ok(Value::Matrix { rows: p, cols: p, data: std::sync::Arc::new(vcov_data) })
         }
         Value::GlmFit(m) => {
             let kind = vcov_kind_from_arg(&args);
             let p = m.blueprint.term_names.len();
             let vcov_data = m.compute_vcov(kind)?;
-            Ok(Value::Matrix { rows: p, cols: p, data: vcov_data })
+            Ok(Value::Matrix { rows: p, cols: p, data: std::sync::Arc::new(vcov_data) })
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
@@ -2614,8 +2631,8 @@ fn native_qr(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Some(Value::Matrix { rows, cols, data }) => {
             let (q_data, r_data) = crate::matrix::MatrixOps::qr(*rows, *cols, data)?;
             Ok(Value::QrDecomp {
-                q: Box::new(Value::Matrix { rows: *rows, cols: *cols, data: q_data }),
-                r: Box::new(Value::Matrix { rows: *cols, cols: *cols, data: r_data }),
+                q: Box::new(Value::Matrix { rows: *rows, cols: *cols, data: std::sync::Arc::new(q_data) }),
+                r: Box::new(Value::Matrix { rows: *cols, cols: *cols, data: std::sync::Arc::new(r_data) }),
             })
         }
         Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`qr()` requires a Matrix, found `{}`", other.type_name()))),
@@ -2651,7 +2668,7 @@ fn native_cholesky(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 ));
             }
             let l_data = crate::matrix::MatrixOps::cholesky(*rows, data)?;
-            Ok(Value::Matrix { rows: *rows, cols: *cols, data: l_data })
+            Ok(Value::Matrix { rows: *rows, cols: *cols, data: std::sync::Arc::new(l_data) })
         }
         Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`cholesky()` requires a Matrix, found `{}`", other.type_name()))),
         None => Err(Diagnostic::compute_error("C0201", "`cholesky()` requires a Matrix")),
@@ -2664,9 +2681,9 @@ fn native_svd(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Some(Value::Matrix { rows, cols, data }) => {
             let (u_data, s_values, v_data, k) = crate::matrix::MatrixOps::svd(*rows, *cols, data)?;
             Ok(Value::SvdDecomp {
-                u: Box::new(Value::Matrix { rows: *rows, cols: k, data: u_data }),
+                u: Box::new(Value::Matrix { rows: *rows, cols: k, data: std::sync::Arc::new(u_data) }),
                 s: Box::new(Value::Vector(VectorData::from_f64(s_values))),
-                v: Box::new(Value::Matrix { rows: *cols, cols: k, data: v_data }),
+                v: Box::new(Value::Matrix { rows: *cols, cols: k, data: std::sync::Arc::new(v_data) }),
             })
         }
         Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`svd()` requires a Matrix, found `{}`", other.type_name()))),
@@ -2712,7 +2729,7 @@ fn native_eigen(args: Vec<Value>) -> Result<Value, Diagnostic> {
             let (values, vectors_data) = crate::matrix::MatrixOps::eigen_symmetric(*rows, data)?;
             Ok(Value::EigenDecomp {
                 values: Box::new(Value::Vector(VectorData::from_f64(values))),
-                vectors: Box::new(Value::Matrix { rows: *rows, cols: *cols, data: vectors_data }),
+                vectors: Box::new(Value::Matrix { rows: *rows, cols: *cols, data: std::sync::Arc::new(vectors_data) }),
             })
         }
         Some(other) => Err(Diagnostic::statistical_error("S0200", format!("`eigen()` requires a Matrix, found `{}`", other.type_name()))),
@@ -3312,4 +3329,93 @@ fn native_slice(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let from = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
     let to   = args.get(2).and_then(|v| v.as_i64()).unwrap_or(5) as usize;
     crate::io::df_slice(df, from, to)
+}
+
+// =========================================================================
+// Regional Memory Arenas (RFC 03 §2.2)
+// =========================================================================
+
+fn native_arena_scope(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let callable = args.first().cloned().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`arena::scope()` requires a callback function `\\a -> ...`")
+    })?;
+    let arena_state = std::sync::Arc::new(std::sync::Mutex::new(crate::arena::ArenaState::new()));
+    let arena_val = Value::Arena(arena_state.clone());
+    let res = interp.call_value(callable, vec![arena_val]);
+    if let Ok(mut st) = arena_state.lock() {
+        st.reset();
+    }
+    res
+}
+
+fn native_alloc_vector(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.is_empty() {
+        return Err(Diagnostic::compute_error("C0201", "`alloc_vector(arena, len, [default])` requires at least an arena and length"));
+    }
+    let arena_val = &args[0];
+    let len = args.get(1).and_then(|v| v.as_i64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`alloc_vector(arena, len)` requires an integer length")
+    })?;
+    if len < 0 {
+        return Err(Diagnostic::compute_error("C0201", format!("`alloc_vector()` length must be non-negative, found {len}")));
+    }
+    let default_val = args.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0);
+    match arena_val {
+        Value::Arena(st_arc) => {
+            let mut st = st_arc.lock().map_err(|e| Diagnostic::compute_error("C0210", format!("Arena lock error: {e}")))?;
+            Ok(st.alloc_vector(len as usize, default_val))
+        }
+        other => Err(Diagnostic::compute_error("C0202", format!("`alloc_vector()` requires an Arena as first argument, found `{}`", other.type_name()))),
+    }
+}
+
+fn native_alloc_matrix(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 3 {
+        return Err(Diagnostic::compute_error("C0201", "`alloc_matrix(arena, rows, cols, [default])` requires arena, rows, and cols"));
+    }
+    let arena_val = &args[0];
+    let r = args[1].as_i64().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`alloc_matrix()` requires integer row count")
+    })?;
+    let c = args[2].as_i64().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`alloc_matrix()` requires integer col count")
+    })?;
+    if r < 0 || c < 0 {
+        return Err(Diagnostic::compute_error("C0201", format!("`alloc_matrix()` dimensions must be non-negative, found ({r}, {c})")));
+    }
+    let default_val = args.get(3).and_then(|v| v.as_f64()).unwrap_or(0.0);
+    match arena_val {
+        Value::Arena(st_arc) => {
+            let mut st = st_arc.lock().map_err(|e| Diagnostic::compute_error("C0210", format!("Arena lock error: {e}")))?;
+            Ok(st.alloc_matrix(r as usize, c as usize, default_val))
+        }
+        other => Err(Diagnostic::compute_error("C0202", format!("`alloc_matrix()` requires an Arena as first argument, found `{}`", other.type_name()))),
+    }
+}
+
+fn native_arena_reset(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let arena_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`reset(arena)` requires an Arena argument")
+    })?;
+    match arena_val {
+        Value::Arena(st_arc) => {
+            let mut st = st_arc.lock().map_err(|e| Diagnostic::compute_error("C0210", format!("Arena lock error: {e}")))?;
+            st.reset();
+            Ok(Value::Unit)
+        }
+        other => Err(Diagnostic::compute_error("C0202", format!("`reset()` requires an Arena, found `{}`", other.type_name()))),
+    }
+}
+
+fn native_arena_allocated_bytes(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let arena_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`allocated_bytes(arena)` requires an Arena argument")
+    })?;
+    match arena_val {
+        Value::Arena(st_arc) => {
+            let st = st_arc.lock().map_err(|e| Diagnostic::compute_error("C0210", format!("Arena lock error: {e}")))?;
+            Ok(Value::I64(st.allocated_bytes() as i64))
+        }
+        other => Err(Diagnostic::compute_error("C0202", format!("`allocated_bytes()` requires an Arena, found `{}`", other.type_name()))),
+    }
 }
