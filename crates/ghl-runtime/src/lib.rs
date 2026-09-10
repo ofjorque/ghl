@@ -627,6 +627,66 @@ mod tests {
     }
 
     #[test]
+    fn test_bootstrap_mean_produces_requested_number_of_replicas() {
+        // TODO.md Fase 4, punto (c), Suite 03's Caso 3.3. Base sample [1..5], real mean 3.0.
+        // Each replica is itself a mean of values resampled *from* the base, so it must
+        // land within the base's own [min, max] range, and averaging many replicas should
+        // land close to the true mean (generous tolerance -- this is a statistical
+        // assertion, not an exact one, to avoid flakiness).
+        let code = r#"
+            let v = [1.0, 2.0, 3.0, 4.0, 5.0];
+            let reps = bootstrap_mean(v, 500);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let reps = vector_f64(&interp.env.get("reps").unwrap());
+        assert_eq!(reps.len(), 500);
+        for r in &reps {
+            assert!((1.0..=5.0).contains(r), "replica mean {r} outside base sample range");
+        }
+        let grand_mean: f64 = reps.iter().sum::<f64>() / reps.len() as f64;
+        assert!((grand_mean - 3.0).abs() < 0.5, "grand mean {grand_mean} too far from true mean 3.0");
+    }
+
+    #[test]
+    fn test_bootstrap_mean_propagates_na() {
+        let code = r#"
+            let v = [1.0, sqrt(-1.0), 3.0];
+            let reps = bootstrap_mean(v, 10);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert!(matches!(interp.env.get("reps").unwrap(), Value::NA(_)));
+    }
+
+    #[test]
+    fn test_bootstrap_mean_rejects_non_vector_first_argument() {
+        let code = r#"
+            let reps = bootstrap_mean(5.0, 10);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("non-Vector first argument must fail");
+        assert_eq!(err.code, "C0202");
+    }
+
+    #[test]
+    fn test_bootstrap_mean_rejects_empty_vector() {
+        let code = r#"
+            let empty = random_uniform(0);
+            let reps = bootstrap_mean(empty, 10);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        let err = interp.eval_program(&program).expect_err("empty base sample must fail");
+        assert_eq!(err.code, "S0412");
+    }
+
+    #[test]
     fn test_eval_singular_matrix_emits_s0101() {
         // Collinear matrix: rows are multiples (det = 0)
         let code = r#"

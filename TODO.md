@@ -699,14 +699,58 @@ Se apoya en `rayon` (Fase 0); habilita el resto de casos de Suite 03.
       sintaxis `.parallel()` explícita porque no hay nada que activar: es el comportamiento
       por defecto del motor de queries, no un modo opt-in. Dejado como verificado y
       documentado, no como trabajo pendiente.
-- [ ] Bootstrap paralelo sin duplicar la muestra base (memoria compartida, Caso 3.3). Aún
-      no existe ningún código de bootstrap/resample en el runtime (confirmado por
-      búsqueda exhaustiva). La base ya ayuda: `Column`/`Series` de polars es `Arc`-interno
-      (clonar es O(1), no duplica el buffer), así que la "memoria compartida sin duplicar
-      la muestra base" que pide el caso viene casi gratis de la representación actual —
-      falta el propio algoritmo de remuestreo + su paralelización con rayon, y una decisión
-      sobre RNG-por-réplica (roza con Fase 5: `rand::rng()` es seguro entre hilos de rayon
-      pero no reproducible entre corridas ni entre distinta cantidad de hilos).
+- [x] **Bootstrap paralelo sin duplicar la muestra base (memoria compartida, Caso 3.3):**
+      `bootstrap_mean(v, n_replicas)` — nueva función libre en `env.rs`, devuelve un
+      `Vector[f64]` de `n_replicas` medias bootstrap, cada una calculada remuestreando `v`
+      con reemplazo. `benchmarks/suites/03-statistical-modeling.md` no traía ejemplo de
+      código para este caso (solo para el Gibbs sampler del Caso 3.1, con sintaxis
+      aspiracional de todos modos), así que se diseñó la superficie desde cero.
+      - **A propósito, solo la media** — no un estimador arbitrario vía clausura (como
+        `map()`): una clausura captura `RuntimeEnv` mutable y lo intercambia por llamada,
+        no es `Send`/`Sync`-segura para repartir en rayon sin rediseñar ese mecanismo
+        (mismo motivo por el que `map()` no se paralelizó en el punto (a) de esta fase). La
+        media, en cambio, no necesita más que un acumulador `f64` por réplica, así que
+        paraleliza limpio tal cual.
+      - **"Memoria compartida sin duplicar la muestra base" sale gratis de algo que ya
+        existía**, no hubo que construir nada nuevo para eso: `base: &[f64]` se obtiene
+        una sola vez vía `VectorData::as_f64_view()` (Punto 2, Fase 3) y se comparte por
+        referencia entre todas las tareas de rayon (`&[f64]` es `Sync`) — cero copias del
+        array de la muestra sin importar cuántas réplicas corran. Cada réplica tampoco
+        materializa su propio subconjunto remuestreado (sería O(n) por réplica) — es un
+        `f64` suelto acumulando `n` sorteos con `rng.random_range(0..n)`
+        (`rand::RngExt::random_range`, ya importado desde `random_uniform`). Memoria total:
+        O(n + n_replicas), no O(n × n_replicas).
+      - **Hallazgo al investigar (nada reusable directo):** `sample_n`/`sample_frac`
+        (`io.rs::df_sample_n`) samplean filas de un `DataFrame` **sin reemplazo**, con su
+        propio xorshift sembrado por reloj del sistema — un RNG completamente distinto al
+        `rand` crate que ya usa `random_uniform` (dos generadores conviviendo en el mismo
+        runtime, dato curioso más que un problema en sí). Y `take_rows()` (usado por
+        `sample_n`) hace un *gather* real que copia los valores seleccionados — exactamente
+        lo que este punto pide evitar, así que no servía como base para bootstrap.
+      - **Medido (`examples/spike_bootstrap_mean_latency.rs`, N=100.000, 2.000 réplicas —
+        no las 20.000 réplicas × N=100.000 completas del enunciado, que son 2×10⁹ sorteos
+        en total y tardan minutos; 2.000 ya deja ver el efecto con margen de sobra):
+        secuencial 1.435s → paralelo 331ms, **~4.34x** con 8 hilos disponibles. Sin riesgo
+        de OOM como los dos spikes anteriores de esta fase — por diseño, no por suerte: acá
+        no hay ningún buffer O(n) por réplica que retener.
+      - Tests nuevos en `lib.rs`:
+        `test_bootstrap_mean_produces_requested_number_of_replicas` (cada réplica cae en
+        el rango de la muestra base, la gran media de 500 réplicas se acerca a la media
+        real), `test_bootstrap_mean_propagates_na`, `test_bootstrap_mean_rejects_non_vector_first_argument`,
+        `test_bootstrap_mean_rejects_empty_vector`.
+      - Verificado de punta a punta con el CLI de release: `bootstrap_mean` sobre una
+        muestra real (2.000 réplicas centradas correctamente en ~0.5 para
+        `random_uniform`) y sobre una muestra con NA (colapsa a `NA:NaN`, no a un Vector).
+      - **Qué queda afuera, a propósito:** otros estimadores (mediana, percentiles, uno
+        arbitrario vía clausura); `quantile()`/`percentile()` para calcular el intervalo de
+        confianza real que pide el enunciado completo del caso (esta pasada entrega la
+        distribución de réplicas, no el intervalo en sí — no existe `quantile()` en el
+        runtime todavía); bootstrap sobre vectores con NA (colapsa a `NA`, no excluye las
+        posiciones NA del pool de remuestreo); reproducibilidad bit-a-bit (mismo criterio
+        que `random_uniform`, es trabajo de Fase 5).
+
+Con esto, Fase 4 queda cerrada por completo (los tres puntos: iteradores work-stealing
+sobre `Vector`, paralelismo de DataFrame verificado, y bootstrap paralelo).
 
 ## Fase 5 — RNG + distribuciones + arenas (`benchmarks/suites/03`, RFC 03 §2.2)
 Requisito para todo el modelado estadístico de la Suite 03.

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
 use polars_core::prelude::PolarsError;
 use rand::RngExt;
+use rayon::prelude::*;
 use crate::eval::Interpreter;
 use crate::polars_bridge;
 use crate::value::Value;
@@ -193,6 +194,7 @@ impl RuntimeEnv {
         env.set("dot".into(),          Value::NativeFn(native_dot));
         env.set("map".into(),          Value::NativeFnCtx(native_map));
         env.set("random_uniform".into(), Value::NativeFn(native_random_uniform));
+        env.set("bootstrap_mean".into(), Value::NativeFn(native_bootstrap_mean));
         env.set("qr".into(),           Value::NativeFn(native_qr));
         env.set("qr_q".into(),         Value::NativeFn(native_qr_q));
         env.set("qr_r".into(),         Value::NativeFn(native_qr_r));
@@ -446,6 +448,70 @@ fn native_random_uniform(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let mut rng = rand::rng();
     let data: Vec<f64> = (0..n).map(|_| rng.random::<f64>()).collect();
     Ok(Value::Vector(VectorData::from_f64(data)))
+}
+
+/// `bootstrap_mean(v, n_replicas)` — a `Vector[f64]` of `n_replicas` bootstrap sample
+/// means, each computed by resampling `v` with replacement (TODO.md Fase 4, punto (c),
+/// Suite 03's Caso 3.3). Deliberately just the mean, not an arbitrary user-supplied
+/// estimator: a closure (like `map()`'s) captures `RuntimeEnv` mutably and swaps it into
+/// the interpreter per call, which isn't `Send`/`Sync`-safe to hand to rayon without
+/// redesigning that mechanism -- the mean, on the other hand, needs nothing but a scalar
+/// accumulator per replica, so it parallelizes cleanly as-is.
+///
+/// "Memoria compartida sin duplicación de la muestra base" (the case's own wording) comes
+/// for free from `VectorData::as_f64_view()` (Punto 2, Fase 3): `base` below is a single
+/// borrowed `&[f64]`, taken once, shared read-only across every rayon task -- no replica
+/// ever copies the base sample, and no replica materializes its resampled subset either
+/// (only a running `f64` sum), so memory use stays O(n + n_replicas), not O(n *
+/// n_replicas). Not reproducible across runs, same as `random_uniform` -- real seeded
+/// reproducibility is Fase 5's job.
+fn native_bootstrap_mean(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let vd = match args.first() {
+        Some(Value::Vector(vd)) => vd,
+        Some(other) => {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!("`bootstrap_mean()` expects a Vector as its first argument, found `{}`", other.type_name()),
+            ));
+        }
+        None => return Err(Diagnostic::compute_error("C0201", "`bootstrap_mean()` requires 2 arguments")),
+    };
+    let n_replicas = args.get(1).and_then(|v| v.as_i64()).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`bootstrap_mean()` requires an integer replica count as its second argument")
+    })?;
+    if n_replicas < 0 {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`bootstrap_mean()` replica count must be non-negative, found {n_replicas}"),
+        ));
+    }
+    if let Some(na) = vd.first_na() {
+        // Same collapse-to-NA Kleene convention as dot()/mean(): any NA in the base sample
+        // makes the estimator undefined, rather than silently excluding it from the
+        // resampling pool (which would change the effective sample size).
+        return Ok(na);
+    }
+    let view = vd.as_f64_view()?;
+    let base = view.as_slice();
+    let n = base.len();
+    if n == 0 {
+        return Err(Diagnostic::statistical_error("S0412", "`bootstrap_mean()` requires a non-empty Vector"));
+    }
+
+    let means: Vec<f64> = (0..n_replicas as usize)
+        .into_par_iter()
+        .map(|_| {
+            let mut rng = rand::rng();
+            let mut acc = 0.0;
+            for _ in 0..n {
+                let idx: usize = rng.random_range(0..n);
+                acc += base[idx];
+            }
+            acc / n as f64
+        })
+        .collect();
+
+    Ok(Value::Vector(VectorData::from_f64(means)))
 }
 
 fn native_dot(args: Vec<Value>) -> Result<Value, Diagnostic> {
