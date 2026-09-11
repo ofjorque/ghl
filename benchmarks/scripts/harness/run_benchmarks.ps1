@@ -12,13 +12,24 @@
 # protocol targets Linux and does not apply on this Windows machine. No such
 # isolation is performed here; treat these as realistic desktop numbers, not
 # lab-isolated ones.
+#
+# NOTE on this re-run (2026-09-11, different Windows machine than the original
+# Phase 10 audit): this machine's Bitdefender Endpoint Protection blocks
+# execution of the freshly-compiled `hello_aot.exe` (Cranelift-emitted PE,
+# unsigned, flagged by heuristic/behavioral scanning — confirmed NOT a general
+# "block new exes" policy, since a plain rustc-built hello-world binary runs
+# fine). This is an EDR decision on a machine we don't control, not something
+# to route around. The "GHL (AOT Binary)" row is therefore skipped in Suite 04
+# on this run; "GHL (Interpreted)" still runs and is directly comparable to
+# the other interpreted/JIT runtimes below.
 
 $ErrorActionPreference = "Stop"
 
-$ghlExe = ".\target\release\ghl.exe"
-$pyExe  = ".\benchmarks\.venv\Scripts\python.exe"
-$rExe   = "Rscript"
-$jlExe  = "julia"
+$ghlExe     = ".\target\release\ghl.exe"
+$pyExe      = ".\benchmarks\.venv\Scripts\python.exe"
+$rExe       = "C:\Program Files\R\R-4.6.1\bin\Rscript.exe"
+$jlExe      = "C:\Users\ofjorque\AppData\Local\Programs\Julia-1.13.0\bin\julia.exe"
+$hyperfine  = "C:\Users\ofjorque\AppData\Local\Microsoft\WinGet\Packages\sharkdp.hyperfine_Microsoft.Winget.Source_8wekyb3d8bbwe\hyperfine-v1.20.0-x86_64-pc-windows-msvc\hyperfine.exe"
 
 Write-Host "=================================================================" -ForegroundColor Cyan
 Write-Host " GHL Empirical Benchmark Suite (Phase 10) vs Python, R, Julia   " -ForegroundColor Cyan
@@ -37,13 +48,12 @@ Write-Host "`n>>> [1/4] Running Suite 04: Startup / TTFX (Hello World)..." -Fore
 $suite04Json = "$resultsDir\suite_04_runtime.json"
 $suite04Md   = "$resultsDir\suite_04_runtime.md"
 
-hyperfine --warmup 5 --runs 30 `
+& $hyperfine --warmup 5 --runs 30 `
     --export-json $suite04Json `
     --export-markdown $suite04Md `
-    -n "GHL (AOT Binary)" ".\benchmarks\scripts\suite_04_runtime\hello_aot.exe" `
     -n "GHL (Interpreted)" "$ghlExe run benchmarks\scripts\suite_04_runtime\hello.gh" `
     -n "Python 3.14" "$pyExe benchmarks\scripts\suite_04_runtime\hello.py" `
-    -n "R 4.6.1" "$rExe benchmarks\scripts\suite_04_runtime\hello.R" `
+    -n "R 4.6.1" "`"$rExe`" benchmarks\scripts\suite_04_runtime\hello.R" `
     -n "Julia" "$jlExe benchmarks\scripts\suite_04_runtime\hello.jl"
 
 # -----------------------------------------------------------------------------
@@ -59,12 +69,12 @@ $suite01Md   = "$resultsDir\suite_01_math.md"
 # is realistically as fast as `crossprod` gets on this machine; no separate
 # "optimized R" variant is added for this suite (see summary.md for the caveat
 # that NumPy/Julia ship a tuned BLAS out of the box while this R does not).
-hyperfine --warmup 5 --runs 30 `
+& $hyperfine --warmup 5 --runs 30 `
     --export-json $suite01Json `
     --export-markdown $suite01Md `
     -n "GHL" "$ghlExe run benchmarks\scripts\suite_01_math\bench_dot.gh" `
     -n "Python (NumPy)" "$pyExe benchmarks\scripts\suite_01_math\bench_dot.py" `
-    -n "R (Base)" "$rExe benchmarks\scripts\suite_01_math\bench_dot.R" `
+    -n "R (Base)" "`"$rExe`" benchmarks\scripts\suite_01_math\bench_dot.R" `
     -n "Julia" "$jlExe benchmarks\scripts\suite_01_math\bench_dot.jl"
 
 # -----------------------------------------------------------------------------
@@ -74,14 +84,14 @@ Write-Host "`n>>> [3/4] Running Suite 02: DataFrame Operations (1M Rows)..." -Fo
 $suite02Json = "$resultsDir\suite_02_dataframe.json"
 $suite02Md   = "$resultsDir\suite_02_dataframe.md"
 
-hyperfine --warmup 3 --runs 30 `
+& $hyperfine --warmup 3 --runs 30 `
     --export-json $suite02Json `
     --export-markdown $suite02Md `
     -n "GHL (Polars-backed)" "$ghlExe run benchmarks\scripts\suite_02_dataframe\bench_df.gh" `
     -n "Python (Pandas)" "$pyExe benchmarks\scripts\suite_02_dataframe\bench_df.py" `
     -n "Python (Polars)" "$pyExe benchmarks\scripts\suite_02_dataframe\bench_df_polars.py" `
-    -n "R (Base)" "$rExe benchmarks\scripts\suite_02_dataframe\bench_df.R" `
-    -n "R (data.table)" "$rExe benchmarks\scripts\suite_02_dataframe\bench_df_datatable.R" `
+    -n "R (Base)" "`"$rExe`" benchmarks\scripts\suite_02_dataframe\bench_df.R" `
+    -n "R (data.table)" "`"$rExe`" benchmarks\scripts\suite_02_dataframe\bench_df_datatable.R" `
     -n "Julia (Base Streaming)" "$jlExe benchmarks\scripts\suite_02_dataframe\bench_df.jl" `
     -n "Julia (DataFrames.jl)" "$jlExe benchmarks\scripts\suite_02_dataframe\bench_df_dataframes.jl"
 
@@ -92,13 +102,13 @@ Write-Host "`n>>> [4/4] Running Suite 03: Statistical Modeling (Gibbs Sampler 10
 $suite03Json = "$resultsDir\suite_03_modeling.json"
 $suite03Md   = "$resultsDir\suite_03_modeling.md"
 
-hyperfine --warmup 3 --runs 30 `
+& $hyperfine --warmup 3 --runs 30 `
     --export-json $suite03Json `
     --export-markdown $suite03Md `
     -n "GHL" "$ghlExe run benchmarks\scripts\suite_03_modeling\bench_gibbs.gh" `
     -n "Python (NumPy)" "$pyExe benchmarks\scripts\suite_03_modeling\bench_gibbs.py" `
     -n "Python (Numba JIT)" "$pyExe benchmarks\scripts\suite_03_modeling\bench_gibbs_numba.py" `
-    -n "R (Base)" "$rExe benchmarks\scripts\suite_03_modeling\bench_gibbs.R" `
+    -n "R (Base)" "`"$rExe`" benchmarks\scripts\suite_03_modeling\bench_gibbs.R" `
     -n "Julia" "$jlExe benchmarks\scripts\suite_03_modeling\bench_gibbs.jl" `
     -n "Julia (@inbounds/typed)" "$jlExe benchmarks\scripts\suite_03_modeling\bench_gibbs_inbounds.jl"
 

@@ -64,3 +64,23 @@ vez de comparar sólo contra Pandas base:
 ambos motores son esencialmente el mismo `polars-core` de Rust) muestra a GHL
 *perdiendo*, no ganando — ver el detalle de por qué en la sección "Suite 02" de
 [../results/summary.md](../results/summary.md).
+
+---
+
+## 5. Corrida de Reproducibilidad en Otra Máquina (11-Sep-2026)
+
+Repetición del día siguiente en un laptop distinto al desktop de la sección
+anterior (números arriba sin modificar), frente a Python 3.13 (mismas versiones de
+NumPy/Pandas/Polars/Numba). Sin la variante AOT en esta máquina — el EDR corporativo
+(Bitdefender) bloquea el binario recién compilado por `ghl build --release`; ver
+[../results/summary.md](../results/summary.md) §4:
+
+| Carga de Trabajo | GHL | Python (PyData) | Resultado |
+| :--- | :---: | :---: | :--- |
+| **Startup / TTFX** | **67.9 ms** (Interp) | 95.0 ms | GHL 1.40x más rápido |
+| **Dot Product ($10^7$ floats)** | **167.9 ms** | 426.8 ms (NumPy, ya vía BLAS) | GHL 2.54x más rápido |
+| **DataFrames (1M filas CSV, group-by, agg)** | 1,465 ms | 2,754 ms (Pandas) / **658 ms (Polars)** | **Polars-Python es 2.23x más rápido que GHL** — GHL sólo gana contra Pandas (1.88x), no contra Polars |
+| **Gibbs Sampler (100 iteraciones)** | **93.5 ms** | 767.3 ms (NumPy) / 1,808.4 ms (Numba JIT) | GHL 8.21x más rápido que NumPy; Numba vuelve a resultar más lento que NumPy puro |
+
+Mismo orden relativo y misma nota de honestidad de la Sección 4 (Polars-Python sigue
+ganándole a GHL en Suite 02).

@@ -103,3 +103,89 @@ Aquí GHL gana claramente incluso contra las variantes optimizadas — este es e
 - Todos los scripts, resultados brutos (`.json`/`.md` de `hyperfine`) y el harness (`run_benchmarks.ps1`, v2 con 30 corridas) están en `benchmarks/scripts/` y `benchmarks/results/raw/`.
 - **Corrección funcional verificada, no solo velocidad:** la salida de `bench_df.gh` (GHL) coincide cifra por cifra con Pandas/Polars/data.table/DataFrames.jl para las 5 categorías. El Gibbs sampler produce medias posteriores estadísticamente consistentes (~3.01, ~8.05, −3.99) en las 8 variantes de los 4 lenguajes — ninguna implementación "hace menos trabajo" para parecer más rápida.
 - **Lo que NO se cumplió de `methodology.md`:** aislamiento de hardware (Sección 3, específico de Linux) y medición de Peak RSS / pausas de GC (Sección 2.C/D) — no instrumentados en esta ronda.
+
+---
+
+## 4. Corrida de Reproducibilidad en Otra Máquina (11-Sep-2026)
+
+Repetición íntegra de las 4 suites, un día después, en un **laptop distinto** al
+desktop de la Sección 1-3 — ninguna de las herramientas del harness estaba instalada
+de antemano. Esta sección se agrega a continuación de la original **sin modificarla**:
+los números de arriba (10-Sep, desktop) siguen siendo el registro del audit original;
+lo de abajo es una corrida independiente para verificar que las conclusiones no son
+un artefacto de una única máquina. Los valores absolutos entre ambas secciones **no
+son comparables 1:1** (hardware distinto); las conclusiones cualitativas sí.
+
+### Instalación en esta máquina nueva
+- **hyperfine 1.20.0** (`winget install sharkdp.hyperfine`)
+- **Julia 1.13.0** (`winget install Julialang.Julia`) + `CSV.jl 0.10.17` + `DataFrames.jl 1.8.2` (`Pkg.add`)
+- **R 4.6.1** ya estaba instalado pero no en el `PATH` de la sesión; se agregó `data.table 1.18.6.1` (`install.packages`)
+- **Python 3.13.15** (venv nuevo en `benchmarks/.venv`) con `numpy 2.5.3`, `pandas 3.0.5`, `polars 1.44.2`, `numba 0.67.0`, `scipy 1.18.1` (requerido por `numba.linalg`, no listado en la corrida original)
+- `target/synthetic_1m.csv` (84 MB, gitignored) regenerado con `cargo run --release --example generate_synthetic_csv -p ghl-runtime -- 1000000 target/synthetic_1m.csv` — determinista por semilla fija, produce los mismos datos que la corrida original
+- `target/release/ghl.exe` recompilado desde cero (`cargo build --release`)
+
+### Limitación encontrada y no resuelta: variante "GHL (AOT Binary)" excluida de Suite 04
+Esta máquina corre **Bitdefender Endpoint Protection** (EDR corporativo) que bloquea
+la ejecución del binario `hello_aot.exe` recién compilado por `ghl build --release`
+(backend Cranelift, sin firmar) con "Acceso denegado" — confirmado que **no** es un
+bloqueo genérico a ejecutables nuevos: un binario Rust trivial compilado con `cargo
+build --release` en la misma sesión corre sin problema. Es una decisión heurística
+del EDR sobre un binario que no reconoce, en una máquina que no administro — no se
+intentó sortear. La fila **"GHL (AOT Binary)"** de Suite 04 no está en esta corrida;
+"GHL (Interpreted)" sí, y sigue siendo comparable directamente contra Python/R/Julia.
+
+### Versiones de software (corrida del 11-Sep)
+- **GHL**: `0.1.0` (idéntico, mismo commit)
+- **Python**: `3.13.15` (NumPy `2.5.3`, Pandas `3.0.5`, Polars `1.44.2`, Numba `0.67.0`)
+- **R**: `4.6.1` (data.table `1.18.6.1`)
+- **Julia**: `1.13.0` (DataFrames.jl `1.8.2`, CSV.jl `0.10.17`)
+
+### Tabla comparativa (11-Sep, laptop)
+| Suite / Carga de Trabajo | GHL | Mejor alternativa externa | Speedup GHL |
+| :--- | :---: | :---: | :---: |
+| **Suite 04: Startup / TTFX** *(Hello World, Interpreted — sin variante AOT)* | **67.9 ms** $\pm$ 18.2 ms | Python 3.13: 95.0 ms $\pm$ 15.4 ms | **1.40x vs Python** (3.91x vs Julia, 4.56x vs R) |
+| **Suite 01: Math / SIMD** *(Dot Product $10^7$ `f64`)* | **167.9 ms** $\pm$ 25.2 ms | NumPy: 426.8 ms $\pm$ 37.4 ms | **2.54x vs NumPy** (3.36x vs Julia, 3.96x vs R) |
+| **Suite 02: DataFrames** *(1M filas CSV + Filter + GroupBy + Agg)* | 1.465 s $\pm$ 0.078 s | **Python (Polars): 0.658 s $\pm$ 0.031 s** | **GHL pierde: 0.45x** (Polars-Python 2.23x más rápido; R data.table 1.43x más rápido que GHL) |
+| **Suite 03: Modelado Estadístico** *(Gibbs Sampler 100 iter / 3k obs)* | **93.5 ms** $\pm$ 21.9 ms | R (Base): 638.6 ms $\pm$ 166.4 ms | **6.83x vs R** (8.21x vs NumPy, 19.35x vs Numba JIT) |
+
+**Conclusión sin cambios respecto al audit original del 10-Sep:** GHL gana Suites
+01/03/04 con margen amplio, y **no** gana Suite 02 frente al estado del arte real de
+cada ecosistema — ahí Polars-Python y data.table-R le ganan a GHL, en ese orden.
+
+### Detalle por suite (11-Sep, laptop)
+
+**Suite 04:** GHL (Interpreted) 67.9ms, Python 95.0ms, Julia 265.6ms, R 309.7ms. Sin
+la variante AOT, el margen de GHL sobre Python es bastante más chico que el 6.6x del
+AOT original (esperable: el modo interpretado paga parseo+typecheck+JIT ligero en
+cada arranque). `hyperfine` marcó outliers estadísticos (rango 51-151ms en GHL) —
+normal en un laptop corporativo con EDR activo inspeccionando cada proceso nuevo.
+
+**Suite 01:** GHL 167.9ms, NumPy 426.8ms, Julia 563.6ms, R 665.1ms. Mismo caveat que
+el audit original: `np.dot`/`LinearAlgebra.dot` ya despachan a BLAS de fábrica, y
+esta R usa BLAS de referencia monohilo. `hyperfine` marcó outliers en Julia.
+
+**Suite 02:** Python (Polars) 658.1ms, R (data.table) 1.025s, **GHL 1.465s**, Julia
+streaming 1.858s, Python (Pandas) 2.754s, R base 7.082s, Julia DataFrames.jl 8.821s.
+Mismo orden relativo que la corrida original (Polars > data.table > GHL > el resto) —
+esto sugiere que la brecha de Suite 02 es estructural (`crates/ghl-runtime` frente al
+estado del arte de su propia categoría), no un artefacto de una máquina puntual. Ver
+el TODO abierto sobre esto en `TODO.md` (Fase 10).
+
+**Suite 03:** GHL 93.5ms, R base 638.6ms, NumPy 767.3ms, Julia @inbounds 906.4ms,
+Julia baseline 1066.5ms, Numba 1808.4ms. Igual que en el audit original, GHL gana con
+margen amplio incluso contra las variantes optimizadas, y Numba vuelve a ser más
+lento que NumPy puro (mismo motivo: costo fijo de import/JIT por proceso). El
+`@inbounds`+tipado de Julia ayuda algo más aquí (~15%, contra ~1% en la corrida
+original), pero sigue sin acercarse a GHL.
+
+### Verificación de reproducibilidad entre máquinas
+- Salida numérica verificada igual que en la corrida original: las 8 variantes de
+  Suite 02 coinciden fila por fila, y el Gibbs sampler de Suite 03 produce medias
+  posteriores consistentes (~3.01-3.02, ~8.05, −3.99) en las 6 variantes/4 lenguajes.
+- **Las conclusiones cualitativas se sostienen igual en un laptop corporativo con EDR
+  activo que en el desktop original** — sólo cambian las magnitudes absolutas y los
+  márgenes de ruido.
+- Igual que en la corrida original, no se cumplió el aislamiento de hardware de
+  `methodology.md` §3 ni la medición de Peak RSS/pausas de GC (§2.C/D).
+- **Nuevo en esta corrida:** la variante "GHL (AOT Binary)" de Suite 04 no se pudo
+  medir por el bloqueo del EDR de esta máquina (ver limitación arriba).

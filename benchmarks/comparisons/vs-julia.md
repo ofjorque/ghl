@@ -72,3 +72,23 @@ cómputo — es mayormente una afirmación sobre latencia de carga de paquetes e
 proceso Julia nuevo, que es exactamente el problema de TTFX descrito en la Sección
 2.A de este documento, no una debilidad del algoritmo de agregación de
 `DataFrames.jl` en sí.
+
+---
+
+## 5. Corrida de Reproducibilidad en Otra Máquina (11-Sep-2026)
+
+Repetición del día siguiente en un laptop distinto al desktop de la sección
+anterior (números arriba sin modificar), frente a Julia 1.13 (mismas versiones de
+`DataFrames.jl`/`CSV.jl`). Sin la variante AOT en esta máquina — el EDR corporativo
+(Bitdefender) bloquea el binario recién compilado por `ghl build --release`; ver
+[../results/summary.md](../results/summary.md) §4:
+
+| Carga de Trabajo | GHL | Julia | Resultado |
+| :--- | :---: | :---: | :--- |
+| **Startup / TTFX** | **67.9 ms** (Interp) | 265.6 ms | GHL 3.91x más rápido en este hello-world |
+| **Dot Product ($10^7$ floats)** | **167.9 ms** | 563.6 ms (ya vía BLAS/OpenBLAS) | GHL 3.36x más rápido |
+| **DataFrames (1M filas CSV, group-by, agg)** | **1,465 ms** | 1,858 ms (streaming artesanal) / **8,821 ms (DataFrames.jl+CSV.jl)** | GHL gana en ambos casos; contra el parser artesanal el margen es más chico aquí (1.27x) que en la corrida original |
+| **Gibbs Sampler (100 iteraciones)** | **93.5 ms** | 1,066.5 ms / 906.4 ms con `@inbounds`+tipado | GHL 9.70x-11.41x más rápido; `@inbounds`+tipado ayuda algo más aquí (~15%, contra ~1% en la corrida original) pero sigue sin acercarse a GHL |
+
+Mismo orden relativo y misma nota de honestidad de la Sección 4 sobre la fila de
+DataFrames (el costo real es sobre todo TTFX de `using DataFrames, CSV`, no cómputo).

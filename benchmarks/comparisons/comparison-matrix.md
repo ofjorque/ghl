@@ -47,3 +47,25 @@ y data.table-R. Es el más rápido en arranque, álgebra vectorial y bucles iter
 (MCMC), pero no en ingestión/agregación de DataFrames a esta escala.
 
 *Ver informe detallado, incluyendo notas de honestidad por suite, en [benchmarks/results/summary.md](../results/summary.md).*
+
+---
+
+## Corrida de Reproducibilidad en Otra Máquina (11-Sep-2026)
+
+Repetición del día siguiente en un **laptop distinto** al desktop de la tabla
+anterior (números arriba sin modificar — corresponden al audit original del 10-Sep).
+Sin la variante "GHL (AOT Binary)" en esta máquina: el EDR corporativo (Bitdefender)
+bloquea el binario recién compilado por `ghl build --release` — ver
+[results/summary.md](../results/summary.md) §4 para el detalle.
+
+| Métrica / Benchmark | GHL | Python | R | Julia | Resultado |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Startup / TTFX** | **67.9 ms** (Interp) | 95.0 ms | 309.7 ms | 265.6 ms | GHL gana, 1.4x-4.6x |
+| **Dot Product ($10^7$ floats)** | **167.9 ms** | 426.8 ms (NumPy, ya usa BLAS) | 665.1 ms (BLAS de referencia) | 563.6 ms (ya usa BLAS) | GHL gana, 2.5x-4.0x |
+| **DataFrames (1M filas)** | 1,465 ms | 2,754 ms Pandas / **658 ms Polars** | 7,082 ms base / 1,025 ms data.table | 1,858 ms streaming / 8,821 ms DataFrames.jl | **GHL PIERDE**: Polars-Python es 2.23x más rápido y data.table-R 1.43x más rápido que GHL |
+| **Gibbs Sampler (100 iter)** | **93.5 ms** | 767.3 ms NumPy / 1,808.4 ms Numba (más lento) | 638.6 ms | 1,066.5 ms / 906.4 ms @inbounds | GHL gana con margen amplio, 6.8x-19.4x |
+
+Mismo orden relativo, mismas conclusiones cualitativas que el 10-Sep — la brecha de
+Suite 02 frente a Polars-Python/data.table-R no es un artefacto de una máquina
+puntual. Los valores absolutos entre esta tabla y la anterior no son comparables 1:1
+(hardware distinto, mayor ruido en este laptop).

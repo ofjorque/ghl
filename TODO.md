@@ -1554,3 +1554,20 @@ Solo tiene sentido al final, cuando ya hay algo que medir.
         (Suite 02); no afecta Suite 01/03/04, donde GHL ya gana con margen amplio.
         No priorizar sobre el resto del roadmap funcional salvo que el caso de uso
         central de GHL sea justo este.
+- [x] **Re-ejecutar las 4 suites en una máquina distinta para verificar reproducibilidad — completado (2026-09-11).**
+      Laptop Windows distinto al desktop original, sin ninguna de las herramientas
+      instaladas de antemano (hyperfine, Julia, R+data.table, venv de Python con
+      Polars/Numba se instalaron desde cero). Resultados en detalle en
+      `benchmarks/results/summary.md`.
+      - **Conclusiones cualitativas idénticas al audit original:** GHL gana Suites
+        01/03/04 con margen amplio y pierde Suite 02 contra Polars-Python (2.23x) y
+        R data.table (1.43x), en ese orden — la brecha de Suite 02 no es un
+        artefacto de una máquina puntual.
+      - **Limitación nueva, no resuelta:** el EDR corporativo de esta máquina
+        (Bitdefender Endpoint Protection) bloquea la ejecución del binario AOT
+        recién compilado por `ghl build --release` (Cranelift, sin firmar) con
+        "Acceso denegado" — confirmado que no es un bloqueo genérico a ejecutables
+        nuevos (un binario Rust trivial sí corre). La fila "GHL (AOT Binary)" de
+        Suite 04 no está en esta corrida; podría afectar la adopción de GHL en
+        entornos corporativos con EDR similar si el binario AOT no se firma o no
+        cambia de forma para dejar de parecer sospechoso a escáneres heurísticos.

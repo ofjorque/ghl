@@ -68,3 +68,22 @@ ventaja real de GHL sobre R no está en "R es lento para todo", sino en que R no
 un motor de DataFrames columnar tan rápido como `data.table` integrado por defecto
 en el lenguaje base, y en que sus bucles `for` interpretados (Suite 03) sí son
 sustancialmente más lentos sin recurrir a `Rcpp`.
+
+---
+
+## 5. Corrida de Reproducibilidad en Otra Máquina (11-Sep-2026)
+
+Repetición del día siguiente en un laptop distinto al desktop de la sección
+anterior (números arriba sin modificar). Sin la variante AOT en esta máquina — el
+EDR corporativo (Bitdefender) bloquea el binario recién compilado por
+`ghl build --release`; ver [../results/summary.md](../results/summary.md) §4:
+
+| Prueba | GHL | R 4.6.1 (Base) | R (data.table) | Resultado |
+| :--- | :---: | :---: | :---: | :--- |
+| **Startup (TTFX)** | **67.9 ms** (Interp) | 309.7 ms | — | GHL 4.6x más rápido |
+| **Dot Product ($10^7$ floats)** | **167.9 ms** | 665.1 ms | — | GHL 4.0x más rápido (nota: esta R usa BLAS de referencia sin OpenBLAS/MKL) |
+| **DataFrames (1M filas CSV, group-by, agg)** | 1,465 ms | 7,082 ms | **1,025 ms** | **`data.table` es 1.43x más rápido que GHL** — GHL sólo gana contra R base |
+| **Gibbs Sampler (100 iteraciones)** | **93.5 ms** | 638.6 ms | — | GHL 6.83x más rápido |
+
+Mismo orden relativo y misma nota de honestidad de la Sección 4 (`data.table` sigue
+superando a GHL en Suite 02, por el mismo motivo).
