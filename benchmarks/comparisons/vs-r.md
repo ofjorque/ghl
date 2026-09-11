@@ -50,11 +50,21 @@ El intérprete de R es intrínsecamente monohilo. Para paralelizar tareas, los p
 
 ## 4. Resultados Empíricos (Benchmarks Fase 10)
 
-Resultados medidos en igualdad de condiciones sobre Windows x86_64:
+Resultados medidos con `hyperfine`, 30 iteraciones, Windows x86_64. methodology.md
+§1.1 promete evaluar `data.table`/`collapse`, no sólo R base — se incluye como
+variante propia:
 
-| Prueba | GHL | R 4.6.1 | Ventaja de GHL |
-| :--- | :---: | :---: | :---: |
-| **Startup (TTFX)** | **6.7 ms** (AOT) / **10.7 ms** (Interp) | 115.1 ms | **10.7x a 17.1x más rápido** |
-| **Dot Product ($10^7$ floats)** | **52.7 ms** | 301.5 ms | **5.7x más rápido** |
-| **DataFrames (1M filas CSV, group-by, agg)** | **658.8 ms** | 3,656 ms | **5.55x más rápido** |
-| **Gibbs Sampler (100 iteraciones)** | **21.1 ms** | 139.5 ms | **6.62x más rápido** |
+| Prueba | GHL | R 4.6.1 (Base) | R (data.table) | Resultado |
+| :--- | :---: | :---: | :---: | :--- |
+| **Startup (TTFX)** | **5.3 ms** (AOT) / 10.5 ms (Interp) | 111.7 ms | — | GHL 21.0x más rápido |
+| **Dot Product ($10^7$ floats)** | **54.7 ms** | 311.5 ms | — | GHL 5.7x más rápido (nota: esta R usa BLAS de referencia sin OpenBLAS/MKL) |
+| **DataFrames (1M filas CSV, group-by, agg)** | 643.0 ms | 3,611.5 ms | **473.2 ms** | **`data.table` es 1.36x más rápido que GHL** — GHL sólo gana contra R base |
+| **Gibbs Sampler (100 iteraciones)** | **21.4 ms** | 138.1 ms | — | GHL 6.45x más rápido |
+
+**Nota de honestidad:** "El castigo de los bucles escalares" (Sección 2.A) describe
+correctamente a R base, pero no aplica a `data.table`, que es código C/C++ optimizado
+por debajo de la sintaxis de R — en la Suite 02, `data.table` supera a GHL. La
+ventaja real de GHL sobre R no está en "R es lento para todo", sino en que R no tiene
+un motor de DataFrames columnar tan rápido como `data.table` integrado por defecto
+en el lenguaje base, y en que sus bucles `for` interpretados (Suite 03) sí son
+sustancialmente más lentos sin recurrir a `Rcpp`.

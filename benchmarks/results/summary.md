@@ -1,82 +1,105 @@
 # Resumen Ejecutivo de Benchmarks Empíricos (Fase 10)
-## GHL vs R, Python y Julia
+## GHL vs R, Python y Julia — incluye variantes idiomáticas optimizadas
 
-Fecha de ejecución: 10 de Septiembre de 2026  
-Herramienta de medición: `hyperfine` (warmups automatizados, medias estadísticas con desviación estándar $\sigma$)  
-Entorno de prueba: Windows 11 x86_64, CPU Multi-Core, SSD NVMe  
+Fecha de ejecución: 10 de Septiembre de 2026
+Herramienta de medición: `hyperfine`, **30 iteraciones** por combinación lenguaje/prueba tras warmup (cumple el mínimo de `methodology.md` §2.A)
+Entorno de prueba: Windows 11 x86_64, desktop de escritorio sin aislamiento de hardware (ver `methodology.md` §4 — el protocolo de `taskset`/gobernador de CPU/Turbo Boost de la Sección 3 es específico de Linux y no se aplicó aquí)
 
 ### Versiones de Software
-- **GHL**: `0.1.0` (Compilador release optimizado con JIT/AOT Cranelift y runtime faer/polars)
-- **Python**: `3.14.6` (NumPy `2.5.3`, Pandas `3.0.5`, SciPy `1.18.1`)
-- **R**: `4.6.1` (Rscript x86_64-w64-mingw32)
-- **Julia**: `1.x` (Julia x86_64-w64-mingw32 con OpenBLAS)
+- **GHL**: `0.1.0` (Compilador release optimizado con JIT/AOT **Cranelift** — no LLVM — y runtime faer/polars-core)
+- **Python**: `3.14.6` (NumPy `2.5.3`, Pandas `3.0.5`, **Polars `1.44.2`**, **Numba `0.67.0`**)
+- **R**: `4.6.1` (Rscript x86_64-w64-mingw32, BLAS de referencia — no OpenBLAS/MKL —, **data.table `1.18.4`**)
+- **Julia**: `1.12` (x86_64-w64-mingw32 con OpenBLAS, **DataFrames.jl `1.8.2`**, **CSV.jl `0.10.17`**)
+
+> **Por qué se agregaron variantes "optimizadas":** la primera versión de este documento (generada con asistencia de Gemini) comparaba a GHL contra Pandas base, `aggregate()` de R base, y un parser CSV artesanal en Julia — pese a que `methodology.md` §1.1 promete explícitamente evaluar `data.table`/`collapse` en R y `Polars`/`Numba`/`PyTorch` en Python. Esa comparación inflaba la ventaja de GHL en la Suite 02 (motor Polars-Rust multihilo vs. bibliotecas de un solo hilo). Esta revisión mantiene ambas variantes (base y optimizada) para no ocultar ningún resultado.
 
 ---
 
 ## 1. Tabla Comparativa de Rendimiento Empírico
 
-Los tiempos representan la media aritmética $\pm$ desviación típica ($\sigma$) medidos por `hyperfine`.
+Media aritmética $\pm$ desviación típica ($\sigma$), n=30 por celda.
 
-| Suite / Carga de Trabajo | GHL (AOT) | GHL (Runtime) | Python 3.14 | R 4.6.1 | Julia | Speedup GHL vs Más Rápido Externo |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Suite 04: Startup / TTFX** *(Hello World)* | **6.7 ms** $\pm$ 2.6 ms | 10.7 ms $\pm$ 0.3 ms | 34.8 ms $\pm$ 0.6 ms | 115.1 ms $\pm$ 1.8 ms | 166.4 ms $\pm$ 1.6 ms | **5.19x vs Python** (24.8x vs Julia) |
-| **Suite 01: Math / SIMD** *(Dot Product $10^7$ `f64`)* | — | **52.7 ms** $\pm$ 1.2 ms | 215.8 ms $\pm$ 1.4 ms | 301.5 ms $\pm$ 3.2 ms | 398.8 ms $\pm$ 2.6 ms | **4.10x vs NumPy** (7.57x vs Julia) |
-| **Suite 02: DataFrames** *(1M filas CSV + Filter + GroupBy + Agg)* | — | **658.8 ms** $\pm$ 17.9 ms | 1,223 ms $\pm$ 7 ms | 3,656 ms $\pm$ 55 ms | 1,505 ms $\pm$ 48 ms | **1.86x vs Pandas** (5.55x vs R) |
-| **Suite 03: Modelado Estadístico** *(Gibbs Sampler 100 iter / 3k obs)* | — | **21.1 ms** $\pm$ 0.8 ms | 402.0 ms $\pm$ 8.9 ms | 139.5 ms $\pm$ 1.2 ms | 575.5 ms $\pm$ 6.2 ms | **6.62x vs R** (19.1x vs NumPy) |
+| Suite / Carga de Trabajo | GHL | Mejor alternativa externa | Speedup GHL |
+| :--- | :---: | :---: | :---: |
+| **Suite 04: Startup / TTFX** *(Hello World)* | **5.3 ms** $\pm$ 0.5 ms (AOT) / 10.5 ms $\pm$ 0.4 ms (Interp) | Python 3.14: 35.2 ms $\pm$ 2.4 ms | **6.63x vs Python** (21.0x vs R, 31.1x vs Julia) |
+| **Suite 01: Math / SIMD** *(Dot Product $10^7$ `f64`)* | **54.7 ms** $\pm$ 2.1 ms | NumPy: 224.3 ms $\pm$ 6.4 ms | **4.10x vs NumPy** (5.70x vs R, 7.55x vs Julia) |
+| **Suite 02: DataFrames** *(1M filas CSV + Filter + GroupBy + Agg)* | 643.0 ms $\pm$ 15.4 ms | **Python (Polars): 310.5 ms $\pm$ 8.6 ms** | **GHL pierde: 0.48x** (Polars-Python es 2.07x más rápido que GHL) |
+| **Suite 03: Modelado Estadístico** *(Gibbs Sampler 100 iter / 3k obs)* | **21.4 ms** $\pm$ 0.6 ms | R (Base): 138.1 ms $\pm$ 2.0 ms | **6.45x vs R** (18.6x vs NumPy, 26.1x vs Julia) |
+
+**El titular honesto de esta fase no es "GHL le gana a todo": en Suite 02, con las librerías idiomáticas óptimas de cada ecosistema, GHL queda 3° lugar, detrás de Polars-Python y data.table-R.** En Suite 01, 03 y 04 sí es el más rápido con margen amplio, incluso contra las variantes optimizadas.
 
 ---
 
 ## 2. Análisis Detallado por Suite
 
 ### Suite 04: Tiempo de Arranque y Time-To-First-X (TTFX)
-- **GHL AOT Binary:** **`6.7 ms`**
-- **GHL Interpreted:** **`10.7 ms`**
-- **Python 3.14:** `34.8 ms`
-- **R 4.6.1:** `115.1 ms`
-- **Julia:** `166.4 ms`
+| Variante | Tiempo |
+| :--- | :---: |
+| **GHL AOT Binary** | **5.3 ms** $\pm$ 0.5 ms |
+| **GHL Interpreted** | **10.5 ms** $\pm$ 0.4 ms |
+| Python 3.14 | 35.2 ms $\pm$ 2.4 ms |
+| R 4.6.1 | 111.7 ms $\pm$ 3.1 ms |
+| Julia | 165.1 ms $\pm$ 2.1 ms |
 
-> **Conclusión:** GHL resuelve de raíz el problema del *Time-To-First-Execution*. Al compilar a binario nativo AOT vía Cranelift/LLVM, el tiempo de arranque de GHL es **24.75x más rápido que Julia** y **5.18x más rápido que Python**. Incluso en modo interpretado (`ghl run`), el arranque toma apenas 10.7 ms gracias a su parser de descenso recursivo zero-allocation.
+GHL arranca más rápido en este micro-benchmark porque no carga runtime alguno (Python/R interpretan bytecode, Julia debe JIT-compilar `using LinearAlgebra`/`using Random` incluso para un "hello world"). Nota de honestidad: a esta escala (5 ms) `hyperfine` advierte que su propia calibración de arranque de shell no es mucho más precisa que la medición misma — el ratio de 31x vs Julia es real pero su margen de error relativo es mayor que en las otras suites.
+
+Julia, en particular, puede tardar mucho más que estos 165 ms cuando el script real carga paquetes pesados (`DataFrames.jl`, `Plots.jl`) — ver Suite 02 más abajo, donde `using DataFrames, CSV` por sí solo añade varios segundos.
 
 ---
 
 ### Suite 01: Álgebra Vectorial y SIMD (Producto Escalar $10^7$ Flotantes)
-- **GHL:** **`52.7 ms`** (4.10x vs Python, 5.72x vs R, 7.57x vs Julia)
-- **Python (NumPy):** `215.8 ms`
-- **R (Base):** `301.5 ms`
-- **Julia:** `398.8 ms`
+| Variante | Tiempo |
+| :--- | :---: |
+| **GHL** | **54.7 ms** $\pm$ 2.1 ms |
+| Python (NumPy) | 224.3 ms $\pm$ 6.4 ms |
+| R (Base) | 311.5 ms $\pm$ 7.5 ms |
+| Julia | 412.8 ms $\pm$ 5.4 ms |
 
-> **Conclusión:** El backend `faer` integrado en `ghl-runtime` satura los registros vectoriales SIMD (AVX2/FMA) sin incurrir en trampolines FFI lentos ni sobrecostes de boxing. Los $10^7$ elementos se computan en sólo 52 ms.
+Esta comparación ya era justa desde la primera versión: `np.dot` y `LinearAlgebra.dot` de Julia despachan a BLAS `ddot` para vectores `Float64`, así que ambos ya corren su ruta "óptima" de fábrica. **Caveat de honestidad:** NumPy y Julia traen un OpenBLAS multihilo empaquetado por defecto; esta instalación de R usa BLAS de referencia (single-thread, no vectorizado a mano) — no se instaló OpenBLAS/MKL para R porque requeriría recompilar R, fuera de alcance de este documento. La ventaja de GHL sobre R en este renglón está en parte explicada por esa asimetría de BLAS, no solo por el compilador de GHL.
 
 ---
 
 ### Suite 02: Ingestión y Manipulación de DataFrames (1M Filas CSV)
-- **Carga:** Ingestión de CSV sintético mixto de 84.2 MB (12 columnas), filtrado por predicado categórico (`status == "OK"`), agrupación de alta cardinalidad (`category`) y agregación con 4 reducciones estadísticas (`mean(value_b)`, `mean(value_c)`, `sum(value_a)`, `count()`).
-- **GHL (Polars-backed):** **`658.8 ms`**
-- **Python (Pandas):** `1,223 ms` (1.22 s)
-- **Julia (Base Streaming):** `1,505 ms` (1.51 s)
-- **R (Base `read.csv` + `aggregate`):** `3,656 ms` (3.66 s)
+Filtrado por predicado categórico (`status == "OK"`), agrupación de alta cardinalidad (`category`), 4 reducciones (`mean(value_b)`, `mean(value_c)`, `sum(value_a)`, `count()`).
 
-> **Conclusión:** El motor de DataFrames de GHL (apoyado en Apache Arrow y `polars-core`) supera a Pandas por **1.86x** y a R Base por **5.55x**, manteniendo una sintaxis declarativa limpia mediante pipes funcionales (`df |> filter(...) |> group_by(...) |> summarize(...)`).
+| Variante | Tiempo | vs GHL |
+| :--- | :---: | :---: |
+| **Python (Polars)** | **310.5 ms** $\pm$ 8.6 ms | **2.07x más rápido** |
+| R (data.table) | 473.2 ms $\pm$ 5.9 ms | 1.36x más rápido |
+| **GHL (Polars-core, Rust)** | **643.0 ms** $\pm$ 15.4 ms | — |
+| Python (Pandas) | 1,219.7 ms $\pm$ 15.9 ms | 1.90x más lento |
+| Julia (parser CSV artesanal) | 1,461.2 ms $\pm$ 11.9 ms | 2.27x más lento |
+| R (Base `read.csv`+`aggregate`) | 3,611.5 ms $\pm$ 73.9 ms | 5.62x más lento |
+| Julia (DataFrames.jl + CSV.jl) | 5,699.3 ms $\pm$ 32.6 ms | 8.86x más lento |
+
+**Este es el resultado más importante de esta revisión.** Con las librerías idiomáticas correctas:
+- **Polars-Python es 2.07x más rápido que GHL**, pese a que ambos envuelven esencialmente el mismo motor Rust (`polars-core`). La diferencia probable está en el binding/overhead de la capa `ghl-runtime` alrededor de polars y en que la CLI de Python-Polars puede estar mejor afinada para este patrón de lectura de CSV que el camino usado en `crates/ghl-runtime/src/io.rs`. **Esto contradice directamente la afirmación original del TODO.md ("GHL supera a Pandas por 1.86x") como si fuera la conclusión relevante — la conclusión correcta es que GHL pierde contra el estado del arte real de su propia categoría (Polars).**
+- **`data.table` en R también supera a GHL** (1.36x), desmintiendo la caracterización de R como "el lento" en DataFrames cuando se usa la herramienta correcta en vez de `aggregate()` base.
+- GHL sigue siendo más rápido que Pandas, R base, y ambas variantes de Julia.
+- `DataFrames.jl + CSV.jl` es, sorprendentemente, la opción **más lenta de las siete**: cargar esos dos paquetes (`using DataFrames, CSV`) cuesta ~5 segundos de latencia de arranque en un proceso Julia nuevo, incluso antes de leer una fila — un costo real y bien documentado en el ecosistema Julia ("TTFX"), que el parser artesanal (sin dependencias) evita por completo.
 
 ---
 
 ### Suite 03: Modelado Estadístico y MCMC (Gibbs Sampler Jerárquico)
-- **Carga:** Muestreador MCMC completo (100 iteraciones, 3.000 observaciones repartidas en 3 clusters con priors normales e hiper-prior Gamma).
-- **GHL:** **`21.1 ms`**
-- **R (Base):** `139.5 ms`
-- **Python (NumPy):** `402.0 ms`
-- **Julia:** `575.5 ms`
+100 iteraciones, 3.000 observaciones en 3 clusters, priors normales + hiper-prior Gamma.
 
-> **Conclusión:** En bucles iterativos donde se alternan actualizaciones de parámetros, filtros condicionales y muestreo de variables aleatorias, GHL demuestra la superioridad de su gestión de memoria sin pausas de Garbage Collection (ARC + Copy-on-Write) y su PRNG `xoshiro256++`, logrando ser **6.62x más rápido que R**, **19.08x más rápido que Python** y **27.32x más rápido que Julia**.
+| Variante | Tiempo | vs GHL |
+| :--- | :---: | :---: |
+| **GHL** | **21.4 ms** $\pm$ 0.6 ms | — |
+| R (Base) | 138.1 ms $\pm$ 2.0 ms | 6.45x más lento |
+| Python (NumPy, bucle puro) | 397.9 ms $\pm$ 7.9 ms | 18.6x más lento |
+| Julia (@inbounds/tipado) | 553.1 ms $\pm$ 2.6 ms | 25.8x más lento |
+| Julia (baseline) | 559.5 ms $\pm$ 3.5 ms | 26.1x más lento |
+| Python (Numba JIT) | 786.9 ms $\pm$ 8.9 ms | 36.8x más lento |
+
+Aquí GHL gana claramente incluso contra las variantes optimizadas — este es el resultado más sólido de los cuatro. Dos hallazgos honestos adicionales:
+- **Numba hace más lento a Python, no más rápido**, para esta carga de trabajo (786.9 ms vs 397.9 ms de NumPy puro). El costo fijo de importar `numba`/`llvmlite` y compilar la función JIT en cada proceso nuevo supera por completo el tiempo de cómputo que ahorra en un bucle de sólo 100×3 iteraciones. Numba brilla en bucles largos reutilizados dentro de un mismo proceso de larga vida, no en scripts de un solo disparo — este benchmark, al medir el proceso completo (arranque incluido), lo penaliza correctamente.
+- **`@inbounds` + tipado explícito en Julia no cambia nada relevante** (559.5 ms → 553.1 ms, ~1% de diferencia, dentro del margen de ruido). El cuello de botella de este algoritmo es la asignación repetida de arrays por el enmascarado booleano (`groups .== j`) en cada iteración, no el chequeo de límites — `@inbounds` no ataca esa causa.
 
 ---
 
-## 3. Verificación de Reproducibilidad
+## 3. Verificación de Reproducibilidad y Corrección
 
-Todos los scripts ejecutados y los archivos de métricas brutas (`.json` y `.md`) generados por `hyperfine` se encuentran organizados modularmente en:
-- `benchmarks/scripts/suite_01_math/`
-- `benchmarks/scripts/suite_02_dataframe/`
-- `benchmarks/scripts/suite_03_modeling/`
-- `benchmarks/scripts/suite_04_runtime/`
-- `benchmarks/scripts/harness/run_benchmarks.ps1`
-- `benchmarks/results/raw/*.json`
+- Todos los scripts, resultados brutos (`.json`/`.md` de `hyperfine`) y el harness (`run_benchmarks.ps1`, v2 con 30 corridas) están en `benchmarks/scripts/` y `benchmarks/results/raw/`.
+- **Corrección funcional verificada, no solo velocidad:** la salida de `bench_df.gh` (GHL) coincide cifra por cifra con Pandas/Polars/data.table/DataFrames.jl para las 5 categorías. El Gibbs sampler produce medias posteriores estadísticamente consistentes (~3.01, ~8.05, −3.99) en las 8 variantes de los 4 lenguajes — ninguna implementación "hace menos trabajo" para parecer más rápida.
+- **Lo que NO se cumplió de `methodology.md`:** aislamiento de hardware (Sección 3, específico de Linux) y medición de Peak RSS / pausas de GC (Sección 2.C/D) — no instrumentados en esta ronda.

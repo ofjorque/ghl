@@ -48,11 +48,19 @@ Python carece de un tipo nativo unificado para datos faltantes:
 
 ## 4. Resultados Empíricos (Benchmarks Fase 10)
 
-Resultados medidos con `hyperfine` sobre Windows x86_64 frente a Python 3.14 (NumPy 2.5 / Pandas 3.0):
+Resultados medidos con `hyperfine`, 30 iteraciones, Windows x86_64, frente a Python 3.14
+(NumPy 2.5, Pandas 3.0, **Polars 1.44**, **Numba 0.67**). methodology.md §1.1 promete
+evaluar Polars y Numba explícitamente, así que se incluyen como variantes propias en
+vez de comparar sólo contra Pandas base:
 
-| Carga de Trabajo | GHL | Python (PyData) | Ventaja de GHL |
-| :--- | :---: | :---: | :---: |
-| **Startup / TTFX** | **6.7 ms** (AOT) / **10.7 ms** (Interp) | 34.8 ms | **3.2x a 5.2x más rápido** |
-| **Dot Product ($10^7$ floats)** | **52.7 ms** | 215.8 ms (NumPy) | **4.10x más rápido** |
-| **DataFrames (1M filas CSV, group-by, agg)** | **658.8 ms** | 1,223 ms (Pandas) | **1.86x más rápido** |
-| **Gibbs Sampler (100 iteraciones)** | **21.1 ms** | 402.0 ms (NumPy) | **19.08x más rápido** |
+| Carga de Trabajo | GHL | Python (PyData) | Resultado |
+| :--- | :---: | :---: | :--- |
+| **Startup / TTFX** | **5.3 ms** (AOT) / 10.5 ms (Interp) | 35.2 ms | GHL 3.3x-6.6x más rápido |
+| **Dot Product ($10^7$ floats)** | **54.7 ms** | 224.3 ms (NumPy, ya vía BLAS) | GHL 4.10x más rápido |
+| **DataFrames (1M filas CSV, group-by, agg)** | 643.0 ms | 1,219.7 ms (Pandas) / **310.5 ms (Polars)** | **Polars-Python es 2.07x más rápido que GHL** — GHL sólo gana contra Pandas (1.90x), no contra Polars |
+| **Gibbs Sampler (100 iteraciones)** | **21.4 ms** | 397.9 ms (NumPy) / 786.9 ms (Numba JIT) | GHL 18.6x más rápido que NumPy; Numba resulta **más lento** que NumPy puro aquí (el costo de importar/compilar JIT supera lo que ahorra en un bucle de 300 iteraciones totales) |
+
+**Nota de honestidad:** en DataFrames, la comparación justa (Polars vs Polars, ya que
+ambos motores son esencialmente el mismo `polars-core` de Rust) muestra a GHL
+*perdiendo*, no ganando — ver el detalle de por qué en la sección "Suite 02" de
+[../results/summary.md](../results/summary.md).

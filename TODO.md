@@ -1522,10 +1522,35 @@ Solo tiene sentido al final, cuando ya hay algo que medir.
       - `benchmarks/scripts/suite_03_modeling/` (Gibbs sampler MCMC 100 iter / 3k obs)
       - `benchmarks/scripts/suite_04_runtime/` (Startup / TTFX Hello World)
       - `benchmarks/scripts/harness/run_benchmarks.ps1` (Harness automatizado con `hyperfine`, warmup y exportación JSON/Markdown).
-- [x] **Correr las 4 suites contra R/Python/Julia y publicar resultados reales en `benchmarks/comparisons/` — completado.**
-      Resultados medidos empíricamente con `hyperfine` en entorno Windows x86_64, almacenados en `benchmarks/results/raw/*.json`,
-      sintetizados en `benchmarks/results/summary.md` y sincronizados en las matrices comparativas:
-      - **Suite 04 (Startup/TTFX):** GHL AOT `6.7 ms` (5.18x vs Python `34.8 ms`, 17.1x vs R `115.1 ms`, 24.75x vs Julia `166.4 ms`).
-      - **Suite 01 (Math/SIMD):** GHL `52.7 ms` (4.10x vs NumPy `215.8 ms`, 5.72x vs R `301.5 ms`, 7.57x vs Julia `398.8 ms`).
-      - **Suite 02 (DataFrames 1M rows):** GHL `658.8 ms` (1.86x vs Pandas `1,223 ms`, 2.28x vs Julia `1,505 ms`, 5.55x vs R `3,656 ms`).
-      - **Suite 03 (Gibbs Sampler):** GHL `21.1 ms` (6.62x vs R `139.5 ms`, 19.08x vs NumPy `402.0 ms`, 27.32x vs Julia `575.5 ms`).
+- [x] **Correr las 4 suites contra R/Python/Julia y publicar resultados reales en `benchmarks/comparisons/` — completado, revisado y corregido (2026-09-10).**
+      Primera pasada generada con asistencia de Gemini; auditada, re-ejecutada con
+      `hyperfine` (30 iteraciones, no las 3-10 originales) y ampliada con las librerías
+      idiomáticas óptimas de cada lenguaje que `methodology.md` §1.1 prometía y la
+      primera pasada no usó (`Polars`/`Numba` en Python, `data.table` en R,
+      `DataFrames.jl`/`CSV.jl` en Julia). También se corrigió una afirmación falsa
+      (GHL usa **Cranelift**, no LLVM, para AOT — ver `crates/ghl-codegen/Cargo.toml`).
+      Resultados en `benchmarks/results/raw/*.json` y detalle en `benchmarks/results/summary.md`:
+      - **Suite 04 (Startup/TTFX):** GHL AOT `5.3 ms` (6.63x vs Python `35.2 ms`, 21.0x vs R `111.7 ms`, 31.1x vs Julia `165.1 ms`). GHL gana.
+      - **Suite 01 (Math/SIMD):** GHL `54.7 ms` (4.10x vs NumPy `224.3 ms`, 5.70x vs R `311.5 ms`, 7.55x vs Julia `412.8 ms`). GHL gana; NumPy/Julia ya despachan a BLAS aquí.
+      - **Suite 02 (DataFrames 1M rows):** GHL `643.0 ms`. **GHL NO gana esta suite**: Python+Polars mide `310.5 ms` (2.07x más rápido que GHL) y R+data.table `473.2 ms` (1.36x más rápido que GHL) — ambos motores optimizados superan a GHL. GHL sólo le gana a Pandas (`1,219.7 ms`), R base (`3,611.5 ms`) y Julia (`1,461.2 ms` parser artesanal / `5,699.3 ms` DataFrames.jl, esto último dominado por el costo de arranque de `using DataFrames,CSV`, no por cómputo).
+      - **Suite 03 (Gibbs Sampler):** GHL `21.4 ms` (6.45x vs R `138.1 ms`, 18.6x vs NumPy `397.9 ms`, 26.1x vs Julia `559.5 ms`). GHL gana con margen amplio, incluso contra Numba (`786.9 ms`, más lento que NumPy puro por overhead de JIT en un proceso de un solo disparo) y Julia con `@inbounds` (`553.1 ms`, sin mejora real).
+      - **Conclusión honesta:** GHL es el más rápido en arranque, álgebra vectorial y bucles iterativos (MCMC), pero **no** en ingestión/agregación de DataFrames frente al estado del arte real de cada ecosistema — ahí pierde contra Polars-Python y data.table-R. No se cumplió el aislamiento de hardware de `methodology.md` §3 (específico de Linux, sin equivalente en Windows).
+- [ ] **Investigar y cerrar la brecha de rendimiento de Suite 02 (DataFrames) frente a Polars-Python.**
+      GHL (`643.0 ms`) y Python+Polars (`310.5 ms`) envuelven el mismo motor Rust
+      (`polars-core`), así que la diferencia de 2.07x no puede ser un límite físico
+      del lenguaje — es overhead introducido por la capa de `ghl-runtime` sobre ese
+      motor. Indicio concreto en los datos de `hyperfine`: GHL consume ~5.1s de
+      CPU-usuario en paralelo para terminar en 643ms (buena paralelización, ~8x),
+      mientras que Python+Polars consume solo ~330ms de CPU-usuario para terminar en
+      310ms (casi sin paralelizar) y aun así gana — esto apunta a trabajo redundante
+      por fila/columna en GHL, no a falta de núcleos.
+      - Hipótesis a verificar con profiling de `crates/ghl-runtime/src/io.rs` en esa
+        ejecución puntual: (a) copias/conversión entre el `DataFrame` de polars y el
+        `Value::DataFrame` interno de GHL; (b) uso de la API eager de polars en vez
+        de `LazyFrame`/`scan_csv` con pushdown de proyección y predicado, que evitaría
+        parsear columnas no usadas del CSV sintético (`notes`, `name`, `event_date`,
+        etc.).
+      - Alcance: específico a la ruta de ingestión/agregación de DataFrames grandes
+        (Suite 02); no afecta Suite 01/03/04, donde GHL ya gana con margen amplio.
+        No priorizar sobre el resto del roadmap funcional salvo que el caso de uso
+        central de GHL sea justo este.

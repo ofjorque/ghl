@@ -56,3 +56,27 @@ Para minimizar el ruido térmico y la interferencia del sistema operativo:
    export JULIA_NUM_THREADS=1
    export GHL_NUM_THREADS=1
    ```
+
+---
+
+## 4. Nota de Aplicación Real (Fase 10, Windows x86_64)
+
+La ejecución real de `benchmarks/scripts/harness/run_benchmarks.ps1` en un desktop
+Windows x86_64 **no** implementa el protocolo de aislamiento de hardware de la
+Sección 3 (`isolcpus`, `taskset`, gobernador de CPU y desactivación de Turbo Boost
+son conceptos específicos de Linux sin equivalente directo en Windows, y no se
+fuerzan las variables de un solo hilo). Los resultados en `results/` deben leerse
+como **mediciones realistas de escritorio**, no como mediciones de laboratorio
+aisladas térmicamente. Esto favorece en particular a cualquier implementación que
+use múltiples hilos "gratis" (p. ej. Polars/`rayon` en GHL, OpenBLAS en NumPy/Julia)
+frente a una que fuerce un solo hilo.
+
+Sí se cumple el requisito de ≥30 iteraciones por combinación lenguaje/prueba
+(warmups descartados vía `hyperfine --warmup`).
+
+Para Suite 02 y Suite 03 se añadió además una variante "idiomática optimizada" por
+lenguaje competidor allí donde la implementación base no representa la mejor
+práctica real (`Polars`/`data.table`/`DataFrames.jl`/`Numba`), en vez de reemplazar
+la baseline — ambas quedan reportadas en `results/summary.md` para que la
+comparación no dependa de qué tan bien o mal esté escrita la implementación de
+referencia en cada lenguaje.

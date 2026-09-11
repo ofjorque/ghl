@@ -9,9 +9,9 @@ Esta tabla resume las diferencias clave de arquitectura, rendimiento, semántica
 | Dimensión / Característica | **GHL (`.gh` / `.ghl`)** | **R (Base + Tidyverse)** | **Python (NumPy + PyData)** | **Julia** |
 | :--- | :--- | :--- | :--- | :--- |
 | **Paradigma Principal** | Expresiones / Funcional / Imperativo | Funcional / Vectorizado / S3/S4 | Multiparadigma / OOP | Múltiple Despacho / Funcional |
-| **Modelo de Compilación** | AOT nativo (LLVM) + JIT ligero (REPL) | Interpretado (Bytecode eval) | Interpretado (CPython bytecode) | JIT intensivo (LLVM en runtime) |
+| **Modelo de Compilación** | AOT nativo (Cranelift) + JIT ligero (REPL, también Cranelift) | Interpretado (Bytecode eval) | Interpretado (CPython bytecode) | JIT intensivo (LLVM en runtime) |
 | **Problema de los 2 Lenguajes** | **Resuelto** (código nativo puro) | No resuelto (depende de C/C++/Rust) | No resuelto (depende de C/C++/Rust) | **Resuelto** (código puro es rápido) |
-| **Tiempo de Arranque / TTFX** | **Instantáneo** (< 20 ms) | Rápido (~50 ms) | Moderado (~80-150 ms) | **Lento a muy lento** (0.5s - 15s) |
+| **Tiempo de Arranque / TTFX** | **Instantáneo** (< 20 ms, medido en §"Resultados Empíricos") | ~111 ms medido (Base R) | ~35 ms medido | **~165 ms medido en "hello world"**; cargas de paquetes pesados (`DataFrames.jl`, `Plots.jl`) o la primera invocación de una función con tipos nuevos puede escalar a **0.5s-15s** (no reproducido en esta suite, ver discusión cualitativa en [vs-julia.md](vs-julia.md) §2.A; sí medimos el costo de `using DataFrames, CSV` en la Suite 02, ver más abajo) |
 | **Gestión de Memoria** | ARC + CoW + Arenas (Sin Tracing GC) | Tracing GC (generacional simple) | Conteo de ref + Tracing GC cíclico | Tracing GC multihilo |
 | **Pausas de GC en Cómputo** | **0 ms (Cero pausas impredecibles)**| Frecuentes en creación de objetos | Pausas periódicas moderadas | Pausas de GC que afectan latencia |
 | **Manejo de Datos Faltantes** | `NA` nativo con lógica Kleene 3-val | `NA` nativo (múltiples tipos) | Inconsistente (`None`, `nan`, `pd.NA`) | `missing` con lógica 3-val |
@@ -28,13 +28,22 @@ Esta tabla resume las diferencias clave de arquitectura, rendimiento, semántica
 
 ## Resultados Empíricos Medidos (Fase 10)
 
-Mediciones automatizadas con `hyperfine` en entorno Windows x86_64:
+Mediciones con `hyperfine`, **30 iteraciones** por celda, Windows x86_64. Se muestra la
+librería base de cada lenguaje y, entre paréntesis, la variante idiomática optimizada
+cuando difiere (`Polars`/`data.table`/`DataFrames.jl`/`Numba`) — ver metodología en
+[results/summary.md](../results/summary.md).
 
-| Métrica / Benchmark | GHL | Python | R | Julia | Ventaja GHL |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Startup / TTFX** | **6.7 ms** (AOT) / **10.7 ms** (Interp) | 34.8 ms | 115.1 ms | 166.4 ms | **5.2x a 24.8x más rápido** |
-| **Dot Product ($10^7$ floats)** | **52.7 ms** | 215.8 ms | 301.5 ms | 398.8 ms | **4.1x a 7.6x más rápido** |
-| **DataFrames (1M filas)** | **658.8 ms** | 1,223 ms | 3,656 ms | 1,505 ms | **1.9x a 5.6x más rápido** |
-| **Gibbs Sampler (100 iter)** | **21.1 ms** | 402.0 ms | 139.5 ms | 575.5 ms | **6.6x a 27.3x más rápido** |
+| Métrica / Benchmark | GHL | Python | R | Julia | Resultado |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Startup / TTFX** | **5.3 ms** (AOT) / 10.5 ms (Interp) | 35.2 ms | 111.7 ms | 165.1 ms | GHL gana, 6.6x-31.1x |
+| **Dot Product ($10^7$ floats)** | **54.7 ms** | 224.3 ms (NumPy, ya usa BLAS) | 311.5 ms (BLAS de referencia) | 412.8 ms (ya usa BLAS) | GHL gana, 4.1x-7.6x |
+| **DataFrames (1M filas)** | 643.0 ms | 1,219.7 ms Pandas / **310.5 ms Polars** | 3,611.5 ms base / 473.2 ms data.table | 1,461.2 ms streaming / 5,699.3 ms DataFrames.jl | **GHL PIERDE**: Polars-Python es 2.07x más rápido y data.table-R 1.36x más rápido que GHL |
+| **Gibbs Sampler (100 iter)** | **21.4 ms** | 397.9 ms NumPy / 786.9 ms Numba (más lento) | 138.1 ms | 559.5 ms / 553.1 ms @inbounds (sin cambio) | GHL gana con margen amplio, 6.5x-36.8x |
 
-*Ver informe detallado en [benchmarks/results/summary.md](file:///o:/Documentos/Rust%20Project/ghl/benchmarks/results/summary.md).*
+El hallazgo central de esta ronda: **GHL no es universalmente el más rápido.** En la
+Suite de DataFrames, comparado contra el estado del arte real de cada ecosistema
+(no contra Pandas/`aggregate`/un parser artesanal), GHL queda detrás de Polars-Python
+y data.table-R. Es el más rápido en arranque, álgebra vectorial y bucles iterativos
+(MCMC), pero no en ingestión/agregación de DataFrames a esta escala.
+
+*Ver informe detallado, incluyendo notas de honestidad por suite, en [benchmarks/results/summary.md](../results/summary.md).*

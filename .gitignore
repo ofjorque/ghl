@@ -22,3 +22,6 @@ lcov.info
 benchmarks/.venv/
 benchmarks/scripts/**/*.exe
 benchmarks/scripts/**/*.pdb
+benchmarks/scripts/**/__pycache__/
+benchmarks/scripts/**/*.nbc
+benchmarks/scripts/**/*.nbi

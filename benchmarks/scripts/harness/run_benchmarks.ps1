@@ -1,5 +1,17 @@
 # Phase 10 Benchmark Execution Harness
-# Runs Hyperfine across all 4 benchmark suites comparing GHL with Python, R, and Julia
+# Runs Hyperfine across all 4 benchmark suites comparing GHL with Python, R, and Julia.
+#
+# v2: bumped to >=30 iterations per methodology.md, and added an "idiomatic
+# optimized" variant per competing language where the naive baseline was not
+# representative of real-world best practice (Polars for Python, data.table
+# for R, DataFrames.jl for Julia in Suite 02; Numba-JIT for Python in Suite 03;
+# @inbounds/type-annotated Julia in Suite 03). Baselines are kept alongside the
+# optimized variants rather than replaced, so both stories stay visible.
+#
+# NOTE on hardware isolation: methodology.md's CPU-governor/turbo-boost/taskset
+# protocol targets Linux and does not apply on this Windows machine. No such
+# isolation is performed here; treat these as realistic desktop numbers, not
+# lab-isolated ones.
 
 $ErrorActionPreference = "Stop"
 
@@ -25,7 +37,7 @@ Write-Host "`n>>> [1/4] Running Suite 04: Startup / TTFX (Hello World)..." -Fore
 $suite04Json = "$resultsDir\suite_04_runtime.json"
 $suite04Md   = "$resultsDir\suite_04_runtime.md"
 
-hyperfine --warmup 3 --runs 10 `
+hyperfine --warmup 5 --runs 30 `
     --export-json $suite04Json `
     --export-markdown $suite04Md `
     -n "GHL (AOT Binary)" ".\benchmarks\scripts\suite_04_runtime\hello_aot.exe" `
@@ -41,7 +53,13 @@ Write-Host "`n>>> [2/4] Running Suite 01: Math (Dot Product 10M Elements)..." -F
 $suite01Json = "$resultsDir\suite_01_math.json"
 $suite01Md   = "$resultsDir\suite_01_math.md"
 
-hyperfine --warmup 2 --runs 5 `
+# NumPy's np.dot and Julia's LinearAlgebra.dot already dispatch to BLAS ddot
+# for Float64 vectors, so they are already each ecosystem's "optimized" path.
+# R here links against reference BLAS (not OpenBLAS/MKL), so base `sum(a*b)`
+# is realistically as fast as `crossprod` gets on this machine; no separate
+# "optimized R" variant is added for this suite (see summary.md for the caveat
+# that NumPy/Julia ship a tuned BLAS out of the box while this R does not).
+hyperfine --warmup 5 --runs 30 `
     --export-json $suite01Json `
     --export-markdown $suite01Md `
     -n "GHL" "$ghlExe run benchmarks\scripts\suite_01_math\bench_dot.gh" `
@@ -56,13 +74,16 @@ Write-Host "`n>>> [3/4] Running Suite 02: DataFrame Operations (1M Rows)..." -Fo
 $suite02Json = "$resultsDir\suite_02_dataframe.json"
 $suite02Md   = "$resultsDir\suite_02_dataframe.md"
 
-hyperfine --warmup 1 --runs 3 `
+hyperfine --warmup 3 --runs 30 `
     --export-json $suite02Json `
     --export-markdown $suite02Md `
     -n "GHL (Polars-backed)" "$ghlExe run benchmarks\scripts\suite_02_dataframe\bench_df.gh" `
     -n "Python (Pandas)" "$pyExe benchmarks\scripts\suite_02_dataframe\bench_df.py" `
+    -n "Python (Polars)" "$pyExe benchmarks\scripts\suite_02_dataframe\bench_df_polars.py" `
     -n "R (Base)" "$rExe benchmarks\scripts\suite_02_dataframe\bench_df.R" `
-    -n "Julia (Base Streaming)" "$jlExe benchmarks\scripts\suite_02_dataframe\bench_df.jl"
+    -n "R (data.table)" "$rExe benchmarks\scripts\suite_02_dataframe\bench_df_datatable.R" `
+    -n "Julia (Base Streaming)" "$jlExe benchmarks\scripts\suite_02_dataframe\bench_df.jl" `
+    -n "Julia (DataFrames.jl)" "$jlExe benchmarks\scripts\suite_02_dataframe\bench_df_dataframes.jl"
 
 # -----------------------------------------------------------------------------
 # Suite 03: Statistical Modeling (Hierarchical Gibbs Sampler 100 Iterations)
@@ -71,13 +92,15 @@ Write-Host "`n>>> [4/4] Running Suite 03: Statistical Modeling (Gibbs Sampler 10
 $suite03Json = "$resultsDir\suite_03_modeling.json"
 $suite03Md   = "$resultsDir\suite_03_modeling.md"
 
-hyperfine --warmup 1 --runs 3 `
+hyperfine --warmup 3 --runs 30 `
     --export-json $suite03Json `
     --export-markdown $suite03Md `
     -n "GHL" "$ghlExe run benchmarks\scripts\suite_03_modeling\bench_gibbs.gh" `
     -n "Python (NumPy)" "$pyExe benchmarks\scripts\suite_03_modeling\bench_gibbs.py" `
+    -n "Python (Numba JIT)" "$pyExe benchmarks\scripts\suite_03_modeling\bench_gibbs_numba.py" `
     -n "R (Base)" "$rExe benchmarks\scripts\suite_03_modeling\bench_gibbs.R" `
-    -n "Julia" "$jlExe benchmarks\scripts\suite_03_modeling\bench_gibbs.jl"
+    -n "Julia" "$jlExe benchmarks\scripts\suite_03_modeling\bench_gibbs.jl" `
+    -n "Julia (@inbounds/typed)" "$jlExe benchmarks\scripts\suite_03_modeling\bench_gibbs_inbounds.jl"
 
 Write-Host "`n=================================================================" -ForegroundColor Green
 Write-Host " All benchmark suites completed successfully! Results stored in: " -ForegroundColor Green
