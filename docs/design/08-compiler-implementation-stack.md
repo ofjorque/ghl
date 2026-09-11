@@ -86,6 +86,13 @@ Esta selección técnica garantiza:
 - **`reedline`:** Motor de línea de comandos para el REPL interactivo (creado para Nushell). Soporta edición multilínea, historial persistente, atajos de teclado y autocompletado en vivo.
 - **`plotters`:** Motor de renderizado visual de datos estadísticos. Permite graficar curvas de densidad, histogramas y dispersión tanto en archivos PNG/SVG como directamente en la terminal interactiva mediante caracteres braille/ANSI.
 
+### 3.7. Aceleración en Hardware (GPU)
+- **`wgpu`:** Motor primario de cómputo en aceleradoras gráficas basado en la especificación estándar WebGPU.
+  - Portabilidad nativa en Windows (DirectX 12 / Vulkan), macOS (Metal) y Linux (Vulkan).
+  - Cero dependencias de SDKs gigantescos propietarios; binarios compactos (< 20 MB).
+- **`bytemuck`:** Casteo Zero-Copy sin sobrecarga entre estructuras primitivas (`f64`, `f32`, `i64`), matrices contiguas de `faer`, arrays de Arrow y búferes de GPU (`&[u8]`).
+- **`cudarc` (Feature flag opcional `cuda`):** Enlace dinámico con el runtime de NVIDIA CUDA (`nvcuda.dll` / `libcuda.so`). Se activa opcionalmente en clusters científicos para exprimir aceleración cuBLAS sin bloquear la ejecución en entornos sin GPUs NVIDIA.
+
 ---
 
 ## 4. Estructura de Workspace de Cargo Planificada

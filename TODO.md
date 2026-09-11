@@ -1495,9 +1495,22 @@ Puede avanzar en paralelo a partir de Fase 0; no depende de las fases de datos/e
 ## Fase 9 — GPU (`std::gpu`, RFC 05 §4)
 Lo más especulativo y grande; sin diseño concreto todavía. Al final a propósito.
 
-- [ ] Diseñar API `std::gpu` (RFC 05 §4) — hoy es solo una sección de la RFC,
-      sin prototipo ni crate elegido.
-- [ ] Evaluar backend (wgpu, CUDA vía FFI, etc.) — decisión abierta.
+- [x] **Diseñar API `std::gpu` (RFC 05 §4) — completado y formalizado.**
+      Diseño arquitectónico completo comparando exhaustivamente las virtudes y falencias de
+      R, Python, Julia y Rust. Adopta paridad de operadores (`+`, `-`, `*`, `%*%`/`matmul`, `transpose`,
+      `cov`, `cholesky`), transferencias DMA explícitas (`to_gpu()`, `to_cpu()`), gestión determinista
+      Zero-GC vía ARC + CoW (búferes de GPU liberados inmediatamente en `ref_count == 0` y mutación
+      in-place cuando `ref_count == 1`), y diagnósticos empáticos con Kaomojis (`[C0601]`, `[S0601]`).
+- [x] **Evaluar y seleccionar backend (wgpu, CUDA vía FFI, etc.) — completado y documentado.**
+      Decisión de arquitectura dual alineada con la pila de crates de GHL:
+      1. **Backend Primario Portable:** `wgpu = "24.0"` + `bytemuck` (Vulkan, Metal, DirectX 12)
+         sin SDKs gigantescos, compatible con laptops y workstations estándar (<20MB de binario).
+         Shaders WGSL pre-compilados y cacheados (`ComputePipelineCache`) para evitar latencias TTFX.
+      2. **Backend Acelerado Opcional:** `cudarc` (feature flag `cuda`) con carga dinámica de
+         `nvcuda.dll`/`libcuda.so` para entornos de clúster científico con cuBLAS.
+      3. **Interoperabilidad:** Zero-Copy con arrays Arrow (`polars`) y matrices continuas (`faer`),
+         despacho desde código nativo Cranelift vía libcalls de runtime, y encolamiento multihilo
+         asíncrono seguro mediante `rayon`. Documentado en detalle en RFC 05 §4 y RFC 08 §3.7.
 
 ## Fase 10 — Cierre: benchmarks reales
 Solo tiene sentido al final, cuando ya hay algo que medir.
