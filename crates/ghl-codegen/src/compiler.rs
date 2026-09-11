@@ -36,6 +36,15 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
         }
     }
 
+    fn is_current_block_terminated(&self) -> bool {
+        if let Some(block) = self.builder.current_block() {
+            if let Some(inst) = self.builder.func.layout.last_inst(block) {
+                return self.builder.func.dfg.insts[inst].opcode().is_terminator();
+            }
+        }
+        false
+    }
+
     pub fn compile_function(mut self, func: &HirFunction) -> Result<(), Diagnostic> {
         let entry_block = self.builder.create_block();
         self.builder.append_block_params_for_function_params(entry_block);
@@ -53,7 +62,9 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
         }
 
         let ret_val = self.compile_expr(&func.body)?;
-        self.builder.ins().return_(&[ret_val]);
+        if !self.is_current_block_terminated() {
+            self.builder.ins().return_(&[ret_val]);
+        }
         let target_config = self.module.target_config();
         self.builder.finalize(target_config);
 
@@ -145,21 +156,37 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                 self.builder.switch_to_block(then_block);
                 self.builder.seal_block(then_block);
                 let then_res = self.compile_expr(then_branch)?;
-                self.builder.def_var(res_var, then_res);
-                self.builder.ins().jump(merge_block, &[]);
+                let then_filled = self.is_current_block_terminated();
+                if !then_filled {
+                    self.builder.def_var(res_var, then_res);
+                    self.builder.ins().jump(merge_block, &[]);
+                }
 
                 // 2. Else branch
                 self.builder.switch_to_block(else_block);
                 self.builder.seal_block(else_block);
                 let else_res = self.compile_expr(else_branch)?;
-                self.builder.def_var(res_var, else_res);
-                self.builder.ins().jump(merge_block, &[]);
+                let else_filled = self.is_current_block_terminated();
+                if !else_filled {
+                    self.builder.def_var(res_var, else_res);
+                    self.builder.ins().jump(merge_block, &[]);
+                }
 
                 // 3. Merge block
                 self.builder.switch_to_block(merge_block);
                 self.builder.seal_block(merge_block);
 
-                Ok(self.builder.use_var(res_var))
+                if then_filled && else_filled {
+                    let dummy = match clif_ty {
+                        types::F64 => self.builder.ins().f64const(0.0),
+                        types::I8 => self.builder.ins().iconst(types::I8, 0),
+                        _ => self.builder.ins().iconst(types::I64, 0),
+                    };
+                    self.builder.def_var(res_var, dummy);
+                    Ok(dummy)
+                } else {
+                    Ok(self.builder.use_var(res_var))
+                }
             }
             HirExpr::Block { statements, result, .. } => {
                 for stmt in statements {
@@ -202,13 +229,22 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                 Ok(())
             }
             HirStatement::Return(expr_opt) => {
+                if self.is_current_block_terminated() {
+                    return Ok(());
+                }
                 if let Some(e) = expr_opt {
                     let val = self.compile_expr(e)?;
-                    self.builder.ins().return_(&[val]);
+                    if !self.is_current_block_terminated() {
+                        self.builder.ins().return_(&[val]);
+                    }
                 } else {
                     let zero = self.builder.ins().iconst(types::I64, 0);
                     self.builder.ins().return_(&[zero]);
                 }
+                // Switch to a fresh dead block to safely absorb any dead statements
+                let dead_block = self.builder.create_block();
+                self.builder.switch_to_block(dead_block);
+                self.builder.seal_block(dead_block);
                 Ok(())
             }
         }

@@ -79,4 +79,71 @@ mod tests {
         let res = hypot_fn(3.0, 4.0);
         assert!((res - 25.0).abs() < 1e-6);
     }
+
+    #[test]
+    fn test_jit_compile_early_return() {
+        let code = r#"
+            fn sign(n: i64) -> i64 {
+                if n > 0 {
+                    return 1;
+                };
+                if n < 0 {
+                    return -1;
+                };
+                return 0;
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let hir_module = lower_ast(&program).expect("hir ok");
+
+        let mut jit = JitEngine::new().expect("jit init ok");
+        jit.compile_module(&hir_module).expect("jit compilation ok");
+
+        let sign_fn = jit.get_fn_i64_1("sign").expect("sign compiled");
+        assert_eq!(sign_fn(42), 1);
+        assert_eq!(sign_fn(-10), -1);
+        assert_eq!(sign_fn(0), 0);
+    }
+
+    #[test]
+    fn test_jit_compile_both_branches_return() {
+        let code = r#"
+            fn abs_val(n: i64) -> i64 {
+                if n < 0 {
+                    return -n;
+                } else {
+                    return n;
+                }
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let hir_module = lower_ast(&program).expect("hir ok");
+
+        let mut jit = JitEngine::new().expect("jit init ok");
+        jit.compile_module(&hir_module).expect("jit compilation ok");
+
+        let abs_fn = jit.get_fn_i64_1("abs_val").expect("abs_val compiled");
+        assert_eq!(abs_fn(-5), 5);
+        assert_eq!(abs_fn(7), 7);
+    }
+
+    #[test]
+    fn test_jit_compile_dead_code_after_return() {
+        let code = r#"
+            fn dead_branch(n: i64) -> i64 {
+                return n * 2;
+                let unused = n + 100;
+                return unused;
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let hir_module = lower_ast(&program).expect("hir ok");
+
+        let mut jit = JitEngine::new().expect("jit init ok");
+        jit.compile_module(&hir_module).expect("jit compilation ok");
+
+        let dead_fn = jit.get_fn_i64_1("dead_branch").expect("dead_branch compiled");
+        assert_eq!(dead_fn(21), 42);
+    }
 }
+
