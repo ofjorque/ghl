@@ -1,0 +1,4 @@
+let a = random_uniform(10000000, 42);
+let b = random_uniform(10000000, 43);
+let res = dot(a, b);
+println(res);

@@ -1,0 +1,43 @@
+fn run_gibbs(y, groups, num_iterations) {
+    let num_groups = max(groups) + 1;
+    let mut trace = zeros(num_iterations, num_groups);
+    let mut tau = 1.0;
+    let mut mu_vec = zeros(num_groups);
+    let n_total = len(y);
+
+    let mut iter = 0;
+    while iter < num_iterations {
+        let mut j = 0;
+        while j < num_groups {
+            let y_j = filter(y, groups == j);
+            let n_j = len(y_j);
+            let post_mean = (sum(y_j) * tau) / (n_j * tau + 1.0);
+            let post_sd = 1.0 / sqrt(n_j * tau + 1.0);
+            let draw = first(random_normal(1, post_mean, post_sd));
+            mu_vec = set(mu_vec, j, draw);
+            j = j + 1;
+        };
+
+        let diff = y - get(mu_vec, groups);
+        let ssq = dot(diff, diff);
+        let alpha_post = 1.0 + n_total / 2.0;
+        let beta_post = 1.0 + ssq / 2.0;
+        tau = first(random_gamma(1, alpha_post, beta_post));
+
+        trace = set_row(trace, iter, mu_vec);
+        iter = iter + 1;
+    };
+
+    trace
+}
+
+let df = read_csv("benchmarks/scripts/suite_03_modeling/gibbs_data.csv");
+let y = pull(df, "y");
+let groups = pull(df, "group");
+let trace = run_gibbs(y, groups, 100);
+let col0 = get_col(trace, 0);
+let col1 = get_col(trace, 1);
+let col2 = get_col(trace, 2);
+println(mean(col0));
+println(mean(col1));
+println(mean(col2));

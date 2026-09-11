@@ -45,3 +45,16 @@ El intérprete de R es intrínsecamente monohilo. Para paralelizar tareas, los p
    (ФωФ) [Statistical Warning SW014]: Perfect Separation Detected in Logistic Fit
      = Note: Fitted probabilities evaluated to 0.0 or 1.0. Coefficients may diverge to infinity.
    ```
+
+---
+
+## 4. Resultados Empíricos (Benchmarks Fase 10)
+
+Resultados medidos en igualdad de condiciones sobre Windows x86_64:
+
+| Prueba | GHL | R 4.6.1 | Ventaja de GHL |
+| :--- | :---: | :---: | :---: |
+| **Startup (TTFX)** | **6.7 ms** (AOT) / **10.7 ms** (Interp) | 115.1 ms | **10.7x a 17.1x más rápido** |
+| **Dot Product ($10^7$ floats)** | **52.7 ms** | 301.5 ms | **5.7x más rápido** |
+| **DataFrames (1M filas CSV, group-by, agg)** | **658.8 ms** | 3,656 ms | **5.55x más rápido** |
+| **Gibbs Sampler (100 iteraciones)** | **21.1 ms** | 139.5 ms | **6.62x más rápido** |

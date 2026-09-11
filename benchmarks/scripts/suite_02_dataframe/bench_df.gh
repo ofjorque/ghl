@@ -1,0 +1,11 @@
+let df = read_csv("target/synthetic_1m.csv");
+let summary = df
+    |> filter(status == "OK")
+    |> group_by(category)
+    |> summarize(
+        mean_b = mean(value_b),
+        mean_c = mean(value_c),
+        total_a = sum(value_a),
+        n = count()
+    );
+println(summary);

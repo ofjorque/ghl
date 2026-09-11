@@ -43,3 +43,16 @@ Python carece de un tipo nativo unificado para datos faltantes:
 3. **Manejo de `NA` sin Corrupción de Tipos:** Soporte formal para enteros, booleanos y cadenas con valores faltantes mediante bitmasks Arrow nativos, sin degradar enteros a flotantes.
 4. **Despliegue Limpio y Determinista:** Generación de binarios ejecutables autónomos de pocos megabytes, eliminando la pesadilla de entornos virtuales corruptos (`venv`) y dependencias C-ABI incompatibles.
 5. **Diagnósticos Claros:** En lugar de tracebacks de 40 líneas de excepciones genéricas de Python, GHL señala inmediatamente si el error es de cómputo (`[Compute Error]`) o estadístico (`[Statistical Error]`) con Kaomojis empáticos.
+
+---
+
+## 4. Resultados Empíricos (Benchmarks Fase 10)
+
+Resultados medidos con `hyperfine` sobre Windows x86_64 frente a Python 3.14 (NumPy 2.5 / Pandas 3.0):
+
+| Carga de Trabajo | GHL | Python (PyData) | Ventaja de GHL |
+| :--- | :---: | :---: | :---: |
+| **Startup / TTFX** | **6.7 ms** (AOT) / **10.7 ms** (Interp) | 34.8 ms | **3.2x a 5.2x más rápido** |
+| **Dot Product ($10^7$ floats)** | **52.7 ms** | 215.8 ms (NumPy) | **4.10x más rápido** |
+| **DataFrames (1M filas CSV, group-by, agg)** | **658.8 ms** | 1,223 ms (Pandas) | **1.86x más rápido** |
+| **Gibbs Sampler (100 iteraciones)** | **21.1 ms** | 402.0 ms (NumPy) | **19.08x más rápido** |

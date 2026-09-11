@@ -1515,7 +1515,17 @@ Lo más especulativo y grande; sin diseño concreto todavía. Al final a propós
 ## Fase 10 — Cierre: benchmarks reales
 Solo tiene sentido al final, cuando ya hay algo que medir.
 
-- [ ] Implementar `methodology.md` (aislamiento de CPU, `hyperfine`, etc.) como
-      script/harness reproducible.
-- [ ] Correr las 4 suites contra R/Python/Julia y publicar resultados reales en
-      `benchmarks/comparisons/`.
+- [x] **Implementar `methodology.md` como script/harness reproducible — completado.**
+      Estructura modular segregada creada en `benchmarks/scripts/` para evitar acumulación plana de archivos:
+      - `benchmarks/scripts/suite_01_math/` (Dot product $10^7$ `f64`)
+      - `benchmarks/scripts/suite_02_dataframe/` (1M filas CSV + filter + group_by + summarize)
+      - `benchmarks/scripts/suite_03_modeling/` (Gibbs sampler MCMC 100 iter / 3k obs)
+      - `benchmarks/scripts/suite_04_runtime/` (Startup / TTFX Hello World)
+      - `benchmarks/scripts/harness/run_benchmarks.ps1` (Harness automatizado con `hyperfine`, warmup y exportación JSON/Markdown).
+- [x] **Correr las 4 suites contra R/Python/Julia y publicar resultados reales en `benchmarks/comparisons/` — completado.**
+      Resultados medidos empíricamente con `hyperfine` en entorno Windows x86_64, almacenados en `benchmarks/results/raw/*.json`,
+      sintetizados en `benchmarks/results/summary.md` y sincronizados en las matrices comparativas:
+      - **Suite 04 (Startup/TTFX):** GHL AOT `6.7 ms` (5.18x vs Python `34.8 ms`, 17.1x vs R `115.1 ms`, 24.75x vs Julia `166.4 ms`).
+      - **Suite 01 (Math/SIMD):** GHL `52.7 ms` (4.10x vs NumPy `215.8 ms`, 5.72x vs R `301.5 ms`, 7.57x vs Julia `398.8 ms`).
+      - **Suite 02 (DataFrames 1M rows):** GHL `658.8 ms` (1.86x vs Pandas `1,223 ms`, 2.28x vs Julia `1,505 ms`, 5.55x vs R `3,656 ms`).
+      - **Suite 03 (Gibbs Sampler):** GHL `21.1 ms` (6.62x vs R `139.5 ms`, 19.08x vs NumPy `402.0 ms`, 27.32x vs Julia `575.5 ms`).

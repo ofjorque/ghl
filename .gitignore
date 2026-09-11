@@ -18,3 +18,7 @@ Thumbs.db
 *.profdata
 lcov.info
 
+# Benchmarks artifacts
+benchmarks/.venv/
+benchmarks/scripts/**/*.exe
+benchmarks/scripts/**/*.pdb

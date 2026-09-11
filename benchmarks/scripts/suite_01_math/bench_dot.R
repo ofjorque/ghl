@@ -1,0 +1,6 @@
+set.seed(42)
+a <- runif(1e7)
+set.seed(43)
+b <- runif(1e7)
+res <- sum(a * b)
+cat(res, "\n")

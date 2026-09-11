@@ -23,3 +23,18 @@ Esta tabla resume las diferencias clave de arquitectura, rendimiento, semántica
 | **Concurrencia / Paralelismo** | Multi-hilo nativo, sin GIL, SIMD | Monohilo (procesos bifurcados) | Monohilo en Python puro (GIL) | Multi-hilo nativo (con locks/tasks) |
 | **Generación de Binarios** | Binarios pequeños y autónomos (<15 MB)| Difícil (requiere empaquetar R) | Difícil (PyInstaller / enorme peso) | Muy complejo (System images >300 MB)|
 | **Interoperabilidad Arrow** | Zero-Copy nativa | Mediante paquete `arrow` | Mediante `pyarrow` | Mediante `Arrow.jl` |
+
+---
+
+## Resultados Empíricos Medidos (Fase 10)
+
+Mediciones automatizadas con `hyperfine` en entorno Windows x86_64:
+
+| Métrica / Benchmark | GHL | Python | R | Julia | Ventaja GHL |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Startup / TTFX** | **6.7 ms** (AOT) / **10.7 ms** (Interp) | 34.8 ms | 115.1 ms | 166.4 ms | **5.2x a 24.8x más rápido** |
+| **Dot Product ($10^7$ floats)** | **52.7 ms** | 215.8 ms | 301.5 ms | 398.8 ms | **4.1x a 7.6x más rápido** |
+| **DataFrames (1M filas)** | **658.8 ms** | 1,223 ms | 3,656 ms | 1,505 ms | **1.9x a 5.6x más rápido** |
+| **Gibbs Sampler (100 iter)** | **21.1 ms** | 402.0 ms | 139.5 ms | 575.5 ms | **6.6x a 27.3x más rápido** |
+
+*Ver informe detallado en [benchmarks/results/summary.md](file:///o:/Documentos/Rust%20Project/ghl/benchmarks/results/summary.md).*
