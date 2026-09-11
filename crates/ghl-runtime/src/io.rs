@@ -1592,21 +1592,47 @@ fn escape_csv_field(field: &str, sep: char) -> String {
 /// for `Value::NA(Some(_))` afterward the way `build_dataframe` does for every other path.
 fn infer_and_convert_column_native(name: &str, raw: &StringChunked) -> (Column, Vec<(usize, String)>) {
     let n = raw.len();
-    let get = |i: usize| raw.get(i).unwrap_or("");
+
+    // One sequential pass via `StringChunked::iter()` -- profiled with `perf record
+    // -e cycles:u` on the 1M-row Suite 02 benchmark: repeated indexed `raw.get(i)`
+    // access (the old approach, 3-4 full passes below) put 49.67% of the *entire
+    // program's* CPU cycles into `ChunkedArray<StringType>::get` +
+    // `BinaryViewArrayGeneric::len` alone. `.iter()` amortizes the chunk lookup that
+    // `.get(i)` was repeating on every call; everything past this point works off the
+    // materialized `&str` slice, never touching `raw` again. A real Arrow null (`None`)
+    // is treated as `""`, same as `get(i).unwrap_or("")` did before.
+    let cells: Vec<&str> = raw.iter().map(|opt| opt.unwrap_or("")).collect();
 
     let mut reasons: Vec<(usize, String)> = Vec::new();
-    for i in 0..n {
-        let s = get(i);
+    let mut any_non_na = false;
+    let mut all_i64 = true;
+    let mut all_f64 = true;
+    let mut all_bool = true;
+    for (i, &s) in cells.iter().enumerate() {
         if is_na_token(s) {
             if let Some(reason) = s.trim().strip_prefix("NA:") {
                 reasons.push((i, reason.to_string()));
             }
+            continue;
+        }
+        any_non_na = true;
+        // Same per-type short-circuit `.all()` gave: once a flag is false, stop paying
+        // for that parse on every remaining cell.
+        if all_i64 && s.parse::<i64>().is_err() {
+            all_i64 = false;
+        }
+        if all_f64 && s.parse::<f64>().is_err() {
+            all_f64 = false;
+        }
+        if all_bool {
+            let lower = s.to_lowercase();
+            if lower != "true" && lower != "false" && lower != "t" && lower != "f" {
+                all_bool = false;
+            }
         }
     }
 
-    let non_na_entries: Vec<&str> = (0..n).map(get).filter(|&s| !is_na_token(s)).collect();
-
-    if non_na_entries.is_empty() {
+    if !any_non_na {
         // Empty or entirely-NA column: no non-NA cell to infer a dtype from, same
         // Float64-nulls fallback `value_column_to_polars` uses for this case.
         let data: Vec<Option<f64>> = vec![None; n];
@@ -1614,31 +1640,24 @@ fn infer_and_convert_column_native(name: &str, raw: &StringChunked) -> (Column, 
         return (col, reasons);
     }
 
-    if non_na_entries.iter().all(|s| s.parse::<i64>().is_ok()) {
-        let data: Vec<Option<i64>> = (0..n).map(|i| {
-            let s = get(i);
+    if all_i64 {
+        let data: Vec<Option<i64>> = cells.iter().map(|&s| {
             if is_na_token(s) { None } else { s.parse::<i64>().ok() }
         }).collect();
         let col = data.into_iter().collect::<Int64Chunked>().with_name(name.into()).into_column();
         return (col, reasons);
     }
 
-    if non_na_entries.iter().all(|s| s.parse::<f64>().is_ok()) {
-        let data: Vec<Option<f64>> = (0..n).map(|i| {
-            let s = get(i);
+    if all_f64 {
+        let data: Vec<Option<f64>> = cells.iter().map(|&s| {
             if is_na_token(s) { None } else { s.parse::<f64>().ok() }
         }).collect();
         let col = data.into_iter().collect::<Float64Chunked>().with_name(name.into()).into_column();
         return (col, reasons);
     }
 
-    let all_bool = non_na_entries.iter().all(|s| {
-        let lower = s.to_lowercase();
-        lower == "true" || lower == "false" || lower == "t" || lower == "f"
-    });
     if all_bool {
-        let data: Vec<Option<bool>> = (0..n).map(|i| {
-            let s = get(i);
+        let data: Vec<Option<bool>> = cells.iter().map(|&s| {
             if is_na_token(s) {
                 None
             } else {
@@ -1653,8 +1672,7 @@ fn infer_and_convert_column_native(name: &str, raw: &StringChunked) -> (Column, 
     // Fallback: string. This is the only branch that needs owned string data -- one clone
     // per cell as `StringChunked`'s builder copies each `&str` into its own buffer, the
     // same single clone a native polars string ingestion path would need too.
-    let data: Vec<Option<&str>> = (0..n).map(|i| {
-        let s = get(i);
+    let data: Vec<Option<&str>> = cells.iter().map(|&s| {
         if is_na_token(s) { None } else { Some(s) }
     }).collect();
     let col = data.into_iter().collect::<StringChunked>().with_name(name.into()).into_column();
@@ -1861,6 +1879,39 @@ mod tests {
             let vals_a = polars_bridge::pull_column_as_values(frame_a, reasons_a, col).unwrap();
             let vals_b = polars_bridge::pull_column_as_values(frame_b, reasons_b, col).unwrap();
             assert_eq!(vals_a, vals_b, "column `{col}` differs between the two CSV paths");
+        }
+    }
+
+    #[test]
+    fn test_csv_column_with_i64_overflow_falls_back_to_f64() {
+        // A column that's all-integer except one value exceeding i64::MAX
+        // (str::parse::<i64> returns Err on overflow, no separate range check) must
+        // fall back to f64 for the *whole* column, not truncate/wrap/panic on that one
+        // cell. This exact case existed in the dtype-priority logic before but had no
+        // test locking it down -- added while rewriting infer_and_convert_column_native
+        // for the Suite 02 perf fix (io.rs), verified identical on both CSV paths.
+        let csv_data = "big\n100\n200\n99999999999999999999\n300\n";
+
+        let temp_dir = std::env::temp_dir();
+        let path = temp_dir.join("ghl_test_i64_overflow.csv");
+        let p_str = path.to_str().unwrap();
+        write_file(p_str, csv_data).unwrap();
+
+        let from_string = parse_csv_string(csv_data, None).expect("parse_csv_string should succeed");
+        let from_file = read_csv_file(p_str, None).expect("read_csv_file should succeed");
+        let _ = fs::remove_file(&path);
+
+        for (label, value) in [("parse_csv_string", &from_string), ("read_csv_file", &from_file)] {
+            let (frame, reasons) = match value {
+                Value::DataFrame { frame, na_reasons } => (frame, na_reasons),
+                _ => panic!("Expected DataFrame from {label}"),
+            };
+            let vals = polars_bridge::pull_column_as_values(frame, reasons, "big").unwrap();
+            assert_eq!(
+                vals,
+                vec![Value::F64(100.0), Value::F64(200.0), Value::F64(99999999999999999999.0), Value::F64(300.0)],
+                "{label}: overflowing column should fall back to f64, not stay i64/truncate"
+            );
         }
     }
 

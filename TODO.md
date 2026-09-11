@@ -1535,25 +1535,60 @@ Solo tiene sentido al final, cuando ya hay algo que medir.
       - **Suite 02 (DataFrames 1M rows):** GHL `643.0 ms`. **GHL NO gana esta suite**: Python+Polars mide `310.5 ms` (2.07x más rápido que GHL) y R+data.table `473.2 ms` (1.36x más rápido que GHL) — ambos motores optimizados superan a GHL. GHL sólo le gana a Pandas (`1,219.7 ms`), R base (`3,611.5 ms`) y Julia (`1,461.2 ms` parser artesanal / `5,699.3 ms` DataFrames.jl, esto último dominado por el costo de arranque de `using DataFrames,CSV`, no por cómputo).
       - **Suite 03 (Gibbs Sampler):** GHL `21.4 ms` (6.45x vs R `138.1 ms`, 18.6x vs NumPy `397.9 ms`, 26.1x vs Julia `559.5 ms`). GHL gana con margen amplio, incluso contra Numba (`786.9 ms`, más lento que NumPy puro por overhead de JIT en un proceso de un solo disparo) y Julia con `@inbounds` (`553.1 ms`, sin mejora real).
       - **Conclusión honesta:** GHL es el más rápido en arranque, álgebra vectorial y bucles iterativos (MCMC), pero **no** en ingestión/agregación de DataFrames frente al estado del arte real de cada ecosistema — ahí pierde contra Polars-Python y data.table-R. No se cumplió el aislamiento de hardware de `methodology.md` §3 (específico de Linux, sin equivalente en Windows).
-- [ ] **Investigar y cerrar la brecha de rendimiento de Suite 02 (DataFrames) frente a Polars-Python.**
-      GHL (`643.0 ms`) y Python+Polars (`310.5 ms`) envuelven el mismo motor Rust
-      (`polars-core`), así que la diferencia de 2.07x no puede ser un límite físico
-      del lenguaje — es overhead introducido por la capa de `ghl-runtime` sobre ese
-      motor. Indicio concreto en los datos de `hyperfine`: GHL consume ~5.1s de
-      CPU-usuario en paralelo para terminar en 643ms (buena paralelización, ~8x),
-      mientras que Python+Polars consume solo ~330ms de CPU-usuario para terminar en
-      310ms (casi sin paralelizar) y aun así gana — esto apunta a trabajo redundante
-      por fila/columna en GHL, no a falta de núcleos.
-      - Hipótesis a verificar con profiling de `crates/ghl-runtime/src/io.rs` en esa
-        ejecución puntual: (a) copias/conversión entre el `DataFrame` de polars y el
-        `Value::DataFrame` interno de GHL; (b) uso de la API eager de polars en vez
-        de `LazyFrame`/`scan_csv` con pushdown de proyección y predicado, que evitaría
-        parsear columnas no usadas del CSV sintético (`notes`, `name`, `event_date`,
-        etc.).
-      - Alcance: específico a la ruta de ingestión/agregación de DataFrames grandes
-        (Suite 02); no afecta Suite 01/03/04, donde GHL ya gana con margen amplio.
-        No priorizar sobre el resto del roadmap funcional salvo que el caso de uso
-        central de GHL sea justo este.
+- [x] **Investigar y cerrar (parcialmente) la brecha de rendimiento de Suite 02
+      (DataFrames) frente a Polars-Python — causa real encontrada y arreglada
+      (2026-09-11), brecha reducida pero no cerrada del todo.**
+      GHL y Python+Polars envuelven el mismo motor Rust (`polars-core`), así que la
+      diferencia no podía ser un límite físico del lenguaje. Las dos hipótesis
+      originales de este ítem (boxing `DataFrame`↔`Value::DataFrame`, o lectura eager
+      sin pushdown de proyección) **resultaron ser las hipótesis equivocadas** —
+      `perf record -e cycles:u` sobre `ghl run bench_df.gh` (posible ahora por estar en
+      Linux) encontró la causa real, mucho más concentrada:
+      - **El 49.67% de TODOS los ciclos de CPU del programa completo** se iban en dos
+        funciones: `polars_arrow::array::binview::BinaryViewArrayGeneric::len` (25.86%)
+        y `polars_core::chunked_array::ChunkedArray<StringType>::get` (23.81%), ambas
+        llamadas desde `infer_and_convert_column_native` (`crates/ghl-runtime/src/io.rs`)
+        — la función de inferencia de dtype propia de GHL (necesaria por el
+        side-channel de `NA:Razon`, que polars no entiende) sobre cada columna que
+        `read_csv_file` lee forzando `dtype_overwrite` a `String`. Esa función hacía
+        3-4 pasadas completas por columna con acceso **indexado** (`raw.get(i)` en un
+        loop `for i in 0..n`) sobre un `ChunkedArray<StringType>` respaldado por el
+        formato "view" de arrow — mucho más caro por celda que iterar secuencial.
+      - **Fix:** reescrita para hacer una sola pasada con `StringChunked::iter()`
+        (materializa `cells: Vec<&str>` una vez, amortizando el chunk-lookup que
+        `.get(i)` repetía en cada llamada) y trabajar el resto de la lógica
+        (detección de NA-razón, prioridad de dtype i64>f64>bool>string, construcción
+        final) sobre ese slice ya en memoria — mismo espíritu que el fix de
+        representación de datos de NEKO (`vector_data::column_as_f64_view`,
+        `neko::Blueprint::bake`), aplicado acá a `StringChunked` en vez de a
+        `Value::DataFrame`. Sin paralelismo anidado dentro de la función:
+        `read_csv_file` ya satura el pool de rayon a nivel de columna, agregar una
+        segunda capa hubiera sobresuscrito hilos sin ganancia.
+      - **Medido, mismo dataset/máquina, antes/después:** tiempo total
+        **966ms → 476ms (2.03x más rápido)**; CPU-usuario **5.0s → 1.8s (2.79x menos
+        trabajo total**, coincide con la caída de ~21.868 a ~8.836 muestras de `perf`
+        a igual tasa de muestreo, ~2.47x). Verificado que `ChunkedArray::get`/
+        `BinaryViewArrayGeneric::len` ya no aparecen entre las funciones calientes del
+        perfil posterior. Corrección funcional re-verificada: mismos 5 grupos/valores
+        exactos de siempre (`total_a`/`n` por categoría).
+      - **Con esto, GHL le gana a R (data.table) en Suite 02** (476ms vs 1.03s,
+        antes perdía contra ambos) **pero sigue perdiendo contra Polars-Python**
+        (341.8ms) — la brecha bajó de 2.83x a **1.39x**, se achicó sustancialmente, no
+        desapareció. No se investigó más a fondo qué explica el 1.39x restante (podría
+        ser overhead de tokenizing/parseo adicional, la construcción de
+        `Vec<Option<T>>` intermedios antes de `collect::<ChunkedArray>()`, u otra
+        cosa) — documentado como parcial, no como resuelto.
+      - Nuevo test: `test_csv_column_with_i64_overflow_falls_back_to_f64` (`io.rs`) —
+        el caso de una columna entera con un valor que excede `i64::MAX` cayendo a
+        `f64` existía en la lógica pero no estaba testeado en ningún lado; se agregó
+        al tocar esta función directamente, verificado idéntico en ambos caminos de
+        CSV (`read_csv_file`/`parse_csv_string`).
+      - **Alcance:** el fix es específico a `infer_and_convert_column_native`
+        (llamada solo desde `read_csv_file`, confirmado sin otro llamador). Su función
+        hermana `infer_and_convert_column` (usada por `parse_csv_string`, el camino
+        desde un string en memoria) queda deliberadamente afuera — es una decisión de
+        alcance ya tomada en Fase 1 (no es el camino de escala GB), no un gemelo
+        desatendido.
 - [x] **Re-ejecutar las 4 suites en una máquina distinta para verificar reproducibilidad — completado (2026-09-11).**
       Laptop Windows distinto al desktop original, sin ninguna de las herramientas
       instaladas de antemano (hyperfine, Julia, R+data.table, venv de Python con
