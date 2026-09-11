@@ -27,6 +27,7 @@ pub fn get_module_item_names(path: &[String]) -> Option<Vec<&'static str>> {
             "count", "coalesce", "desc", "pull", "slice_min", "slice_max",
             "sample_n", "sample_frac", "inner_join", "left_join",
             "fill_na", "fill_na_all", "glimpse", "na_reason", "na_reasons", "is_na",
+            "lazy", "collect", "explain", "scan_csv", "scan_parquet",
         ]),
 
         ["std", "linalg"] => Some(vec![
@@ -73,7 +74,7 @@ pub fn get_module_item_names(path: &[String]) -> Option<Vec<&'static str>> {
         ["std", "io"] => Some(vec![
             "print", "println", "read_file", "read_lines", "write_file",
             "append_file", "file_exists", "read_csv", "write_csv",
-            "read_parquet", "write_parquet",
+            "read_parquet", "write_parquet", "scan_csv", "scan_parquet",
         ]),
 
         ["std", "plot"] => Some(vec![

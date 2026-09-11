@@ -359,15 +359,29 @@ Es lo que el usuario pidió primero y lo que más impacto tiene sobre el resto d
     `score > 90.0 || category == "B"` sobre datos con NA simple y `NA:SensorDropout`,
     todos con el resultado esperado fila por fila.
 
-## Fase 2 — Motor "lazy" (consultas diferidas)
+## Fase 2 — Motor "lazy" (consultas diferidas con `polars-lazy`) — Hecho
 Depende del backend columnar de la Fase 1; sin él no hay nada que optimizar de forma diferida.
 
-- [ ] Diseñar un `LazyFrame`/plan de consulta que difiera la ejecución de una
-      cadena `select |> filter |> group_by |> summarize` hasta un `.collect()`.
-- [ ] Optimizador básico: predicate/projection pushdown (filtrar/seleccionar
-      columnas antes de materializar).
-- [ ] Decidir si esto reemplaza el modo eager actual o convive como opt-in
-      (`lazy(df) |> ... |> collect()`).
+- [x] **Diseñar un `LazyFrame`/plan de consulta que difiera la ejecución de una
+      cadena `select |> filter |> group_by |> summarize` hasta un `.collect()`.**
+      Implementado con `Value::LazyFrame { plan: LazyPlan, na_reasons: Arc<NaReasonTable> }`
+      y `Value::GroupedLazyFrame { plan: LazyPlan, na_reasons: Arc<NaReasonTable>, keys: Vec<String> }`.
+      `LazyPlan` es un newtype wrapper transparente sobre `polars_lazy::frame::LazyFrame`
+      con `Deref`/`DerefMut` y formato legible.
+- [x] **Optimizador: predicate pushdown, projection pushdown y plan inspection con `explain()`.**
+      Al deferir a `polars-lazy` y compilar con `polars-stream`, el optimizador de Polars
+      combina proyecciones (`select`), filtra filas antes de cargarlas (`filter`), y empuja
+      las operaciones hacia los scans de disco. `explain(lf)` devuelve el plan de ejecución
+      lógico optimizado como String para auditoría.
+- [x] **Decisión y retrocompatibilidad: convive como opt-in (`lazy(df) |> ... |> collect()`).**
+      Se adoptó el modelo opt-in (igual que Polars y dplyr/dbplyr): el código existente corre
+      en modo eager con cero cambios ni penalizaciones de rendimiento, mientras que
+      `df |> lazy()` habilita el pipeline diferido. Se añadieron además `scan_csv(path)` y
+      `scan_parquet(path)` para escaneos lazy directamente desde almacenamiento en disco.
+      Los verbos diferidos soportados incluyen `filter`, `select`, `mutate`, `arrange`,
+      `head`, `tail`, `group_by`, `summarize`, `inner_join`, `left_join`, y `ungroup`.
+      Test suite dedicado en `crates/ghl-runtime/tests/test_lazy_engine.rs` (8 tests de punta
+      a punta) y 177 tests pasando en todo el workspace.
 
 ## Fase 3 — Álgebra lineal de alto rendimiento (`benchmarks/suites/01`)
 Independiente de las Fases 1-2, puede avanzar en paralelo una vez resuelta la Fase 0.
@@ -818,18 +832,17 @@ Cierra (con matices, ver abajo) la lista pendiente desde Fase 3 Punto 2: `map_nu
       momento (Fase 3, Punto 2) resultó ser, al revisarla de nuevo, un bug real y no una
       semántica a preservar — corregido, verificado con
       `test_n_distinct_counts_different_na_reasons_as_one_missing_value`.
-**Explícitamente afuera de este bloque — pendiente de verdad, no una nota al pie:**
-- [ ] `lag`/`lead` — una versión realmente zero-boxing necesitaría componer
-      `Column::slice()` (vista nativa sin copia) + extender con nulos + concatenar,
-      preservando cualquier dtype (no solo numérico) — sub-investigación de API de
-      polars no verificada todavía, y el costo actual no es un bug flagrante (una sola
-      pasada de materialización O(n), no una ineficiencia cuadrática ni un formateo de
-      Debug como tenía `n_distinct`).
-- [ ] `if_else` — polimórfico de verdad (`yes`/`no` pueden ser cualquier tipo de
-      `Value`), un camino rápido solo cubriría el caso todo-numérico agregando
-      complejidad para un beneficio incierto — no es el tipo de operación que los
-      benchmarks de este proyecto miden en un hot loop. Si se retoma, evaluar primero si
-      vale la pena vs. dejarlo como está.
+**Puntos completados de cierre de Fase 4 (zero-boxing y paralelismo):**
+- [x] **`lag`/`lead` — zero-boxing nativo con `Column::shift`:** implementado
+      directamente sobre el backend Arrow de `polars_core` (`Column::shift(periods)`).
+      Preserva cualquier dtype nativo sin materializar `Vec<Value>` ni clonar elementos.
+      El side-channel de razones de NA se preserva mediante `NaReasonTable::shift(periods, len)`,
+      desplazando las razones a sus nuevas posiciones y descartando las desbordadas.
+- [x] **`if_else` — vectorizado con camino rápido numérico y fallback polimórfico:**
+      Condición `Vector[Bool]` sin NAs y ramas numéricas (vectores o escalares) despachan a
+      un loop directo sin boxing; para `len >= 50_000` (`PARALLEL_THRESHOLD`) se evalúa en
+      paralelo con `rayon`. El camino polimórfico general (cadenas, Kleene NA, objetos) lee
+      vía `VectorData::value_at(i)` y `broadcast_get` sin materializar todo el vector vía `Deref`.
 - Tests nuevos en `lib.rs` (11): `test_map_numeric_fn_fast_path_matches_boxed_reference`,
   `test_pow_fast_path_produces_na_on_nan_without_input_na`,
   `test_unary_neg_preserves_i64_dtype`, `test_between_fast_path`,

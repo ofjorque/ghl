@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
 use polars_core::prelude::{IdxCa, IdxSize, PlSmallStr, PolarsError};
 use rand::{RngExt, SeedableRng};
@@ -8,7 +9,7 @@ use statrs::distribution::{Continuous, ContinuousCDF, Gamma, Normal};
 use crate::eval::Interpreter;
 use crate::polars_bridge;
 use crate::value::Value;
-use crate::vector_data::VectorData;
+use crate::vector_data::{NumericView, VectorData};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeEnv {
@@ -131,6 +132,13 @@ impl RuntimeEnv {
         // Parquet I/O
         env.set("read_parquet".into(),  Value::NativeFn(native_read_parquet));
         env.set("write_parquet".into(), Value::NativeFn(native_write_parquet));
+
+        // Lazy Execution Engine (TODO.md Fase 2)
+        env.set("lazy".into(),         Value::NativeFn(native_lazy));
+        env.set("collect".into(),      Value::NativeFn(native_collect));
+        env.set("explain".into(),      Value::NativeFn(native_explain));
+        env.set("scan_csv".into(),     Value::NativeFn(native_scan_csv));
+        env.set("scan_parquet".into(), Value::NativeFn(native_scan_parquet));
 
         // DataFrame Wrangling Verbs — Tidyverse-style
         env.set("select".into(),   Value::NativeFn(native_select));
@@ -1128,12 +1136,16 @@ fn native_ungroup(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Some(Value::GroupedDataFrame { frame, na_reasons, .. }) => {
             Ok(Value::DataFrame { frame: frame.clone(), na_reasons: na_reasons.clone() })
         }
+        Some(Value::GroupedLazyFrame { plan, na_reasons, .. }) => {
+            Ok(Value::LazyFrame { plan: plan.clone(), na_reasons: na_reasons.clone() })
+        }
         Some(df @ Value::DataFrame { .. }) => Ok(df.clone()),
+        Some(lf @ Value::LazyFrame { .. }) => Ok(lf.clone()),
         Some(other) => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`ungroup()` requires a GroupedDataFrame, found `{}`", other.type_name()),
+            format!("(ノ°□°)ノ `ungroup()` requires a GroupedDataFrame or GroupedLazyFrame, found `{}`", other.type_name()),
         )),
-        None => Err(Diagnostic::compute_error("C0201", "`ungroup()` requires an argument")),
+        None => Err(Diagnostic::compute_error("C0201", "(ノ°□°)ノ `ungroup()` requires an argument")),
     }
 }
 
@@ -1159,6 +1171,22 @@ fn native_arrange(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let mut specs: Vec<(String, bool)> = Vec::new();
     for arg in &args[1..] {
         match arg {
+            Value::Vector(items) => {
+                for it in items.iter() {
+                    match it {
+                        Value::SortSpec { col, desc } => specs.push((col.clone(), *desc)),
+                        other => match col_name_of(other) {
+                            Some(name) => specs.push((name, false)),
+                            None => {
+                                return Err(Diagnostic::compute_error(
+                                    "C0201",
+                                    format!("`arrange()` expects column names or `desc(col)`, found `{}`", other.type_name()),
+                                ));
+                            }
+                        },
+                    }
+                }
+            }
             Value::SortSpec { col, desc } => specs.push((col.clone(), *desc)),
             other => match col_name_of(other) {
                 Some(name) => specs.push((name, false)),
@@ -1467,51 +1495,119 @@ fn native_cummin(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 fn native_lag(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let items = args.first().and_then(as_vector).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`lag()` requires a Vector argument")
+    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "(ノ°□°)ノ `lag()` requires a Vector argument")
     })?;
-    let len = items.len();
-    let n = (args.get(1).and_then(|v| v.as_i64()).unwrap_or(1).max(0) as usize).min(len);
-    let mut out = Vec::with_capacity(len);
-    out.extend(std::iter::repeat(Value::NA(None)).take(n));
-    out.extend(items[..len - n].iter().cloned());
-    Ok(Value::Vector(VectorData::from_values(out)))
+    let len = vd.len();
+    let n = args.get(1).and_then(|v| v.as_i64()).unwrap_or(1).max(0) as usize;
+    if n == 0 {
+        return Ok(Value::Vector(vd.clone()));
+    }
+    let shifted_col = vd.column().shift(n as i64);
+    let shifted_reasons = vd.na_reasons().shift(n as i64, len);
+    Ok(Value::Vector(VectorData::from_column_and_reasons(shifted_col, Arc::new(shifted_reasons))))
 }
 
 fn native_lead(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let items = args.first().and_then(as_vector).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`lead()` requires a Vector argument")
+    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "(ノ°□°)ノ `lead()` requires a Vector argument")
     })?;
-    let len = items.len();
-    let n = (args.get(1).and_then(|v| v.as_i64()).unwrap_or(1).max(0) as usize).min(len);
-    let mut out = Vec::with_capacity(len);
-    out.extend(items[n..].iter().cloned());
-    out.extend(std::iter::repeat(Value::NA(None)).take(n));
-    Ok(Value::Vector(VectorData::from_values(out)))
+    let len = vd.len();
+    let n = args.get(1).and_then(|v| v.as_i64()).unwrap_or(1).max(0) as usize;
+    if n == 0 {
+        return Ok(Value::Vector(vd.clone()));
+    }
+    let shifted_col = vd.column().shift(-(n as i64));
+    let shifted_reasons = vd.na_reasons().shift(-(n as i64), len);
+    Ok(Value::Vector(VectorData::from_column_and_reasons(shifted_col, Arc::new(shifted_reasons))))
 }
 
 fn broadcast_get(v: &Value, i: usize) -> Value {
     match v {
-        Value::Vector(items) => items.get(i).cloned().unwrap_or(Value::NA(None)),
+        Value::Vector(vd) => vd.value_at(i).unwrap_or(Value::NA(None)),
         scalar => scalar.clone(),
     }
 }
 
+enum NumericSource<'a> {
+    Scalar(f64),
+    Slice(&'a [f64]),
+    Owned(Vec<f64>),
+}
+
+impl<'a> NumericSource<'a> {
+    #[inline(always)]
+    fn get(&self, i: usize) -> f64 {
+        match self {
+            NumericSource::Scalar(s) => *s,
+            NumericSource::Slice(sl) => sl[i],
+            NumericSource::Owned(v) => v[i],
+        }
+    }
+}
+
+fn as_numeric_source(v: &Value, expected_len: usize) -> Option<NumericSource<'_>> {
+    match v {
+        Value::F64(n) => Some(NumericSource::Scalar(*n)),
+        Value::I64(n) => Some(NumericSource::Scalar(*n as f64)),
+        Value::Vector(vd) => {
+            if vd.len() == expected_len && vd.null_count() == 0 {
+                match vd.as_f64_view() {
+                    Ok(NumericView::Borrowed(s)) => Some(NumericSource::Slice(s)),
+                    Ok(NumericView::Owned(v)) => Some(NumericSource::Owned(v)),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 fn native_if_else(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let cond = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
-    let yes = args.get(1).ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
-    let no = args.get(2).ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
+    let cond = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "(ノ°□°)ノ `if_else()` requires 3 arguments"))?;
+    let yes = args.get(1).ok_or_else(|| Diagnostic::compute_error("C0201", "(ノ°□°)ノ `if_else()` requires 3 arguments"))?;
+    let no = args.get(2).ok_or_else(|| Diagnostic::compute_error("C0201", "(ノ°□°)ノ `if_else()` requires 3 arguments"))?;
 
     match cond {
         Value::Bool(b) => Ok(if *b { yes.clone() } else { no.clone() }),
         Value::NA(r) => Ok(Value::NA(r.clone())),
-        Value::Vector(conds) => {
-            let mut out = Vec::with_capacity(conds.len());
-            for (i, c) in conds.iter().enumerate() {
-                out.push(match c {
-                    Value::Bool(true) => broadcast_get(yes, i),
-                    Value::Bool(false) => broadcast_get(no, i),
-                    Value::NA(r) => Value::NA(r.clone()),
+        Value::Vector(cond_data) => {
+            let len = cond_data.len();
+            // Fast-path: numeric yes/no, cond has no NAs and is boolean
+            if cond_data.null_count() == 0 {
+                if let (Some(yes_src), Some(no_src)) = (as_numeric_source(yes, len), as_numeric_source(no, len)) {
+                    if let Ok(bool_ca) = cond_data.column().bool() {
+                        let data: Vec<f64> = if len >= crate::eval::PARALLEL_THRESHOLD {
+                            (0..len).into_par_iter().map(|i| {
+                                if bool_ca.get(i).unwrap_or(false) {
+                                    yes_src.get(i)
+                                } else {
+                                    no_src.get(i)
+                                }
+                            }).collect()
+                        } else {
+                            (0..len).map(|i| {
+                                if bool_ca.get(i).unwrap_or(false) {
+                                    yes_src.get(i)
+                                } else {
+                                    no_src.get(i)
+                                }
+                            }).collect()
+                        };
+                        return Ok(Value::Vector(VectorData::from_f64(data)));
+                    }
+                }
+            }
+
+            // General fallback: preserves arbitrary types and Kleene NA logic without full materialization
+            let mut out = Vec::with_capacity(len);
+            for i in 0..len {
+                out.push(match cond_data.value_at(i) {
+                    Some(Value::Bool(true)) => broadcast_get(yes, i),
+                    Some(Value::Bool(false)) => broadcast_get(no, i),
+                    Some(Value::NA(r)) => Value::NA(r),
                     _ => Value::NA(None),
                 });
             }
@@ -1519,7 +1615,7 @@ fn native_if_else(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("`if_else()` condition must be Bool or Vector[Bool], found `{}`", other.type_name()),
+            format!("(ノ°□°)ノ `if_else()` condition must be Bool or Vector[Bool], found `{}`", other.type_name()),
         )),
     }
 }
@@ -1827,6 +1923,22 @@ fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
                      predicate -- expected a column comparison (`col(x) > 5` or bare \
                      `x > 5`), `is_na(col(x))`, a combination of those with `!`/`&&`/`||`, \
                      or a boolean Vector",
+                    predicate.type_name()
+                ),
+            ))
+        }
+        Value::LazyFrame { .. } => {
+            if args.len() < 2 {
+                return Ok(target);
+            }
+            let predicate = &args[1];
+            if crate::eval::is_predicate(predicate) {
+                return crate::io::df_filter_by_predicate(&target, predicate);
+            }
+            Err(Diagnostic::compute_error(
+                "C0202",
+                format!(
+                    "(ノ°□°)ノ `filter()` on LazyFrame does not understand the second argument (`{}`) as a predicate",
                     predicate.type_name()
                 ),
             ))
@@ -3144,6 +3256,42 @@ fn native_write_parquet(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     crate::io::write_parquet_file(df, p)?;
     Ok(Value::Unit)
+}
+
+fn native_lazy(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let df = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "(ノ°□°)ノ `lazy()` requires a DataFrame")
+    })?;
+    crate::io::df_lazy(df)
+}
+
+fn native_collect(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let lf = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "(ノ°□°)ノ `collect()` requires a LazyFrame")
+    })?;
+    crate::io::df_collect(lf)
+}
+
+fn native_explain(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let lf = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "(ノ°□°)ノ `explain()` requires a LazyFrame")
+    })?;
+    let opt = args.get(1).and_then(|v| v.as_bool()).unwrap_or(true);
+    crate::io::df_explain(lf, opt)
+}
+
+fn native_scan_csv(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let path = args.first().and_then(|v| v.as_str()).ok_or_else(|| {
+        Diagnostic::compute_error("C0403", "(ノ°□°)ノ `scan_csv()` requires a file path string")
+    })?;
+    crate::io::scan_csv_file(path)
+}
+
+fn native_scan_parquet(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let path = args.first().and_then(|v| v.as_str()).ok_or_else(|| {
+        Diagnostic::compute_error("C0405", "(ノ°□°)ノ `scan_parquet()` requires a file path string")
+    })?;
+    crate::io::scan_parquet_file(path)
 }
 
 fn native_select(args: Vec<Value>) -> Result<Value, Diagnostic> {

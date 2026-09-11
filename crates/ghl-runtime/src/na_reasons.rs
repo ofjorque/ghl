@@ -97,6 +97,23 @@ impl NaReasonTable {
             self.reasons.insert(k.clone(), v.clone());
         }
     }
+
+    /// Desplaza las razones `periods` filas para una longitud total `len`.
+    /// `periods > 0` (lag): fila `r` pasa a `r + periods` (si `< len`).
+    /// `periods < 0` (lead): fila `r` pasa a `r + periods` (si `>= 0`).
+    pub fn shift(&self, periods: i64, len: usize) -> NaReasonTable {
+        if self.reasons.is_empty() || periods == 0 {
+            return self.clone();
+        }
+        let mut out = NaReasonTable::default();
+        for ((col, old_row), reason) in &self.reasons {
+            let new_row = (*old_row as i64) + periods;
+            if new_row >= 0 && (new_row as usize) < len {
+                out.set(col, new_row as usize, reason.clone());
+            }
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -139,4 +156,26 @@ mod tests {
         assert_eq!(retained.get("keep_me", 0), Some("A"));
         assert_eq!(retained.get("drop_me", 0), None);
     }
+
+    #[test]
+    fn test_shift_lag_and_lead() {
+        let mut t = NaReasonTable::new();
+        t.set("col", 1, "Reason1");
+
+        // Lag by 1 on length 4: row 1 -> row 2
+        let lagged = t.shift(1, 4);
+        assert_eq!(lagged.get("col", 2), Some("Reason1"));
+        assert_eq!(lagged.get("col", 1), None);
+
+        // Lead by 1 on length 4: row 1 -> row 0
+        let leaded = t.shift(-1, 4);
+        assert_eq!(leaded.get("col", 0), Some("Reason1"));
+        assert_eq!(leaded.get("col", 1), None);
+
+        // Lag beyond len drops
+        let dropped = t.shift(3, 4);
+        assert_eq!(dropped.get("col", 4), None);
+        assert!(dropped.is_empty());
+    }
 }
+

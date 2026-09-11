@@ -12,6 +12,29 @@ use crate::gmm::FittedGmm;
 
 pub type NativeFunction = fn(Vec<Value>) -> Result<Value, Diagnostic>;
 
+/// Wrapper around `polars_lazy::frame::LazyFrame` that provides `Debug` and `Deref`.
+#[derive(Clone)]
+pub struct LazyPlan(pub polars_lazy::frame::LazyFrame);
+
+impl std::fmt::Debug for LazyPlan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LazyPlan")
+    }
+}
+
+impl std::ops::Deref for LazyPlan {
+    type Target = polars_lazy::frame::LazyFrame;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for LazyPlan {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 /// First-class runtime values in GHL.
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -52,6 +75,21 @@ pub enum Value {
     DataFrame {
         frame: polars_core::frame::DataFrame,
         na_reasons: std::sync::Arc<crate::na_reasons::NaReasonTable>,
+    },
+
+    /// A deferred execution plan backed by `polars_lazy::frame::LazyFrame` (TODO.md Fase 2).
+    /// Query operations (filter, select, mutate, arrange, group_by, summarize, joins)
+    /// accumulate in the query graph and benefit from Polars' optimizer (predicate pushdown,
+    /// projection pushdown) until materialized with `collect()` or inspected with `explain()`.
+    LazyFrame {
+        plan: LazyPlan,
+        na_reasons: std::sync::Arc<crate::na_reasons::NaReasonTable>,
+    },
+    /// A partitioned deferred query plan produced by `group_by()` on a `LazyFrame`.
+    GroupedLazyFrame {
+        plan: LazyPlan,
+        na_reasons: std::sync::Arc<crate::na_reasons::NaReasonTable>,
+        keys: Vec<String>,
     },
     ColRef(String),
     /// `col(x) > 5`-style single comparison. The leaf of the predicate tree `filter()`
@@ -221,6 +259,8 @@ impl Value {
             Value::Vector(_) => "Vector",
             Value::Matrix { .. } => "Matrix",
             Value::DataFrame { .. } => "DataFrame",
+            Value::LazyFrame { .. } => "LazyFrame",
+            Value::GroupedLazyFrame { .. } => "GroupedLazyFrame",
             Value::ColRef(_) => "ColRef",
             Value::ColPredicate { .. } => "ColPredicate",
             Value::IsNaPredicate(_) => "IsNaPredicate",
@@ -307,6 +347,10 @@ impl PartialEq for Value {
                 Value::GroupedDataFrame { frame: f1, na_reasons: n1, keys: k1 },
                 Value::GroupedDataFrame { frame: f2, na_reasons: n2, keys: k2 },
             ) => f1.columns() == f2.columns() && n1 == n2 && k1 == k2,
+            (
+                Value::GroupedLazyFrame { keys: k1, .. },
+                Value::GroupedLazyFrame { keys: k2, .. },
+            ) => k1 == k2,
             (
                 Value::AggSpec { kind: k1, col: c1 },
                 Value::AggSpec { kind: k2, col: c2 },
@@ -506,6 +550,12 @@ impl Value {
             Value::OrPredicate(a, b) => format!("({}) || ({})", a, b),
             Value::GroupedDataFrame { frame, keys, .. } => {
                 format!("GroupedDataFrame[keys={:?}, n_rows={}]", keys, frame.height())
+            }
+            Value::LazyFrame { .. } => {
+                "LazyFrame [deferred execution plan — call `collect()` to materialize or `explain()` to inspect]".to_string()
+            }
+            Value::GroupedLazyFrame { keys, .. } => {
+                format!("GroupedLazyFrame[keys={:?}, deferred execution plan]", keys)
             }
             Value::AggSpec { kind, col } => match col {
                 Some(c) => format!("{}(\"{}\")", kind, c),

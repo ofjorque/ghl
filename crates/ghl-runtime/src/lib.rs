@@ -3309,6 +3309,136 @@ mod tests {
             panic!("Expected vector result from arena scope, found {res:?}");
         }
     }
+
+    #[test]
+    fn test_lag_lead_zero_boxing_and_na_reasons() {
+        let code = r#"
+            let v = [10.0, 20.0, NA:SensorDropout, 40.0, 50.0];
+            let lagged = lag(v, 1);
+            let leaded = lead(v, 1);
+            let lagged2 = lag(v, 2);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("eval ok");
+
+        let lagged = interp.env.get("lagged").expect("lagged");
+        if let Value::Vector(vd) = lagged {
+            assert_eq!(vd.len(), 5);
+            // Row 0 is NA (generic)
+            assert_eq!(vd.value_at(0), Some(Value::NA(None)));
+            // Row 1 is 10.0
+            assert_eq!(vd.value_at(1), Some(Value::F64(10.0)));
+            // Row 2 is 20.0
+            assert_eq!(vd.value_at(2), Some(Value::F64(20.0)));
+            // Row 3 is NA:SensorDropout (shifted from row 2)
+            assert_eq!(vd.value_at(3), Some(Value::NA(Some("SensorDropout".into()))));
+            // Row 4 is 40.0
+            assert_eq!(vd.value_at(4), Some(Value::F64(40.0)));
+        } else {
+            panic!("Expected vector");
+        }
+
+        let leaded = interp.env.get("leaded").expect("leaded");
+        if let Value::Vector(vd) = leaded {
+            assert_eq!(vd.len(), 5);
+            // Row 0 is 20.0
+            assert_eq!(vd.value_at(0), Some(Value::F64(20.0)));
+            // Row 1 is NA:SensorDropout (shifted from row 2)
+            assert_eq!(vd.value_at(1), Some(Value::NA(Some("SensorDropout".into()))));
+            // Row 2 is 40.0
+            assert_eq!(vd.value_at(2), Some(Value::F64(40.0)));
+            // Row 3 is 50.0
+            assert_eq!(vd.value_at(3), Some(Value::F64(50.0)));
+            // Row 4 is NA (generic)
+            assert_eq!(vd.value_at(4), Some(Value::NA(None)));
+        } else {
+            panic!("Expected vector");
+        }
+    }
+
+    #[test]
+    fn test_if_else_fast_path_and_parallel() {
+        let code = r#"
+            let cond = [true, false, true, false];
+            let yes = [1.0, 2.0, 3.0, 4.0];
+            let no = [10.0, 20.0, 30.0, 40.0];
+            let res = if_else(cond, yes, no);
+            let res_scalar = if_else(cond, 100.0, 0.0);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("eval ok");
+
+        let res = interp.env.get("res").expect("res");
+        if let Value::Vector(vd) = res {
+            assert_eq!(vd.len(), 4);
+            assert_eq!(vd.value_at(0), Some(Value::F64(1.0)));
+            assert_eq!(vd.value_at(1), Some(Value::F64(20.0)));
+            assert_eq!(vd.value_at(2), Some(Value::F64(3.0)));
+            assert_eq!(vd.value_at(3), Some(Value::F64(40.0)));
+        } else {
+            panic!("Expected vector");
+        }
+
+        let res_scalar = interp.env.get("res_scalar").expect("res_scalar");
+        if let Value::Vector(vd) = res_scalar {
+            assert_eq!(vd.len(), 4);
+            assert_eq!(vd.value_at(0), Some(Value::F64(100.0)));
+            assert_eq!(vd.value_at(1), Some(Value::F64(0.0)));
+            assert_eq!(vd.value_at(2), Some(Value::F64(100.0)));
+            assert_eq!(vd.value_at(3), Some(Value::F64(0.0)));
+        } else {
+            panic!("Expected vector");
+        }
+
+        // Test parallel threshold path (>= 50_000)
+        let large_n = 60_000;
+        let cond_large: Vec<bool> = (0..large_n).map(|i| i % 2 == 0).collect();
+        let yes_large: Vec<f64> = vec![1.0; large_n];
+        let no_large: Vec<f64> = vec![2.0; large_n];
+        let v_cond = Value::Vector(VectorData::from_bool(cond_large));
+        let v_yes = Value::Vector(VectorData::from_f64(yes_large));
+        let v_no = Value::Vector(VectorData::from_f64(no_large));
+
+        let runtime_env = RuntimeEnv::with_prelude();
+        let if_else_fn = runtime_env.get("if_else").unwrap();
+        if let Value::NativeFn(f) = if_else_fn {
+            let out = f(vec![v_cond, v_yes, v_no]).expect("parallel if_else succeeds");
+            if let Value::Vector(vd) = out {
+                assert_eq!(vd.len(), large_n);
+                assert_eq!(vd.value_at(0), Some(Value::F64(1.0)));
+                assert_eq!(vd.value_at(1), Some(Value::F64(2.0)));
+            } else {
+                panic!("Expected vector");
+            }
+        } else {
+            panic!("Expected NativeFn");
+        }
+    }
+
+    #[test]
+    fn test_if_else_polymorphic_fallback() {
+        let code = r#"
+            let cond = [true, false, NA:MissingFlag];
+            let yes = ["A", "B", "C"];
+            let no = ["X", "Y", "Z"];
+            let res = if_else(cond, yes, no);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("eval ok");
+
+        let res = interp.env.get("res").expect("res");
+        if let Value::Vector(vd) = res {
+            assert_eq!(vd.len(), 3);
+            assert_eq!(vd.value_at(0), Some(Value::String("A".into())));
+            assert_eq!(vd.value_at(1), Some(Value::String("Y".into())));
+            assert_eq!(vd.value_at(2), Some(Value::NA(Some("MissingFlag".into()))));
+        } else {
+            panic!("Expected vector");
+        }
+    }
 }
 
 

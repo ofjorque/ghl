@@ -19,7 +19,7 @@ use polars_ops::prelude::*;
 use rayon::prelude::*;
 use crate::na_reasons::NaReasonTable;
 use crate::polars_bridge;
-use crate::value::Value;
+use crate::value::{Value, LazyPlan};
 use crate::vector_data::VectorData;
 
 /// Extrae `&DataFrame`/`&Arc<NaReasonTable>` de un `Value`, o el diagnóstico de error
@@ -34,7 +34,7 @@ fn as_dataframe<'a>(df: &'a Value, verb: &str) -> Result<(&'a DataFrame, &'a Arc
         Value::DataFrame { frame, na_reasons } => Ok((frame, na_reasons)),
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`{verb}()` requires a DataFrame, found `{}`", other.type_name()),
+            format!("(ノ°□°)ノ `{verb}()` requires a DataFrame, found `{}`", other.type_name()),
         )),
     }
 }
@@ -108,20 +108,78 @@ pub(crate) fn mask_to_indices(mask: &BooleanChunked) -> Vec<usize> {
     mask.iter().enumerate().filter_map(|(i, v)| v.unwrap_or(false).then_some(i)).collect()
 }
 
-/// `filter(df, col OP scalar)` end to end: computes the vectorized mask, then applies it
-/// to both the frame and the NA-reason table via the same `take_rows` every other
-/// row-preserving verb uses.
+/// Converts a scalar `Value` into a literal `Expr` for lazy query expressions.
+pub(crate) fn value_to_lazy_lit(v: &Value) -> Result<Expr, Diagnostic> {
+    match v {
+        Value::I64(n) => Ok(lit(*n)),
+        Value::F64(x) => Ok(lit(*x)),
+        Value::Bool(b) => Ok(lit(*b)),
+        Value::String(s) => Ok(lit(s.as_str())),
+        other => Err(Diagnostic::compute_error(
+            "C0202",
+            format!("(ノ°□°)ノ Value `{}` cannot be used as a literal in a lazy query expression", other.type_name()),
+        )),
+    }
+}
+
+/// Recursively translates GHL's deferred predicate tree into a native `polars_lazy::dsl::Expr`.
+pub(crate) fn predicate_to_lazy_expr(pred: &Value) -> Result<Expr, Diagnostic> {
+    match pred {
+        Value::ColPredicate { col: col_name, op, rhs } => {
+            let left = col(col_name.as_str());
+            let right = value_to_lazy_lit(rhs)?;
+            match op {
+                BinaryOp::Gt => Ok(left.gt(right)),
+                BinaryOp::GtEq => Ok(left.gt_eq(right)),
+                BinaryOp::Lt => Ok(left.lt(right)),
+                BinaryOp::LtEq => Ok(left.lt_eq(right)),
+                BinaryOp::Eq => Ok(left.eq(right)),
+                BinaryOp::NotEq => Ok(left.neq(right)),
+                other => Err(Diagnostic::compute_error(
+                    "C0202",
+                    format!("(ノ°□°)ノ `filter()` does not support operator `{:?}` in a lazy query", other),
+                )),
+            }
+        }
+        Value::IsNaPredicate(col_name) => Ok(col(col_name.as_str()).is_null()),
+        Value::NotPredicate(inner) => {
+            let expr = predicate_to_lazy_expr(inner)?;
+            Ok(expr.not())
+        }
+        Value::AndPredicate(a, b) => {
+            let expr_a = predicate_to_lazy_expr(a)?;
+            let expr_b = predicate_to_lazy_expr(b)?;
+            Ok(expr_a.and(expr_b))
+        }
+        Value::OrPredicate(a, b) => {
+            let expr_a = predicate_to_lazy_expr(a)?;
+            let expr_b = predicate_to_lazy_expr(b)?;
+            Ok(expr_a.or(expr_b))
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0202",
+            format!(
+                "(ノ°□°)ノ `filter()` does not understand `{}` as a lazy predicate",
+                other.type_name()
+            ),
+        )),
+    }
+}
+
+/// `filter(df, col OP scalar)` end to end: computes the vectorized mask (or appends filter in lazy mode),
+/// preserving both the frame and the NA-reason table.
 pub fn df_filter_by_col_predicate(
     df: &Value,
     col: &str,
     op: BinaryOp,
     rhs: &Value,
 ) -> Result<Value, Diagnostic> {
-    let (frame, na_reasons) = as_dataframe(df, "filter")?;
-    let mask = colref_predicate_mask(frame, col, op, rhs)?;
-    let indices = mask_to_indices(&mask);
-    let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    let pred = Value::ColPredicate {
+        col: col.to_string(),
+        op,
+        rhs: Box::new(rhs.clone()),
+    };
+    df_filter_by_predicate(df, &pred)
 }
 
 /// Evaluates a whole predicate tree (`col(x) > 5`, `is_na(col(y))`, and any combination
@@ -152,15 +210,29 @@ pub(crate) fn predicate_mask(frame: &DataFrame, pred: &Value) -> Result<BooleanC
     }
 }
 
-/// `filter(df, predicate)` for any predicate tree (see [`predicate_mask`]) — the general
-/// case `df_filter_by_col_predicate` is a convenience wrapper around for the single-
-/// comparison leaf.
+/// `filter(df, predicate)` for any predicate tree (see [`predicate_mask`]) — supports both
+/// eager `DataFrame` and deferred `LazyFrame`.
 pub fn df_filter_by_predicate(df: &Value, pred: &Value) -> Result<Value, Diagnostic> {
-    let (frame, na_reasons) = as_dataframe(df, "filter")?;
-    let mask = predicate_mask(frame, pred)?;
-    let indices = mask_to_indices(&mask);
-    let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    match df {
+        Value::DataFrame { frame, na_reasons } => {
+            let mask = predicate_mask(frame, pred)?;
+            let indices = mask_to_indices(&mask);
+            let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
+            Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+        }
+        Value::LazyFrame { plan, na_reasons } => {
+            let expr = predicate_to_lazy_expr(pred)?;
+            let new_plan = plan.0.clone().filter(expr);
+            Ok(Value::LazyFrame {
+                plan: LazyPlan(new_plan),
+                na_reasons: na_reasons.clone(),
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("(ノ°□°)ノ `filter()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+        )),
+    }
 }
 
 // =========================================================================
@@ -488,82 +560,237 @@ pub fn write_parquet_file(df: &Value, path: &str) -> Result<(), Diagnostic> {
 }
 
 // =========================================================================
+// 2b. Lazy Execution Engine (TODO.md Fase 2)
+// =========================================================================
+
+/// `lazy(df)` — converts an eager `DataFrame` into a `LazyFrame` for deferred query optimization.
+pub fn df_lazy(val: &Value) -> Result<Value, Diagnostic> {
+    match val {
+        Value::DataFrame { frame, na_reasons } => {
+            Ok(Value::LazyFrame {
+                plan: LazyPlan(frame.clone().lazy()),
+                na_reasons: na_reasons.clone(),
+            })
+        }
+        Value::LazyFrame { .. } => Ok(val.clone()),
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("(ノ°□°)ノ `lazy()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `collect(lf)` — executes the deferred query plan with Polars' query optimizer and returns an eager `DataFrame`.
+pub fn df_collect(val: &Value) -> Result<Value, Diagnostic> {
+    match val {
+        Value::LazyFrame { plan, na_reasons } => {
+            let collected = plan.0.clone().collect().map_err(|e| {
+                Diagnostic::compute_error("C0210", format!("(ノ°□°)ノ `collect()` execution failed: {e}"))
+            })?;
+            Ok(Value::DataFrame {
+                frame: collected,
+                na_reasons: na_reasons.clone(),
+            })
+        }
+        Value::DataFrame { .. } => Ok(val.clone()),
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("(ノ°□°)ノ `collect()` requires a LazyFrame or DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `explain(lf)` — returns the optimized (or unoptimized) logical query execution plan as a String.
+pub fn df_explain(val: &Value, optimized: bool) -> Result<Value, Diagnostic> {
+    match val {
+        Value::LazyFrame { plan, .. } => {
+            let plan_str = plan.0.explain(optimized).map_err(|e| {
+                Diagnostic::compute_error("C0210", format!("(ノ°□°)ノ Failed to generate explain plan: {e}"))
+            })?;
+            Ok(Value::String(plan_str))
+        }
+        Value::DataFrame { frame, .. } => {
+            let plan_str = frame.clone().lazy().explain(optimized).map_err(|e| {
+                Diagnostic::compute_error("C0210", format!("(ノ°□°)ノ Failed to generate explain plan: {e}"))
+            })?;
+            Ok(Value::String(plan_str))
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("(ノ°□°)ノ `explain()` requires a LazyFrame or DataFrame, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `scan_csv(path)` — lazy scan of a CSV file without materializing it in memory.
+pub fn scan_csv_file(path: &str) -> Result<Value, Diagnostic> {
+    let plan = LazyCsvReader::new(path.into())
+        .finish()
+        .map_err(|e| {
+            Diagnostic::compute_error("C0403", format!("(ノ°□°)ノ Failed to scan CSV file `{path}`: {e}"))
+        })?;
+    Ok(Value::LazyFrame {
+        plan: LazyPlan(plan),
+        na_reasons: Arc::new(NaReasonTable::new()),
+    })
+}
+
+/// `scan_parquet(path)` — lazy scan of a Parquet file.
+pub fn scan_parquet_file(path: &str) -> Result<Value, Diagnostic> {
+    let plan = LazyFrame::scan_parquet(path.into(), ScanArgsParquet::default())
+        .map_err(|e| {
+            Diagnostic::compute_error("C0405", format!("(ノ°□°)ノ Failed to scan Parquet file `{path}`: {e}"))
+        })?;
+    Ok(Value::LazyFrame {
+        plan: LazyPlan(plan),
+        na_reasons: Arc::new(NaReasonTable::new()),
+    })
+}
+
+// =========================================================================
 // 3. DataFrame Wrangling Verbs (select, head, tail, mutate, arrange,
 //    rename, drop, distinct, nrow, ncol, colnames, slice)
 // =========================================================================
 
 pub fn df_select(df: &Value, cols_to_keep: &[String]) -> Result<Value, Diagnostic> {
-    let (frame, na_reasons) = as_dataframe(df, "select")?;
+    match df {
+        Value::DataFrame { frame, na_reasons } => {
+            for col in cols_to_keep {
+                if frame.column(col).is_err() {
+                    return Err(Diagnostic::statistical_error(
+                        "S0201",
+                        format!("Column `{}` not found in DataFrame for `select()`", col),
+                    ));
+                }
+            }
 
-    for col in cols_to_keep {
-        if frame.column(col).is_err() {
-            return Err(Diagnostic::statistical_error(
-                "S0201",
-                format!("Column `{}` not found in DataFrame for `select()`", col),
-            ));
+            let new_frame = frame.select(cols_to_keep.iter().map(|s| s.as_str())).map_err(|e| {
+                Diagnostic::compute_error("C0210", format!("`select()` failed: {e}"))
+            })?;
+            let new_reasons = Arc::new(na_reasons.retain_columns(cols_to_keep));
+            Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
         }
+        Value::LazyFrame { plan, na_reasons } => {
+            let exprs: Vec<Expr> = cols_to_keep.iter().map(|c| col(c.as_str())).collect();
+            let new_plan = plan.0.clone().select(exprs);
+            let new_reasons = Arc::new(na_reasons.retain_columns(cols_to_keep));
+            Ok(Value::LazyFrame {
+                plan: LazyPlan(new_plan),
+                na_reasons: new_reasons,
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("(ノ°□°)ノ `select()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+        )),
     }
-
-    let new_frame = frame.select(cols_to_keep.iter().map(|s| s.as_str())).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`select()` failed: {e}"))
-    })?;
-    let new_reasons = Arc::new(na_reasons.retain_columns(cols_to_keep));
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
 }
 
 pub fn df_head(df: &Value, n: usize) -> Result<Value, Diagnostic> {
-    let (frame, na_reasons) = as_dataframe(df, "head")?;
-    let indices: Vec<usize> = (0..n.min(frame.height())).collect();
-    let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    match df {
+        Value::DataFrame { frame, na_reasons } => {
+            let indices: Vec<usize> = (0..n.min(frame.height())).collect();
+            let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
+            Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+        }
+        Value::LazyFrame { plan, na_reasons } => {
+            let new_plan = plan.0.clone().limit(n as IdxSize);
+            Ok(Value::LazyFrame {
+                plan: LazyPlan(new_plan),
+                na_reasons: na_reasons.clone(),
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("(ノ°□°)ノ `head()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+        )),
+    }
 }
 
 pub fn df_tail(df: &Value, n: usize) -> Result<Value, Diagnostic> {
-    let (frame, na_reasons) = as_dataframe(df, "tail")?;
-    let start = frame.height().saturating_sub(n);
-    let indices: Vec<usize> = (start..frame.height()).collect();
-    let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    match df {
+        Value::DataFrame { frame, na_reasons } => {
+            let start = frame.height().saturating_sub(n);
+            let indices: Vec<usize> = (start..frame.height()).collect();
+            let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
+            Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+        }
+        Value::LazyFrame { plan, na_reasons } => {
+            let new_plan = plan.0.clone().tail(n as IdxSize);
+            Ok(Value::LazyFrame {
+                plan: LazyPlan(new_plan),
+                na_reasons: na_reasons.clone(),
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("(ノ°□°)ノ `tail()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+        )),
+    }
 }
 
 /// `mutate(df, "new_col", values_vector)` — add or replace a column with pre-computed values.
 ///
 /// Pipe-friendly: `df |> mutate("log_dose", log_vals)`
 pub fn df_mutate(df: &Value, col_name: &str, new_values: Vec<Value>) -> Result<Value, Diagnostic> {
-    let (frame, na_reasons) = as_dataframe(df, "mutate")?;
-    let num_rows = frame.height();
+    match df {
+        Value::DataFrame { frame, na_reasons } => {
+            let num_rows = frame.height();
 
-    if !new_values.is_empty() && new_values.len() != num_rows && num_rows > 0 {
-        return Err(Diagnostic::compute_error(
-            "C0205",
-            format!(
-                "`mutate()`: column `{}` has {} values, but DataFrame has {} rows",
-                col_name, new_values.len(), num_rows
-            ),
-        ));
-    }
+            if !new_values.is_empty() && new_values.len() != num_rows && num_rows > 0 {
+                return Err(Diagnostic::compute_error(
+                    "C0205",
+                    format!(
+                        "`mutate()`: column `{}` has {} values, but DataFrame has {} rows",
+                        col_name, new_values.len(), num_rows
+                    ),
+                ));
+            }
 
-    // Broadcast a single scalar value to every row (`mutate(df, "flag", true)`).
-    let new_values = if new_values.len() == 1 && num_rows > 1 {
-        vec![new_values[0].clone(); num_rows]
-    } else {
-        new_values
-    };
+            // Broadcast a single scalar value to every row (`mutate(df, "flag", true)`).
+            let new_values = if new_values.len() == 1 && num_rows > 1 {
+                vec![new_values[0].clone(); num_rows]
+            } else {
+                new_values
+            };
 
-    let mut new_reasons = na_reasons.without_column(col_name);
-    for (row, v) in new_values.iter().enumerate() {
-        if let Value::NA(Some(reason)) = v {
-            new_reasons.set(col_name, row, reason.clone());
+            let mut new_reasons = na_reasons.without_column(col_name);
+            for (row, v) in new_values.iter().enumerate() {
+                if let Value::NA(Some(reason)) = v {
+                    new_reasons.set(col_name, row, reason.clone());
+                }
+            }
+
+            let column = polars_bridge::value_column_to_polars(col_name, &new_values);
+            let mut new_frame = frame.clone();
+            new_frame.with_column(column).map_err(|e| {
+                Diagnostic::compute_error("C0210", format!("`mutate()` failed: {e}"))
+            })?;
+
+            Ok(Value::DataFrame { frame: new_frame, na_reasons: Arc::new(new_reasons) })
         }
+        Value::LazyFrame { plan, na_reasons } => {
+            if new_values.len() == 1 {
+                let lit_expr = value_to_lazy_lit(&new_values[0])?.alias(PlSmallStr::from_string(col_name.to_string()));
+                let new_plan = plan.0.clone().with_column(lit_expr);
+                return Ok(Value::LazyFrame {
+                    plan: LazyPlan(new_plan),
+                    na_reasons: na_reasons.clone(),
+                });
+            }
+            let col_series = polars_bridge::value_column_to_polars(col_name, &new_values);
+            let lit_expr = lit(col_series.as_materialized_series().clone()).alias(PlSmallStr::from_string(col_name.to_string()));
+            let new_plan = plan.0.clone().with_column(lit_expr);
+            Ok(Value::LazyFrame {
+                plan: LazyPlan(new_plan),
+                na_reasons: na_reasons.clone(),
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("(ノ°□°)ノ `mutate()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+        )),
     }
-
-    let column = polars_bridge::value_column_to_polars(col_name, &new_values);
-    let mut new_frame = frame.clone();
-    new_frame.with_column(column).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`mutate()` failed: {e}"))
-    })?;
-
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: Arc::new(new_reasons) })
 }
 
 /// Total order over two optional cell values, used by `arrange()`, `rank()`, `sort_asc()`/`sort_desc()`.
@@ -589,33 +816,50 @@ pub(crate) fn compare_values(a: Option<&Value>, b: Option<&Value>) -> std::cmp::
 /// `arrange(df, col1, col2, ...)` — stable, multi-column sort. Each `(col, desc)` pair
 /// is tried in order, falling through to the next column on ties.
 pub fn df_arrange(df: &Value, specs: &[(String, bool)]) -> Result<Value, Diagnostic> {
-    let (frame, na_reasons) = as_dataframe(df, "arrange")?;
-
-    let mut sort_cols: Vec<(Vec<Value>, bool)> = Vec::with_capacity(specs.len());
-    for (col_name, desc) in specs {
-        let col_vals = polars_bridge::pull_column_as_values(frame, na_reasons, col_name).map_err(|_| {
-            Diagnostic::statistical_error(
-                "S0201",
-                format!("Column `{}` not found in DataFrame for `arrange()`", col_name),
-            )
-        })?;
-        sort_cols.push((col_vals, *desc));
-    }
-
-    let num_rows = frame.height();
-    let mut indices: Vec<usize> = (0..num_rows).collect();
-    indices.sort_by(|&a, &b| {
-        for (col_vals, desc) in &sort_cols {
-            let ord = compare_values(col_vals.get(a), col_vals.get(b));
-            if ord != std::cmp::Ordering::Equal {
-                return if *desc { ord.reverse() } else { ord };
+    match df {
+        Value::DataFrame { frame, na_reasons } => {
+            let mut sort_cols: Vec<(Vec<Value>, bool)> = Vec::with_capacity(specs.len());
+            for (col_name, desc) in specs {
+                let col_vals = polars_bridge::pull_column_as_values(frame, na_reasons, col_name).map_err(|_| {
+                    Diagnostic::statistical_error(
+                        "S0201",
+                        format!("Column `{}` not found in DataFrame for `arrange()`", col_name),
+                    )
+                })?;
+                sort_cols.push((col_vals, *desc));
             }
-        }
-        std::cmp::Ordering::Equal
-    });
 
-    let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+            let num_rows = frame.height();
+            let mut indices: Vec<usize> = (0..num_rows).collect();
+            indices.sort_by(|&a, &b| {
+                for (col_vals, desc) in &sort_cols {
+                    let ord = compare_values(col_vals.get(a), col_vals.get(b));
+                    if ord != std::cmp::Ordering::Equal {
+                        return if *desc { ord.reverse() } else { ord };
+                    }
+                }
+                std::cmp::Ordering::Equal
+            });
+
+            let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
+            Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+        }
+        Value::LazyFrame { plan, na_reasons } => {
+            let by_cols: Vec<PlSmallStr> = specs.iter().map(|(c, _)| PlSmallStr::from_string(c.clone())).collect();
+            let descending: Vec<bool> = specs.iter().map(|(_, desc)| *desc).collect();
+            let sort_options = SortMultipleOptions::default()
+                .with_order_descending_multi(descending);
+            let new_plan = plan.0.clone().sort(by_cols, sort_options);
+            Ok(Value::LazyFrame {
+                plan: LazyPlan(new_plan),
+                na_reasons: na_reasons.clone(),
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("(ノ°□°)ノ `arrange()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+        )),
+    }
 }
 
 /// `slice_min(df, col, n)` — the `n` rows with the smallest `col` value.
@@ -777,18 +1021,31 @@ pub fn df_slice(df: &Value, from: usize, to: usize) -> Result<Value, Diagnostic>
 /// `df_summarize` rather than stored here, since polars' `GroupBy<'a>` borrows its
 /// source frame and can't live inside an owned `Value`.
 pub fn df_group_by(df: &Value, keys: &[String]) -> Result<Value, Diagnostic> {
-    let (frame, na_reasons) = as_dataframe(df, "group_by")?;
+    match df {
+        Value::DataFrame { frame, na_reasons } => {
+            for k in keys {
+                if frame.column(k).is_err() {
+                    return Err(Diagnostic::statistical_error(
+                        "S0201",
+                        format!("Column `{}` not found in DataFrame for `group_by()`", k),
+                    ));
+                }
+            }
 
-    for k in keys {
-        if frame.column(k).is_err() {
-            return Err(Diagnostic::statistical_error(
-                "S0201",
-                format!("Column `{}` not found in DataFrame for `group_by()`", k),
-            ));
+            Ok(Value::GroupedDataFrame { frame: frame.clone(), na_reasons: na_reasons.clone(), keys: keys.to_vec() })
         }
+        Value::LazyFrame { plan, na_reasons } => {
+            Ok(Value::GroupedLazyFrame {
+                plan: plan.clone(),
+                na_reasons: na_reasons.clone(),
+                keys: keys.to_vec(),
+            })
+        }
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("(ノ°□°)ノ `group_by()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+        )),
     }
-
-    Ok(Value::GroupedDataFrame { frame: frame.clone(), na_reasons: na_reasons.clone(), keys: keys.to_vec() })
 }
 
 const PROPAGATES_NA_KINDS: [&str; 7] = ["mean", "sum", "std_dev", "var", "min", "max", "median"];
@@ -830,26 +1087,39 @@ fn get_idx_cell(column: &Column, i: usize, what: &str) -> Result<usize, Diagnost
     }
 }
 
-/// `summarize(gdf, name = agg, ...)` — consumes the `GroupedDataFrame`, returns a plain
-/// `DataFrame`. `specs` is `(output_name, agg_kind, source_col)`.
-///
-/// Uses `polars-lazy`'s query engine (`LazyFrame::group_by().agg([...])`) rather than
-/// `polars-core`'s eager `GroupBy` reduction methods (`.mean()`/`.sum()`/etc.) — those have
-/// been deprecated since polars-core 0.24.1 in favor of exactly this lazy path ("use
-/// polars.lazy aggregations"), and there is no non-deprecated eager alternative that fuses
-/// an aggregation across all groups in one native pass. One single `.agg([...])` call
-/// computes every distinct `(kind, col)` aggregation the caller asked for, plus a per-column
-/// null-count (for Kleene NA propagation) and a representative original-row index per group
-/// (for na_reason-aware key values) — all fused into that one query-engine pass, so there's
-/// no join between partial results to manage (TODO.md's original worry about this item).
+/// `summarize(gdf, name = agg, ...)` — consumes the `GroupedDataFrame` or `GroupedLazyFrame`,
+/// returning a plain `DataFrame` or `LazyFrame`. `specs` is `(output_name, agg_kind, source_col)`.
 pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> Result<Value, Diagnostic> {
+    if let Value::GroupedLazyFrame { plan, na_reasons, keys } = gdf {
+        let key_exprs: Vec<Expr> = keys.iter().map(|k| col(k.as_str())).collect();
+        let mut agg_exprs: Vec<Expr> = Vec::with_capacity(specs.len());
+        for (out_name, kind, source_col) in specs {
+            let expr = match (kind.as_str(), source_col) {
+                ("count" | "n", _) => len().alias(PlSmallStr::from_string(out_name.clone())),
+                (k, Some(col_name)) => agg_expr_for(k, col_name, out_name)?,
+                (other, None) => {
+                    return Err(Diagnostic::compute_error(
+                        "C0201",
+                        format!("(ノ°□°)ノ Aggregation `{other}` requires a column argument in `summarize()`"),
+                    ));
+                }
+            };
+            agg_exprs.push(expr);
+        }
+        let new_plan = plan.0.clone().group_by_stable(key_exprs).agg(agg_exprs);
+        return Ok(Value::LazyFrame {
+            plan: LazyPlan(new_plan),
+            na_reasons: Arc::new(na_reasons.retain_columns(keys)),
+        });
+    }
+
     let (frame, na_reasons, keys) = match gdf {
         Value::GroupedDataFrame { frame, na_reasons, keys } => (frame, na_reasons, keys),
         other => {
             return Err(Diagnostic::compute_error(
                 "C0201",
                 format!(
-                    "`summarize()` requires a GroupedDataFrame (did you forget `group_by()`?), found `{}`",
+                    "(ノ°□°)ノ `summarize()` requires a GroupedDataFrame or GroupedLazyFrame (did you forget `group_by()`?), found `{}`",
                     other.type_name()
                 ),
             ));
@@ -1086,13 +1356,51 @@ pub fn df_glimpse(df: &Value) -> Result<Value, Diagnostic> {
 
 /// `inner_join(left, right, on)` — hash join, keeping only matching rows on both sides.
 pub fn df_inner_join(left: &Value, right: &Value, on: &[String]) -> Result<Value, Diagnostic> {
-    df_join(left, right, on, JoinType::Inner)
+    df_join_dispatch(left, right, on, JoinType::Inner)
 }
 
 /// `left_join(left, right, on)` — hash join, keeping every row of `left` (unmatched
 /// `right` columns become NA).
 pub fn df_left_join(left: &Value, right: &Value, on: &[String]) -> Result<Value, Diagnostic> {
-    df_join(left, right, on, JoinType::Left)
+    df_join_dispatch(left, right, on, JoinType::Left)
+}
+
+fn df_join_dispatch(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<Value, Diagnostic> {
+    let verb = match how {
+        JoinType::Inner => "inner_join",
+        JoinType::Left => "left_join",
+        _ => "join",
+    };
+    if matches!(left, Value::LazyFrame { .. }) || matches!(right, Value::LazyFrame { .. }) {
+        let left_plan = match left {
+            Value::LazyFrame { plan, .. } => plan.0.clone(),
+            Value::DataFrame { frame, .. } => frame.clone().lazy(),
+            other => {
+                return Err(Diagnostic::compute_error(
+                    "C0201",
+                    format!("(ノ°□°)ノ `{verb}()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+                ));
+            }
+        };
+        let right_plan = match right {
+            Value::LazyFrame { plan, .. } => plan.0.clone(),
+            Value::DataFrame { frame, .. } => frame.clone().lazy(),
+            other => {
+                return Err(Diagnostic::compute_error(
+                    "C0201",
+                    format!("(ノ°□°)ノ `{verb}()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+                ));
+            }
+        };
+        let left_on: Vec<Expr> = on.iter().map(|c| col(c.as_str())).collect();
+        let right_on: Vec<Expr> = on.iter().map(|c| col(c.as_str())).collect();
+        let joined_plan = left_plan.join(right_plan, left_on, right_on, JoinArgs::new(how));
+        return Ok(Value::LazyFrame {
+            plan: LazyPlan(joined_plan),
+            na_reasons: Arc::new(NaReasonTable::new()),
+        });
+    }
+    df_join(left, right, on, how)
 }
 
 /// Like `get_idx_cell` (used by `df_summarize`), but tolerates a null cell instead of

@@ -70,6 +70,11 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("na_reason".into(), any_fn()),
             ("na_reasons".into(), any_fn()),
             ("is_na".into(), any_fn()),
+            ("lazy".into(), any_fn()),
+            ("collect".into(), any_fn()),
+            ("explain".into(), any_fn_multi(2)),
+            ("scan_csv".into(), any_fn()),
+            ("scan_parquet".into(), any_fn()),
         ]),
 
         ["std", "linalg"] => Some(vec![
@@ -190,6 +195,8 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("write_csv".into(), any_fn_multi(2)),
             ("read_parquet".into(), any_fn()),
             ("write_parquet".into(), any_fn_multi(2)),
+            ("scan_csv".into(), any_fn()),
+            ("scan_parquet".into(), any_fn()),
         ]),
 
         ["std", "plot"] => Some(vec![
