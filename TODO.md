@@ -1554,30 +1554,53 @@ Solo tiene sentido al final, cuando ya hay algo que medir.
         3-4 pasadas completas por columna con acceso **indexado** (`raw.get(i)` en un
         loop `for i in 0..n`) sobre un `ChunkedArray<StringType>` respaldado por el
         formato "view" de arrow — mucho más caro por celda que iterar secuencial.
-      - **Fix:** reescrita para hacer una sola pasada con `StringChunked::iter()`
-        (materializa `cells: Vec<&str>` una vez, amortizando el chunk-lookup que
-        `.get(i)` repetía en cada llamada) y trabajar el resto de la lógica
-        (detección de NA-razón, prioridad de dtype i64>f64>bool>string, construcción
-        final) sobre ese slice ya en memoria — mismo espíritu que el fix de
-        representación de datos de NEKO (`vector_data::column_as_f64_view`,
-        `neko::Blueprint::bake`), aplicado acá a `StringChunked` en vez de a
-        `Value::DataFrame`. Sin paralelismo anidado dentro de la función:
-        `read_csv_file` ya satura el pool de rayon a nivel de columna, agregar una
-        segunda capa hubiera sobresuscrito hilos sin ganancia.
-      - **Medido, mismo dataset/máquina, antes/después:** tiempo total
-        **966ms → 476ms (2.03x más rápido)**; CPU-usuario **5.0s → 1.8s (2.79x menos
-        trabajo total**, coincide con la caída de ~21.868 a ~8.836 muestras de `perf`
-        a igual tasa de muestreo, ~2.47x). Verificado que `ChunkedArray::get`/
-        `BinaryViewArrayGeneric::len` ya no aparecen entre las funciones calientes del
-        perfil posterior. Corrección funcional re-verificada: mismos 5 grupos/valores
-        exactos de siempre (`total_a`/`n` por categoría).
-      - **Con esto, GHL le gana a R (data.table) en Suite 02** (476ms vs 1.03s,
-        antes perdía contra ambos) **pero sigue perdiendo contra Polars-Python**
-        (341.8ms) — la brecha bajó de 2.83x a **1.39x**, se achicó sustancialmente, no
-        desapareció. No se investigó más a fondo qué explica el 1.39x restante (podría
-        ser overhead de tokenizing/parseo adicional, la construcción de
-        `Vec<Option<T>>` intermedios antes de `collect::<ChunkedArray>()`, u otra
-        cosa) — documentado como parcial, no como resuelto.
+      - **Fix, en dos rondas de medición (la segunda a pedido explícito de intentar
+        acercarse más a Python):**
+        1. Reescrita para hacer una sola pasada con `StringChunked::iter()`
+           (materializa `cells: Vec<&str>` una vez, amortizando el chunk-lookup que
+           `.get(i)` repetía en cada llamada) en vez de 3-4 pasadas indexadas — mismo
+           espíritu que el fix de representación de datos de NEKO
+           (`vector_data::column_as_f64_view`, `neko::Blueprint::bake`), aplicado acá a
+           `StringChunked` en vez de a `Value::DataFrame`.
+        2. Perfilando de nuevo tras (1), encontró que el tipo *ganador* (i64/f64/bool)
+           se seguía parseando dos veces (una en el chequeo `.all()`-equivalente, otra
+           al construir el `Column` final). Reescrita otra vez para construir el buffer
+           del tipo candidato *incrementalmente* durante la misma pasada de
+           clasificación (`i64_buf`/`f64_buf`/`bool_buf`, cada uno se descarta apenas
+           su tipo deja de ser candidato) — el tipo que sigue vivo al final ya tiene los
+           datos listos, sin re-parsear.
+        - **Intento adicional que NO funcionó, medido y revertido:** cachear el estado
+          de NA en un `str_buf: Vec<Option<&str>>` construido para las 12 columnas (no
+          solo las 5 de texto) para evitar una segunda llamada a `is_na_token` en la
+          rama de fallback a `String`. Midió **peor** (438ms → ~447-451ms,
+          reproducible en 3 corridas) que dejar esa rama re-chequeando `is_na_token` —
+          el costo de mantener un buffer extra para las 7 columnas que nunca lo usan
+          superó el ahorro en las 5 que sí. Revertido a la versión más simple, que
+          medía mejor. Documentado para que nadie repita el mismo intento sin medirlo.
+        - Sin paralelismo anidado dentro de la función en ningún caso: `read_csv_file`
+          ya satura el pool de rayon a nivel de columna, agregar una segunda capa
+          hubiera sobresuscrito hilos sin ganancia.
+      - **Medido, mismo dataset/máquina, antes/después (número final tras ambas
+        rondas):** tiempo total **966ms → 439ms (2.20x más rápido)**; CPU-usuario
+        **5.0s → 1.56s (3.2x menos trabajo total**, coincide con la caída de ~21.868 a
+        ~8.114 muestras de `perf` a igual tasa de muestreo, ~2.7x). Verificado que
+        `ChunkedArray::get`/`BinaryViewArrayGeneric::len` ya no aparecen entre las
+        funciones calientes del perfil posterior. Corrección funcional re-verificada
+        en cada ronda: mismos 5 grupos/valores exactos de siempre (`total_a`/`n` por
+        categoría).
+      - **Con esto, GHL le gana a R (data.table) en Suite 02** (439ms vs 1.03s, antes
+        perdía contra ambos) **pero sigue perdiendo contra Polars-Python** (341.8ms) —
+        la brecha bajó de 2.83x a **1.29x**, se achicó sustancialmente, no desapareció.
+        Lo que queda del perfil posterior (`perf`) apunta a una causa arquitectónica,
+        no a otro descuido puntual: ~35% de los ciclos restantes son del propio
+        `polars-io` tokenizando el CSV hacia `String` (`parse_lines`,
+        `MutableBinaryViewArray::push_value_into_buffer`, `CountLines::find_next`) —
+        trabajo que Polars-Python no paga porque su lector nativo infiere tipos
+        directamente sin pasar por `String` primero. Cerrar esto del todo requeriría
+        dejar de forzar `dtype_overwrite: String` y detectar `NA:Razon` por otro
+        mecanismo — un cambio de arquitectura de la ingesta de CSV, no un fix
+        puntual; **no se intentó en esta pasada**, documentado como parcial, no como
+        resuelto.
       - Nuevo test: `test_csv_column_with_i64_overflow_falls_back_to_f64` (`io.rs`) —
         el caso de una columna entera con un valor que excede `i64::MAX` cayendo a
         `f64` existía en la lógica pero no estaba testeado en ningún lado; se agregó

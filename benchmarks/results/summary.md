@@ -313,23 +313,36 @@ corridas de Windows) el `GHL (Polars-backed)` de la Sección 5 — encontró que
 lento (`ChunkedArray<StringType>::get` + `BinaryViewArrayGeneric::len`) dentro de la
 inferencia de dtype propia de GHL sobre cada columna del CSV
 (`infer_and_convert_column_native`, `crates/ghl-runtime/src/io.rs`), no en las dos
-hipótesis originales del TODO (boxing `DataFrame`↔`Value`, o falta de pushdown
-lazy). Se reescribió esa función para iterar con `StringChunked::iter()` una sola vez
-en vez de indexar con `.get(i)` en 3-4 pasadas — detalle completo, semántica
-preservada y tests nuevos en `TODO.md` (Fase 10).
+hipótesis originales del TODO (boxing `DataFrame`↔`Value`, o falta de pushdown lazy).
 
-**Medido en esta misma máquina, mismo dataset, antes/después:**
+Fix en dos rondas (la segunda a pedido explícito de acercarse más a Python): (1)
+reescrita para iterar con `StringChunked::iter()` una sola vez en vez de indexar con
+`.get(i)` en 3-4 pasadas; (2) al perfilar de nuevo, el tipo ganador (i64/f64/bool)
+todavía se parseaba dos veces (chequeo + construcción) — reescrita otra vez para
+construir el buffer del tipo candidato incrementalmente en la misma pasada de
+clasificación, sin re-parsear. Un tercer intento (cachear el estado de NA en un buffer
+de `&str` para las 12 columnas, no solo las 5 de texto) **midió peor** y se revirtió —
+detalle completo, semántica preservada y tests nuevos en `TODO.md` (Fase 10).
+
+**Medido en esta misma máquina, mismo dataset, antes/después (número final tras ambas
+rondas que sí funcionaron):**
 
 | | Antes (Sección 5) | Después | Cambio |
 | :--- | :---: | :---: | :---: |
-| **GHL (Polars-backed)** | 966.2 ms $\pm$ 31.4 ms | **476.2 ms $\pm$ 10.8 ms** | **2.03x más rápido** |
-| CPU-usuario (paralelo) | 5013.2 ms | 1793.9 ms | 2.79x menos trabajo total |
-| vs. Python (Polars), sin cambios (341.8ms) | pierde 2.83x | **pierde 1.39x** | brecha reducida, no cerrada |
-| vs. R (data.table), sin cambios (1029ms) | **pierde 1.06x** | **gana 2.16x** | GHL pasa a ganarle |
+| **GHL (Polars-backed)** | 966.2 ms $\pm$ 31.4 ms | **439.1 ms $\pm$ 9.0 ms** | **2.20x más rápido** |
+| CPU-usuario (paralelo) | 5013.2 ms | 1556.0 ms | 3.2x menos trabajo total |
+| vs. Python (Polars), sin cambios (341.8ms) | pierde 2.83x | **pierde 1.29x** | brecha reducida, no cerrada |
+| vs. R (data.table), sin cambios (1029ms) | **pierde 1.06x** | **gana 2.34x** | GHL pasa a ganarle |
 
 Las demás 5 variantes de Suite 02 (Python Pandas/Polars, R base/data.table, Julia
 streaming/DataFrames.jl) no cambiaron — no dependen de este código, no se remidieron.
 **Titular honesto, no forzado a "resuelto":** la brecha con Polars-Python bajó
-sustancialmente (de perder por 2.83x a perder por 1.39x) pero **sigue sin cerrarse** —
-no se investigó qué explica el 1.39x restante. Corrección funcional re-verificada:
-`bench_df.gh` sigue dando exactamente los mismos 5 grupos/valores de siempre.
+sustancialmente (de perder por 2.83x a perder por 1.29x) pero **sigue sin cerrarse**.
+Lo que queda del perfil posterior apunta a algo arquitectónico, no a otro descuido
+puntual: ~35% de los ciclos restantes son del propio `polars-io` tokenizando el CSV
+hacia `String` — trabajo que Polars-Python no paga porque infiere tipos nativos
+directamente. Cerrarlo del todo implicaría dejar de forzar `dtype_overwrite: String` y
+detectar `NA:Razon` por otro mecanismo, un cambio de arquitectura de la ingesta de CSV,
+no otro fix puntual — no se intentó en esta pasada. Corrección funcional re-verificada
+en cada ronda: `bench_df.gh` sigue dando exactamente los mismos 5 grupos/valores de
+siempre.
