@@ -1,8 +1,10 @@
 //! Code generation and Cranelift JIT engine for GHL.
 
+pub mod aot;
 pub mod compiler;
 pub mod jit;
 
+pub use aot::AotEngine;
 pub use compiler::FunctionCompiler;
 pub use jit::JitEngine;
 
@@ -144,6 +146,32 @@ mod tests {
 
         let dead_fn = jit.get_fn_i64_1("dead_branch").expect("dead_branch compiled");
         assert_eq!(dead_fn(21), 42);
+    }
+
+    #[test]
+    fn test_aot_compile_object_file() {
+        let code = r#"
+            fn multiply(a: i64, b: i64) -> i64 {
+                a * b
+            }
+
+            fn square(x: i64) -> i64 {
+                multiply(x, x)
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let hir_module = lower_ast(&program).expect("hir ok");
+
+        let aot = AotEngine::new("test_module").expect("aot init ok");
+        let obj_bytes = aot.compile_module(&hir_module).expect("aot compilation ok");
+
+        assert!(!obj_bytes.is_empty(), "Object bytes should not be empty");
+        // Verify that the bytes are a valid object file format parseable by `object`
+        let obj_file = cranelift_object::object::File::parse(&*obj_bytes).expect("parse valid object file");
+        use cranelift_object::object::{Object, ObjectSymbol};
+        let symbols: Vec<_> = obj_file.symbols().filter_map(|s| s.name().ok()).collect();
+        assert!(symbols.contains(&"multiply"), "Emitted object should contain exported `multiply` symbol");
+        assert!(symbols.contains(&"square"), "Emitted object should contain exported `square` symbol");
     }
 }
 

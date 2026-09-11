@@ -12,6 +12,7 @@ ghl-syntax = { path = "../ghl-syntax" }
 ghl-diagnostics = { path = "../ghl-diagnostics" }
 cranelift = "0.135.1"
 cranelift-jit = "0.135.1"
+cranelift-object = "0.135.1"
 cranelift-module = "0.135.1"
 cranelift-native = "0.135.1"
 cranelift-frontend = "0.135.1"
