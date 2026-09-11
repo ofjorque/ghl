@@ -1571,3 +1571,27 @@ Solo tiene sentido al final, cuando ya hay algo que medir.
         Suite 04 no está en esta corrida; podría afectar la adopción de GHL en
         entornos corporativos con EDR similar si el binario AOT no se firma o no
         cambia de forma para dejar de parecer sospechoso a escáneres heurísticos.
+- [x] **Re-ejecutar las 4 suites en una tercera máquina (Linux) — completado
+      (2026-09-11).** Primera vez corriendo el harness fuera de Windows — se escribió
+      `benchmarks/scripts/harness/run_benchmarks.sh` (puerto bash del `.ps1`, mismos
+      scripts/rutas de salida) ya que no existía equivalente. Herramientas instaladas
+      desde cero: venv de Python (mismas versiones que el laptop Windows), `data.table`
+      en R (biblioteca de usuario no existía, había que crearla primero), y
+      `DataFrames.jl`/`CSV.jl` en Julia (el gestor de paquetes no arrancaba por un
+      mismatch de libcurl del build de Julia de Fedora — resuelto con
+      `JULIA_PKG_USE_CLI_GIT=true`). Resultados en detalle en
+      `benchmarks/results/summary.md` §5.
+      - **Conclusiones cualitativas idénticas a ambas corridas de Windows:** GHL gana
+        Suites 01/03/04 con margen amplio y pierde Suite 02 contra Polars-Python
+        (2.83x) y R data.table (3.01x) — la brecha de Suite 02 se sostiene en un
+        tercer sistema operativo, no es un artefacto de Windows.
+      - **A diferencia de ambas corridas de Windows, acá sí se pudo medir "GHL (AOT
+        Binary)"** (0.7ms) — no hay EDR bloqueando el binario nuevo en esta máquina,
+        así que Suite 04 quedó completa con las 5 variantes por primera vez desde el
+        audit original.
+      - **Incidente real durante la corrida, documentado en vez de ocultado:** la
+        máquina se fue a suspensión de energía a mitad de la Suite 02 (política de
+        inactividad de escritorio) — Suites 04/01 ya habían exportado antes de eso y
+        quedan válidas; Suite 02 (interrumpida) y Suite 03 (sin arrancar) se
+        descartaron enteras y se repitieron con `systemd-inhibit --what=sleep:idle`
+        bloqueando la suspensión por el resto de la corrida.

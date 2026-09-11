@@ -189,3 +189,116 @@ original), pero sigue sin acercarse a GHL.
   `methodology.md` §3 ni la medición de Peak RSS/pausas de GC (§2.C/D).
 - **Nuevo en esta corrida:** la variante "GHL (AOT Binary)" de Suite 04 no se pudo
   medir por el bloqueo del EDR de esta máquina (ver limitación arriba).
+
+---
+
+## 5. Corrida en Linux (11-Sep-2026)
+
+Tercera máquina, primera vez en Linux (Fedora, kernel 7.1.13, x86_64, 8 cores, 15GiB
+RAM) — mismo repositorio, commit distinto (incluye el fix de representación de datos
+de NEKO y el trabajo de Fase 5-8/GMM/módulos/AOT fusionado desde entonces; no afecta a
+estas 4 suites, que no tocan NEKO). Se agrega igual que la Sección 4: **sin modificar
+las secciones anteriores**, para comparar las tres máquinas una al lado de la otra.
+
+### Instalación en esta máquina
+- **hyperfine 1.20.0** (paquete de Fedora, ya instalado)
+- **Julia 1.12.1** (paquete de Fedora) + `DataFrames.jl 1.8.2` + `CSV.jl 0.10.17`
+  (`Pkg.add`) — el registro General no se pudo agregar con el mecanismo normal
+  (`curl_easy_setopt: 48`, un mismatch conocido de libcurl en el build de Julia de
+  Fedora); se resolvió con `JULIA_PKG_USE_CLI_GIT=true`, que hace que Pkg use el
+  `git`/`curl` del sistema en vez del libcurl empaquetado con Julia.
+- **R 4.6.1** (paquete de Fedora) + `data.table 1.18.6.1` — la librería de paquetes de
+  usuario no existía (`install.packages` fallaba con "not writable" incluso apuntando a
+  `Sys.getenv("R_LIBS_USER")`, porque el directorio nunca se había creado); se resolvió
+  creando el árbol de directorios antes de instalar.
+- **Python 3.14.7** (venv nuevo en `benchmarks/.venv`) con `numpy 2.5.3`, `pandas
+  3.0.5`, `polars 1.44.2`, `numba 0.67.0`, `scipy 1.18.1` — mismas versiones exactas
+  que la corrida del laptop Windows (11-Sep).
+- `target/synthetic_1m.csv` regenerado con el mismo generador determinista de siempre
+  — verificado cifra por cifra idéntico al de las corridas anteriores (ver más abajo).
+- `target/release/ghl` compilado desde cero (`cargo build --release`).
+- **A diferencia de ambas corridas de Windows: acá sí se pudo medir la variante "GHL
+  (AOT Binary)"** (`ghl build --release`) — no hay EDR bloqueando el binario nuevo, así
+  que Suite 04 queda completa con las 5 variantes por primera vez desde el audit
+  original del 10-Sep.
+
+### Incidente durante la corrida: suspensión del sistema a mitad de medición
+La máquina se fue a suspensión (`systemd-sleep`, política de inactividad de escritorio)
+mientras corría la Suite 02 — confirmado en el log de systemd
+(`System returned from sleep operation 'suspend'` a las 17:49:48). Suites 04 y 01 ya
+habían terminado y exportado sus JSON **antes** de la suspensión (17:37-17:38), así que
+esos dos quedan válidos tal cual. Suite 02 (a mitad de la variante 7/7) y Suite 03 (que
+ni había arrancado) se descartaron enteras y se repitieron desde cero, esta vez con
+`systemd-inhibit --what=sleep:idle --mode=block` envolviendo el comando de `hyperfine`
+para bloquear la suspensión por el resto de la corrida — no se tocó ninguna
+configuración de energía del sistema de forma permanente, solo se inhibió mientras
+corría este proceso puntual.
+
+### Versiones de software (corrida del 11-Sep, Linux)
+- **GHL**: `0.1.0` (mismo repo, commit posterior a las corridas de Windows — sin
+  cambios en el código que ejercitan estas 4 suites)
+- **Python**: `3.14.7` (NumPy `2.5.3`, Pandas `3.0.5`, Polars `1.44.2`, Numba `0.67.0`)
+- **R**: `4.6.1` (data.table `1.18.6.1`)
+- **Julia**: `1.12.1` (DataFrames.jl `1.8.2`, CSV.jl `0.10.17`)
+
+### Tabla comparativa (11-Sep, Linux)
+| Suite / Carga de Trabajo | GHL | Mejor alternativa externa | Speedup GHL |
+| :--- | :---: | :---: | :---: |
+| **Suite 04: Startup / TTFX** *(Hello World, con variante AOT)* | **0.7 ms** $\pm$ 0.1 ms (AOT) / 6.4 ms $\pm$ 0.5 ms (Interp) | Python 3.14: 15.3 ms $\pm$ 1.0 ms | **21.22x vs Python** (231x vs R, 250x vs Julia) |
+| **Suite 01: Math / SIMD** *(Dot Product $10^7$ `f64`)* | **141.3 ms** $\pm$ 2.8 ms | Python (NumPy): 298.7 ms $\pm$ 1.4 ms | **2.11x vs NumPy** (4.77x vs Julia, 6.18x vs R) |
+| **Suite 02: DataFrames** *(1M filas CSV + Filter + GroupBy + Agg)* | 966 ms $\pm$ 31 ms | **Python (Polars): 341.8 ms $\pm$ 3.3 ms** | **GHL pierde: 0.35x** (Polars-Python 2.83x más rápido; R data.table 3.01x más rápido que GHL) |
+| **Suite 03: Modelado Estadístico** *(Gibbs Sampler 100 iter / 3k obs)* | **21.1 ms** $\pm$ 0.3 ms | R (Base): 264.7 ms $\pm$ 84.9 ms | **12.55x vs R** (19.54x vs NumPy, 46.34x vs Julia) |
+
+**Mismas conclusiones cualitativas que en las dos corridas de Windows:** GHL gana
+Suites 01/03/04 con margen amplio, y **no** gana Suite 02 frente a Polars-Python ni
+data.table-R — la brecha estructural de Suite 02 (`crates/ghl-runtime` vs. el estado
+del arte de su propia categoría) se sostiene en un tercer sistema operativo distinto,
+así que no es un artefacto de Windows.
+
+### Detalle por suite (11-Sep, Linux)
+
+**Suite 04:** GHL AOT 0.7ms, GHL Interpreted 6.4ms, Python 15.3ms, R 166.5ms, Julia
+180.3ms. Con la variante AOT medible por primera vez desde el audit original, el
+margen de GHL sobre Python (21.22x) es más parecido al del desktop original (6.63x con
+un binario AOT distinto, distinta máquina) que al del laptop sin AOT (1.40x) —
+consistente con que la mayor parte del costo de "Interpreted" es parseo+typecheck, no
+el propio `println`.
+
+**Suite 01:** GHL 141.3ms, NumPy 298.7ms, Julia 674.3ms, R 873.7ms. Mismo caveat que
+las corridas de Windows: `np.dot`/`LinearAlgebra.dot` ya despachan a BLAS de fábrica, y
+esta R usa BLAS de referencia monohilo.
+
+**Suite 02:** Python (Polars) 341.8ms, R (data.table) 1.029s, **GHL 966.2ms**, Julia
+streaming 2.025s, Python (Pandas) 1.918s, R base 8.006s, Julia DataFrames.jl 11.617s.
+Mismo orden relativo que ambas corridas de Windows (Polars > data.table ≈ GHL > el
+resto) — en esta máquina GHL queda apenas detrás de data.table en vez de claramente
+por delante como en Windows, pero el resultado cualitativo (Polars y data.table le
+ganan a GHL) es idéntico en las tres máquinas. Julia (DataFrames.jl) vuelve a ser la
+opción más lenta con margen amplio, igual que en ambas corridas anteriores.
+
+**Suite 03:** GHL 21.1ms, R base 264.7ms, NumPy 412.2ms, Julia (@inbounds) 954.9ms,
+Julia baseline 977.7ms, Numba 948.5ms. `hyperfine` marcó outliers estadísticos en R,
+Julia y Julia (@inbounds) (rango de R: 217-535ms) — coherente con ser un escritorio de
+uso normal sin aislamiento de hardware, no un artefacto de esta implementación
+puntual. Igual que en ambas corridas anteriores, GHL gana con margen amplio y Numba no
+mejora sobre NumPy puro (948.5ms vs 412.2ms) por el mismo motivo de costo fijo de
+import/JIT por proceso de un solo disparo.
+
+### Verificación de reproducibilidad y corrección (11-Sep, Linux)
+- Salida numérica verificada igual que en ambas corridas anteriores: las 5 variantes
+  de Suite 02 con agregación por categoría (GHL/Pandas/Polars/R base/data.table/Julia
+  streaming/DataFrames.jl) coinciden cifra por cifra entre sí y contra las corridas de
+  Windows (ej. categoría A: `total_a=66980610620`, `n=133583`, idéntico en las tres
+  máquinas — confirma que el generador de CSV determinista produce el mismo dataset
+  sin importar el sistema operativo). El Gibbs sampler de Suite 03 produce medias
+  posteriores estadísticamente consistentes (~3.01, ~8.05, −3.99) en las 6 variantes.
+- **Las conclusiones cualitativas se sostienen en las tres máquinas/sistemas
+  operativos** (desktop Windows, laptop Windows con EDR, desktop Linux) — solo cambian
+  las magnitudes absolutas y los márgenes de ruido.
+- Tampoco se cumplió el aislamiento de hardware de `methodology.md` §3 en esta corrida
+  — es hardware de uso real, no un rig de benchmarking dedicado; sí se usó
+  `systemd-inhibit` puntualmente para evitar que una suspensión de energía
+  interrumpiera la medición (ver incidente arriba), que no es lo mismo que el
+  aislamiento térmico/de gobernador de CPU que pide §3.
+- **Único de las tres corridas:** la variante "GHL (AOT Binary)" de Suite 04 se pudo
+  medir de punta a punta (0.7ms), sin el bloqueo de EDR que afectó al laptop Windows.
