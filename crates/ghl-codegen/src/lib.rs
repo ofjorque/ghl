@@ -173,5 +173,30 @@ mod tests {
         assert!(symbols.contains(&"multiply"), "Emitted object should contain exported `multiply` symbol");
         assert!(symbols.contains(&"square"), "Emitted object should contain exported `square` symbol");
     }
+
+    #[test]
+    fn test_top_level_script_jit_and_aot() {
+        let code = r#"
+            let a = 15;
+            let b = 27;
+            a + b;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let hir_module = lower_ast(&program).expect("hir ok");
+
+        // Test JIT execution
+        let mut jit = JitEngine::new().expect("jit init ok");
+        jit.compile_module(&hir_module).expect("jit compilation ok");
+        let main_fn = jit.get_fn_i64_0("__ghl_main").expect("__ghl_main exists");
+        assert_eq!(main_fn(), 42);
+
+        // Test AOT object emission
+        let aot = AotEngine::new("script_main").expect("aot init ok");
+        let obj_bytes = aot.compile_module(&hir_module).expect("aot compilation ok");
+        let obj_file = cranelift_object::object::File::parse(&*obj_bytes).expect("parse valid object file");
+        use cranelift_object::object::{Object, ObjectSymbol};
+        let symbols: Vec<_> = obj_file.symbols().filter_map(|s| s.name().ok()).collect();
+        assert!(symbols.contains(&"__ghl_main"), "Object should export `__ghl_main`");
+    }
 }
 

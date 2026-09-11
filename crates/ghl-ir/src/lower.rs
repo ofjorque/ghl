@@ -103,6 +103,51 @@ impl LoweringContext {
             }
         }
 
+        // 3. Third pass: lower top-level non-Fn statements into a synthesized `__ghl_main` entry point function
+        let top_level_stmts: Vec<&Stmt> = program
+            .statements
+            .iter()
+            .filter(|s| !matches!(&s.kind, StmtKind::Fn { .. } | StmtKind::Use(_)))
+            .collect();
+
+        if !top_level_stmts.is_empty() {
+            self.push_scope();
+            let mut hir_stmts = Vec::with_capacity(top_level_stmts.len());
+            let num_stmts = top_level_stmts.len();
+
+            let (stmts_to_lower, trailing_expr) = if let StmtKind::Expr(e) = &top_level_stmts[num_stmts - 1].kind {
+                (&top_level_stmts[..num_stmts - 1], Some(e))
+            } else {
+                (&top_level_stmts[..], None)
+            };
+
+            for stmt in stmts_to_lower {
+                hir_stmts.push(self.lower_stmt(stmt)?);
+            }
+
+            let (result_expr, return_ty) = if let Some(e) = trailing_expr {
+                let lowered = self.lower_expr(e)?;
+                let ty = lowered.ty();
+                (Some(Box::new(lowered)), ty)
+            } else {
+                (Some(Box::new(HirExpr::Literal(HirLiteral::I64(0), HirType::I64))), HirType::I64)
+            };
+
+            self.pop_scope();
+
+            let main_fn = HirFunction {
+                name: "__ghl_main".to_string(),
+                params: Vec::new(),
+                return_ty,
+                body: HirExpr::Block {
+                    statements: hir_stmts,
+                    result: result_expr,
+                    ty: return_ty,
+                },
+            };
+            module.add_function(main_fn);
+        }
+
         Ok(module)
     }
 
@@ -345,6 +390,22 @@ mod tests {
         let module = lower_ast(&program).expect("lowering ok");
 
         assert!(module.functions.contains_key("fib"));
+    }
+
+    #[test]
+    fn test_lower_top_level_script_to_ghl_main() {
+        let code = r#"
+            let a = 10;
+            let b = 25;
+            a + b;
+        "#;
+        let program = ghl_syntax::parse(code).expect("syntax ok");
+        let module = lower_ast(&program).expect("lowering ok");
+
+        assert!(module.functions.contains_key("__ghl_main"));
+        let main_fn = &module.functions["__ghl_main"];
+        assert_eq!(main_fn.params.len(), 0);
+        assert_eq!(main_fn.return_ty, HirType::I64);
     }
 }
 

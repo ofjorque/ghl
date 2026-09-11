@@ -117,6 +117,11 @@ impl JitEngine {
         self.compiled_ptrs.get(name).copied()
     }
 
+    /// Retrieve a callable native function taking 0 arguments and returning i64.
+    pub fn get_fn_i64_0(&self, name: &str) -> Option<extern "C" fn() -> i64> {
+        self.get_fn_ptr(name).map(|ptr| unsafe { std::mem::transmute(ptr) })
+    }
+
     /// Retrieve a callable native function taking 1 i64 and returning i64.
     pub fn get_fn_i64_1(&self, name: &str) -> Option<extern "C" fn(i64) -> i64> {
         self.get_fn_ptr(name).map(|ptr| unsafe { std::mem::transmute(ptr) })
