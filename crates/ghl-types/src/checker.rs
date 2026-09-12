@@ -542,6 +542,31 @@ impl TypeChecker {
                 Type::Unit
             }
 
+            ExprKind::For { start, end, body, .. } => {
+                let start_ty = self.check_expr(start);
+                if start_ty != Type::I64 && start_ty != Type::Any {
+                    self.diagnostics.push(
+                        Diagnostic::compute_error(
+                            "C0103",
+                            format!("`for` range start must be `i64`, found `{}`", start_ty),
+                        )
+                        .with_location(&self.source_file, start.span.start, start.span.end),
+                    );
+                }
+                let end_ty = self.check_expr(end);
+                if end_ty != Type::I64 && end_ty != Type::Any {
+                    self.diagnostics.push(
+                        Diagnostic::compute_error(
+                            "C0103",
+                            format!("`for` range end must be `i64`, found `{}`", end_ty),
+                        )
+                        .with_location(&self.source_file, end.span.start, end.span.end),
+                    );
+                }
+                self.check_expr(body);
+                Type::Unit
+            }
+
             ExprKind::Match { expr: matched, arms } => {
                 let _matched_ty = self.check_expr(matched);
                 let mut unified_result = Type::NA;

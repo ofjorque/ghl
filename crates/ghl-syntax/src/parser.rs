@@ -286,6 +286,30 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 )
             });
 
+        // For-range expression: for ident in start..end { block }
+        // `..` is exclusive (like Rust's `a..b`); `..=` inclusive is not yet supported.
+        let for_expr = just(Token::For)
+            .map_with_span(|_, span| span)
+            .then(select! { Token::Ident(name) => name })
+            .then_ignore(just(Token::In))
+            .then(expr.clone())
+            .then_ignore(just(Token::DotDot))
+            .then(expr.clone())
+            .then(block.clone())
+            .map(|((((for_span, var), range_start), range_end), body)| {
+                let start = for_span.start;
+                let end = body.span.end;
+                Expr::new(
+                    ExprKind::For {
+                        var,
+                        start: Box::new(range_start),
+                        end: Box::new(range_end),
+                        body: Box::new(body),
+                    },
+                    start..end,
+                )
+            });
+
         let atom = val
             .or(parenthesized)
             .or(vector_literal)
@@ -296,6 +320,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .or(if_expr)
             .or(match_expr)
             .or(while_expr)
+            .or(for_expr)
             .boxed();
 
         // Call argument: either `name = expr` (named) or a plain positional `expr`.

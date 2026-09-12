@@ -139,6 +139,14 @@ pub enum ExprKind {
         cond: Box<Expr>,
         body: Box<Expr>,
     },
+    /// `for var in start..end { body }` — integer range loop (exclusive end).
+    /// Desugars to a native Rust loop at eval time: zero heap allocations per iteration.
+    For {
+        var: String,
+        start: Box<Expr>,
+        end: Box<Expr>,
+        body: Box<Expr>,
+    },
     DataFrameLit(Vec<(String, Expr)>),
     MatrixLit {
         rows: Vec<Vec<Expr>>,

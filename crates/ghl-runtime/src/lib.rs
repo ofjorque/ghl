@@ -1380,6 +1380,39 @@ mod tests {
     }
 
     #[test]
+    fn test_for_range_accumulates() {
+        // `for i in 0..10` should sum 0+1+...+9 = 45, equivalent to the while-loop test.
+        let code = r#"
+            let mut acc = 0;
+            for i in 0..10 {
+                acc = acc + i;
+            };
+            let result = acc;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert_eq!(interp.env.get("result"), Some(Value::I64(45)));
+    }
+
+    #[test]
+    fn test_for_loop_variable_does_not_leak() {
+        // The loop variable `i` must not be visible outside the for loop.
+        let code = r#"
+            let before = 99;
+            for i in 0..3 {
+                let tmp = i;
+            };
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        // `i` must not exist in the outer env after the loop.
+        assert!(interp.env.get("i").is_none(), "loop variable must not leak");
+        assert_eq!(interp.env.get("before"), Some(Value::I64(99)));
+    }
+
+    #[test]
     fn test_assign_rejects_undeclared_variable() {
         // Interpreter-level check (RuntimeEnv::assign returns false) -- exercised
         // directly, independent of whether the type checker ran first.
@@ -3437,6 +3470,21 @@ mod tests {
             assert_eq!(vd.value_at(2), Some(Value::NA(Some("MissingFlag".into()))));
         } else {
             panic!("Expected vector");
+        }
+    }
+
+    #[test]
+    fn test_matrix_clone_is_zero_copy_cow() {
+        // Cloning a Matrix must share the same Arc buffer — O(1) time and memory,
+        // no data copy. Arc::ptr_eq verifies the raw pointer identity.
+        use std::sync::Arc;
+        let data: Arc<Vec<f64>> = Arc::new((0..1_000_000).map(|i| i as f64).collect());
+        let original = Value::Matrix { rows: 1000, cols: 1000, data: Arc::clone(&data) };
+        let cloned = original.clone();
+        if let (Value::Matrix { data: d1, .. }, Value::Matrix { data: d2, .. }) = (&original, &cloned) {
+            assert!(Arc::ptr_eq(d1, d2), "Clone must share the same Arc buffer (zero-copy)");
+        } else {
+            panic!("Expected Matrix variants");
         }
     }
 }

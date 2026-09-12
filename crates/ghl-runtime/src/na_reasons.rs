@@ -11,12 +11,16 @@
 //! (`filter`, `arrange`, `slice`, joins, ...).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Razones de NA para un `Value::DataFrame`, indexadas por `(nombre_columna, fila)`.
 /// Una celda nula sin entrada aquí es una NA "genérica" (`Value::NA(None)`).
+/// Los motivos se almacenan como `Arc<str>` para que múltiples entradas con el mismo
+/// texto (p.ej. 100 k celdas con `"SensorDropout"`) compartan el mismo descriptor
+/// inmutable en heap — sin duplicación por inserción.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct NaReasonTable {
-    reasons: HashMap<(String, usize), String>,
+    reasons: HashMap<(String, usize), Arc<str>>,
 }
 
 impl NaReasonTable {
@@ -28,12 +32,12 @@ impl NaReasonTable {
         self.reasons.is_empty()
     }
 
-    pub fn set(&mut self, col: &str, row: usize, reason: impl Into<String>) {
-        self.reasons.insert((col.to_string(), row), reason.into());
+    pub fn set(&mut self, col: &str, row: usize, reason: impl AsRef<str>) {
+        self.reasons.insert((col.to_string(), row), Arc::from(reason.as_ref()));
     }
 
     pub fn get(&self, col: &str, row: usize) -> Option<&str> {
-        self.reasons.get(&(col.to_string(), row)).map(|s| s.as_str())
+        self.reasons.get(&(col.to_string(), row)).map(|s| s.as_ref())
     }
 
     /// Reindexa las razones tras una operación que selecciona un subconjunto de filas.
@@ -50,7 +54,7 @@ impl NaReasonTable {
         let mut out = NaReasonTable::default();
         for ((col, old_row), reason) in &self.reasons {
             if let Some(&new_row) = position_of_old.get(old_row) {
-                out.set(col, new_row, reason.clone());
+                out.reasons.insert((col.clone(), new_row), Arc::clone(reason));
             }
         }
         out
@@ -61,7 +65,7 @@ impl NaReasonTable {
         let mut out = NaReasonTable::default();
         for ((col, row), reason) in &self.reasons {
             let mapped = if col == old_col { new_col } else { col.as_str() };
-            out.set(mapped, *row, reason.clone());
+            out.reasons.insert((mapped.to_string(), *row), Arc::clone(reason));
         }
         out
     }
@@ -71,7 +75,7 @@ impl NaReasonTable {
         let mut out = NaReasonTable::default();
         for ((col, row), reason) in &self.reasons {
             if keep_cols.iter().any(|c| c == col) {
-                out.set(col, *row, reason.clone());
+                out.reasons.insert((col.clone(), *row), Arc::clone(reason));
             }
         }
         out
@@ -83,7 +87,7 @@ impl NaReasonTable {
         let mut out = NaReasonTable::default();
         for ((c, row), reason) in &self.reasons {
             if c != col {
-                out.set(c, *row, reason.clone());
+                out.reasons.insert((c.clone(), *row), Arc::clone(reason));
             }
         }
         out
@@ -91,10 +95,10 @@ impl NaReasonTable {
 
     /// Fusiona las entradas de otra tabla, sobrescribiendo en caso de choque
     /// (usado por `mutate()` al reemplazar una columna: primero se descartan sus
-    /// razones viejas con [`without_column`], luego se insertan las nuevas).
+    /// razones viejas con [`without_column`], luego se insertan las nuevas).\
     pub fn merge(&mut self, other: &NaReasonTable) {
         for (k, v) in &other.reasons {
-            self.reasons.insert(k.clone(), v.clone());
+            self.reasons.insert(k.clone(), Arc::clone(v));
         }
     }
 
@@ -109,7 +113,7 @@ impl NaReasonTable {
         for ((col, old_row), reason) in &self.reasons {
             let new_row = (*old_row as i64) + periods;
             if new_row >= 0 && (new_row as usize) < len {
-                out.set(col, new_row as usize, reason.clone());
+                out.reasons.insert((col.clone(), new_row as usize), Arc::clone(reason));
             }
         }
         out
@@ -177,5 +181,22 @@ mod tests {
         assert_eq!(dropped.get("col", 4), None);
         assert!(dropped.is_empty());
     }
-}
 
+    #[test]
+    fn test_reasons_arc_clone_is_zero_copy() {
+        // After reindex, each surviving entry must share the *same* Arc pointer as in
+        // the original table — no string data is duplicated. This is the key property
+        // that makes operating on large NA-annotated DataFrames O(1) in reason memory.
+        let mut t = NaReasonTable::new();
+        t.set("col", 0, "SensorDropout");
+        t.set("col", 1, "LowBattery");
+
+        // Keep only row 0 → new row 0.
+        let reindexed = t.reindex(&[0]);
+
+        let orig = t.reasons.get(&("col".to_string(), 0)).unwrap();
+        let copy = reindexed.reasons.get(&("col".to_string(), 0)).unwrap();
+        assert!(Arc::ptr_eq(orig, copy),
+            "reindex must share Arc pointers, not clone string data");
+    }
+}

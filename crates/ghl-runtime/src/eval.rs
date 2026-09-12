@@ -358,6 +358,34 @@ impl Interpreter {
                 Ok(Value::Unit)
             }
 
+            ExprKind::For { var, start, end, body } => {
+                // Native Rust loop — no recursion, no heap allocation per iteration.
+                // The loop variable is bound in its own pushed scope; each iteration
+                // overwrites the same slot (no alloc). The scope is popped after the
+                // loop so the variable does not leak into the surrounding env.
+                let start_val = self.eval_expr(start)?;
+                let end_val = self.eval_expr(end)?;
+                let (start_i, end_i) = match (&start_val, &end_val) {
+                    (Value::I64(s), Value::I64(e)) => (*s, *e),
+                    _ => return Err(Diagnostic::compute_error(
+                        "C0104",
+                        format!("for loop range requires integer bounds, got `{}` and `{}`",
+                            start_val.type_name(), end_val.type_name()),
+                    )),
+                };
+                self.env.push_scope();
+                self.env.set(var.clone(), Value::I64(start_i));
+                for i in start_i..end_i {
+                    self.env.set(var.clone(), Value::I64(i));
+                    self.eval_expr(body)?;
+                    if self.pending_return.is_some() {
+                        break;
+                    }
+                }
+                self.env.pop_scope();
+                Ok(Value::Unit)
+            }
+
             ExprKind::Match { expr: target, arms } => {
                 let target_val = self.eval_expr(target)?;
 
