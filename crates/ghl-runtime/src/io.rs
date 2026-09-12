@@ -1593,62 +1593,74 @@ fn escape_csv_field(field: &str, sep: char) -> String {
 fn infer_and_convert_column_native(name: &str, raw: &StringChunked) -> (Column, Vec<(usize, String)>) {
     let n = raw.len();
 
-    // One sequential pass via `StringChunked::iter()` -- profiled with `perf record
-    // -e cycles:u` on the 1M-row Suite 02 benchmark: repeated indexed `raw.get(i)`
-    // access (the old approach, 3-4 full passes below) put 49.67% of the *entire
-    // program's* CPU cycles into `ChunkedArray<StringType>::get` +
-    // `BinaryViewArrayGeneric::len` alone. `.iter()` amortizes the chunk lookup that
-    // `.get(i)` was repeating on every call; everything past this point works off the
-    // materialized `&str` slice, never touching `raw` again. A real Arrow null (`None`)
-    // is treated as `""`, same as `get(i).unwrap_or("")` did before.
-    let cells: Vec<&str> = raw.iter().map(|opt| opt.unwrap_or("")).collect();
-
-    // Candidate buffers for each still-live dtype, built incrementally *as* we
-    // classify -- not re-parsed afterward. Whichever of these is still `all_*` at the
-    // end already holds the fully-converted column, no second pass over `cells`
-    // needed. This matters because `.all(...)` (the previous approach: check every
-    // cell, discard the parsed value, then re-parse every cell to build the real data)
-    // parsed the *winning* type's cells twice -- for the 3 f64 columns and 2 bool
-    // columns in Suite 02's benchmark, that was a real, measured cost, not just a
-    // theoretical one. A losing type's buffer is dropped (not filled further) the
-    // moment its flag flips false, so a genuine f64 column (where i64 disqualifies on
-    // the first non-integer cell) never pays to build a full-length i64 buffer either.
     let mut reasons: Vec<(usize, String)> = Vec::new();
     let mut any_non_na = false;
     let mut all_i64 = true;
     let mut all_f64 = true;
     let mut all_bool = true;
     let mut i64_buf: Vec<Option<i64>> = Vec::with_capacity(n);
-    let mut f64_buf: Vec<Option<f64>> = Vec::with_capacity(n);
-    let mut bool_buf: Vec<Option<bool>> = Vec::with_capacity(n);
-    for (i, &s) in cells.iter().enumerate() {
+    let mut f64_buf: Vec<Option<f64>> = Vec::new();
+    let mut bool_buf: Vec<Option<bool>> = Vec::new();
+
+    for (i, opt) in raw.iter().enumerate() {
+        let s = opt.unwrap_or("");
         if is_na_token(s) {
             if let Some(reason) = s.trim().strip_prefix("NA:") {
                 reasons.push((i, reason.to_string()));
             }
-            if all_i64 { i64_buf.push(None); }
-            if all_f64 { f64_buf.push(None); }
-            if all_bool { bool_buf.push(None); }
+            if all_i64 {
+                i64_buf.push(None);
+            } else if all_f64 {
+                f64_buf.push(None);
+            }
+            if all_bool && !bool_buf.is_empty() {
+                bool_buf.push(None);
+            }
             continue;
         }
         any_non_na = true;
         if all_i64 {
             match s.parse::<i64>() {
                 Ok(v) => i64_buf.push(Some(v)),
-                Err(_) => { all_i64 = false; i64_buf = Vec::new(); }
+                Err(_) => {
+                    all_i64 = false;
+                    if all_f64 {
+                        f64_buf = Vec::with_capacity(n);
+                        f64_buf.extend(i64_buf.iter().map(|opt| opt.map(|x| x as f64)));
+                        match s.parse::<f64>() {
+                            Ok(v) => f64_buf.push(Some(v)),
+                            Err(_) => {
+                                all_f64 = false;
+                                f64_buf = Vec::new();
+                            }
+                        }
+                    }
+                    i64_buf = Vec::new();
+                }
             }
-        }
-        if all_f64 {
+        } else if all_f64 {
             match s.parse::<f64>() {
                 Ok(v) => f64_buf.push(Some(v)),
-                Err(_) => { all_f64 = false; f64_buf = Vec::new(); }
+                Err(_) => {
+                    all_f64 = false;
+                    f64_buf = Vec::new();
+                }
             }
         }
         if all_bool {
-            match s.to_lowercase().as_str() {
-                "true" | "t" => bool_buf.push(Some(true)),
-                "false" | "f" => bool_buf.push(Some(false)),
-                _ => { all_bool = false; bool_buf = Vec::new(); }
+            if s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("t") {
+                if bool_buf.is_empty() && i > 0 {
+                    bool_buf.resize(i, None);
+                }
+                bool_buf.push(Some(true));
+            } else if s.eq_ignore_ascii_case("false") || s.eq_ignore_ascii_case("f") {
+                if bool_buf.is_empty() && i > 0 {
+                    bool_buf.resize(i, None);
+                }
+                bool_buf.push(Some(false));
+            } else {
+                all_bool = false;
+                bool_buf = Vec::new();
             }
         }
     }
@@ -1676,15 +1688,9 @@ fn infer_and_convert_column_native(name: &str, raw: &StringChunked) -> (Column, 
         return (col, reasons);
     }
 
-    // Fallback: string. This is the only branch that needs owned string data -- one clone
-    // per cell as `StringChunked`'s builder copies each `&str` into its own buffer, the
-    // same single clone a native polars string ingestion path would need too. Re-checks
-    // `is_na_token` here rather than caching it in an always-built `str_buf` above:
-    // measured that trade-off directly (`hyperfine`, this same benchmark) and building a
-    // `Vec<Option<&str>>` for every column -- including the 7 that end up i64/f64/bool
-    // and never use it -- cost more (~440ms -> ~450ms) than the redundant `is_na_token`
-    // calls it was meant to save on just the 5 string columns.
-    let data: Vec<Option<&str>> = cells.iter().map(|&s| {
+    // Fallback: string. Build StringChunked directly from raw iterator.
+    let data: Vec<Option<&str>> = raw.iter().map(|opt| {
+        let s = opt.unwrap_or("");
         if is_na_token(s) { None } else { Some(s) }
     }).collect();
     let col = data.into_iter().collect::<StringChunked>().with_name(name.into()).into_column();
@@ -1735,8 +1741,8 @@ fn infer_and_convert_column(raw: &[String]) -> Vec<Value> {
 
     // 4. Check if all non-NA parse as bool
     let all_bool = non_na_entries.iter().all(|s| {
-        let lower = s.to_lowercase();
-        lower == "true" || lower == "false" || lower == "t" || lower == "f"
+        s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("false")
+            || s.eq_ignore_ascii_case("t") || s.eq_ignore_ascii_case("f")
     });
     if all_bool {
         return raw
@@ -1745,8 +1751,7 @@ fn infer_and_convert_column(raw: &[String]) -> Vec<Value> {
                 if is_na_token(s) {
                     parse_na_token(s)
                 } else {
-                    let lower = s.to_lowercase();
-                    Value::Bool(lower == "true" || lower == "t")
+                    Value::Bool(s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("t"))
                 }
             })
             .collect();
@@ -1764,10 +1769,21 @@ fn infer_and_convert_column(raw: &[String]) -> Vec<Value> {
         .collect()
 }
 
+#[inline(always)]
 fn is_na_token(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
+        return true;
+    }
+    let first = bytes[0];
+    let last = bytes[bytes.len() - 1];
+    if !first.is_ascii_whitespace() && !last.is_ascii_whitespace() {
+        return s == "NA" || s == "NaN" || s == "null" || s == "None" || s.starts_with("NA:");
+    }
     let t = s.trim();
     t.is_empty() || t == "NA" || t == "NaN" || t == "null" || t == "None" || t.starts_with("NA:")
 }
+
 
 fn parse_na_token(s: &str) -> Value {
     let t = s.trim();
