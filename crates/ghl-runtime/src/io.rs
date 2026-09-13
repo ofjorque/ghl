@@ -1312,6 +1312,174 @@ pub fn df_fill_na_all(df: &Value, default: &Value) -> Result<Value, Diagnostic> 
     Ok(result)
 }
 
+/// `impute(df, col, strategy, only_for, const_val)` — RFC 01 §7.3 & RFC 02 §2.2
+/// Imputes missing values in `col` using the specified strategy (`mean`, `median`, `mode`, `const`, `zero`).
+/// If `only_for` is provided, only missing values with reasons in `only_for` are replaced; other NAs and their reasons are preserved.
+/// If `only_for` is None, all missing values in `col` are replaced.
+pub fn df_impute(
+    df: &Value,
+    col: &str,
+    strategy: &str,
+    only_for: Option<&[String]>,
+    const_val: Option<&Value>,
+) -> Result<Value, Diagnostic> {
+    let (frame, na_reasons) = as_dataframe(df, "impute")?;
+    let col_vals = polars_bridge::pull_column_as_values(frame, na_reasons, col).map_err(|_| {
+        Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `impute()`", col))
+    })?;
+
+    let strat_clean = strategy.trim().to_lowercase();
+    let replacement = match strat_clean.as_str() {
+        "mean" => {
+            let mut sum = 0.0;
+            let mut count = 0usize;
+            for v in &col_vals {
+                match v {
+                    Value::F64(x) => { sum += x; count += 1; }
+                    Value::I64(n) => { sum += *n as f64; count += 1; }
+                    _ => {}
+                }
+            }
+            if count == 0 {
+                return Err(Diagnostic::statistical_error("S0202", format!("Cannot compute mean for imputation of `{col}`: no valid numeric observations")));
+            }
+            Value::F64(sum / count as f64)
+        }
+        "median" => {
+            let mut nums: Vec<f64> = col_vals.iter().filter_map(|v| match v {
+                Value::F64(x) => Some(*x),
+                Value::I64(n) => Some(*n as f64),
+                _ => None,
+            }).collect();
+            if nums.is_empty() {
+                return Err(Diagnostic::statistical_error("S0202", format!("Cannot compute median for imputation of `{col}`: no valid numeric observations")));
+            }
+            nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let mid = nums.len() / 2;
+            let med = if nums.len() % 2 == 0 {
+                (nums[mid - 1] + nums[mid]) / 2.0
+            } else {
+                nums[mid]
+            };
+            Value::F64(med)
+        }
+        "mode" => {
+            let mut counts: HashMap<String, (usize, Value)> = HashMap::new();
+            for v in &col_vals {
+                if !v.is_na() {
+                    let key = format!("{:?}", v);
+                    counts.entry(key).or_insert((0, v.clone())).0 += 1;
+                }
+            }
+            if counts.is_empty() {
+                return Err(Diagnostic::statistical_error("S0202", format!("Cannot compute mode for imputation of `{col}`: no valid observations")));
+            }
+            let mut best_val = Value::NA(None);
+            let mut max_count = 0;
+            for (cnt, val) in counts.values() {
+                if *cnt > max_count {
+                    max_count = *cnt;
+                    best_val = val.clone();
+                }
+            }
+            best_val
+        }
+        "zero" => Value::F64(0.0),
+        "const" | "constant" => const_val.cloned().unwrap_or(Value::F64(0.0)),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                format!("Unknown imputation strategy `{other}` for `impute()`. Supported: mean, median, mode, const, zero"),
+            ));
+        }
+    };
+
+    let mut new_reasons: NaReasonTable = (**na_reasons).clone();
+    let mut new_vals = Vec::with_capacity(col_vals.len());
+
+    for (row, v) in col_vals.into_iter().enumerate() {
+        if v.is_na() {
+            let reason = na_reasons.get(col, row);
+            let should_impute = match only_for {
+                Some(allowed) => match reason {
+                    Some(r) => allowed.iter().any(|a| a == r),
+                    None => allowed.iter().any(|a| a == "" || a == "NA"),
+                },
+                None => true,
+            };
+
+            if should_impute {
+                new_reasons.remove(col, row);
+                new_vals.push(replacement.clone());
+            } else {
+                new_vals.push(v);
+            }
+        } else {
+            new_vals.push(v);
+        }
+    }
+
+    let column = polars_bridge::value_column_to_polars(col, &new_vals);
+    let mut new_frame = frame.clone();
+    new_frame.with_column(column).map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("`impute()` failed: {e}"))
+    })?;
+
+    Ok(Value::DataFrame {
+        frame: new_frame,
+        na_reasons: Arc::new(new_reasons),
+    })
+}
+
+/// `filter_na_reason(df, col, drop: [...], keep: [...])` — RFC 02 §2.2
+/// Filters rows of a DataFrame based on the semantic NA reason in `col`.
+pub fn df_filter_na_reason(
+    df: &Value,
+    col: &str,
+    drop_reasons: Option<&[String]>,
+    keep_reasons: Option<&[String]>,
+) -> Result<Value, Diagnostic> {
+    let (frame, na_reasons) = as_dataframe(df, "filter_na_reason")?;
+    let col_series = frame.column(col).map_err(|_| {
+        Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `filter_na_reason()`", col))
+    })?;
+
+    let null_mask = col_series.is_null();
+    let n_rows = frame.height();
+    let mut kept_indices = Vec::with_capacity(n_rows);
+
+    for row in 0..n_rows {
+        let is_null = null_mask.get(row).unwrap_or(false);
+        if is_null {
+            let reason = na_reasons.get(col, row);
+            if let Some(drops) = drop_reasons {
+                let should_drop = match reason {
+                    Some(r) => drops.iter().any(|d| d == r),
+                    None => drops.iter().any(|d| d == "" || d == "NA"),
+                };
+                if !should_drop {
+                    kept_indices.push(row);
+                }
+            } else if let Some(keeps) = keep_reasons {
+                let should_keep = match reason {
+                    Some(r) => keeps.iter().any(|k| k == r),
+                    None => keeps.iter().any(|k| k == "" || k == "NA"),
+                };
+                if should_keep {
+                    kept_indices.push(row);
+                }
+            } else {
+                kept_indices.push(row);
+            }
+        } else {
+            kept_indices.push(row);
+        }
+    }
+
+    let (new_frame, new_reasons) = take_rows(frame, na_reasons, &kept_indices)?;
+    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+}
+
 /// `count(df, col)` — frequency table: `DataFrame[col, n]`, one row per distinct value.
 pub fn df_count(df: &Value, col: &str) -> Result<Value, Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "count")?;

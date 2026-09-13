@@ -3626,6 +3626,164 @@ mod tests {
             panic!("expected vector for colnames");
         }
     }
+
+    #[test]
+    fn test_impute_mean_with_only_for_reason() {
+        let code = r#"
+            let df = dataframe {
+                id: [1, 2, 3, 4],
+                score: [10.0, 20.0, NA:SensorDropout, NA:NoResponse]
+            };
+            let imputed = df |> impute(score, strategy: Mean, only_for: [NAReason::SensorDropout]);
+            let s = pull(imputed, "score");
+            let reasons = na_reasons(imputed, "score");
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let s = interp.env.get("s").expect("s exists");
+        if let Value::Vector(v) = s {
+            assert_eq!(v.len(), 4);
+            assert_eq!(v.value_at(0), Some(Value::F64(10.0)));
+            assert_eq!(v.value_at(1), Some(Value::F64(20.0)));
+            // Imputed row 2: mean of (10 + 20) / 2 = 15.0
+            assert_eq!(v.value_at(2), Some(Value::F64(15.0)));
+            // Preserved row 3: NA:NoResponse
+            assert_eq!(v.value_at(3), Some(Value::NA(Some("NoResponse".into()))));
+        } else {
+            panic!("expected vector for score");
+        }
+
+        let reasons = interp.env.get("reasons").expect("reasons exists");
+        if let Value::Vector(v) = reasons {
+            assert_eq!(v.value_at(0), Some(Value::NA(None)));
+            assert_eq!(v.value_at(1), Some(Value::NA(None)));
+            // Imputed cell has no reason now
+            assert_eq!(v.value_at(2), Some(Value::NA(None)));
+            // Non-imputed cell keeps reason
+            assert_eq!(v.value_at(3), Some(Value::String("NoResponse".into())));
+        } else {
+            panic!("expected vector for reasons");
+        }
+    }
+
+    #[test]
+    fn test_impute_median_all_na() {
+        let code = r#"
+            let df = dataframe {
+                val: [1.0, 5.0, 9.0, NA, NA:Dropout]
+            };
+            let imputed = df |> impute(val, strategy: Median);
+            let vals = pull(imputed, "val");
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let vals = interp.env.get("vals").expect("vals exists");
+        if let Value::Vector(v) = vals {
+            assert_eq!(v.len(), 5);
+            assert_eq!(v.value_at(0), Some(Value::F64(1.0)));
+            assert_eq!(v.value_at(1), Some(Value::F64(5.0)));
+            assert_eq!(v.value_at(2), Some(Value::F64(9.0)));
+            // Both NAs imputed with median = 5.0
+            assert_eq!(v.value_at(3), Some(Value::F64(5.0)));
+            assert_eq!(v.value_at(4), Some(Value::F64(5.0)));
+        } else {
+            panic!("expected vector for vals");
+        }
+    }
+
+    #[test]
+    fn test_filter_na_reason_drops_specified() {
+        let code = r#"
+            let df = dataframe {
+                id: [1, 2, 3, 4],
+                salary: [100.0, NA:NoResponse, 200.0, NA:SensorDropout]
+            };
+            let filtered = df |> filter_na_reason(salary, drop: [NAReason::NoResponse]);
+            let ids = pull(filtered, "id");
+            let sals = pull(filtered, "salary");
+            let reasons = na_reasons(filtered, "salary");
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let ids = interp.env.get("ids").expect("ids exists");
+        if let Value::Vector(v) = ids {
+            assert_eq!(v.len(), 3);
+            assert_eq!(v.value_at(0), Some(Value::I64(1)));
+            assert_eq!(v.value_at(1), Some(Value::I64(3)));
+            assert_eq!(v.value_at(2), Some(Value::I64(4)));
+        } else {
+            panic!("expected vector for ids");
+        }
+
+        let sals = interp.env.get("sals").expect("sals exists");
+        if let Value::Vector(v) = sals {
+            assert_eq!(v.len(), 3);
+            assert_eq!(v.value_at(0), Some(Value::F64(100.0)));
+            assert_eq!(v.value_at(1), Some(Value::F64(200.0)));
+            assert_eq!(v.value_at(2), Some(Value::NA(Some("SensorDropout".into()))));
+        } else {
+            panic!("expected vector for sals");
+        }
+
+        let reasons = interp.env.get("reasons").expect("reasons exists");
+        if let Value::Vector(v) = reasons {
+            assert_eq!(v.len(), 3);
+            assert_eq!(v.value_at(0), Some(Value::NA(None)));
+            assert_eq!(v.value_at(1), Some(Value::NA(None)));
+            assert_eq!(v.value_at(2), Some(Value::String("SensorDropout".into())));
+        } else {
+            panic!("expected vector for reasons");
+        }
+    }
+
+    #[test]
+    fn test_filter_na_reason_and_impute_pipeline() {
+        let code = r#"
+            let df = dataframe {
+                patient_id: [101, 102, 103, 104],
+                salary: [50000.0, NA:NoResponse, 65000.0, 70000.0],
+                measurement: [12.0, 14.0, NA:SensorDropout, 16.0]
+            };
+            let clean_df = df
+                |> filter_na_reason(salary, drop: [NAReason::NoResponse])
+                |> impute(measurement, strategy: Mean, only_for: [NAReason::SensorDropout]);
+
+            let pids = pull(clean_df, "patient_id");
+            let ms = pull(clean_df, "measurement");
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let pids = interp.env.get("pids").expect("pids exists");
+        if let Value::Vector(v) = pids {
+            // Patient 102 was dropped due to salary NA:NoResponse
+            assert_eq!(v.len(), 3);
+            assert_eq!(v.value_at(0), Some(Value::I64(101)));
+            assert_eq!(v.value_at(1), Some(Value::I64(103)));
+            assert_eq!(v.value_at(2), Some(Value::I64(104)));
+        } else {
+            panic!("expected vector for pids");
+        }
+
+        let ms = interp.env.get("ms").expect("ms exists");
+        if let Value::Vector(v) = ms {
+            // Measurements remaining: 12.0, NA:SensorDropout (patient 103), 16.0
+            // Mean of valid (12.0 + 16.0) / 2 = 14.0
+            assert_eq!(v.len(), 3);
+            assert_eq!(v.value_at(0), Some(Value::F64(12.0)));
+            assert_eq!(v.value_at(1), Some(Value::F64(14.0)));
+            assert_eq!(v.value_at(2), Some(Value::F64(16.0)));
+        } else {
+            panic!("expected vector for ms");
+        }
+    }
 }
 
 

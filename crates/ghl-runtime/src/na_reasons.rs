@@ -40,6 +40,10 @@ impl NaReasonTable {
         self.reasons.get(&(col.to_string(), row)).map(|s| s.as_ref())
     }
 
+    pub fn remove(&mut self, col: &str, row: usize) {
+        self.reasons.remove(&(col.to_string(), row));
+    }
+
     /// Reindexa las razones tras una operación que selecciona un subconjunto de filas.
     /// `kept_rows[new_row] == old_row` — el mapeo que produce un `BooleanChunked`
     /// (filter), un slice/sort, o el lado izquierdo de un join. Las razones de filas

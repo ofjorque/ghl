@@ -442,7 +442,9 @@ impl Interpreter {
             ExprKind::Placeholder => Ok(Value::Unit),
 
             ExprKind::Path(segments) => {
-                if let Some(val) = crate::modules::lookup_module_item(segments) {
+                if segments.len() == 2 && (segments[0] == "NAReason" || segments[0] == "NAReasons") {
+                    Ok(Value::NA(Some(segments[1].clone())))
+                } else if let Some(val) = crate::modules::lookup_module_item(segments) {
                     Ok(val)
                 } else {
                     let full_name = segments.join("::");

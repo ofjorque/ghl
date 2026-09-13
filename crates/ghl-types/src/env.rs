@@ -137,6 +137,44 @@ impl TypeEnv {
             },
             false,
         );
+        env.insert(
+            "pivot_wider".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Any),
+            },
+            false,
+        );
+        env.insert(
+            "pivot_longer".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Any),
+            },
+            false,
+        );
+        env.insert(
+            "impute".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Any),
+            },
+            false,
+        );
+        env.insert(
+            "filter_na_reason".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Any),
+            },
+            false,
+        );
+
+        // Imputation strategies (RFC 01 §7.3 & RFC 02 §2.2)
+        env.insert("Mean".into(), Type::String, false);
+        env.insert("Median".into(), Type::String, false);
+        env.insert("Mode".into(), Type::String, false);
+        env.insert("Const".into(), Type::String, false);
 
         // Register Linear Algebra
         env.insert(

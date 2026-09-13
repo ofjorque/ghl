@@ -183,6 +183,15 @@ impl RuntimeEnv {
         env.set("is_na".into(),       Value::NativeFn(native_is_na));
         env.set("fill_na".into(),     Value::NativeFn(native_fill_na));
         env.set("fill_na_all".into(), Value::NativeFn(native_fill_na_all));
+        env.set("impute".into(),      Value::NativeFn(native_impute));
+        env.set("filter_na_reason".into(), Value::NativeFn(native_filter_na_reason));
+
+        // Canonical imputation strategies (RFC 01 §7.3 & RFC 02 §2.2)
+        env.set("Mean".into(),   Value::String("mean".into()));
+        env.set("Median".into(), Value::String("median".into()));
+        env.set("Mode".into(),   Value::String("mode".into()));
+        env.set("Const".into(),  Value::String("const".into()));
+
         env.set("glimpse".into(),     Value::NativeFn(native_glimpse));
         env.set("slice_min".into(),   Value::NativeFn(native_slice_min));
         env.set("slice_max".into(),   Value::NativeFn(native_slice_max));
@@ -1406,6 +1415,7 @@ fn native_clamp(args: Vec<Value>) -> Result<Value, Diagnostic> {
 // Vector / window helpers
 // =========================================================================
 
+#[allow(dead_code)]
 fn as_vector(v: &Value) -> Option<&Vec<Value>> {
     match v {
         Value::Vector(items) => Some(items),
@@ -3762,4 +3772,166 @@ fn native_pivot_longer(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 
     crate::io::df_pivot_longer(df, cols.as_deref(), &names_to, &values_to, id_cols.as_deref())
+}
+
+fn extract_reason_str(v: &Value) -> Option<String> {
+    match v {
+        Value::NA(Some(r)) => Some(r.clone()),
+        Value::String(s) => Some(s.clone()),
+        Value::ColRef(c) => Some(c.clone()),
+        _ => None,
+    }
+}
+
+fn extract_reasons_list(val: &Value) -> Vec<String> {
+    match val {
+        Value::Vector(items) => {
+            let mut list = Vec::new();
+            for it in items.iter() {
+                if let Some(r) = extract_reason_str(it) {
+                    list.push(r);
+                }
+            }
+            list
+        }
+        other => {
+            if let Some(r) = extract_reason_str(other) {
+                vec![r]
+            } else {
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// `impute(df, col, strategy: Mean, only_for: [NAReason::SensorDropout], value: ...)`
+/// or `df |> impute(col("x"), strategy: Mean, only_for: [NAReason::SensorDropout])`
+fn native_impute(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.is_empty() {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`impute()` requires a DataFrame as first argument",
+        ));
+    }
+    let df = &args[0];
+
+    let mut col: Option<String> = None;
+    let mut strategy: Option<String> = None;
+    let mut only_for: Option<Vec<String>> = None;
+    let mut const_val: Option<Value> = None;
+    let mut positional = Vec::new();
+
+    for arg in &args[1..] {
+        match arg {
+            Value::NamedArg(name, val) => match name.as_str() {
+                "col" | "column" => col = col_name_of(val),
+                "strategy" | "method" => {
+                    strategy = match val.as_ref() {
+                        Value::String(s) => Some(s.clone()),
+                        Value::ColRef(s) => Some(s.clone()),
+                        other => col_name_of(other),
+                    };
+                }
+                "only_for" | "for_reasons" | "reasons" => {
+                    only_for = Some(extract_reasons_list(val));
+                }
+                "value" | "const" | "constant" | "default" => {
+                    const_val = Some(*val.clone());
+                }
+                other => {
+                    return Err(Diagnostic::compute_error(
+                        "C0201",
+                        format!("Unknown argument `{other}` in `impute()`"),
+                    ));
+                }
+            },
+            other => positional.push(other),
+        }
+    }
+
+    if col.is_none() && !positional.is_empty() {
+        col = col_name_of(positional[0]);
+    }
+    if strategy.is_none() && positional.len() > 1 {
+        strategy = match positional[1] {
+            Value::String(s) => Some(s.clone()),
+            Value::ColRef(s) => Some(s.clone()),
+            other => col_name_of(other),
+        };
+    }
+    if only_for.is_none() && positional.len() > 2 {
+        only_for = Some(extract_reasons_list(positional[2]));
+    }
+    if const_val.is_none() && positional.len() > 3 {
+        const_val = Some(positional[3].clone());
+    }
+
+    let col_name = col.ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`impute()` requires a column name")
+    })?;
+    let strat = strategy.unwrap_or_else(|| "mean".to_string());
+
+    crate::io::df_impute(
+        df,
+        &col_name,
+        &strat,
+        only_for.as_deref(),
+        const_val.as_ref(),
+    )
+}
+
+/// `filter_na_reason(df, col, drop: [NAReason::NoResponse])`
+/// or `df |> filter_na_reason(salary, drop: [NAReason::NoResponse])`
+fn native_filter_na_reason(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.is_empty() {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`filter_na_reason()` requires a DataFrame as first argument",
+        ));
+    }
+    let df = &args[0];
+
+    let mut col: Option<String> = None;
+    let mut drop_reasons: Option<Vec<String>> = None;
+    let mut keep_reasons: Option<Vec<String>> = None;
+    let mut positional = Vec::new();
+
+    for arg in &args[1..] {
+        match arg {
+            Value::NamedArg(name, val) => match name.as_str() {
+                "col" | "column" => col = col_name_of(val),
+                "drop" | "exclude" => {
+                    drop_reasons = Some(extract_reasons_list(val));
+                }
+                "keep" | "include" => {
+                    keep_reasons = Some(extract_reasons_list(val));
+                }
+                other => {
+                    return Err(Diagnostic::compute_error(
+                        "C0201",
+                        format!("Unknown argument `{other}` in `filter_na_reason()`"),
+                    ));
+                }
+            },
+            other => positional.push(other),
+        }
+    }
+
+    if col.is_none() && !positional.is_empty() {
+        col = col_name_of(positional[0]);
+    }
+    if drop_reasons.is_none() && keep_reasons.is_none() && positional.len() > 1 {
+        drop_reasons = Some(extract_reasons_list(positional[1]));
+    }
+
+    let col_name = col.ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`filter_na_reason()` requires a column name")
+    })?;
+
+    crate::io::df_filter_na_reason(
+        df,
+        &col_name,
+        drop_reasons.as_deref(),
+        keep_reasons.as_deref(),
+    )
 }

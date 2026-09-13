@@ -613,7 +613,9 @@ impl TypeChecker {
             ExprKind::NamedArg { value, .. } => self.check_expr_ctx(value, col_ctx),
 
             ExprKind::Path(segments) => {
-                if let Some(ty) = crate::modules::lookup_module_item(segments) {
+                if segments.len() == 2 && (segments[0] == "NAReason" || segments[0] == "NAReasons") {
+                    Type::NA
+                } else if let Some(ty) = crate::modules::lookup_module_item(segments) {
                     ty
                 } else {
                     let full_name = segments.join("::");

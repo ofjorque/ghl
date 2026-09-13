@@ -26,7 +26,8 @@ pub fn get_module_item_names(path: &[String]) -> Option<Vec<&'static str>> {
             "group_by", "summarize", "ungroup", "first", "last", "n_distinct",
             "count", "coalesce", "desc", "pull", "slice_min", "slice_max",
             "sample_n", "sample_frac", "inner_join", "left_join",
-            "fill_na", "fill_na_all", "glimpse", "na_reason", "na_reasons", "is_na",
+            "fill_na", "fill_na_all", "pivot_wider", "pivot_longer", "impute", "filter_na_reason",
+            "glimpse", "na_reason", "na_reasons", "is_na",
             "lazy", "collect", "explain", "scan_csv", "scan_parquet",
         ]),
 
