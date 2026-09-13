@@ -3487,6 +3487,145 @@ mod tests {
             panic!("Expected Matrix variants");
         }
     }
+
+    #[test]
+    fn test_pivot_wider_basic() {
+        let code = r#"
+            let df = dataframe {
+                patient_id: [101, 102, 101, 102],
+                visit: ["v1", "v1", "v2", "v2"],
+                score: [12.4, 18.9, 15.2, 19.5]
+            };
+            let wide = df |> pivot_wider(names_from: "visit", values_from: "score");
+            let cols = colnames(wide);
+            let n = nrow(wide);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let n = interp.env.get("n").expect("n exists");
+        assert_eq!(n, Value::I64(2));
+
+        let cols = interp.env.get("cols").expect("cols exists");
+        if let Value::Vector(v) = cols {
+            let col_names: Vec<String> = v.iter().map(|x| match x { Value::String(s) => s.clone(), other => other.to_string() }).collect();
+            assert_eq!(col_names, vec!["patient_id", "v1", "v2"]);
+        } else {
+            panic!("expected vector for colnames");
+        }
+    }
+
+    #[test]
+    fn test_pivot_longer_basic() {
+        let code = r#"
+            let wide = dataframe {
+                id: [1, 2],
+                t1: [10.0, 20.0],
+                t2: [30.0, 40.0]
+            };
+            let long = wide |> pivot_longer(cols: ["t1", "t2"], names_to: "time", values_to: "val");
+            let n = nrow(long);
+            let cols = colnames(long);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let n = interp.env.get("n").expect("n exists");
+        assert_eq!(n, Value::I64(4));
+
+        let cols = interp.env.get("cols").expect("cols exists");
+        if let Value::Vector(v) = cols {
+            let col_names: Vec<String> = v.iter().map(|x| match x { Value::String(s) => s.clone(), other => other.to_string() }).collect();
+            assert_eq!(col_names, vec!["id", "time", "val"]);
+        } else {
+            panic!("expected vector for colnames");
+        }
+    }
+
+    #[test]
+    fn test_pivot_roundtrip() {
+        let code = r#"
+            let orig = dataframe {
+                id: [1, 2],
+                a: [100.0, 200.0],
+                b: [300.0, 400.0]
+            };
+            let long = orig |> pivot_longer(cols: ["a", "b"], names_to: "k", values_to: "v");
+            let back = long |> pivot_wider(names_from: "k", values_from: "v");
+            let n = nrow(back);
+            let cols = colnames(back);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let n = interp.env.get("n").expect("n exists");
+        assert_eq!(n, Value::I64(2));
+
+        let cols = interp.env.get("cols").expect("cols exists");
+        if let Value::Vector(v) = cols {
+            let col_names: Vec<String> = v.iter().map(|x| match x { Value::String(s) => s.clone(), other => other.to_string() }).collect();
+            assert_eq!(col_names, vec!["id", "a", "b"]);
+        } else {
+            panic!("expected vector for colnames");
+        }
+    }
+
+    #[test]
+    fn test_pivot_preserves_na_reasons() {
+        let code = r#"
+            let df = dataframe {
+                patient_id: [101, 102],
+                v1: [12.4, NA:SensorDropout],
+                v2: [NA:NoResponse, 19.5]
+            };
+            let long = df |> pivot_longer(cols: ["v1", "v2"], names_to: "visit", values_to: "score");
+            let reasons = na_reasons(long, "score");
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let reasons = interp.env.get("reasons").expect("reasons exists");
+        if let Value::Vector(v) = reasons {
+            // Row 0: 101, v1 -> 12.4 (no NA)
+            // Row 1: 102, v1 -> NA:SensorDropout
+            // Row 2: 101, v2 -> NA:NoResponse
+            // Row 3: 102, v2 -> 19.5 (no NA)
+            assert_eq!(v.value_at(0), Some(Value::NA(None)));
+            assert_eq!(v.value_at(1), Some(Value::String("SensorDropout".into())));
+            assert_eq!(v.value_at(2), Some(Value::String("NoResponse".into())));
+            assert_eq!(v.value_at(3), Some(Value::NA(None)));
+        } else {
+            panic!("expected vector for reasons");
+        }
+    }
+
+    #[test]
+    fn test_pivot_named_colon_and_bare_identifiers() {
+        let code = r#"
+            let df = dataframe {
+                patient_id: [101, 102],
+                visit: ["v1", "v2"],
+                score: [12.4, 18.9]
+            };
+            let wide = df |> pivot_wider(names_from: visit, values_from: score);
+            let cols = colnames(wide);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let cols = interp.env.get("cols").expect("cols exists");
+        if let Value::Vector(v) = cols {
+            let col_names: Vec<String> = v.iter().map(|x| match x { Value::String(s) => s.clone(), other => other.to_string() }).collect();
+            assert_eq!(col_names, vec!["patient_id", "v1", "v2"]);
+        } else {
+            panic!("expected vector for colnames");
+        }
+    }
 }
 
 

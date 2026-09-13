@@ -153,6 +153,8 @@ impl RuntimeEnv {
         env.set("ncol".into(),     Value::NativeFn(native_ncol));
         env.set("colnames".into(), Value::NativeFn(native_colnames));
         env.set("slice".into(),    Value::NativeFn(native_slice));
+        env.set("pivot_wider".into(),  Value::NativeFn(native_pivot_wider));
+        env.set("pivot_longer".into(), Value::NativeFn(native_pivot_longer));
 
         // Joins
         env.set("inner_join".into(), Value::NativeFn(native_inner_join));
@@ -3566,4 +3568,198 @@ fn native_arena_allocated_bytes(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error("C0202", format!("`allocated_bytes()` requires an Arena, found `{}`", other.type_name()))),
     }
+}
+
+/// `pivot_wider(df, names_from: "visit", values_from: "score", id_cols: ["id"])`
+/// or `df |> pivot_wider(names_from: "visit", values_from: "score")`
+fn native_pivot_wider(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.is_empty() {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`pivot_wider()` requires a DataFrame as first argument",
+        ));
+    }
+    let df = &args[0];
+
+    let mut names_from: Option<String> = None;
+    let mut values_from: Option<String> = None;
+    let mut id_cols: Option<Vec<String>> = None;
+    let mut positional = Vec::new();
+
+    for arg in &args[1..] {
+        match arg {
+            Value::NamedArg(name, val) => match name.as_str() {
+                "names_from" => names_from = col_name_of(val),
+                "values_from" => values_from = col_name_of(val),
+                "id_cols" | "index" => {
+                    let mut cols = Vec::new();
+                    match val.as_ref() {
+                        Value::Vector(items) => {
+                            for it in items.iter() {
+                                if let Some(c) = col_name_of(it) {
+                                    cols.push(c);
+                                }
+                            }
+                        }
+                        other => {
+                            if let Some(c) = col_name_of(other) {
+                                cols.push(c);
+                            }
+                        }
+                    }
+                    id_cols = Some(cols);
+                }
+                other => {
+                    return Err(Diagnostic::compute_error(
+                        "C0201",
+                        format!("Unknown argument `{other}` in `pivot_wider()`"),
+                    ));
+                }
+            },
+            other => positional.push(other),
+        }
+    }
+
+    if names_from.is_none() && !positional.is_empty() {
+        names_from = col_name_of(positional[0]);
+    }
+    if values_from.is_none() && positional.len() > 1 {
+        values_from = col_name_of(positional[1]);
+    }
+    if id_cols.is_none() && positional.len() > 2 {
+        let mut cols = Vec::new();
+        match positional[2] {
+            Value::Vector(items) => {
+                for it in items.iter() {
+                    if let Some(c) = col_name_of(it) {
+                        cols.push(c);
+                    }
+                }
+            }
+            other => {
+                if let Some(c) = col_name_of(other) {
+                    cols.push(c);
+                }
+            }
+        }
+        id_cols = Some(cols);
+    }
+
+    let nf = names_from.ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`pivot_wider()` requires `names_from`")
+    })?;
+    let vf = values_from.ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`pivot_wider()` requires `values_from`")
+    })?;
+
+    crate::io::df_pivot_wider(df, &nf, &vf, id_cols.as_deref())
+}
+
+/// `pivot_longer(df, cols: ["v1", "v2"], names_to: "visit", values_to: "score")`
+/// or `df |> pivot_longer(cols: ["v1", "v2"])`
+fn native_pivot_longer(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.is_empty() {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`pivot_longer()` requires a DataFrame as first argument",
+        ));
+    }
+    let df = &args[0];
+
+    let mut cols: Option<Vec<String>> = None;
+    let mut names_to = "name".to_string();
+    let mut values_to = "value".to_string();
+    let mut id_cols: Option<Vec<String>> = None;
+    let mut positional = Vec::new();
+
+    for arg in &args[1..] {
+        match arg {
+            Value::NamedArg(name, val) => match name.as_str() {
+                "cols" => {
+                    let mut c_list = Vec::new();
+                    match val.as_ref() {
+                        Value::Vector(items) => {
+                            for it in items.iter() {
+                                if let Some(c) = col_name_of(it) {
+                                    c_list.push(c);
+                                }
+                            }
+                        }
+                        other => {
+                            if let Some(c) = col_name_of(other) {
+                                c_list.push(c);
+                            }
+                        }
+                    }
+                    cols = Some(c_list);
+                }
+                "names_to" => {
+                    if let Some(s) = col_name_of(val) {
+                        names_to = s;
+                    }
+                }
+                "values_to" => {
+                    if let Some(s) = col_name_of(val) {
+                        values_to = s;
+                    }
+                }
+                "id_cols" | "index" => {
+                    let mut c_list = Vec::new();
+                    match val.as_ref() {
+                        Value::Vector(items) => {
+                            for it in items.iter() {
+                                if let Some(c) = col_name_of(it) {
+                                    c_list.push(c);
+                                }
+                            }
+                        }
+                        other => {
+                            if let Some(c) = col_name_of(other) {
+                                c_list.push(c);
+                            }
+                        }
+                    }
+                    id_cols = Some(c_list);
+                }
+                other => {
+                    return Err(Diagnostic::compute_error(
+                        "C0201",
+                        format!("Unknown argument `{other}` in `pivot_longer()`"),
+                    ));
+                }
+            },
+            other => positional.push(other),
+        }
+    }
+
+    if cols.is_none() && !positional.is_empty() {
+        let mut c_list = Vec::new();
+        match positional[0] {
+            Value::Vector(items) => {
+                for it in items.iter() {
+                    if let Some(c) = col_name_of(it) {
+                        c_list.push(c);
+                    }
+                }
+            }
+            other => {
+                if let Some(c) = col_name_of(other) {
+                    c_list.push(c);
+                }
+            }
+        }
+        cols = Some(c_list);
+    }
+    if positional.len() > 1 {
+        if let Some(s) = col_name_of(positional[1]) {
+            names_to = s;
+        }
+    }
+    if positional.len() > 2 {
+        if let Some(s) = col_name_of(positional[2]) {
+            values_to = s;
+        }
+    }
+
+    crate::io::df_pivot_longer(df, cols.as_deref(), &names_to, &values_to, id_cols.as_deref())
 }

@@ -18,7 +18,7 @@ rand_distr = "0.6.0"
 rand = "0.10.2"
 rand_xoshiro = "0.8.1"
 bumpalo = "3.20.3"
-polars-ops = "0.55.2"
+polars-ops = { version = "0.55.2", features = ["pivot"] }
 polars-io = { version = "0.55.2", features = ["csv", "parquet"] }
-polars-lazy = { version = "0.55.2", features = ["csv", "parquet", "streaming"] }
+polars-lazy = { version = "0.55.2", features = ["csv", "parquet", "streaming", "pivot"] }
 

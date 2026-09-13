@@ -323,12 +323,12 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .or(for_expr)
             .boxed();
 
-        // Call argument: either `name = expr` (named) or a plain positional `expr`.
+        // Call argument: either `name = expr` / `name: expr` (named) or a plain positional `expr`.
         let named_arg = select! {
             Token::Ident(name) => name,
             Token::Col => "col".to_string(),
         }
-        .then_ignore(just(Token::Eq))
+        .then_ignore(just(Token::Eq).or(just(Token::Colon)))
         .then(expr.clone())
         .map_with_span(|(name, value), span| {
             Expr::new(ExprKind::NamedArg { name, value: Box::new(value) }, span)

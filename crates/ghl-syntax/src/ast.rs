@@ -10,6 +10,7 @@ pub const COLUMN_CONTEXT_VERBS: &[&str] = &[
     "filter", "select", "arrange", "desc", "group_by", "summarize",
     "mutate", "drop", "distinct", "pull", "count", "fill_na",
     "slice_min", "slice_max", "inner_join", "left_join", "na_reasons",
+    "pivot_wider", "pivot_longer",
 ];
 
 pub fn is_column_context_verb(name: &str) -> bool {

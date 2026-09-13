@@ -1525,6 +1525,172 @@ fn df_join(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<
     Ok(Value::DataFrame { frame: joined, na_reasons: Arc::new(result_reasons) })
 }
 
+/// `pivot_wider(df, names_from, values_from, id_cols)` — reshape from long to wide format.
+pub fn df_pivot_wider(
+    df: &Value,
+    names_from: &str,
+    values_from: &str,
+    id_cols: Option<&[String]>,
+) -> Result<Value, Diagnostic> {
+    let (frame, _) = as_dataframe(df, "pivot_wider")?;
+    let all_cols: Vec<String> = frame.get_column_names().iter().map(|s| s.to_string()).collect();
+
+    if !all_cols.iter().any(|c| c == names_from) {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`pivot_wider()`: `names_from` column `{names_from}` not found in DataFrame"),
+        ));
+    }
+    if !all_cols.iter().any(|c| c == values_from) {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`pivot_wider()`: `values_from` column `{values_from}` not found in DataFrame"),
+        ));
+    }
+
+    let id_columns: Vec<String> = match id_cols {
+        Some(ids) => ids.to_vec(),
+        None => all_cols
+            .into_iter()
+            .filter(|c| c != names_from && c != values_from)
+            .collect(),
+    };
+
+    if id_columns.is_empty() {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`pivot_wider()` requires at least one id column to group rows",
+        ));
+    }
+
+    // 1. Get base unique id combinations
+    let base_selected = df_select(df, &id_columns)?;
+    let mut wide_df = df_distinct(&base_selected, Some(&id_columns))?;
+
+    // 2. Extract distinct values of names_from in order of appearance
+    let (frame_ref, na_reasons_ref) = as_dataframe(df, "pivot_wider")?;
+    let names_vals = polars_bridge::pull_column_as_values(frame_ref, na_reasons_ref, names_from)?;
+    let mut distinct_names: Vec<(String, Value)> = Vec::new();
+    for v in &names_vals {
+        if !v.is_na() {
+            let s = match v {
+                Value::String(s) | Value::ColRef(s) => s.clone(),
+                other => other.to_string(),
+            };
+            if !distinct_names.iter().any(|(name, _)| name == &s) {
+                distinct_names.push((s, v.clone()));
+            }
+        }
+    }
+
+    // 3. For each distinct name, filter, select id_cols + values_from, rename to name_str, and left_join
+    for (name_str, name_val) in &distinct_names {
+        let filtered = df_filter_by_col_predicate(
+            df,
+            names_from,
+            BinaryOp::Eq,
+            name_val,
+        )?;
+
+        let mut slice_cols = id_columns.clone();
+        slice_cols.push(values_from.to_string());
+        let projected = df_select(&filtered, &slice_cols)?;
+        let deduped = df_distinct(&projected, Some(&id_columns))?;
+        let renamed = df_rename(&deduped, values_from, name_str)?;
+
+        wide_df = df_left_join(&wide_df, &renamed, &id_columns)?;
+    }
+
+    Ok(wide_df)
+}
+
+/// `pivot_longer(df, cols, names_to, values_to, id_cols)` — reshape from wide to long format.
+pub fn df_pivot_longer(
+    df: &Value,
+    cols: Option<&[String]>,
+    names_to: &str,
+    values_to: &str,
+    id_cols: Option<&[String]>,
+) -> Result<Value, Diagnostic> {
+    let (frame, na_reasons) = as_dataframe(df, "pivot_longer")?;
+    let all_cols: Vec<String> = frame.get_column_names().iter().map(|s| s.to_string()).collect();
+
+    let (on_cols, index_cols): (Vec<PlSmallStr>, Vec<PlSmallStr>) = match (cols, id_cols) {
+        (Some(c), Some(id)) => (
+            c.iter().map(|s| PlSmallStr::from_str(s)).collect(),
+            id.iter().map(|s| PlSmallStr::from_str(s)).collect(),
+        ),
+        (Some(c), None) => {
+            let on: Vec<PlSmallStr> = c.iter().map(|s| PlSmallStr::from_str(s)).collect();
+            let index: Vec<PlSmallStr> = all_cols
+                .iter()
+                .filter(|col| !c.contains(col))
+                .map(|s| PlSmallStr::from_str(s))
+                .collect();
+            (on, index)
+        }
+        (None, Some(id)) => {
+            let index: Vec<PlSmallStr> = id.iter().map(|s| PlSmallStr::from_str(s)).collect();
+            let on: Vec<PlSmallStr> = all_cols
+                .iter()
+                .filter(|col| !id.contains(col))
+                .map(|s| PlSmallStr::from_str(s))
+                .collect();
+            (on, index)
+        }
+        (None, None) => {
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                "`pivot_longer()` requires either `cols` or `id_cols`",
+            ));
+        }
+    };
+
+    let orig_height = frame.height();
+    let num_on = on_cols.len();
+
+    let args = UnpivotArgsIR {
+        on: on_cols.clone(),
+        index: index_cols.clone(),
+        variable_name: PlSmallStr::from_str(names_to),
+        value_name: PlSmallStr::from_str(values_to),
+    };
+
+    let unpivoted = frame.unpivot2(args).map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("`pivot_longer()` failed: {e}"))
+    })?;
+
+    // Map NA reasons to new row positions
+    let mut new_reasons = NaReasonTable::new();
+    if !na_reasons.is_empty() {
+        for (k, on_name) in on_cols.iter().enumerate() {
+            let on_str = on_name.as_str();
+            for r in 0..orig_height {
+                if let Some(reason) = na_reasons.get(on_str, r) {
+                    let new_row = k * orig_height + r;
+                    new_reasons.set(values_to, new_row, reason);
+                }
+            }
+        }
+        for id_name in &index_cols {
+            let id_str = id_name.as_str();
+            for r in 0..orig_height {
+                if let Some(reason) = na_reasons.get(id_str, r) {
+                    for k in 0..num_on {
+                        let new_row = k * orig_height + r;
+                        new_reasons.set(id_str, new_row, reason);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Value::DataFrame {
+        frame: unpivoted,
+        na_reasons: Arc::new(new_reasons),
+    })
+}
+
 // =========================================================================
 // Helper parsing functions
 // =========================================================================
