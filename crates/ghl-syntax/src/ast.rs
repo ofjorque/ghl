@@ -168,8 +168,23 @@ pub enum ExprKind {
         target: Box<Expr>,
         field: String,
     },
+    Index {
+        target: Box<Expr>,
+        indices: Vec<IndexSpec>,
+    },
     /// Qualified path, e.g. `std::math::sqrt` or `std::linalg::eye`
     Path(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum IndexSpec {
+    Expr(Expr),
+    Range {
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        inclusive: bool,
+    },
+    All, // `:` or `..`
 }
 
 #[derive(Debug, Clone, PartialEq)]

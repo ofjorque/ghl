@@ -355,6 +355,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
         enum Postfix {
             Call(Vec<Expr>, Span),
             Field(String, Span),
+            Index(Vec<IndexSpec>, Span),
         }
 
         let postfix_call = call_arg
@@ -370,9 +371,54 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             })
             .map_with_span(Postfix::Field);
 
-        let postfix = postfix_call.or(postfix_field);
+        let colon_wildcard = just(Token::Colon).to(IndexSpec::All);
+        let range_starts_with_dotdot_eq = just(Token::DotDotEq)
+            .ignore_then(expr.clone())
+            .map(|e| IndexSpec::Range {
+                start: None,
+                end: Some(Box::new(e)),
+                inclusive: true,
+            });
+        let range_starts_with_dotdot = just(Token::DotDot)
+            .ignore_then(expr.clone().or_not())
+            .map(|opt_e| match opt_e {
+                Some(e) => IndexSpec::Range {
+                    start: None,
+                    end: Some(Box::new(e)),
+                    inclusive: false,
+                },
+                None => IndexSpec::All,
+            });
+        let index_from_expr = expr.clone()
+            .then(
+                just(Token::DotDotEq).ignore_then(expr.clone()).map(|e| Some((true, Some(e))))
+                    .or(just(Token::DotDot).ignore_then(expr.clone().or_not()).map(|opt_e| Some((false, opt_e))))
+                    .or(empty().to(None))
+            )
+            .map(|(first, opt_range)| match opt_range {
+                None => IndexSpec::Expr(first),
+                Some((inclusive, end)) => IndexSpec::Range {
+                    start: Some(Box::new(first)),
+                    end: end.map(Box::new),
+                    inclusive,
+                },
+            });
 
-        // Postfix operations: calls `(args...)` and field accesses `.field`
+        let index_spec = colon_wildcard
+            .or(range_starts_with_dotdot_eq)
+            .or(range_starts_with_dotdot)
+            .or(index_from_expr);
+
+        let postfix_index = index_spec
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .at_least(1)
+            .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            .map_with_span(Postfix::Index);
+
+        let postfix = postfix_call.or(postfix_field).or(postfix_index);
+
+        // Postfix operations: calls `(args...)`, field accesses `.field`, and bracket indexing `[indices...]`
         let call = atom
             .then(postfix.repeated())
             .foldl(|target, post| match post {
@@ -394,6 +440,17 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                         ExprKind::FieldAccess {
                             target: Box::new(target),
                             field,
+                        },
+                        start..end,
+                    )
+                }
+                Postfix::Index(indices, span) => {
+                    let start = target.span.start;
+                    let end = span.end;
+                    Expr::new(
+                        ExprKind::Index {
+                            target: Box::new(target),
+                            indices,
                         },
                         start..end,
                     )
@@ -1055,6 +1112,114 @@ mod tests {
                 }
             }
             _ => panic!("Expected let statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bracket_indexing_and_slicing() {
+        let p_a = parse("let a = v[0];").expect("v[0] ok");
+        if let StmtKind::Let { init, .. } = &p_a.statements[0].kind {
+            match &init.kind {
+                ExprKind::Index { target, indices } => {
+                    assert_eq!(target.kind, ExprKind::Ident("v".into()));
+                    assert_eq!(indices.len(), 1);
+                    assert!(matches!(&indices[0], IndexSpec::Expr(_)));
+                }
+                _ => panic!("expected Index"),
+            }
+        }
+
+        let p_b = parse("let b = v[0..5];").expect("v[0..5] ok");
+        if let StmtKind::Let { init, .. } = &p_b.statements[0].kind {
+            match &init.kind {
+                ExprKind::Index { indices, .. } => {
+                    assert_eq!(indices.len(), 1);
+                    match &indices[0] {
+                        IndexSpec::Range { start, end, inclusive } => {
+                            assert!(!inclusive);
+                            assert!(start.is_some());
+                            assert!(end.is_some());
+                        }
+                        _ => panic!("expected half-open Range"),
+                    }
+                }
+                _ => panic!("expected Index"),
+            }
+        }
+
+        let p_c = parse("let c = v[0..=5];").expect("v[0..=5] ok");
+        if let StmtKind::Let { init, .. } = &p_c.statements[0].kind {
+            match &init.kind {
+                ExprKind::Index { indices, .. } => {
+                    assert_eq!(indices.len(), 1);
+                    match &indices[0] {
+                        IndexSpec::Range { start, end, inclusive } => {
+                            assert!(*inclusive);
+                            assert!(start.is_some());
+                            assert!(end.is_some());
+                        }
+                        _ => panic!("expected inclusive Range"),
+                    }
+                }
+                _ => panic!("expected Index"),
+            }
+        }
+
+        let p_d = parse("let d = v[..];").expect("v[..] ok");
+        if let StmtKind::Let { init, .. } = &p_d.statements[0].kind {
+            match &init.kind {
+                ExprKind::Index { indices, .. } => {
+                    assert_eq!(indices.len(), 1);
+                    assert_eq!(indices[0], IndexSpec::All);
+                }
+                _ => panic!("expected Index"),
+            }
+        }
+
+        let p_e = parse("let e = m[0..2, :];").expect("m[0..2, :] ok");
+        if let StmtKind::Let { init, .. } = &p_e.statements[0].kind {
+            match &init.kind {
+                ExprKind::Index { indices, .. } => {
+                    assert_eq!(indices.len(), 2);
+                    assert!(matches!(&indices[0], IndexSpec::Range { inclusive: false, .. }));
+                    assert_eq!(indices[1], IndexSpec::All);
+                }
+                _ => panic!("expected Index"),
+            }
+        }
+
+        let p_f = parse("let f = m[:, 1];").expect("m[:, 1] ok");
+        if let StmtKind::Let { init, .. } = &p_f.statements[0].kind {
+            match &init.kind {
+                ExprKind::Index { indices, .. } => {
+                    assert_eq!(indices.len(), 2);
+                    assert_eq!(indices[0], IndexSpec::All);
+                    assert!(matches!(&indices[1], IndexSpec::Expr(_)));
+                }
+                _ => panic!("expected Index"),
+            }
+        }
+
+        let p_g = parse("let g = v[v > 0.0];").expect("v[v > 0.0] ok");
+        if let StmtKind::Let { init, .. } = &p_g.statements[0].kind {
+            match &init.kind {
+                ExprKind::Index { indices, .. } => {
+                    assert_eq!(indices.len(), 1);
+                    assert!(matches!(&indices[0], IndexSpec::Expr(_)));
+                }
+                _ => panic!("expected Index"),
+            }
+        }
+
+        let p_h = parse("let h = v[[0, 2, 4]];").expect("v[[0, 2, 4]] ok");
+        if let StmtKind::Let { init, .. } = &p_h.statements[0].kind {
+            match &init.kind {
+                ExprKind::Index { indices, .. } => {
+                    assert_eq!(indices.len(), 1);
+                    assert!(matches!(&indices[0], IndexSpec::Expr(_)));
+                }
+                _ => panic!("expected Index"),
+            }
         }
     }
 }

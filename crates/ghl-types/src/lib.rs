@@ -296,6 +296,25 @@ mod tests {
         let rep_sym = env.lookup("rep").expect("rep must exist");
         assert_eq!(rep_sym.ty, Type::I64);
     }
+
+    #[test]
+    fn test_typecheck_bracket_indexing_and_slicing() {
+        let code = r#"
+            let v = [1.0, 2.0, 3.0, 4.0];
+            let elem = v[0];
+            let sub_v = v[0..2];
+            let m = mat [ 1.0, 2.0 ; 3.0, 4.0 ];
+            let m_elem = m[0, 1];
+            let m_sub = m[0..1, :];
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let env = check(&program, "test.gh").expect("type check ok");
+
+        assert_eq!(env.lookup("elem").unwrap().ty, Type::F64);
+        assert_eq!(env.lookup("sub_v").unwrap().ty, Type::Vector(Box::new(Type::F64)));
+        assert_eq!(env.lookup("m_elem").unwrap().ty, Type::F64);
+        assert_eq!(env.lookup("m_sub").unwrap().ty, Type::Matrix(Box::new(Type::F64)));
+    }
 }
 
 

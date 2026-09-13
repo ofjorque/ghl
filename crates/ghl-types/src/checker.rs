@@ -648,6 +648,51 @@ impl TypeChecker {
                 }
             }
 
+            ExprKind::Index { target, indices } => {
+                let target_ty = self.check_expr_ctx(target, col_ctx);
+                match target_ty {
+                    Type::Vector(elem_ty) => {
+                        if indices.len() == 1 {
+                            match &indices[0] {
+                                IndexSpec::Expr(e) => {
+                                    let idx_ty = self.check_expr_ctx(e, col_ctx);
+                                    match idx_ty {
+                                        Type::I64 => *elem_ty,
+                                        _ => Type::Vector(elem_ty),
+                                    }
+                                }
+                                IndexSpec::Range { .. } | IndexSpec::All => Type::Vector(elem_ty),
+                            }
+                        } else {
+                            Type::Any
+                        }
+                    }
+                    Type::Matrix(elem_ty) => {
+                        if indices.len() == 2 {
+                            let is_r_scalar = match &indices[0] {
+                                IndexSpec::Expr(e) => self.check_expr_ctx(e, col_ctx) == Type::I64,
+                                _ => false,
+                            };
+                            let is_c_scalar = match &indices[1] {
+                                IndexSpec::Expr(e) => self.check_expr_ctx(e, col_ctx) == Type::I64,
+                                _ => false,
+                            };
+                            if is_r_scalar && is_c_scalar {
+                                *elem_ty
+                            } else if is_r_scalar || is_c_scalar {
+                                Type::Vector(elem_ty)
+                            } else {
+                                Type::Matrix(elem_ty)
+                            }
+                        } else {
+                            Type::Any
+                        }
+                    }
+                    Type::String => Type::String,
+                    _ => Type::Any,
+                }
+            }
+
             ExprKind::Path(segments) => {
                 if segments.len() == 2 && (segments[0] == "NAReason" || segments[0] == "NAReasons") {
                     Type::NA

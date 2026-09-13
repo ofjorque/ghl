@@ -3838,6 +3838,106 @@ mod tests {
         assert_eq!(interp.env.get("s").unwrap(), Value::F64(10.0));
         assert_eq!(interp.env.get("m").unwrap(), Value::F64(2.5));
     }
+
+    #[test]
+    fn test_bracket_indexing_and_slicing() {
+        let code = r#"
+            let v = [10.0, 20.0, 30.0, 40.0, 50.0];
+            let first = v[0];
+            let sub_half = v[1..3];
+            let sub_incl = v[1..=3];
+            let all_v = v[..];
+            let masked = v[v > 25.0];
+            let gathered = v[[0, 2, 4]];
+
+            let m = mat [ 1.0, 2.0, 3.0 ; 4.0, 5.0, 6.0 ; 7.0, 8.0, 9.0 ];
+            let elem = m[1, 2];
+            let row_slice = m[0..2, :];
+            let col_vec = m[:, 1];
+            let row_vec = m[0, :];
+
+            let s = "hello world";
+            let s_ch = s[0];
+            let s_sub = s[0..5];
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(interp.env.get("first").unwrap(), Value::F64(10.0));
+
+        if let Value::Vector(v_half) = interp.env.get("sub_half").unwrap() {
+            assert_eq!(v_half.len(), 2);
+            assert_eq!(v_half.value_at(0), Some(Value::F64(20.0)));
+            assert_eq!(v_half.value_at(1), Some(Value::F64(30.0)));
+        } else {
+            panic!("expected Vector for sub_half");
+        }
+
+        if let Value::Vector(v_incl) = interp.env.get("sub_incl").unwrap() {
+            assert_eq!(v_incl.len(), 3);
+            assert_eq!(v_incl.value_at(0), Some(Value::F64(20.0)));
+            assert_eq!(v_incl.value_at(1), Some(Value::F64(30.0)));
+            assert_eq!(v_incl.value_at(2), Some(Value::F64(40.0)));
+        } else {
+            panic!("expected Vector for sub_incl");
+        }
+
+        if let Value::Vector(v_all) = interp.env.get("all_v").unwrap() {
+            assert_eq!(v_all.len(), 5);
+        } else {
+            panic!("expected Vector for all_v");
+        }
+
+        if let Value::Vector(v_mask) = interp.env.get("masked").unwrap() {
+            assert_eq!(v_mask.len(), 3);
+            assert_eq!(v_mask.value_at(0), Some(Value::F64(30.0)));
+            assert_eq!(v_mask.value_at(1), Some(Value::F64(40.0)));
+            assert_eq!(v_mask.value_at(2), Some(Value::F64(50.0)));
+        } else {
+            panic!("expected Vector for masked");
+        }
+
+        if let Value::Vector(v_gath) = interp.env.get("gathered").unwrap() {
+            assert_eq!(v_gath.len(), 3);
+            assert_eq!(v_gath.value_at(0), Some(Value::F64(10.0)));
+            assert_eq!(v_gath.value_at(1), Some(Value::F64(30.0)));
+            assert_eq!(v_gath.value_at(2), Some(Value::F64(50.0)));
+        } else {
+            panic!("expected Vector for gathered");
+        }
+
+        assert_eq!(interp.env.get("elem").unwrap(), Value::F64(6.0));
+
+        if let Value::Matrix { rows, cols, data } = interp.env.get("row_slice").unwrap() {
+            assert_eq!(rows, 2);
+            assert_eq!(cols, 3);
+            assert_eq!(&data[..], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        } else {
+            panic!("expected Matrix for row_slice");
+        }
+
+        if let Value::Vector(col) = interp.env.get("col_vec").unwrap() {
+            assert_eq!(col.len(), 3);
+            assert_eq!(col.value_at(0), Some(Value::F64(2.0)));
+            assert_eq!(col.value_at(1), Some(Value::F64(5.0)));
+            assert_eq!(col.value_at(2), Some(Value::F64(8.0)));
+        } else {
+            panic!("expected Vector for col_vec");
+        }
+
+        if let Value::Vector(row) = interp.env.get("row_vec").unwrap() {
+            assert_eq!(row.len(), 3);
+            assert_eq!(row.value_at(0), Some(Value::F64(1.0)));
+            assert_eq!(row.value_at(1), Some(Value::F64(2.0)));
+            assert_eq!(row.value_at(2), Some(Value::F64(3.0)));
+        } else {
+            panic!("expected Vector for row_vec");
+        }
+
+        assert_eq!(interp.env.get("s_ch").unwrap(), Value::String("h".into()));
+        assert_eq!(interp.env.get("s_sub").unwrap(), Value::String("hello".into()));
+    }
 }
 
 

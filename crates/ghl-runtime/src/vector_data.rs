@@ -29,7 +29,7 @@ use crate::value::Value;
 /// The fixed internal "column name" `VectorData` uses when reusing `NaReasonTable`'s
 /// (column, row) keying and `polars_bridge`'s column-oriented helpers for a single,
 /// unnamed vector. Never seen by GHL scripts.
-const VECTOR_COL: &str = "__ghl_vector__";
+pub(crate) const VECTOR_COL: &str = "__ghl_vector__";
 
 #[derive(Debug, Clone)]
 pub struct VectorData {
@@ -130,6 +130,23 @@ impl VectorData {
         VectorData {
             column,
             na_reasons,
+            materialized: Arc::new(OnceLock::new()),
+        }
+    }
+
+    pub fn slice(&self, offset: usize, length: usize) -> Self {
+        let new_col = self.column.slice(offset as i64, length);
+        let mut new_reasons = NaReasonTable::new();
+        if self.null_count() > 0 {
+            for row in 0..length {
+                if let Some(r) = self.na_reasons.get(VECTOR_COL, offset + row) {
+                    new_reasons.set(VECTOR_COL, row, r);
+                }
+            }
+        }
+        VectorData {
+            column: new_col,
+            na_reasons: Arc::new(new_reasons),
             materialized: Arc::new(OnceLock::new()),
         }
     }

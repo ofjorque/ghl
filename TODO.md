@@ -52,11 +52,11 @@ Este documento audita y contrasta sistemáticamente el estado de implementación
   - [x] `filter`, `select`, `drop`, `mutate`, `arrange`, `group_by`, `summarize`.
   - [x] `inner_join`, `left_join`, `outer_join`, `distinct`, `slice`, `slice_min`, `slice_max`.
   - [x] `head`, `tail`, `sample_n`, `sample_frac`, `fill_na`, `rename`, `count`, `pull`, `glimpse`.
-- [ ] **Gaps / Extensiones pendientes de RFC 01:**
+- [x] **Gaps / Extensiones pendientes de RFC 01:**
   - [x] **`pivot_wider` y `pivot_longer`:** Verbos de transformación de forma tabular (RFC 01 §7.3).
   - [x] **`impute(col, strategy: Mean, only_for: [NAReason::...])` y `filter_na_reason`:** Imputación condicional y filtrado de filas por motivo de NA (RFC 01 §7.3 y RFC 02 §2.2).
   - [x] **Literales de Registros / Named Tuples (`{ a: 1, b: 2 }`):** Soporte sintáctico para records estructurales en AST/eval (RFC 01 §3.4).
-  - [ ] **Indexación general por corchetes (`v[0..5]`, `mat[0..2, :]`, `v[v > 0.0]`):** Azúcar sintáctico para rebanado directo en expresiones de vectores y matrices (RFC 01 §4).
+  - [x] **Indexación general por corchetes (`v[0..5]`, `mat[0..2, :]`, `v[v > 0.0]`):** Azúcar sintáctico para rebanado directo en expresiones de vectores y matrices (RFC 01 §4).
 
 ---
 
