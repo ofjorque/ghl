@@ -279,6 +279,23 @@ mod tests {
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0106"));
     }
+
+    #[test]
+    fn test_typecheck_record_literal_and_field_access() {
+        let code = r#"
+            let rec = { sample_id: "SMP-001", replicates: 4, p_value: 0.0042 };
+            let s_id = rec.sample_id;
+            let rep = rec.replicates;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let env = check(&program, "test.gh").expect("type check ok");
+
+        let s_id_sym = env.lookup("s_id").expect("s_id must exist");
+        assert_eq!(s_id_sym.ty, Type::String);
+
+        let rep_sym = env.lookup("rep").expect("rep must exist");
+        assert_eq!(rep_sym.ty, Type::I64);
+    }
 }
 
 

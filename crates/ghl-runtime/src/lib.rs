@@ -3784,6 +3784,60 @@ mod tests {
             panic!("expected vector for ms");
         }
     }
+
+    #[test]
+    fn test_record_literal_and_field_access() {
+        let code = r#"
+            let sample = { sample_id: "SMP-001", replicates: 4, p_value: 0.0042 };
+            let sid = sample.sample_id;
+            let reps = sample.replicates;
+            let p = get(sample, "p_value");
+            let p_piped = sample |> get("p_value");
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(interp.env.get("sid").unwrap(), Value::String("SMP-001".into()));
+        assert_eq!(interp.env.get("reps").unwrap(), Value::I64(4));
+        assert_eq!(interp.env.get("p").unwrap(), Value::F64(0.0042));
+        assert_eq!(interp.env.get("p_piped").unwrap(), Value::F64(0.0042));
+    }
+
+    #[test]
+    fn test_record_and_block_coexistence() {
+        let code = r#"
+            let empty_block = {};
+            let block_val = {
+                let x = 10;
+                x + 5
+            };
+            let rec = { x: 10, y: "hello" };
+            let x_val = rec.x;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(interp.env.get("empty_block").unwrap(), Value::Unit);
+        assert_eq!(interp.env.get("block_val").unwrap(), Value::I64(15));
+        assert_eq!(interp.env.get("x_val").unwrap(), Value::I64(10));
+    }
+
+    #[test]
+    fn test_ufcs_method_call() {
+        let code = r#"
+            let v = [1.0, 2.0, 3.0, 4.0];
+            let s = v.sum();
+            let m = v.mean();
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(interp.env.get("s").unwrap(), Value::F64(10.0));
+        assert_eq!(interp.env.get("m").unwrap(), Value::F64(2.5));
+    }
 }
 
 

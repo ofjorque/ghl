@@ -195,6 +195,8 @@ pub enum Value {
     NativeFnCtx(fn(&mut crate::eval::Interpreter, Vec<Value>) -> Result<Value, Diagnostic>),
     /// Regional memory arena (RFC 03 §2.2) backed by `bumpalo`
     Arena(std::sync::Arc<std::sync::Mutex<crate::arena::ArenaState>>),
+    /// Structural Record / Named Tuple (RFC 01 §3.4)
+    Record(std::sync::Arc<std::collections::BTreeMap<String, Value>>),
 }
 
 impl Value {
@@ -286,6 +288,7 @@ impl Value {
             Value::NativeFn(_) => "NativeFunction",
             Value::NativeFnCtx(_) => "NativeFunction",
             Value::Arena(_) => "Arena",
+            Value::Record(_) => "Record",
         }
     }
 }
@@ -361,6 +364,7 @@ impl PartialEq for Value {
             ) => c1 == c2 && d1 == d2,
             (Value::NamedArg(n1, v1), Value::NamedArg(n2, v2)) => n1 == n2 && v1 == v2,
             (Value::Arena(a1), Value::Arena(a2)) => std::sync::Arc::ptr_eq(a1, a2),
+            (Value::Record(a1), Value::Record(a2)) => a1 == a2,
             _ => false,
         }
     }
@@ -625,6 +629,13 @@ impl Value {
             Value::Arena(a) => {
                 let bytes = a.lock().map(|st| st.allocated_bytes()).unwrap_or(0);
                 format!("<Arena ({} bytes allocated)>", bytes)
+            }
+            Value::Record(map) => {
+                let mut parts = Vec::new();
+                for (k, v) in map.iter() {
+                    parts.push(format!("{}: {}", k, v.render_styled(caps)));
+                }
+                format!("{{ {} }}", parts.join(", "))
             }
         }
     }

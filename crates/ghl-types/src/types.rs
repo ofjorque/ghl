@@ -41,6 +41,8 @@ pub enum Type {
     /// Standalone missing value literal (NA or NA:Reason).
     /// Unifies with any type without contaminating integers into floats.
     NA,
+    /// Structural Record / Named Tuple: { field1: Type, field2: Type }
+    Record(Vec<(String, Type)>),
     /// Dynamic or generic placeholder for unconstrained inference.
     Any,
 }
@@ -116,6 +118,19 @@ impl Type {
                     params: unified_params,
                     ret: Box::new(unified_ret),
                 })
+            }
+            (Type::Record(f1), Type::Record(f2)) => {
+                if f1.len() != f2.len() {
+                    return None;
+                }
+                let mut unified = Vec::new();
+                for ((n1, t1), (n2, t2)) in f1.iter().zip(f2.iter()) {
+                    if n1 != n2 {
+                        return None;
+                    }
+                    unified.push((n1.clone(), t1.unify(t2)?));
+                }
+                Some(Type::Record(unified))
             }
 
             _ => None,
@@ -211,6 +226,16 @@ impl fmt::Display for Type {
                     write!(f, "{}", p)?;
                 }
                 write!(f, ") -> {}", ret)
+            }
+            Type::Record(fields) => {
+                write!(f, "{{ ")?;
+                for (i, (name, ty)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", name, ty)?;
+                }
+                write!(f, " }}")
             }
             Type::NA => write!(f, "NA"),
             Type::Any => write!(f, "any"),

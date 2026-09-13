@@ -115,6 +115,21 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             )
             .map_with_span(|cols, span| Expr::new(ExprKind::DataFrameLit(cols), span));
 
+        // Record literal: { field_1: expr, field_2: expr, ... } (RFC 01 §3.4)
+        let record_entry = select! {
+            Token::Ident(name) => name,
+            Token::Col => "col".to_string(),
+        }
+        .then_ignore(just(Token::Colon))
+        .then(expr.clone());
+
+        let record_literal = record_entry
+            .separated_by(just(Token::Comma))
+            .at_least(1)
+            .allow_trailing()
+            .delimited_by(just(Token::LBrace), just(Token::RBrace))
+            .map_with_span(|fields, span| Expr::new(ExprKind::RecordLit(fields), span));
+
         // Matrix literal: mat [ 1.0, 2.0 ; 3.0, 4.0 ]
         let mat_row = expr.clone().separated_by(just(Token::Comma)).allow_trailing();
         let matrix_literal = just(Token::Mat)
@@ -316,6 +331,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .or(dataframe_literal)
             .or(matrix_literal)
             .or(lambda)
+            .or(record_literal)
             .or(block)
             .or(if_expr)
             .or(match_expr)
@@ -335,29 +351,53 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
         });
         let call_arg = named_arg.or(expr.clone());
 
-        // Function call: atom ( arg1, arg2 )
+        #[derive(Clone)]
+        enum Postfix {
+            Call(Vec<Expr>, Span),
+            Field(String, Span),
+        }
+
+        let postfix_call = call_arg
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .delimited_by(just(Token::LParen), just(Token::RParen))
+            .map_with_span(Postfix::Call);
+
+        let postfix_field = just(Token::Dot)
+            .ignore_then(select! {
+                Token::Ident(name) => name,
+                Token::Col => "col".to_string(),
+            })
+            .map_with_span(Postfix::Field);
+
+        let postfix = postfix_call.or(postfix_field);
+
+        // Postfix operations: calls `(args...)` and field accesses `.field`
         let call = atom
-            .then(
-                call_arg
-                    .separated_by(just(Token::Comma))
-                    .allow_trailing()
-                    .delimited_by(just(Token::LParen), just(Token::RParen))
-                    .repeated(),
-            )
-            .foldl(|callee, args| {
-                let start = callee.span.start;
-                let end = if let Some(last) = args.last() {
-                    last.span.end + 1
-                } else {
-                    callee.span.end + 2
-                };
-                Expr::new(
-                    ExprKind::Call {
-                        callee: Box::new(callee),
-                        args,
-                    },
-                    start..end,
-                )
+            .then(postfix.repeated())
+            .foldl(|target, post| match post {
+                Postfix::Call(args, span) => {
+                    let start = target.span.start;
+                    let end = span.end;
+                    Expr::new(
+                        ExprKind::Call {
+                            callee: Box::new(target),
+                            args,
+                        },
+                        start..end,
+                    )
+                }
+                Postfix::Field(field, span) => {
+                    let start = target.span.start;
+                    let end = span.end;
+                    Expr::new(
+                        ExprKind::FieldAccess {
+                            target: Box::new(target),
+                            field,
+                        },
+                        start..end,
+                    )
+                }
             });
 
         // Unary operators (-, !)
@@ -973,6 +1013,47 @@ mod tests {
                 }
                 _ => panic!("Expected Call expression"),
             },
+            _ => panic!("Expected let statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_record_literal_and_field_access() {
+        let code = r#"
+            let record = { sample_id: "SMP-001", replicates: 4, p_value: 0.0042 };
+            let s_id = record.sample_id;
+            let res = compute(record.p_value);
+        "#;
+        let program = parse(code).expect("Should parse record literal and field access");
+        assert_eq!(program.statements.len(), 3);
+
+        match &program.statements[0].kind {
+            StmtKind::Let { name, init, .. } => {
+                assert_eq!(name, "record");
+                match &init.kind {
+                    ExprKind::RecordLit(fields) => {
+                        assert_eq!(fields.len(), 3);
+                        assert_eq!(fields[0].0, "sample_id");
+                        assert_eq!(fields[1].0, "replicates");
+                        assert_eq!(fields[2].0, "p_value");
+                    }
+                    _ => panic!("Expected RecordLit, got {:?}", init.kind),
+                }
+            }
+            _ => panic!("Expected let statement"),
+        }
+
+        match &program.statements[1].kind {
+            StmtKind::Let { name, init, .. } => {
+                assert_eq!(name, "s_id");
+                match &init.kind {
+                    ExprKind::FieldAccess { target, field } => {
+                        assert_eq!(field, "sample_id");
+                        assert_eq!(target.kind, ExprKind::Ident("record".into()));
+                    }
+                    _ => panic!("Expected FieldAccess, got {:?}", init.kind),
+                }
+            }
             _ => panic!("Expected let statement"),
         }
     }

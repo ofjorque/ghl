@@ -188,6 +188,8 @@ pub enum Token {
     DotDotEq,
     #[token("..")]
     DotDot,
+    #[token(".")]
+    Dot,
     #[token("(")]
     LParen,
     #[token(")")]

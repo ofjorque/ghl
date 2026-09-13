@@ -163,6 +163,11 @@ pub enum ExprKind {
         name: String,
         value: Box<Expr>,
     },
+    RecordLit(Vec<(String, Expr)>),
+    FieldAccess {
+        target: Box<Expr>,
+        field: String,
+    },
     /// Qualified path, e.g. `std::math::sqrt` or `std::linalg::eye`
     Path(Vec<String>),
 }

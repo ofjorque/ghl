@@ -208,6 +208,27 @@ impl Interpreter {
                 })
             }
 
+            ExprKind::RecordLit(fields) => {
+                let mut map = std::collections::BTreeMap::new();
+                for (name, val_expr) in fields {
+                    let val = self.eval_expr_ctx(val_expr, col_ctx)?;
+                    map.insert(name.clone(), val);
+                }
+                Ok(Value::Record(std::sync::Arc::new(map)))
+            }
+
+            ExprKind::FieldAccess { target, field } => {
+                let target_val = self.eval_expr_ctx(target, col_ctx)?;
+                match target_val {
+                    Value::Record(map) => {
+                        map.get(field).cloned().ok_or_else(|| {
+                            Diagnostic::compute_error("C0102", format!("Field `{field}` not found in record"))
+                        })
+                    }
+                    _ => Err(Diagnostic::compute_error("C0202", format!("Cannot access field `{field}` on non-record value"))),
+                }
+            }
+
             ExprKind::Binary { op, lhs, rhs } => {
                 let left = self.eval_expr_ctx(lhs, col_ctx)?;
                 let right = self.eval_expr_ctx(rhs, col_ctx)?;
@@ -292,6 +313,36 @@ impl Interpreter {
             }
 
             ExprKind::Call { callee, args } => {
+                if let ExprKind::FieldAccess { target, field } = &callee.kind {
+                    let target_val = self.eval_expr(target)?;
+                    let is_record_fn = match &target_val {
+                        Value::Record(map) => map.get(field).map(|v| matches!(v, Value::NativeFn(_) | Value::NativeFnCtx(_) | Value::Closure { .. })).unwrap_or(false),
+                        _ => false,
+                    };
+
+                    if is_record_fn {
+                        if let Value::Record(map) = target_val {
+                            let fn_val = map.get(field).unwrap().clone();
+                            let mut evaluated_args = Vec::with_capacity(args.len());
+                            for a in args {
+                                evaluated_args.push(self.eval_expr_ctx(a, false)?);
+                            }
+                            return self.call_value(fn_val, evaluated_args);
+                        }
+                    } else {
+                        let fn_val = self.env.get(field).ok_or_else(|| {
+                            Diagnostic::compute_error("C0101", format!("Undefined function or method `{field}`"))
+                        })?;
+                        let arg_ctx = is_column_context_verb(field);
+                        let mut evaluated_args = Vec::with_capacity(args.len() + 1);
+                        evaluated_args.push(target_val);
+                        for a in args {
+                            evaluated_args.push(self.eval_expr_ctx(a, arg_ctx)?);
+                        }
+                        return self.call_value(fn_val, evaluated_args);
+                    }
+                }
+
                 let callee_val = self.eval_expr(callee)?;
                 let arg_ctx = col_ctx || callee_name(callee).is_some_and(is_column_context_verb);
                 let mut evaluated_args = Vec::with_capacity(args.len());
@@ -538,6 +589,36 @@ impl Interpreter {
             }
 
             ExprKind::Call { callee, args } => {
+                if let ExprKind::FieldAccess { target, field } = &callee.kind {
+                    let target_val = self.eval_expr(target)?;
+                    let is_record_fn = match &target_val {
+                        Value::Record(map) => map.get(field).map(|v| matches!(v, Value::NativeFn(_) | Value::NativeFnCtx(_) | Value::Closure { .. })).unwrap_or(false),
+                        _ => false,
+                    };
+
+                    if is_record_fn {
+                        if let Value::Record(map) = target_val {
+                            let fn_val = map.get(field).unwrap().clone();
+                            let mut evaluated_args = Vec::with_capacity(args.len());
+                            for a in args {
+                                evaluated_args.push(self.eval_expr_ctx(a, false)?);
+                            }
+                            return Ok(TailOutcome::TailCall { callee: fn_val, args: evaluated_args });
+                        }
+                    } else {
+                        let fn_val = self.env.get(field).ok_or_else(|| {
+                            Diagnostic::compute_error("C0101", format!("Undefined function or method `{field}`"))
+                        })?;
+                        let arg_ctx = is_column_context_verb(field);
+                        let mut evaluated_args = Vec::with_capacity(args.len() + 1);
+                        evaluated_args.push(target_val);
+                        for a in args {
+                            evaluated_args.push(self.eval_expr_ctx(a, arg_ctx)?);
+                        }
+                        return Ok(TailOutcome::TailCall { callee: fn_val, args: evaluated_args });
+                    }
+                }
+
                 let callee_val = self.eval_expr(callee)?;
                 let arg_ctx = callee_name(callee).is_some_and(is_column_context_verb);
                 let mut evaluated_args = Vec::with_capacity(args.len());
@@ -949,6 +1030,7 @@ use ghl_syntax::ast::is_column_context_verb;
 fn callee_name(expr: &Expr) -> Option<&str> {
     match &expr.kind {
         ExprKind::Ident(name) => Some(name.as_str()),
+        ExprKind::FieldAccess { field, .. } => Some(field.as_str()),
         ExprKind::Path(segments) => segments.last().map(|s| s.as_str()),
         _ => None,
     }

@@ -2127,9 +2127,14 @@ fn native_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     let ch = s.chars().nth(i as usize).unwrap();
                     Ok(Value::String(ch.to_string()))
                 }
+                (Value::Record(map), Value::String(field)) => {
+                    map.get(field).cloned().ok_or_else(|| {
+                        Diagnostic::compute_error("C0102", format!("Field `{field}` not found in record"))
+                    })
+                }
                 (c, i) => Err(Diagnostic::compute_error(
                     "C0202",
-                    format!("`get()` requires a (Vector, index) or (String, index), found (`{}`, `{}`)", c.type_name(), i.type_name()),
+                    format!("`get()` requires a (Vector, index), (String, index), or (Record, field), found (`{}`, `{}`)", c.type_name(), i.type_name()),
                 )),
             }
         }

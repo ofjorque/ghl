@@ -612,6 +612,42 @@ impl TypeChecker {
 
             ExprKind::NamedArg { value, .. } => self.check_expr_ctx(value, col_ctx),
 
+            ExprKind::RecordLit(fields) => {
+                let checked_fields: Vec<(String, Type)> = fields
+                    .iter()
+                    .map(|(name, e)| (name.clone(), self.check_expr_ctx(e, col_ctx)))
+                    .collect();
+                Type::Record(checked_fields)
+            }
+
+            ExprKind::FieldAccess { target, field } => {
+                let target_ty = self.check_expr_ctx(target, col_ctx);
+                match target_ty {
+                    Type::Record(fields) => {
+                        if let Some((_, ty)) = fields.iter().find(|(n, _)| n == field) {
+                            ty.clone()
+                        } else {
+                            self.diagnostics.push(
+                                Diagnostic::compute_error(
+                                    "C0101",
+                                    format!("Field `{}` not found in record", field),
+                                )
+                                .with_location(&self.source_file, expr.span.start, expr.span.end),
+                            );
+                            Type::Any
+                        }
+                    }
+                    Type::DataFrame(cols) => {
+                        if let Some((_, ty)) = cols.iter().find(|(n, _)| n == field) {
+                            Type::Vector(Box::new(ty.clone()))
+                        } else {
+                            Type::Any
+                        }
+                    }
+                    _ => Type::Any,
+                }
+            }
+
             ExprKind::Path(segments) => {
                 if segments.len() == 2 && (segments[0] == "NAReason" || segments[0] == "NAReasons") {
                     Type::NA

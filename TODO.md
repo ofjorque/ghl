@@ -55,7 +55,7 @@ Este documento audita y contrasta sistemáticamente el estado de implementación
 - [ ] **Gaps / Extensiones pendientes de RFC 01:**
   - [x] **`pivot_wider` y `pivot_longer`:** Verbos de transformación de forma tabular (RFC 01 §7.3).
   - [x] **`impute(col, strategy: Mean, only_for: [NAReason::...])` y `filter_na_reason`:** Imputación condicional y filtrado de filas por motivo de NA (RFC 01 §7.3 y RFC 02 §2.2).
-  - [ ] **Literales de Registros / Named Tuples (`{ a: 1, b: 2 }`):** Soporte sintáctico para records estructurales en AST/eval (RFC 01 §3.4).
+  - [x] **Literales de Registros / Named Tuples (`{ a: 1, b: 2 }`):** Soporte sintáctico para records estructurales en AST/eval (RFC 01 §3.4).
   - [ ] **Indexación general por corchetes (`v[0..5]`, `mat[0..2, :]`, `v[v > 0.0]`):** Azúcar sintáctico para rebanado directo en expresiones de vectores y matrices (RFC 01 §4).
 
 ---
@@ -71,7 +71,7 @@ Este documento audita y contrasta sistemáticamente el estado de implementación
   - [x] Funciones de inspección semántica: `na_reason(x)` y `na_reasons(df, col)`.
 - [x] **Manejo de errores algebraicos:** `Result<T, E>` y separación entre `ComputeError` y `StatisticalError`.
 - [ ] **Gaps / Extensiones pendientes de RFC 02:**
-  - [ ] **`filter_na_reason(col, drop: [...])`:** Filtrado de filas según el motivo semántico de ausencia (RFC 02 §2.2).
+  - [x] **`filter_na_reason(col, drop: [...])`:** Filtrado de filas según el motivo semántico de ausencia (RFC 02 §2.2).
   - [ ] **Comprobación estática de dimensiones matriciales (`Matrix<f64, ROWS, COLS>`):** Validación de dimensiones en tiempo de compilación mediante const generics en el type-checker (RFC 02 §3).
   - [ ] **Sintaxis de Traits y polimorfismo de usuario (`trait Distribution`, `impl Trait for Struct`):** Exposición de traits definidos por el usuario en el frontend del lenguaje (RFC 02 §4).
 
