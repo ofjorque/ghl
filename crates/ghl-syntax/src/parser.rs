@@ -4,23 +4,51 @@ use crate::ast::*;
 
 pub fn type_parser() -> impl Parser<Token, TypeAnnotation, Error = Simple<Token>> + Clone {
     recursive(|ty| {
-        let ident_str = select! {
+        let single_name = select! {
             Token::Ident(name) => name,
             Token::Col => "col".to_string(),
             Token::IntLit(n) => n.to_string(),
             Token::Underscore => "_".to_string(),
+            Token::SelfType => "Self".to_string(),
         };
 
-        ident_str
+        let path_name = single_name
+            .then(just(Token::PathSep).ignore_then(single_name).repeated())
+            .map(|(first, rest)| {
+                if rest.is_empty() {
+                    first
+                } else {
+                    let mut s = first;
+                    for r in rest {
+                        s.push_str("::");
+                        s.push_str(&r);
+                    }
+                    s
+                }
+            });
+
+        let ref_prefix = just(Token::Amp)
+            .ignore_then(just(Token::Mut).or_not())
+            .map(|is_mut| if is_mut.is_some() { "&mut " } else { "&" })
+            .or_not();
+
+        ref_prefix
+            .then(path_name)
             .then(
                 ty.separated_by(just(Token::Comma))
                     .allow_trailing()
                     .delimited_by(just(Token::LBracket), just(Token::RBracket))
                     .or_not(),
             )
-            .map(|(name, args)| match args {
-                Some(args) if !args.is_empty() => TypeAnnotation::Generic(name, args),
-                _ => TypeAnnotation::Simple(name),
+            .map(|((prefix, name), args)| {
+                let full_name = match prefix {
+                    Some(p) => format!("{}{}", p, name),
+                    None => name,
+                };
+                match args {
+                    Some(args) if !args.is_empty() => TypeAnnotation::Generic(full_name, args),
+                    _ => TypeAnnotation::Simple(full_name),
+                }
             })
     })
 }
@@ -40,14 +68,41 @@ pub fn pattern_parser() -> impl Parser<Token, Pattern, Error = Simple<Token>> + 
 }
 
 pub fn fn_param_parser() -> impl Parser<Token, FnParam, Error = Simple<Token>> + Clone {
+    let self_tok = select! {
+        Token::SelfValue => "self".to_string(),
+        Token::Ident(name) if name == "self" => name,
+    };
+
+    let self_param = just(Token::Amp)
+        .ignore_then(just(Token::Mut).or_not())
+        .then(self_tok.clone())
+        .map_with_span(|(is_mut, _name), span| {
+            let ref_str = if is_mut.is_some() { "&mut self" } else { "&self" };
+            FnParam {
+                name: ref_str.to_string(),
+                ty: Some(TypeAnnotation::Simple("Self".to_string())),
+                span,
+            }
+        })
+        .or(
+            self_tok
+                .map_with_span(|name, span| FnParam {
+                    name,
+                    ty: Some(TypeAnnotation::Simple("Self".to_string())),
+                    span,
+                })
+        );
+
     let ident_str = select! {
         Token::Ident(name) => name,
         Token::Col => "col".to_string(),
     };
 
-    ident_str
+    let regular_param = ident_str
         .then(just(Token::Colon).ignore_then(type_parser()).or_not())
-        .map_with_span(|(name, ty), span| FnParam { name, ty, span })
+        .map_with_span(|(name, ty), span| FnParam { name, ty, span });
+
+    self_param.or(regular_param)
 }
 
 pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone {
@@ -70,6 +125,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
         let single_ident = select! {
             Token::Ident(id) => ExprKind::Ident(id),
             Token::Col => ExprKind::Ident("col".into()),
+            Token::SelfValue => ExprKind::Ident("self".into()),
         }
         .map_with_span(Expr::new);
 
@@ -87,7 +143,25 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
         }
         .map_with_span(Expr::new);
 
-        let val = lit_val.or(ident_or_path);
+        let struct_entry = select! {
+            Token::Ident(name) => name,
+            Token::Col => "col".to_string(),
+        }
+        .then_ignore(just(Token::Colon))
+        .then(expr.clone());
+
+        let struct_literal = select! {
+            Token::Ident(name) => name,
+        }
+        .then(
+            struct_entry
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+        )
+        .map_with_span(|(name, fields), span| Expr::new(ExprKind::StructLit { name, fields }, span));
+
+        let val = lit_val.or(struct_literal).or(ident_or_path);
 
         let parenthesized = expr
             .clone()
@@ -724,9 +798,149 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         .then_ignore(just(Token::Semicolon).or_not())
         .map_with_span(|expr, span| Stmt::new(StmtKind::Expr(expr), span));
 
+    let struct_field = select! {
+        Token::Ident(name) => name,
+        Token::Col => "col".to_string(),
+    }
+    .then_ignore(just(Token::Colon))
+    .then(type_parser())
+    .map_with_span(|(name, ty), span| StructField { name, ty, span });
+
+    let struct_stmt = just(Token::Struct)
+        .ignore_then(select! {
+            Token::Ident(name) => name,
+            Token::Col => "col".to_string(),
+        })
+        .then(
+            struct_field
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+        )
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map_with_span(|(name, fields), span| {
+            Stmt::new(StmtKind::Struct(StructDecl { name, fields }), span)
+        });
+
+    let trait_assoc_type = just(Token::Type)
+        .ignore_then(select! { Token::Ident(name) => name })
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map(TraitItem::AssociatedType);
+
+    let trait_method = just(Token::Fn)
+        .ignore_then(select! {
+            Token::Ident(name) => name,
+            Token::Col => "col".to_string(),
+        })
+        .then(
+            fn_param_parser()
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .delimited_by(just(Token::LParen), just(Token::RParen)),
+        )
+        .then(just(Token::Arrow).ignore_then(type_parser()).or_not())
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map_with_span(|((name, params), ret_ty), span| {
+            TraitItem::Method(TraitMethodSig {
+                name,
+                params,
+                ret_ty,
+                span,
+            })
+        });
+
+    let trait_stmt = just(Token::Trait)
+        .ignore_then(select! {
+            Token::Ident(name) => name,
+            Token::Col => "col".to_string(),
+        })
+        .then(
+            trait_assoc_type
+                .or(trait_method)
+                .repeated()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+        )
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map_with_span(|(name, items), span| {
+            Stmt::new(StmtKind::Trait(TraitDecl { name, items }), span)
+        });
+
+    let impl_assoc_type = just(Token::Type)
+        .ignore_then(select! { Token::Ident(name) => name })
+        .then_ignore(just(Token::Eq))
+        .then(type_parser())
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map_with_span(|(name, ty), span| ImplItem::AssociatedType { name, ty, span });
+
+    let impl_method = just(Token::Fn)
+        .ignore_then(select! {
+            Token::Ident(name) => name,
+            Token::Col => "col".to_string(),
+        })
+        .then(
+            fn_param_parser()
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .delimited_by(just(Token::LParen), just(Token::RParen)),
+        )
+        .then(just(Token::Arrow).ignore_then(type_parser()).or_not())
+        .then(expr_parser())
+        .map_with_span(|(((name, params), ret_ty), body), span| {
+            ImplItem::Method {
+                name,
+                params,
+                ret_ty,
+                body,
+                span,
+            }
+        });
+
+    let impl_stmt = just(Token::Impl)
+        .ignore_then(select! {
+            Token::Ident(name) => name,
+            Token::Col => "col".to_string(),
+        })
+        .then(
+            just(Token::For)
+                .ignore_then(select! {
+                    Token::Ident(name) => name,
+                    Token::Col => "col".to_string(),
+                })
+                .or_not(),
+        )
+        .then(
+            impl_assoc_type
+                .or(impl_method)
+                .repeated()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+        )
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map_with_span(|((first, target), items), span| {
+            let (trait_name, target_type) = match target {
+                Some(tgt) => (Some(first), tgt),
+                None => (None, first),
+            };
+            Stmt::new(
+                StmtKind::Impl(ImplDecl {
+                    trait_name,
+                    target_type,
+                    items,
+                }),
+                span,
+            )
+        });
+
     let use_stmt = use_stmt_parser();
 
-    use_stmt.or(fn_stmt).or(let_stmt).or(return_stmt).or(assign_stmt).or(expr_stmt)
+    use_stmt
+        .or(struct_stmt)
+        .or(trait_stmt)
+        .or(impl_stmt)
+        .or(fn_stmt)
+        .or(let_stmt)
+        .or(return_stmt)
+        .or(assign_stmt)
+        .or(expr_stmt)
 }
 
 pub fn program_parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
@@ -1222,6 +1436,71 @@ mod tests {
                 }
                 _ => panic!("expected Index"),
             }
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_trait_and_impl() {
+        let code = r#"
+            struct NormalDistribution {
+                mean: f64,
+                std_dev: f64,
+            }
+
+            trait Distribution {
+                type Output;
+                fn sample(&self, rng: &mut RNG) -> Self::Output;
+                fn log_pdf(&self, x: Self::Output) -> f64;
+                fn cdf(&self, x: Self::Output) -> f64;
+            }
+
+            impl Distribution for NormalDistribution {
+                type Output = f64;
+                fn log_pdf(&self, x: f64) -> f64 {
+                    let diff = (x - self.mean) / self.std_dev;
+                    -0.5 * diff * diff
+                }
+            }
+
+            let dist = NormalDistribution { mean: 0.0, std_dev: 1.0 };
+            let val = dist.log_pdf(0.5);
+        "#;
+        let program = parse(code).expect("syntax must parse correctly");
+        assert_eq!(program.statements.len(), 5);
+        match &program.statements[0].kind {
+            StmtKind::Struct(s) => {
+                assert_eq!(s.name, "NormalDistribution");
+                assert_eq!(s.fields.len(), 2);
+                assert_eq!(s.fields[0].name, "mean");
+            }
+            _ => panic!("expected Struct"),
+        }
+        match &program.statements[1].kind {
+            StmtKind::Trait(t) => {
+                assert_eq!(t.name, "Distribution");
+                assert_eq!(t.items.len(), 4);
+            }
+            _ => panic!("expected Trait"),
+        }
+        match &program.statements[2].kind {
+            StmtKind::Impl(i) => {
+                assert_eq!(i.trait_name, Some("Distribution".into()));
+                assert_eq!(i.target_type, "NormalDistribution");
+                assert_eq!(i.items.len(), 2);
+            }
+            _ => panic!("expected Impl"),
+        }
+        match &program.statements[3].kind {
+            StmtKind::Let { init, .. } => {
+                match &init.kind {
+                    ExprKind::StructLit { name, fields } => {
+                        assert_eq!(name, "NormalDistribution");
+                        assert_eq!(fields.len(), 2);
+                    }
+                    _ => panic!("expected StructLit"),
+                }
+            }
+            _ => panic!("expected Let"),
         }
     }
 }

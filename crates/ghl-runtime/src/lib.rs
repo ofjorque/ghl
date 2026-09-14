@@ -3938,7 +3938,37 @@ mod tests {
         assert_eq!(interp.env.get("s_ch").unwrap(), Value::String("h".into()));
         assert_eq!(interp.env.get("s_sub").unwrap(), Value::String("hello".into()));
     }
+
+    #[test]
+    fn test_eval_struct_trait_and_impl() {
+        let code = r#"
+            struct NormalDistribution {
+                mean: f64,
+                std_dev: f64,
+            }
+
+            trait Distribution {
+                type Output;
+                fn log_pdf(&self, x: Self::Output) -> f64;
+            }
+
+            impl Distribution for NormalDistribution {
+                type Output = f64;
+                fn log_pdf(&self, x: f64) -> f64 {
+                    let diff = (x - self.mean) / self.std_dev;
+                    -0.5 * diff * diff
+                }
+            }
+
+            let dist = NormalDistribution { mean: 2.0, std_dev: 1.0 };
+            let val = dist.log_pdf(4.0);
+            let mean_val = dist.mean;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(interp.env.get("mean_val").unwrap(), Value::F64(2.0));
+        assert_eq!(interp.env.get("val").unwrap(), Value::F64(-2.0));
+    }
 }
-
-
-

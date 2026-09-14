@@ -70,10 +70,12 @@ Este documento audita y contrasta sistemáticamente el estado de implementación
   - [x] Representación eficiente: bitmask de 1 bit de Arrow para NA base + tabla `NaReasonTable` con interning `Arc<str>` para motivos.
   - [x] Funciones de inspección semántica: `na_reason(x)` y `na_reasons(df, col)`.
 - [x] **Manejo de errores algebraicos:** `Result<T, E>` y separación entre `ComputeError` y `StatisticalError`.
-- [ ] **Gaps / Extensiones pendientes de RFC 02:**
+- [x] **Gaps / Extensiones pendientes de RFC 02:**
   - [x] **`filter_na_reason(col, drop: [...])`:** Filtrado de filas según el motivo semántico de ausencia (RFC 02 §2.2).
   - [x] **Comprobación estática de dimensiones matriciales (`Matrix<f64, ROWS, COLS>`):** Validación de dimensiones en tiempo de compilación mediante const generics en el type-checker (RFC 02 §3).
-  - [ ] **Sintaxis de Traits y polimorfismo de usuario (`trait Distribution`, `impl Trait for Struct`):** Exposición de traits definidos por el usuario en el frontend del lenguaje (RFC 02 §4).
+  - [x] **Sintaxis de Traits y polimorfismo de usuario (`trait Distribution`, `impl Trait for Struct`):** Exposición de traits definidos por el usuario en el frontend del lenguaje (RFC 02 §4).
+    - [x] **Tokens de primera clase para `Self` y `self`:** Palabras clave dedicadas en el lexer (`Token::SelfType`, `Token::SelfValue`) para evitar ambigüedades con identificadores comunes.
+    - [x] **Resolución contextual de `Self` y tipos asociados (`Self::Output`):** Sustitución estática en el type-checker de `Self` por el tipo receptor en bloques `impl Trait for Struct` y proyección de tipos asociados.
 
 ---
 

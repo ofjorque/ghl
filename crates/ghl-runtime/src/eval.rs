@@ -70,6 +70,32 @@ impl Interpreter {
                 self.env.set(name.clone(), recursive_closure.clone());
                 Ok(recursive_closure)
             }
+            StmtKind::Struct(_) => Ok(Value::Unit),
+            StmtKind::Trait(_) => Ok(Value::Unit),
+            StmtKind::Impl(impl_decl) => {
+                for item in &impl_decl.items {
+                    if let ImplItem::Method { name, params, body, .. } = item {
+                        let param_names: Vec<String> = params
+                            .iter()
+                            .map(|p| {
+                                if p.name == "&self" || p.name == "&mut self" {
+                                    "self".to_string()
+                                } else {
+                                    p.name.clone()
+                                }
+                            })
+                            .collect();
+                        let method_closure = Value::Closure {
+                            params: param_names,
+                            body: body.clone(),
+                            env: self.env.clone(),
+                        };
+                        let method_key = format!("{}::{}", impl_decl.target_type, name);
+                        self.env.set(method_key, method_closure);
+                    }
+                }
+                Ok(Value::Unit)
+            }
             StmtKind::Expr(expr) => self.eval_expr(expr),
             StmtKind::Return(opt_expr) => {
                 let val = if let Some(e) = opt_expr {
@@ -217,6 +243,18 @@ impl Interpreter {
                 Ok(Value::Record(std::sync::Arc::new(map)))
             }
 
+            ExprKind::StructLit { name, fields } => {
+                let mut map = std::collections::BTreeMap::new();
+                for (f_name, f_expr) in fields {
+                    let val = self.eval_expr_ctx(f_expr, col_ctx)?;
+                    map.insert(f_name.clone(), val);
+                }
+                Ok(Value::Struct {
+                    name: name.clone(),
+                    fields: std::sync::Arc::new(map),
+                })
+            }
+
             ExprKind::FieldAccess { target, field } => {
                 let target_val = self.eval_expr_ctx(target, col_ctx)?;
                 match target_val {
@@ -225,7 +263,19 @@ impl Interpreter {
                             Diagnostic::compute_error("C0102", format!("Field `{field}` not found in record"))
                         })
                     }
-                    _ => Err(Diagnostic::compute_error("C0202", format!("Cannot access field `{field}` on non-record value"))),
+                    Value::Struct { ref name, ref fields } => {
+                        if let Some(v) = fields.get(field) {
+                            Ok(v.clone())
+                        } else {
+                            let method_key = format!("{}::{}", name, field);
+                            if let Some(m) = self.env.get(&method_key) {
+                                Ok(m)
+                            } else {
+                                Err(Diagnostic::compute_error("C0102", format!("Field or method `{field}` not found in struct `{name}`")))
+                            }
+                        }
+                    }
+                    _ => Err(Diagnostic::compute_error("C0202", format!("Cannot access field `{field}` on non-record/non-struct value"))),
                 }
             }
 
@@ -334,6 +384,17 @@ impl Interpreter {
                             }
                             return self.call_value(fn_val, evaluated_args);
                         }
+                    } else if let Value::Struct { ref name, .. } = target_val {
+                        let method_key = format!("{}::{}", name, field);
+                        let fn_val = self.env.get(&method_key).or_else(|| self.env.get(field)).ok_or_else(|| {
+                            Diagnostic::compute_error("C0101", format!("Undefined method `{field}` on struct `{name}`"))
+                        })?;
+                        let mut evaluated_args = Vec::with_capacity(args.len() + 1);
+                        evaluated_args.push(target_val);
+                        for a in args {
+                            evaluated_args.push(self.eval_expr_ctx(a, false)?);
+                        }
+                        return self.call_value(fn_val, evaluated_args);
                     } else {
                         let fn_val = self.env.get(field).ok_or_else(|| {
                             Diagnostic::compute_error("C0101", format!("Undefined function or method `{field}`"))
@@ -610,6 +671,17 @@ impl Interpreter {
                             }
                             return Ok(TailOutcome::TailCall { callee: fn_val, args: evaluated_args });
                         }
+                    } else if let Value::Struct { ref name, .. } = target_val {
+                        let method_key = format!("{}::{}", name, field);
+                        let fn_val = self.env.get(&method_key).or_else(|| self.env.get(field)).ok_or_else(|| {
+                            Diagnostic::compute_error("C0101", format!("Undefined method `{field}` on struct `{name}`"))
+                        })?;
+                        let mut evaluated_args = Vec::with_capacity(args.len() + 1);
+                        evaluated_args.push(target_val);
+                        for a in args {
+                            evaluated_args.push(self.eval_expr_ctx(a, false)?);
+                        }
+                        return Ok(TailOutcome::TailCall { callee: fn_val, args: evaluated_args });
                     } else {
                         let fn_val = self.env.get(field).ok_or_else(|| {
                             Diagnostic::compute_error("C0101", format!("Undefined function or method `{field}`"))

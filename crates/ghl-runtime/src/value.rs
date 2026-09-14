@@ -197,6 +197,11 @@ pub enum Value {
     Arena(std::sync::Arc<std::sync::Mutex<crate::arena::ArenaState>>),
     /// Structural Record / Named Tuple (RFC 01 §3.4)
     Record(std::sync::Arc<std::collections::BTreeMap<String, Value>>),
+    /// User-defined Struct instance (RFC 02 §4)
+    Struct {
+        name: String,
+        fields: std::sync::Arc<std::collections::BTreeMap<String, Value>>,
+    },
 }
 
 impl Value {
@@ -289,6 +294,7 @@ impl Value {
             Value::NativeFnCtx(_) => "NativeFunction",
             Value::Arena(_) => "Arena",
             Value::Record(_) => "Record",
+            Value::Struct { .. } => "Struct",
         }
     }
 }
@@ -365,6 +371,10 @@ impl PartialEq for Value {
             (Value::NamedArg(n1, v1), Value::NamedArg(n2, v2)) => n1 == n2 && v1 == v2,
             (Value::Arena(a1), Value::Arena(a2)) => std::sync::Arc::ptr_eq(a1, a2),
             (Value::Record(a1), Value::Record(a2)) => a1 == a2,
+            (
+                Value::Struct { name: n1, fields: f1 },
+                Value::Struct { name: n2, fields: f2 },
+            ) => n1 == n2 && f1 == f2,
             _ => false,
         }
     }
@@ -636,6 +646,13 @@ impl Value {
                     parts.push(format!("{}: {}", k, v.render_styled(caps)));
                 }
                 format!("{{ {} }}", parts.join(", "))
+            }
+            Value::Struct { name, fields } => {
+                let mut parts = Vec::new();
+                for (k, v) in fields.iter() {
+                    parts.push(format!("{}: {}", k, v.render_styled(caps)));
+                }
+                format!("{} {{ {} }}", name, parts.join(", "))
             }
         }
     }

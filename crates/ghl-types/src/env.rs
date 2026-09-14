@@ -10,12 +10,18 @@ pub struct SymbolInfo {
 #[derive(Debug, Clone)]
 pub struct TypeEnv {
     scopes: Vec<HashMap<String, SymbolInfo>>,
+    pub structs: HashMap<String, Vec<(String, Type)>>,
+    pub traits: HashMap<String, HashMap<String, (Vec<Type>, Type)>>,
+    pub impl_methods: HashMap<(String, String), (Vec<Type>, Type)>,
 }
 
 impl TypeEnv {
     pub fn new() -> Self {
         Self {
             scopes: vec![HashMap::new()],
+            structs: HashMap::new(),
+            traits: HashMap::new(),
+            impl_methods: HashMap::new(),
         }
     }
 
@@ -730,5 +736,29 @@ impl TypeEnv {
             }
         }
         None
+    }
+
+    pub fn insert_struct(&mut self, name: String, fields: Vec<(String, Type)>) {
+        self.structs.insert(name, fields);
+    }
+
+    pub fn lookup_struct(&self, name: &str) -> Option<&Vec<(String, Type)>> {
+        self.structs.get(name)
+    }
+
+    pub fn insert_trait(&mut self, name: String, methods: HashMap<String, (Vec<Type>, Type)>) {
+        self.traits.insert(name, methods);
+    }
+
+    pub fn lookup_trait(&self, name: &str) -> Option<&HashMap<String, (Vec<Type>, Type)>> {
+        self.traits.get(name)
+    }
+
+    pub fn insert_impl_method(&mut self, struct_name: String, method_name: String, params: Vec<Type>, ret: Type) {
+        self.impl_methods.insert((struct_name, method_name), (params, ret));
+    }
+
+    pub fn lookup_method(&self, struct_name: &str, method_name: &str) -> Option<&(Vec<Type>, Type)> {
+        self.impl_methods.get(&(struct_name.to_string(), method_name.to_string()))
     }
 }

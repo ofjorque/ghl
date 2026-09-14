@@ -78,6 +78,13 @@ pub enum Type {
     NA,
     /// Structural Record / Named Tuple: { field1: Type, field2: Type }
     Record(Vec<(String, Type)>),
+    /// User-defined struct instance (RFC 02 §4).
+    Struct {
+        name: String,
+        fields: Vec<(String, Type)>,
+    },
+    /// Custom nominal type reference (e.g. struct/trait name).
+    Custom(String),
     /// Dynamic or generic placeholder for unconstrained inference.
     Any,
 }
@@ -201,6 +208,26 @@ impl Type {
                 }
                 Some(Type::Record(unified))
             }
+            (Type::Struct { name: n1, fields: f1 }, Type::Struct { name: n2, fields: f2 }) => {
+                if n1 != n2 || f1.len() != f2.len() {
+                    return None;
+                }
+                let mut unified = Vec::new();
+                for ((k1, t1), (k2, t2)) in f1.iter().zip(f2.iter()) {
+                    if k1 != k2 {
+                        return None;
+                    }
+                    unified.push((k1.clone(), t1.unify(t2)?));
+                }
+                Some(Type::Struct {
+                    name: n1.clone(),
+                    fields: unified,
+                })
+            }
+            (Type::Custom(n1), Type::Custom(n2)) if n1 == n2 => Some(Type::Custom(n1.clone())),
+            (s @ Type::Struct { name, .. }, Type::Custom(c)) | (Type::Custom(c), s @ Type::Struct { name, .. }) if name == c => {
+                Some(s.clone())
+            }
 
             _ => None,
         }
@@ -224,7 +251,7 @@ impl Type {
                 "ModelFit" | "modelfit" => Type::ModelFit,
                 "Plot" | "plot" => Type::Plot,
                 "()" | "unit" | "void" => Type::Unit,
-                _ => Type::Any,
+                other => Type::Custom(other.to_string()),
             },
             TypeAnnotation::Generic(name, args) => match name.as_str() {
                 "Vector" | "vector" => {
@@ -327,6 +354,8 @@ impl fmt::Display for Type {
                 }
                 write!(f, " }}")
             }
+            Type::Struct { name, .. } => write!(f, "{}", name),
+            Type::Custom(name) => write!(f, "{}", name),
             Type::NA => write!(f, "NA"),
             Type::Any => write!(f, "any"),
         }

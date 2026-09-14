@@ -38,6 +38,10 @@ pub enum Token {
     Impl,
     #[token("type")]
     Type,
+    #[token("Self")]
+    SelfType,
+    #[token("self")]
+    SelfValue,
 
     // Keywords: Control Flow
     #[token("if")]
@@ -168,6 +172,8 @@ pub enum Token {
     Gt,
     #[token("&&")]
     AndAnd,
+    #[token("&")]
+    Amp,
     #[token("||")]
     OrOr,
     #[token("!")]

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use ghl_syntax::ast::*;
 use ghl_diagnostics::Diagnostic;
 use crate::types::{Type, Dim};
@@ -123,6 +124,143 @@ impl TypeChecker {
                         .with_location(&self.source_file, stmt.span.start, stmt.span.end)
                         .with_help("Adjust the function body or declared return type so they agree."),
                     );
+                }
+            }
+
+            StmtKind::Struct(decl) => {
+                let fields = decl
+                    .fields
+                    .iter()
+                    .map(|f| (f.name.clone(), Type::from_annotation(&f.ty)))
+                    .collect::<Vec<_>>();
+                self.env.insert_struct(decl.name.clone(), fields);
+            }
+
+            StmtKind::Trait(decl) => {
+                let mut methods = HashMap::new();
+                for item in &decl.items {
+                    if let TraitItem::Method(sig) = item {
+                        let param_types = sig
+                            .params
+                            .iter()
+                            .map(|p| {
+                                p.ty.as_ref()
+                                    .map(Type::from_annotation)
+                                    .unwrap_or(Type::Any)
+                            })
+                            .collect::<Vec<_>>();
+                        let ret = sig
+                            .ret_ty
+                            .as_ref()
+                            .map(Type::from_annotation)
+                            .unwrap_or(Type::Unit);
+                        methods.insert(sig.name.clone(), (param_types, ret));
+                    }
+                }
+                self.env.insert_trait(decl.name.clone(), methods);
+            }
+
+            StmtKind::Impl(decl) => {
+                let target_fields = self.env.lookup_struct(&decl.target_type).cloned();
+                if target_fields.is_none() {
+                    self.diagnostics.push(
+                        Diagnostic::compute_error(
+                            "C0101",
+                            format!("Cannot implement for undefined struct `{}`", decl.target_type),
+                        )
+                        .with_location(&self.source_file, stmt.span.start, stmt.span.end),
+                    );
+                }
+
+                if let Some(trait_name) = &decl.trait_name {
+                    if self.env.lookup_trait(trait_name).is_none() {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0101",
+                                format!("Undefined trait `{}`", trait_name),
+                            )
+                            .with_location(&self.source_file, stmt.span.start, stmt.span.end),
+                        );
+                    }
+                }
+
+                let mut assoc_types: HashMap<String, Type> = HashMap::new();
+                for item in &decl.items {
+                    if let ImplItem::AssociatedType { name, ty, .. } = item {
+                        assoc_types.insert(name.clone(), Type::from_annotation(ty));
+                    }
+                }
+
+                let target_struct_ty = Type::Struct {
+                    name: decl.target_type.clone(),
+                    fields: target_fields.unwrap_or_default(),
+                };
+
+                let resolve_self = |t: Type| -> Type {
+                    match t {
+                        Type::Custom(ref s) if s == "Self" || s == "&self" || s == "&mut self" => {
+                            target_struct_ty.clone()
+                        }
+                        Type::Custom(ref s) if s.starts_with("Self::") => {
+                            let assoc_name = &s[6..];
+                            assoc_types.get(assoc_name).cloned().unwrap_or(Type::Any)
+                        }
+                        other => other,
+                    }
+                };
+
+                for item in &decl.items {
+                    if let ImplItem::Method { name, params, ret_ty, body, span } = item {
+                        let expected_ret = ret_ty
+                            .as_ref()
+                            .map(|ann| resolve_self(Type::from_annotation(ann)))
+                            .unwrap_or(Type::Unit);
+
+                        let mut param_types = Vec::new();
+                        for p in params {
+                            let p_ty = if p.name == "&self" || p.name == "&mut self" || p.name == "self" {
+                                target_struct_ty.clone()
+                            } else {
+                                p.ty.as_ref()
+                                    .map(|ann| resolve_self(Type::from_annotation(ann)))
+                                    .unwrap_or(Type::Any)
+                            };
+                            param_types.push(p_ty);
+                        }
+
+                        self.env.insert_impl_method(
+                            decl.target_type.clone(),
+                            name.clone(),
+                            param_types.clone(),
+                            expected_ret.clone(),
+                        );
+
+                        self.env.push_scope();
+                        for (p, p_ty) in params.iter().zip(&param_types) {
+                            let bind_name = if p.name == "&self" || p.name == "&mut self" {
+                                "self".to_string()
+                            } else {
+                                p.name.clone()
+                            };
+                            self.env.insert(bind_name, p_ty.clone(), false);
+                        }
+
+                        let body_ty = self.check_expr(body);
+                        self.env.pop_scope();
+
+                        if body_ty.unify(&expected_ret).is_none() && expected_ret != Type::Unit && expected_ret != Type::Any {
+                            self.diagnostics.push(
+                                Diagnostic::compute_error(
+                                    "C0102",
+                                    format!(
+                                        "Method `{}` in impl `{}` return type mismatch: declared `{}`, found `{}`",
+                                        name, decl.target_type, expected_ret, body_ty
+                                    ),
+                                )
+                                .with_location(&self.source_file, span.start, span.end),
+                            );
+                        }
+                    }
                 }
             }
 
@@ -706,6 +844,55 @@ impl TypeChecker {
                 Type::Record(checked_fields)
             }
 
+            ExprKind::StructLit { name, fields } => {
+                let defined_fields = match self.env.lookup_struct(name) {
+                    Some(f) => f.clone(),
+                    None => {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0101",
+                                format!("Struct `{}` is not defined", name),
+                            )
+                            .with_location(&self.source_file, expr.span.start, expr.span.end),
+                        );
+                        return Type::Any;
+                    }
+                };
+
+                let mut actual_fields = Vec::new();
+                for (f_name, f_expr) in fields {
+                    let f_ty = self.check_expr_ctx(f_expr, col_ctx);
+                    if let Some((_, expected_ty)) = defined_fields.iter().find(|(n, _)| n == f_name) {
+                        if f_ty.unify(expected_ty).is_none() {
+                            self.diagnostics.push(
+                                Diagnostic::compute_error(
+                                    "C0102",
+                                    format!(
+                                        "Field `{}` in `{}` expected type `{}`, but found `{}`",
+                                        f_name, name, expected_ty, f_ty
+                                    ),
+                                )
+                                .with_location(&self.source_file, f_expr.span.start, f_expr.span.end),
+                            );
+                        }
+                    } else {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0102",
+                                format!("Unknown field `{}` for struct `{}`", f_name, name),
+                            )
+                            .with_location(&self.source_file, f_expr.span.start, f_expr.span.end),
+                        );
+                    }
+                    actual_fields.push((f_name.clone(), f_ty));
+                }
+
+                Type::Struct {
+                    name: name.clone(),
+                    fields: actual_fields,
+                }
+            }
+
             ExprKind::FieldAccess { target, field } => {
                 let target_ty = self.check_expr_ctx(target, col_ctx);
                 match target_ty {
@@ -720,6 +907,33 @@ impl TypeChecker {
                                 )
                                 .with_location(&self.source_file, expr.span.start, expr.span.end),
                             );
+                            Type::Any
+                        }
+                    }
+                    Type::Struct { ref name, ref fields } => {
+                        if let Some((_, ty)) = fields.iter().find(|(n, _)| n == field) {
+                            ty.clone()
+                        } else if let Some((params, ret)) = self.env.lookup_method(name, field) {
+                            Type::Function {
+                                params: if params.is_empty() { Vec::new() } else { params[1..].to_vec() },
+                                ret: Box::new(ret.clone()),
+                            }
+                        } else {
+                            Type::Any
+                        }
+                    }
+                    Type::Custom(ref name) => {
+                        if let Some(fields) = self.env.lookup_struct(name) {
+                            if let Some((_, ty)) = fields.iter().find(|(n, _)| n == field) {
+                                return ty.clone();
+                            }
+                        }
+                        if let Some((params, ret)) = self.env.lookup_method(name, field) {
+                            Type::Function {
+                                params: if params.is_empty() { Vec::new() } else { params[1..].to_vec() },
+                                ret: Box::new(ret.clone()),
+                            }
+                        } else {
                             Type::Any
                         }
                     }

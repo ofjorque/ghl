@@ -164,6 +164,10 @@ pub enum ExprKind {
         value: Box<Expr>,
     },
     RecordLit(Vec<(String, Expr)>),
+    StructLit {
+        name: String,
+        fields: Vec<(String, Expr)>,
+    },
     FieldAccess {
         target: Box<Expr>,
         field: String,
@@ -174,6 +178,62 @@ pub enum ExprKind {
     },
     /// Qualified path, e.g. `std::math::sqrt` or `std::linalg::eye`
     Path(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructField {
+    pub name: String,
+    pub ty: TypeAnnotation,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructDecl {
+    pub name: String,
+    pub fields: Vec<StructField>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitMethodSig {
+    pub name: String,
+    pub params: Vec<FnParam>,
+    pub ret_ty: Option<TypeAnnotation>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TraitItem {
+    Method(TraitMethodSig),
+    AssociatedType(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitDecl {
+    pub name: String,
+    pub items: Vec<TraitItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImplItem {
+    Method {
+        name: String,
+        params: Vec<FnParam>,
+        ret_ty: Option<TypeAnnotation>,
+        body: Expr,
+        span: Span,
+    },
+    AssociatedType {
+        name: String,
+        ty: TypeAnnotation,
+        span: Span,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImplDecl {
+    pub trait_name: Option<String>,
+    pub target_type: String,
+    pub items: Vec<ImplItem>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -231,6 +291,9 @@ pub enum StmtKind {
         ret_ty: Option<TypeAnnotation>,
         body: Expr,
     },
+    Struct(StructDecl),
+    Trait(TraitDecl),
+    Impl(ImplDecl),
     Expr(Expr),
     Return(Option<Expr>),
     /// `name = value;` -- reassigns an existing `let mut` binding in place

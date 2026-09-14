@@ -360,4 +360,48 @@ mod tests {
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0102"));
     }
+
+    #[test]
+    fn test_typecheck_struct_trait_and_impl() {
+        let code = r#"
+            struct NormalDistribution {
+                mean: f64,
+                std_dev: f64,
+            }
+
+            trait Distribution {
+                type Output;
+                fn log_pdf(&self, x: Self::Output) -> f64;
+            }
+
+            impl Distribution for NormalDistribution {
+                type Output = f64;
+                fn log_pdf(&self, x: f64) -> f64 {
+                    let diff = (x - self.mean) / self.std_dev;
+                    -0.5 * diff * diff
+                }
+            }
+
+            let dist = NormalDistribution { mean: 0.0, std_dev: 1.0 };
+            let val = dist.log_pdf(0.5);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let env = check(&program, "test.gh").expect("typecheck ok");
+        assert_eq!(env.lookup("val").unwrap().ty, Type::F64);
+    }
+
+    #[test]
+    fn test_typecheck_reject_missing_struct_field() {
+        let code = r#"
+            struct Point {
+                x: f64,
+                y: f64,
+            }
+
+            let p = Point { x: 1.0, z: 2.0 };
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh");
+        assert!(res.is_err());
+    }
 }
