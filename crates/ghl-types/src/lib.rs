@@ -313,9 +313,51 @@ mod tests {
         assert_eq!(env.lookup("elem").unwrap().ty, Type::F64);
         assert_eq!(env.lookup("sub_v").unwrap().ty, Type::Vector(Box::new(Type::F64)));
         assert_eq!(env.lookup("m_elem").unwrap().ty, Type::F64);
-        assert_eq!(env.lookup("m_sub").unwrap().ty, Type::Matrix(Box::new(Type::F64)));
+        assert_eq!(env.lookup("m_sub").unwrap().ty, Type::matrix_dynamic(Type::F64));
+    }
+
+    #[test]
+    fn test_typecheck_matrix_dimensions_success() {
+        let code = r#"
+            let A = mat [ 1.0, 2.0, 3.0 ; 4.0, 5.0, 6.0 ]; // 2x3
+            let B = mat [ 1.0, 2.0 ; 3.0, 4.0 ; 5.0, 6.0 ]; // 3x2
+            let C = A * B; // 2x2
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let env = check(&program, "test.gh").expect("type check ok");
+        assert_eq!(env.lookup("C").unwrap().ty, Type::matrix(Type::F64, 2, 2));
+    }
+
+    #[test]
+    fn test_typecheck_matrix_dimensions_mismatch_rejected() {
+        let code = r#"
+            let A = mat [ 1.0, 2.0, 3.0 ; 4.0, 5.0, 6.0 ]; // 2x3
+            let B = mat [ 1.0, 2.0 ; 3.0, 4.0 ]; // 2x2
+            let C = A * B;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh");
+        assert!(res.is_err(), "Matrix dimension mismatch (2x3 * 2x2) must be rejected at compile time");
+        let diags = res.unwrap_err();
+        assert!(diags.iter().any(|d| d.code == "C0102"));
+    }
+
+    #[test]
+    fn test_typecheck_matrix_type_annotation_with_dims() {
+        let code = r#"
+            let A: Matrix[f64, 2, 2] = mat [ 1.0, 2.0 ; 3.0, 4.0 ];
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let env = check(&program, "test.gh").expect("type check ok");
+        assert_eq!(env.lookup("A").unwrap().ty, Type::matrix(Type::F64, 2, 2));
+
+        let bad_code = r#"
+            let A: Matrix[f64, 3, 3] = mat [ 1.0, 2.0 ; 3.0, 4.0 ];
+        "#;
+        let bad_program = parse(bad_code).expect("syntax ok");
+        let res = check(&bad_program, "test.gh");
+        assert!(res.is_err(), "Annotation dimension mismatch must be rejected");
+        let diags = res.unwrap_err();
+        assert!(diags.iter().any(|d| d.code == "C0102"));
     }
 }
-
-
-

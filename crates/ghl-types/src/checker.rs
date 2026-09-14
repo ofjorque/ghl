@@ -1,6 +1,6 @@
 use ghl_syntax::ast::*;
 use ghl_diagnostics::Diagnostic;
-use crate::types::Type;
+use crate::types::{Type, Dim};
 use crate::env::TypeEnv;
 
 fn callee_name(expr: &Expr) -> Option<&str> {
@@ -323,7 +323,9 @@ impl TypeChecker {
                         }
                     }
                 }
-                Type::Matrix(Box::new(Type::F64))
+                let r_count = rows.len();
+                let c_count = rows.first().map(|r| r.len()).unwrap_or(0);
+                Type::matrix(Type::F64, Dim::Known(r_count), Dim::Known(c_count))
             }
 
             ExprKind::Binary { op, lhs, rhs } => {
@@ -367,6 +369,56 @@ impl TypeChecker {
                             return Type::F64;
                         }
 
+                        // Matrix multiplication: A * B
+                        if *op == BinaryOp::Mul {
+                            if let (Type::Matrix { elem: e1, rows: r1, cols: c1 }, Type::Matrix { elem: e2, rows: r2, cols: c2 }) = (&t_lhs, &t_rhs) {
+                                if let (Dim::Known(k1), Dim::Known(k2)) = (c1, r2) {
+                                    if k1 != k2 {
+                                        self.diagnostics.push(
+                                            Diagnostic::compute_error(
+                                                "C0102",
+                                                format!(
+                                                    "Matrix dimension mismatch in multiplication: ({}x{}) * ({}x{}) — inner dimensions {} and {} do not match",
+                                                    r1, c1, r2, c2, k1, k2
+                                                ),
+                                            )
+                                            .with_location(&self.source_file, expr.span.start, expr.span.end)
+                                            .with_help("To multiply matrices A * B, the number of columns in A must equal the number of rows in B."),
+                                        );
+                                        return Type::Any;
+                                    }
+                                }
+                                let elem = e1.unify(e2).unwrap_or(Type::F64);
+                                return Type::Matrix {
+                                    elem: Box::new(elem),
+                                    rows: *r1,
+                                    cols: *c2,
+                                };
+                            }
+
+                            // Matrix * Vector or Vector * Matrix
+                            if let (Type::Matrix { elem: e1, .. }, Type::Vector(e2)) = (&t_lhs, &t_rhs) {
+                                let elem = e1.unify(e2).unwrap_or(Type::F64);
+                                return Type::Vector(Box::new(elem));
+                            }
+                            if let (Type::Vector(e1), Type::Matrix { elem: e2, .. }) = (&t_lhs, &t_rhs) {
+                                let elem = e1.unify(e2).unwrap_or(Type::F64);
+                                return Type::Vector(Box::new(elem));
+                            }
+
+                            // Matrix * Scalar or Scalar * Matrix
+                            if let Type::Matrix { elem, rows, cols } = &t_lhs {
+                                if t_rhs.is_numeric() {
+                                    return Type::Matrix { elem: elem.clone(), rows: *rows, cols: *cols };
+                                }
+                            }
+                            if let Type::Matrix { elem, rows, cols } = &t_rhs {
+                                if t_lhs.is_numeric() {
+                                    return Type::Matrix { elem: elem.clone(), rows: *rows, cols: *cols };
+                                }
+                            }
+                        }
+
                         // Numeric combination
                         if t_lhs == Type::F64 || t_rhs == Type::F64 {
                             Type::F64
@@ -393,15 +445,49 @@ impl TypeChecker {
                         }
                         if t_rhs.is_vector() {
                             Type::Vector(Box::new(Type::F64))
+                        } else if let (Type::Matrix { rows: r1, cols: c1, .. }, Type::Matrix { elem: e2, rows: r2, cols: c2 }) = (&t_lhs, &t_rhs) {
+                            if let (Dim::Known(k1), Dim::Known(k2)) = (r1, r2) {
+                                if k1 != k2 {
+                                    self.diagnostics.push(
+                                        Diagnostic::compute_error(
+                                            "C0102",
+                                            format!("Matrix dimension mismatch in solve `\\`: A is ({}x{}), B is ({}x{}) — row dimensions {} and {} must match", r1, c1, r2, c2, k1, k2),
+                                        )
+                                        .with_location(&self.source_file, expr.span.start, expr.span.end),
+                                    );
+                                    return Type::Any;
+                                }
+                            }
+                            Type::Matrix { elem: e2.clone(), rows: *c1, cols: *c2 }
                         } else {
-                            Type::Matrix(Box::new(Type::F64))
+                            Type::matrix_dynamic(Type::F64)
                         }
                     }
 
                     // Element-wise matrix operations
                     BinaryOp::DotMul | BinaryOp::DotAdd | BinaryOp::DotSub | BinaryOp::DotDiv => {
-                        if t_lhs.is_matrix() || t_rhs.is_matrix() {
-                            Type::Matrix(Box::new(Type::F64))
+                        if let (Type::Matrix { elem: e1, rows: r1, cols: c1 }, Type::Matrix { elem: e2, rows: r2, cols: c2 }) = (&t_lhs, &t_rhs) {
+                            if !r1.is_compatible_with(r2) || !c1.is_compatible_with(c2) {
+                                self.diagnostics.push(
+                                    Diagnostic::compute_error(
+                                        "C0102",
+                                        format!("Matrix dimension mismatch in element-wise operation: ({}x{}) vs ({}x{})", r1, c1, r2, c2),
+                                    )
+                                    .with_location(&self.source_file, expr.span.start, expr.span.end)
+                                    .with_help("Element-wise matrix operations require identical dimensions."),
+                                );
+                                return Type::Any;
+                            }
+                            let elem = e1.unify(e2).unwrap_or(Type::F64);
+                            return Type::Matrix {
+                                elem: Box::new(elem),
+                                rows: if let Dim::Known(_) = r1 { *r1 } else { *r2 },
+                                cols: if let Dim::Known(_) = c1 { *c1 } else { *c2 },
+                            };
+                        } else if t_lhs.is_matrix() {
+                            t_lhs.clone()
+                        } else if t_rhs.is_matrix() {
+                            t_rhs.clone()
                         } else if t_lhs.is_vector() || t_rhs.is_vector() {
                             Type::Vector(Box::new(Type::F64))
                         } else {
@@ -667,7 +753,7 @@ impl TypeChecker {
                             Type::Any
                         }
                     }
-                    Type::Matrix(elem_ty) => {
+                    Type::Matrix { elem, rows: _, cols: _ } => {
                         if indices.len() == 2 {
                             let is_r_scalar = match &indices[0] {
                                 IndexSpec::Expr(e) => self.check_expr_ctx(e, col_ctx) == Type::I64,
@@ -678,11 +764,11 @@ impl TypeChecker {
                                 _ => false,
                             };
                             if is_r_scalar && is_c_scalar {
-                                *elem_ty
+                                *elem
                             } else if is_r_scalar || is_c_scalar {
-                                Type::Vector(elem_ty)
+                                Type::Vector(elem)
                             } else {
-                                Type::Matrix(elem_ty)
+                                Type::matrix_dynamic(*elem)
                             }
                         } else {
                             Type::Any

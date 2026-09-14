@@ -2,6 +2,37 @@ use std::fmt;
 use ghl_syntax::ast::TypeAnnotation;
 use crate::ContrastScheme;
 
+/// Matrix dimension in static type checking (RFC 02 §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Dim {
+    Known(usize),
+    Dynamic,
+}
+
+impl Dim {
+    pub fn is_compatible_with(&self, other: &Dim) -> bool {
+        match (self, other) {
+            (Dim::Known(a), Dim::Known(b)) => a == b,
+            _ => true,
+        }
+    }
+}
+
+impl fmt::Display for Dim {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Dim::Known(n) => write!(f, "{}", n),
+            Dim::Dynamic => write!(f, "Dynamic"),
+        }
+    }
+}
+
+impl From<usize> for Dim {
+    fn from(n: usize) -> Self {
+        Dim::Known(n)
+    }
+}
+
 /// Formal types in GHL's static type system.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
@@ -17,8 +48,12 @@ pub enum Type {
     Unit,
     /// Homogeneous columnar or memory vector.
     Vector(Box<Type>),
-    /// 2D dense matrix with linear algebra operators.
-    Matrix(Box<Type>),
+    /// 2D dense matrix with linear algebra operators and static dimensions (RFC 02 §3).
+    Matrix {
+        elem: Box<Type>,
+        rows: Dim,
+        cols: Dim,
+    },
     /// Columnar dataset with named typed columns.
     DataFrame(Vec<(String, Type)>),
     /// Categorical factor with explicit levels and contrast coding.
@@ -48,6 +83,22 @@ pub enum Type {
 }
 
 impl Type {
+    pub fn matrix(elem: Type, rows: impl Into<Dim>, cols: impl Into<Dim>) -> Self {
+        Type::Matrix {
+            elem: Box::new(elem),
+            rows: rows.into(),
+            cols: cols.into(),
+        }
+    }
+
+    pub fn matrix_dynamic(elem: Type) -> Self {
+        Type::Matrix {
+            elem: Box::new(elem),
+            rows: Dim::Dynamic,
+            cols: Dim::Dynamic,
+        }
+    }
+
     /// Checks whether this type is numeric (i64 or f64).
     pub fn is_numeric(&self) -> bool {
         matches!(self, Type::I64 | Type::F64)
@@ -60,13 +111,13 @@ impl Type {
 
     /// Checks whether this type is a matrix.
     pub fn is_matrix(&self) -> bool {
-        matches!(self, Type::Matrix(_))
+        matches!(self, Type::Matrix { .. })
     }
 
     /// Returns the element type if this is a Vector or Matrix.
     pub fn element_type(&self) -> Option<&Type> {
         match self {
-            Type::Vector(inner) | Type::Matrix(inner) => Some(inner),
+            Type::Vector(inner) | Type::Matrix { elem: inner, .. } => Some(inner),
             _ => None,
         }
     }
@@ -96,9 +147,27 @@ impl Type {
             }
 
             // Matrix unification
-            (Type::Matrix(a), Type::Matrix(b)) => {
+            (
+                Type::Matrix { elem: a, rows: r1, cols: c1 },
+                Type::Matrix { elem: b, rows: r2, cols: c2 },
+            ) => {
                 let inner = a.unify(b)?;
-                Some(Type::Matrix(Box::new(inner)))
+                if !r1.is_compatible_with(r2) || !c1.is_compatible_with(c2) {
+                    return None;
+                }
+                let rows = match (r1, r2) {
+                    (Dim::Known(n), _) | (_, Dim::Known(n)) => Dim::Known(*n),
+                    _ => Dim::Dynamic,
+                };
+                let cols = match (c1, c2) {
+                    (Dim::Known(n), _) | (_, Dim::Known(n)) => Dim::Known(*n),
+                    _ => Dim::Dynamic,
+                };
+                Some(Type::Matrix {
+                    elem: Box::new(inner),
+                    rows,
+                    cols,
+                })
             }
 
             // Functions
@@ -170,7 +239,25 @@ impl Type {
                         .first()
                         .map(Self::from_annotation)
                         .unwrap_or(Type::F64);
-                    Type::Matrix(Box::new(inner))
+                    let parse_dim = |ann: Option<&TypeAnnotation>| -> Dim {
+                        match ann {
+                            Some(TypeAnnotation::Simple(s)) => {
+                                if let Ok(n) = s.parse::<usize>() {
+                                    Dim::Known(n)
+                                } else {
+                                    Dim::Dynamic
+                                }
+                            }
+                            _ => Dim::Dynamic,
+                        }
+                    };
+                    let rows = parse_dim(args.get(1));
+                    let cols = parse_dim(args.get(2));
+                    Type::Matrix {
+                        elem: Box::new(inner),
+                        rows,
+                        cols,
+                    }
                 }
                 "Factor" | "factor" => Type::Factor {
                     levels: Vec::new(),
@@ -192,7 +279,10 @@ impl fmt::Display for Type {
             Type::String => write!(f, "str"),
             Type::Unit => write!(f, "()"),
             Type::Vector(inner) => write!(f, "Vector[{}]", inner),
-            Type::Matrix(inner) => write!(f, "Matrix[{}]", inner),
+            Type::Matrix { elem, rows, cols } => match (rows, cols) {
+                (Dim::Dynamic, Dim::Dynamic) => write!(f, "Matrix[{}]", elem),
+                (r, c) => write!(f, "Matrix[{}, {}, {}]", elem, r, c),
+            },
             Type::DataFrame(cols) => {
                 if cols.is_empty() {
                     write!(f, "DataFrame")

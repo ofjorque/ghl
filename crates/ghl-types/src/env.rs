@@ -180,23 +180,23 @@ impl TypeEnv {
         env.insert(
             "inv".into(),
             Type::Function {
-                params: vec![Type::Matrix(Box::new(Type::F64))],
-                ret: Box::new(Type::Matrix(Box::new(Type::F64))),
+                params: vec![Type::matrix_dynamic(Type::F64)],
+                ret: Box::new(Type::matrix_dynamic(Type::F64)),
             },
             false,
         );
         env.insert(
             "transpose".into(),
             Type::Function {
-                params: vec![Type::Matrix(Box::new(Type::Any))],
-                ret: Box::new(Type::Matrix(Box::new(Type::Any))),
+                params: vec![Type::matrix_dynamic(Type::Any)],
+                ret: Box::new(Type::matrix_dynamic(Type::Any)),
             },
             false,
         );
         env.insert(
             "det".into(),
             Type::Function {
-                params: vec![Type::Matrix(Box::new(Type::F64))],
+                params: vec![Type::matrix_dynamic(Type::F64)],
                 ret: Box::new(Type::F64),
             },
             false,
@@ -339,7 +339,7 @@ impl TypeEnv {
             "vcov".into(),
             Type::Function {
                 params: vec![Type::Any],
-                ret: Box::new(Type::Matrix(Box::new(Type::F64))),
+                ret: Box::new(Type::matrix_dynamic(Type::F64)),
             },
             false,
         );

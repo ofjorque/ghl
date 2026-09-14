@@ -7,6 +7,8 @@ pub fn type_parser() -> impl Parser<Token, TypeAnnotation, Error = Simple<Token>
         let ident_str = select! {
             Token::Ident(name) => name,
             Token::Col => "col".to_string(),
+            Token::IntLit(n) => n.to_string(),
+            Token::Underscore => "_".to_string(),
         };
 
         ident_str

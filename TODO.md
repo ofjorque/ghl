@@ -72,7 +72,7 @@ Este documento audita y contrasta sistemáticamente el estado de implementación
 - [x] **Manejo de errores algebraicos:** `Result<T, E>` y separación entre `ComputeError` y `StatisticalError`.
 - [ ] **Gaps / Extensiones pendientes de RFC 02:**
   - [x] **`filter_na_reason(col, drop: [...])`:** Filtrado de filas según el motivo semántico de ausencia (RFC 02 §2.2).
-  - [ ] **Comprobación estática de dimensiones matriciales (`Matrix<f64, ROWS, COLS>`):** Validación de dimensiones en tiempo de compilación mediante const generics en el type-checker (RFC 02 §3).
+  - [x] **Comprobación estática de dimensiones matriciales (`Matrix<f64, ROWS, COLS>`):** Validación de dimensiones en tiempo de compilación mediante const generics en el type-checker (RFC 02 §3).
   - [ ] **Sintaxis de Traits y polimorfismo de usuario (`trait Distribution`, `impl Trait for Struct`):** Exposición de traits definidos por el usuario en el frontend del lenguaje (RFC 02 §4).
 
 ---
