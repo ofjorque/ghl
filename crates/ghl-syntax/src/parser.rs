@@ -217,18 +217,31 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             )
             .map_with_span(|rows, span| Expr::new(ExprKind::MatrixLit { rows }, span));
 
-        // Lambda: \x, y -> expr
-        let lambda = just(Token::Backslash)
-            .ignore_then(
-                select! {
-                    Token::Ident(name) => name,
-                    Token::Col => "col".to_string(),
-                }
-                .separated_by(just(Token::Comma))
-                .allow_trailing(),
-            )
+        // Lambda: \x, y -> expr OR |x, y| expr OR || expr
+        let lambda_params = select! {
+            Token::Ident(name) => name,
+            Token::Col => "col".to_string(),
+        }
+        .separated_by(just(Token::Comma))
+        .allow_trailing();
+
+        let slash_lambda = just(Token::Backslash)
+            .ignore_then(lambda_params.clone())
             .then_ignore(just(Token::Arrow))
-            .then(expr.clone())
+            .then(expr.clone());
+
+        let pipe_lambda = just(Token::VBar)
+            .ignore_then(lambda_params)
+            .then_ignore(just(Token::VBar))
+            .then(expr.clone());
+
+        let pipe_lambda_empty = just(Token::OrOr)
+            .ignore_then(expr.clone())
+            .map(|body| (Vec::new(), body));
+
+        let lambda = slash_lambda
+            .or(pipe_lambda)
+            .or(pipe_lambda_empty)
             .map_with_span(|(params, body), span| {
                 Expr::new(
                     ExprKind::Lambda {
@@ -1201,6 +1214,54 @@ mod tests {
                 }
                 _ => panic!("Expected Lambda expression"),
             },
+            _ => panic!("Expected let statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_lambda_and_arena_scope() {
+        let code = r#"
+            let res = arena::scope(|arena| {
+                let v = arena.alloc_vector(10, 0.0);
+                v
+            });
+            let no_args = || 42;
+        "#;
+        let program = parse(code).expect("Should parse pipe lambda and arena::scope");
+        assert_eq!(program.statements.len(), 2);
+
+        match &program.statements[0].kind {
+            StmtKind::Let { name, init, .. } => {
+                assert_eq!(name, "res");
+                match &init.kind {
+                    ExprKind::Call { callee, args } => {
+                        assert!(matches!(&callee.kind, ExprKind::Path(p) if p == &vec!["arena", "scope"]));
+                        assert_eq!(args.len(), 1);
+                        match &args[0].kind {
+                            ExprKind::Lambda { params, body } => {
+                                assert_eq!(params, &vec!["arena".to_string()]);
+                                assert!(matches!(body.kind, ExprKind::Block { .. }));
+                            }
+                            _ => panic!("Expected Lambda arg to arena::scope"),
+                        }
+                    }
+                    _ => panic!("Expected Call expression"),
+                }
+            }
+            _ => panic!("Expected let statement"),
+        }
+
+        match &program.statements[1].kind {
+            StmtKind::Let { name, init, .. } => {
+                assert_eq!(name, "no_args");
+                match &init.kind {
+                    ExprKind::Lambda { params, body } => {
+                        assert!(params.is_empty());
+                        assert!(matches!(body.kind, ExprKind::Lit(Literal::Int(42))));
+                    }
+                    _ => panic!("Expected empty Lambda expression"),
+                }
+            }
             _ => panic!("Expected let statement"),
         }
     }

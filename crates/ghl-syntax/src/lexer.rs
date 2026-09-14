@@ -176,6 +176,8 @@ pub enum Token {
     Amp,
     #[token("||")]
     OrOr,
+    #[token("|")]
+    VBar,
     #[token("!")]
     Bang,
 
@@ -232,6 +234,7 @@ impl std::fmt::Display for Token {
             Token::True => write!(f, "true"),
             Token::False => write!(f, "false"),
             Token::Pipe => write!(f, "|>"),
+            Token::VBar => write!(f, "|"),
             Token::Tilde => write!(f, "~"),
             other => write!(f, "{:?}", other),
         }
@@ -350,4 +353,26 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn test_lex_pipe_and_vbar() {
+        let src = r#"|arena| || |> |"#;
+        let tokens: Vec<Token> = lex(src)
+            .into_iter()
+            .map(|(r, _)| r.unwrap())
+            .collect();
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::VBar,
+                Token::Ident("arena".into()),
+                Token::VBar,
+                Token::OrOr,
+                Token::Pipe,
+                Token::VBar,
+            ]
+        );
+    }
 }
+

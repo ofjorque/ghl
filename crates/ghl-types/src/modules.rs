@@ -221,7 +221,7 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("boxplot".into(), any_fn_multi(2)),
         ]),
 
-        ["std", "arena"] => Some(vec![
+        ["arena"] | ["std", "arena"] => Some(vec![
             ("scope".into(), any_fn()),
             ("alloc_vector".into(), any_fn_multi(2)),
             ("alloc_matrix".into(), any_fn_multi(3)),
@@ -249,6 +249,7 @@ pub fn is_valid_module_path(path: &[String]) -> bool {
             | ["std", "io"]
             | ["std", "plot"]
             | ["std", "arena"]
+            | ["arena"]
     )
 }
 

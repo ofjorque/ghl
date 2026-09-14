@@ -91,8 +91,8 @@ Este documento audita y contrasta sistemáticamente el estado de implementación
   - [x] Tier-1 REPL / Scripting interactivo instantáneo (< 15 ms).
   - [x] Compilación nativa JIT / AOT con Cranelift (`ghl-codegen`).
   - [x] Binarios standalone livianos (< 1 MB, muy por debajo de la meta de 15 MB).
-- [ ] **Gaps / Extensiones pendientes de RFC 03:**
-  - [ ] **Sintaxis de superficie para arenas regionales:** Exponer `arena::scope(|arena| { ... })` directamente en el lenguaje para scripts de usuario (RFC 03 §2.2).
+- [x] **Gaps / Extensiones pendientes de RFC 03:**
+  - [x] **Sintaxis de superficie para arenas regionales:** Exponer `arena::scope(|arena| { ... })` directamente en el lenguaje para scripts de usuario (RFC 03 §2.2).
 
 ---
 

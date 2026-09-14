@@ -710,6 +710,19 @@ impl TypeEnv {
             );
         }
 
+        // Regional Memory Arenas (RFC 03 §2.2)
+        for name in [
+            "scope", "arena::scope", "alloc_vector", "arena::alloc_vector",
+            "alloc_matrix", "arena::alloc_matrix", "reset", "arena::reset",
+            "allocated_bytes", "arena::allocated_bytes",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
         env
     }
 

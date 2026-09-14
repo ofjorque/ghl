@@ -3971,4 +3971,24 @@ mod tests {
         assert_eq!(interp.env.get("mean_val").unwrap(), Value::F64(2.0));
         assert_eq!(interp.env.get("val").unwrap(), Value::F64(-2.0));
     }
+
+    #[test]
+    fn test_eval_arena_scope_surface_syntax() {
+        let code = r#"
+            let total = arena::scope(|arena| {
+                let v = arena.alloc_vector(4, 2.5);
+                let m = arena.alloc_matrix(2, 2, 10.0);
+                let b_before = arena.allocated_bytes();
+                arena.reset();
+                let b_after = arena.allocated_bytes();
+                let v2 = arena.alloc_vector(2, 5.0);
+                v2[0] + v2[1]
+            });
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(interp.env.get("total").unwrap(), Value::F64(10.0));
+    }
 }

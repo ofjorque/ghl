@@ -284,11 +284,16 @@ impl RuntimeEnv {
         }));
 
         // Regional Memory Arenas (RFC 03 §2.2)
-        env.set("scope".into(),           Value::NativeFnCtx(native_arena_scope));
-        env.set("alloc_vector".into(),    Value::NativeFn(native_alloc_vector));
-        env.set("alloc_matrix".into(),    Value::NativeFn(native_alloc_matrix));
-        env.set("reset".into(),           Value::NativeFn(native_arena_reset));
-        env.set("allocated_bytes".into(), Value::NativeFn(native_arena_allocated_bytes));
+        env.set("scope".into(),                  Value::NativeFnCtx(native_arena_scope));
+        env.set("arena::scope".into(),           Value::NativeFnCtx(native_arena_scope));
+        env.set("alloc_vector".into(),           Value::NativeFn(native_alloc_vector));
+        env.set("arena::alloc_vector".into(),    Value::NativeFn(native_alloc_vector));
+        env.set("alloc_matrix".into(),           Value::NativeFn(native_alloc_matrix));
+        env.set("arena::alloc_matrix".into(),    Value::NativeFn(native_alloc_matrix));
+        env.set("reset".into(),                  Value::NativeFn(native_arena_reset));
+        env.set("arena::reset".into(),           Value::NativeFn(native_arena_reset));
+        env.set("allocated_bytes".into(),        Value::NativeFn(native_arena_allocated_bytes));
+        env.set("arena::allocated_bytes".into(), Value::NativeFn(native_arena_allocated_bytes));
 
         env
     }
