@@ -134,9 +134,9 @@ Este documento audita y contrasta sistemáticamente el estado de implementación
   - [x] `ghl bench`: Harness de micro-benchmarks y suites.
   - [x] `ghl check`: Verificación de sintaxis y tipos sin ejecutar.
   - [x] `ghl aot` / `ghl jit`: Compilación y ejecución nativa con Cranelift.
-- [ ] **Gaps / Extensiones pendientes de RFC 06:**
-  - [ ] **Gestor de paquetes completo (`ghl new`, `ghl fetch`, `ghl.lock`):** Resolución de dependencias externas reproducibles con hashes SHA-256 (RFC 06 §4).
-  - [ ] **Directiva de exportación FFI (`#[export_ffi]` / `extern "C"`):** Generación automática de bibliotecas compartidas (`.so` / `.dylib`) consumibles desde Python y R (RFC 06 §3).
+- [x] **Gaps / Extensiones pendientes de RFC 06:**
+  - [x] **Gestor de paquetes completo (`ghl new`, `ghl fetch`, `ghl.lock`):** Resolución de dependencias externas reproducibles con hashes SHA-256 (RFC 06 §4).
+  - [x] **Directiva de exportación FFI (`#[export_ffi]` / `extern "C"`):** Generación automática de bibliotecas compartidas (`.so` / `.dylib`) consumibles desde Python y R (RFC 06 §3).
 
 ---
 

@@ -76,7 +76,7 @@ impl LoweringContext {
 
         // 2. Second pass: lower function bodies
         for stmt in &program.statements {
-            if let StmtKind::Fn { name, params, ret_ty, body } = &stmt.kind {
+            if let StmtKind::Fn { name, params, ret_ty, body, .. } = &stmt.kind {
                 self.push_scope();
 
                 let mut hir_params = Vec::new();

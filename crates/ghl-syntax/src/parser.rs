@@ -792,8 +792,22 @@ pub fn use_stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Cl
 }
 
 pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone {
-    let fn_stmt = just(Token::Fn)
-        .ignore_then(select! {
+    let fn_prefix = just(Token::Hash)
+        .then_ignore(just(Token::LBracket))
+        .then_ignore(select! { Token::Ident(name) if name == "export_ffi" => () })
+        .then_ignore(just(Token::RBracket))
+        .to(true)
+        .or(
+            just(Token::Extern)
+                .then_ignore(select! { Token::StringLit(s) if s == "C" => () })
+                .to(true),
+        );
+
+    let fn_stmt = just(Token::Pub).or_not()
+        .ignore_then(fn_prefix.or_not())
+        .then_ignore(just(Token::Pub).or_not())
+        .then_ignore(just(Token::Fn))
+        .then(select! {
             Token::Ident(name) => name,
             Token::Col => "col".to_string(),
         })
@@ -805,13 +819,14 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         )
         .then(just(Token::Arrow).ignore_then(type_parser()).or_not())
         .then(expr_parser())
-        .map_with_span(|(((name, params), ret_ty), body), span| {
+        .map_with_span(|((((export_ffi, name), params), ret_ty), body), span| {
             Stmt::new(
                 StmtKind::Fn {
                     name,
                     params,
                     ret_ty,
                     body,
+                    export_ffi: export_ffi.unwrap_or(false),
                 },
                 span,
             )
@@ -1109,6 +1124,7 @@ mod tests {
                 params,
                 ret_ty,
                 body,
+                ..
             } => {
                 assert_eq!(name, "calculate_beta");
                 assert_eq!(params.len(), 2);
@@ -1641,6 +1657,38 @@ mod tests {
                 assert!(matches!(e.kind, ExprKind::For { ref var, .. } if var == "i"));
             }
             _ => panic!("expected Expr(For)"),
+        }
+    }
+
+    #[test]
+    fn test_parse_export_ffi_and_extern_c() {
+        let code = r#"
+            #[export_ffi]
+            pub fn custom_sampler(n: i64) -> f64 {
+                42.0
+            }
+
+            extern "C" fn foreign_func(x: f64) -> f64 {
+                x * 2.0
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        assert_eq!(program.statements.len(), 2);
+
+        match &program.statements[0].kind {
+            StmtKind::Fn { name, export_ffi, .. } => {
+                assert_eq!(name, "custom_sampler");
+                assert!(*export_ffi);
+            }
+            _ => panic!("expected Fn"),
+        }
+
+        match &program.statements[1].kind {
+            StmtKind::Fn { name, export_ffi, .. } => {
+                assert_eq!(name, "foreign_func");
+                assert!(*export_ffi);
+            }
+            _ => panic!("expected Fn"),
         }
     }
 }

@@ -214,6 +214,8 @@ pub enum Token {
     Comma,
     #[token(";")]
     Semicolon,
+    #[token("#")]
+    Hash,
 }
 
 pub type SpannedToken = (Result<Token, ()>, std::ops::Range<usize>);

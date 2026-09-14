@@ -78,6 +78,7 @@ impl TypeChecker {
                 params,
                 ret_ty,
                 body,
+                ..
             } => {
                 let expected_ret = ret_ty
                     .as_ref()

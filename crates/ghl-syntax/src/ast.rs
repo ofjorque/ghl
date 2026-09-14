@@ -296,6 +296,7 @@ pub enum StmtKind {
         params: Vec<FnParam>,
         ret_ty: Option<TypeAnnotation>,
         body: Expr,
+        export_ffi: bool,
     },
     Struct(StructDecl),
     Trait(TraitDecl),

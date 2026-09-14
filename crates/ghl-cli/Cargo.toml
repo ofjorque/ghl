@@ -18,4 +18,5 @@ ghl-runtime = { path = "../ghl-runtime" }
 ghl-ir = { path = "../ghl-ir" }
 ghl-codegen = { path = "../ghl-codegen" }
 rustyline = "18.0.1"
+sha2 = "0.10"
 
