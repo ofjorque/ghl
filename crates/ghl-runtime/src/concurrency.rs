@@ -32,13 +32,11 @@ pub fn extract_parallel_items(val: &Value) -> Result<Vec<Value>, Diagnostic> {
                 Err(Diagnostic::compute_error("C0201", "Corrupted ParallelIterator struct: missing __items"))
             }
         }
-        Value::Range { start, end, inclusive } => {
-            let s = *start;
-            let e = *end;
-            let items: Vec<Value> = if *inclusive {
-                (s..=e).map(Value::I64).collect()
+        &Value::Range { start, end, inclusive } => {
+            let items: Vec<Value> = if inclusive {
+                (start..=end).map(Value::I64).collect()
             } else {
-                (s..e).map(Value::I64).collect()
+                (start..end).map(Value::I64).collect()
             };
             Ok(items)
         }

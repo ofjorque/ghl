@@ -23,7 +23,7 @@ pub struct Interpreter {
     /// (`call_value`'s `Closure` arm) or at the end of `eval_program` -- everywhere in
     /// between, it stays set and unconsumed so an outer, enclosing `Block` (a `return`
     /// nested inside an `if`/`match`) also observes it and short-circuits in turn.
-    pending_return: Option<Value>,
+    pub pending_return: Option<Value>,
 }
 
 impl Interpreter {
@@ -758,7 +758,7 @@ impl Interpreter {
         }
     }
 
-    pub(crate) fn call_value(&mut self, callee: Value, args: Vec<Value>) -> Result<Value, Diagnostic> {
+    pub fn call_value(&mut self, callee: Value, args: Vec<Value>) -> Result<Value, Diagnostic> {
         match callee {
             Value::NativeFn(func) => func(args),
             Value::NativeFnCtx(func) => func(self, args),
