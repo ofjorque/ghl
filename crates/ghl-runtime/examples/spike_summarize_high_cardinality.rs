@@ -1,13 +1,11 @@
-//! Fase 1 — mide `group_by() |> summarize()` a alta cardinalidad de grupos (el escenario
-//! que la "optimización de seguimiento" de TODO.md apuntaba: muchas llamadas nativas
-//! pequeñas, una por grupo por agregación, contra pocas llamadas nativas grandes, una
-//! fusionada por `(kind, col)` sobre todos los grupos a la vez). `spike_summarize_latency`
-//! ya mide el caso de baja cardinalidad (5 grupos, dataset de Suite 02 Caso 2.1); este
-//! spike genera datos en memoria con `n_groups` grupos (por defecto 100.000, la escala que
-//! TODO.md cita para Suite 02) para ver el mismo `df_summarize()` en el régimen donde la
-//! fusión debería importar.
+//! Phase 1 — benchmarks `group_by() |> summarize()` with high group cardinality
+//! (the scenario targeted by the follow-up optimization: many small native calls,
+//! one per group per aggregation, versus few fused native calls across all groups at once).
+//! `spike_summarize_latency` benchmarks low cardinality (5 groups, Suite 02 Case 2.1 dataset);
+//! this spike generates in-memory data with `n_groups` groups (default 100,000) to evaluate
+//! `df_summarize()` in the regime where fusion provides maximum benefit.
 //!
-//! Uso: `cargo run --release --example spike_summarize_high_cardinality -p ghl-runtime -- <rows> <n_groups>`
+//! Usage: `cargo run --release --example spike_summarize_high_cardinality -p ghl-runtime -- <rows> <n_groups>`
 
 use std::time::Instant;
 use ghl_runtime::io::{df_group_by, df_summarize};
@@ -53,7 +51,7 @@ fn main() {
     ]).expect("build_dataframe should succeed");
     let df = Value::DataFrame { frame, na_reasons };
 
-    println!("Dataset en memoria: {rows} filas, {n_groups} grupos");
+    println!("In-memory dataset: {rows} rows, {n_groups} groups");
 
     let specs = vec![
         ("n".to_string(), "count".to_string(), None),
@@ -69,7 +67,7 @@ fn main() {
 
     println!(
         "group_by(group_key) |> summarize(n, mean_value_b, max_value_b, sum_value_c): \
-         {} filas -> {} grupos en {:.2?} ({:.0} filas/s)",
+         {} rows -> {} groups in {:.2?} ({:.0} rows/s)",
         rows,
         height_of(&summary),
         elapsed,

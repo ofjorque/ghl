@@ -1,20 +1,18 @@
-//! La capa de conversión en los bordes entre `Value` (dinámico, GHL) y
-//! `polars_core::frame::DataFrame` (columnar, tipado) — TODO.md, Fase 0.
+//! Boundary conversion layer between GHL's dynamic `Value` and
+//! `polars_core::frame::DataFrame` (columnar, typed).
 //!
-//! Dos operaciones cruzan esta frontera hoy:
-//! - [`build_dataframe`]: construcción — el literal `dataframe { col: [...], ... }` y,
-//!   más adelante, `read_csv`/`parse_csv`, arman un DataFrame real a partir de columnas
-//!   `Vec<Value>` de GHL.
-//! - [`pull_column_as_values`]: extracción — `pull(df, col)` saca una columna de vuelta
-//!   a un `Value::Vector` de GHL puro.
+//! Two main operations cross this boundary:
+//! - [`build_dataframe`]: construction — the `dataframe { col: [...], ... }` literal
+//!   and tabular file ingestion construct a native DataFrame from GHL `Vec<Value>` columns.
+//! - [`pull_column_as_values`]: extraction — `pull(df, col)` extracts a column back
+//!   to a pure GHL `Value::Vector`.
 //!
-//! Todo lo demás (los ~30 verbos de `io.rs`, y desde el fix de representación de datos
-//! de NEKO, también `Blueprint::bake`/`FittedModel`/`FittedGlm` en `neko.rs`/`glm.rs`)
-//! opera directo sobre el `DataFrame` de polars sin pasar por `Value` en absoluto — ese
-//! es exactamente el punto de adoptarlo (Fase 0, Opción A) en vez de reboxear cada celda
-//! en cada verbo. `f64_opt_column`/`bool_column`/`string_column` son el mismo idioma de
-//! [`value_column_to_polars`] expuesto para un nombre de columna fijo, para agregar
-//! columnas derivadas (ej. `augment()`) sin pasar por `Vec<Value>`.
+//! All other operations (the ~30 verbs in `io.rs`, and NEKO data representations
+//! including `Blueprint::bake`/`FittedModel`/`FittedGlm` in `neko.rs`/`glm.rs`)
+//! operate directly on the Polars `DataFrame` without round-tripping through `Value`.
+//! `f64_opt_column`/`bool_column`/`string_column` provide the same pattern as
+//! [`value_column_to_polars`] for fixed column names, adding derived columns
+//! (e.g. `augment()`) without `Vec<Value>` boxing.
 
 use std::sync::Arc;
 
@@ -24,14 +22,10 @@ use polars_core::prelude::*;
 use crate::na_reasons::NaReasonTable;
 use crate::value::Value;
 
-/// Construye un `DataFrame` de polars + su tabla de razones de NA a partir de columnas
-/// GHL (`Vec<Value>`, todas de la misma longitud). Infiere el dtype de cada columna
-/// ensanchando al tipo más permisivo presente: `String` > `f64` > `i64` > `bool` — la
-/// misma política de "si hay cualquier duda, quedate con lo más general" que ya usan
-/// `select`/`drop` en `io.rs` para columnas heterogéneas (`format!("{other}")`).
-/// Devuelve las razones ya envueltas en `Arc` (TODO.md Fase 1, "Copy-on-Write" acotado a
-/// `Value::DataFrame`) para que cada uno de los ~10 llamadores de esta función no tenga
-/// que acordarse de envolverlas por su cuenta.
+/// Constructs a Polars `DataFrame` and its associated NA reason table from GHL columns
+/// (`Vec<Value>`, all of equal length). Infers the dtype of each column by widening
+/// to the most permissive type present: `String` > `f64` > `i64` > `bool`.
+/// Returns reasons wrapped in an `Arc` for Copy-on-Write sharing across `Value::DataFrame`.
 pub fn build_dataframe(cols: &[(String, Vec<Value>)]) -> Result<(DataFrame, Arc<NaReasonTable>), Diagnostic> {
     let mut na_reasons = NaReasonTable::new();
     let mut columns = Vec::with_capacity(cols.len());
@@ -49,7 +43,7 @@ pub fn build_dataframe(cols: &[(String, Vec<Value>)]) -> Result<(DataFrame, Arc<
         DataFrame::empty()
     } else {
         DataFrame::new_infer_height(columns).map_err(|e| {
-            Diagnostic::compute_error("C0210", format!("No se pudo construir el DataFrame: {e}"))
+            Diagnostic::compute_error("C0210", format!("Failed to construct DataFrame: {e}"))
         })?
     };
 
@@ -82,7 +76,7 @@ pub(crate) fn value_column_to_polars(name: &str, values: &[Value]) -> Column {
         let data: Vec<Option<bool>> = values.iter().map(|v| v.as_bool()).collect();
         data.into_iter().collect::<BooleanChunked>().with_name(name.into()).into_series()
     } else {
-        // Columna vacía o enteramente NA: sin celdas para inferir tipo, F64-nula por defecto.
+        // Empty column or entirely NA: default to null Float64 series.
         let data: Vec<Option<f64>> = vec![None; values.len()];
         data.into_iter().collect::<Float64Chunked>().with_name(name.into()).into_series()
     };
@@ -90,34 +84,33 @@ pub(crate) fn value_column_to_polars(name: &str, values: &[Value]) -> Column {
     series.into()
 }
 
-/// Construye una columna `f64` nullable con un nombre dado -- mismo idioma
-/// `collect::<Float64Chunked>()` que ya usa la rama f64 de [`value_column_to_polars`],
-/// para un único nombre fijo en vez de inferir dtype de un `Vec<Value>`. La usan
-/// `FittedModel::augment`/`FittedGlm::augment` (`neko.rs`/`glm.rs`) para agregar
-/// `.fitted`/`.residual` sin reboxear el resto del DataFrame a través de `Vec<Value>`.
+/// Constructs a nullable `f64` column with a given name, using the same
+/// `collect::<Float64Chunked>()` pattern as the f64 branch of [`value_column_to_polars`]
+/// for a single fixed name without inferring dtype from `Vec<Value>`. Used by
+/// `FittedModel::augment`/`FittedGlm::augment` to append `.fitted`/`.residual`.
 pub(crate) fn f64_opt_column(name: &str, data: Vec<Option<f64>>) -> Column {
     data.into_iter().collect::<Float64Chunked>().with_name(name.into()).into_series().into()
 }
 
-/// Como [`f64_opt_column`] pero para `bool`, sin nulos (`.used_in_fit` nunca es NA).
+/// Like [`f64_opt_column`] but for non-nullable `bool` (`.used_in_fit` is never NA).
 pub(crate) fn bool_column(name: &str, data: Vec<bool>) -> Column {
     data.into_iter().map(Some).collect::<BooleanChunked>().with_name(name.into()).into_series().into()
 }
 
-/// Como [`f64_opt_column`] pero para `String`, sin nulos (`.na_reason` siempre es un
-/// texto -- `"none"`/`"unspecified"`/la razón real -- nunca `NA`).
+/// Like [`f64_opt_column`] but for non-nullable `String` (`.na_reason` is always text
+/// -- `"none"`, `"unspecified"`, or the actual reason -- never `NA`).
 pub(crate) fn string_column(name: &str, data: Vec<String>) -> Column {
     data.into_iter().map(Some).collect::<StringChunked>().with_name(name.into()).into_series().into()
 }
 
-/// Como [`f64_opt_column`] pero para `i64`, sin nulos (ej. `.cluster`).
+/// Like [`f64_opt_column`] but for non-nullable `i64` (e.g. `.cluster`).
 pub(crate) fn i64_column(name: &str, data: Vec<i64>) -> Column {
     data.into_iter().map(Some).collect::<Int64Chunked>().with_name(name.into()).into_series().into()
 }
 
-/// Extrae una columna de un `DataFrame` de polars de vuelta a `Vec<Value>` de GHL,
-/// reconstruyendo `NA:razon` desde `na_reasons` donde exista una entrada — celdas nulas
-/// sin entrada quedan como `Value::NA(None)`.
+/// Extracts a column from a Polars `DataFrame` back to a GHL `Vec<Value>`,
+/// restoring `NA:Reason` from `na_reasons` when an entry exists — null cells
+/// without an entry become `Value::NA(None)`.
 pub fn pull_column_as_values(
     frame: &DataFrame,
     na_reasons: &NaReasonTable,
@@ -127,8 +120,8 @@ pub fn pull_column_as_values(
     pull_rows_as_values(frame, na_reasons, col, &all_rows)
 }
 
-/// Como [`pull_column_as_values`] pero para un subconjunto arbitrario de filas — lo usa
-/// `summarize()` para extraer los valores de un grupo sin materializar la columna entera.
+/// Like [`pull_column_as_values`] but for an arbitrary subset of rows — used by
+/// `summarize()` to extract values for a group without materializing the whole column.
 pub(crate) fn pull_rows_as_values(
     frame: &DataFrame,
     na_reasons: &NaReasonTable,
@@ -142,15 +135,14 @@ pub(crate) fn pull_rows_as_values(
     let mut out = Vec::with_capacity(rows.len());
     for &row in rows {
         let av = column.get(row).map_err(|e| {
-            Diagnostic::compute_error("C0210", format!("Error leyendo la celda ({col}, {row}): {e}"))
+            Diagnostic::compute_error("C0210", format!("Error reading cell ({col}, {row}): {e}"))
         })?;
         out.push(any_value_to_value(&av, col, row, na_reasons));
     }
     Ok(out)
 }
 
-/// Una sola celda — lo usa `group_by()`/`summarize()` para leer el valor de cada
-/// columna clave (todas las filas de un grupo comparten el mismo valor de clave).
+/// Single cell extraction — used by `group_by()`/`summarize()` to read group key values.
 pub(crate) fn get_cell_as_value(
     frame: &DataFrame,
     na_reasons: &NaReasonTable,
@@ -161,7 +153,7 @@ pub(crate) fn get_cell_as_value(
         Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame", col))
     })?;
     let av = column.get(row).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("Error leyendo la celda ({col}, {row}): {e}"))
+        Diagnostic::compute_error("C0210", format!("Error reading cell ({col}, {row}): {e}"))
     })?;
     Ok(any_value_to_value(&av, col, row, na_reasons))
 }
@@ -176,10 +168,10 @@ pub(crate) fn any_value_to_value(av: &AnyValue, col: &str, row: usize, na_reason
     }
 }
 
-/// Como [`any_value_to_value`] pero sin contexto de `(col, row)` — para valores que no
-/// vienen de una celda concreta del DataFrame, como el resultado escalar de una
-/// agregación (`summarize()`'s `compute_agg` en `io.rs`). Un `Null` aquí siempre se
-/// vuelve `Value::NA(None)`: no hay una razón que buscar para un escalar sintético.
+/// Like [`any_value_to_value`] but without `(col, row)` context — for values not
+/// originating from a specific DataFrame cell, such as scalar aggregation results
+/// (`summarize()`'s `compute_agg` in `io.rs`). A `Null` here always becomes
+/// `Value::NA(None)` since there is no reason lookup for synthetic scalars.
 pub(crate) fn any_value_to_plain_value(av: &AnyValue) -> Value {
     match av {
         AnyValue::Null => Value::NA(None),
@@ -202,8 +194,8 @@ pub(crate) fn any_value_to_plain_value(av: &AnyValue) -> Value {
         AnyValue::UInt64(n) => Value::I64(*n as i64),
         AnyValue::Float32(x) => Value::F64(*x as f64),
         AnyValue::Float64(x) => Value::F64(*x),
-        // Tipos que todavía no tienen contraparte en GHL (fechas, etc.) — se preservan
-        // como texto en vez de perder el dato silenciosamente.
+        // Types without direct GHL counterparts (dates, etc.) — preserved as strings
+        // rather than dropping data silently.
         other => Value::String(format!("{other}")),
     }
 }

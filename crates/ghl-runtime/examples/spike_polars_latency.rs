@@ -1,10 +1,10 @@
-//! Fase 0 — Spike #1: latencia de construir/operar sobre un `polars::DataFrame`
-//! a escala chica (10 - 100k filas), para confirmar que adoptar polars como backend
-//! de `Value::DataFrame` (TODO.md, Fase 0/1) no rompe las metas de arranque de
-//! `benchmarks/suites/04-runtime-characteristics.md` (Prueba C: filtrar + media
-//! sobre una tabla y responder en el rango de milisegundos).
+//! Phase 0 — Spike #1: latency of building/operating on a `polars::DataFrame`
+//! at small scale (10 - 100k rows), confirming that adopting polars as the backend
+//! for `Value::DataFrame` (Phase 0/1) does not violate the startup and small-scale goals
+//! of `benchmarks/suites/04-runtime-characteristics.md` (Test C: filter + mean
+//! on a table responding within the millisecond range).
 //!
-//! Corridas: `cargo run --release --example spike_polars_latency -p ghl-runtime`
+//! Run: `cargo run --release --example spike_polars_latency -p ghl-runtime`
 
 use std::time::Instant;
 
@@ -56,7 +56,7 @@ fn run_case(n: usize) {
 
     // `GroupBy::select().mean()` (the eager API) has been deprecated since polars-core
     // 0.24.1 in favor of exactly this lazy-query path -- `ghl-runtime`'s own
-    // `df_summarize` (io.rs, TODO.md Fase 1 "Optimización de seguimiento") uses the same
+    // `df_summarize` (io.rs, Phase 1 follow-up optimization) uses the same
     // `LazyFrame::group_by().agg([...])` shape, so this spike matches the real code path
     // instead of measuring an API the runtime no longer calls.
     time_it("group_by(group).agg(mean(value))", || {
@@ -78,8 +78,7 @@ fn main() {
     }
 
     println!(
-        "\nLee estos numeros contra la meta de Suite 04 (Prueba C, menos de 25ms de punta \
-         a punta para 100k filas) antes de decidir si hace falta un camino separado \
-         para DataFrames chicos."
+        "\nCompare these numbers against Suite 04 targets (Test C, under 25ms end-to-end \
+         for 100k rows) before deciding if a separate small-DataFrame code path is needed."
     );
 }

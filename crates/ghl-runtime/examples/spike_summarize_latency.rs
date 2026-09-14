@@ -1,10 +1,10 @@
-//! Fase 1 — mide `group_by() |> summarize()` tras la "optimización pendiente" que
-//! TODO.md dejó anotada al enviar el primer `summarize()`: `compute_agg` ya no boxea
-//! cada grupo a `Vec<Value>` y delega en `native_mean`/`native_sum`/etc. -- calcula
-//! `mean_reduce`/`sum_reduce`/etc. nativos de polars directo sobre el subconjunto de
-//! cada grupo (`Column::take` + `Column::mean_reduce`/...).
+//! Phase 1 — benchmarks `group_by() |> summarize()` after the optimization
+//! noted during the initial `summarize()` implementation: `compute_agg` no longer boxes
+//! each group into a `Vec<Value>` to delegate to `native_mean`/`native_sum`/etc. — it calculates
+//! native polars `mean_reduce`/`sum_reduce`/etc. directly on each group subset
+//! (`Column::take` + `Column::mean_reduce`/...).
 //!
-//! Uso: `cargo run --release --example spike_summarize_latency -p ghl-runtime -- <parquet_path>`
+//! Usage: `cargo run --release --example spike_summarize_latency -p ghl-runtime -- <parquet_path>`
 
 use std::time::Instant;
 use ghl_runtime::io::{read_parquet_file, df_group_by, df_summarize};
@@ -22,11 +22,11 @@ fn main() {
     let path = args.get(1).cloned().unwrap_or_else(|| "target/synthetic.parquet".to_string());
 
     let df = read_parquet_file(&path).unwrap_or_else(|e| {
-        eprintln!("No se pudo leer {path}: {e:?}");
+        eprintln!("Could not read {path}: {e:?}");
         std::process::exit(1);
     });
     let total_rows = height_of(&df);
-    println!("Archivo: {path} ({total_rows} filas)");
+    println!("File: {path} ({total_rows} rows)");
 
     let specs = vec![
         ("n".to_string(), "count".to_string(), None),
@@ -42,16 +42,16 @@ fn main() {
 
     println!(
         "group_by(category) |> summarize(n, mean_value_b, max_value_b, sum_value_c): \
-         {} filas -> {} grupos en {:.2?} ({:.0} filas/s)",
+         {} rows -> {} groups in {:.2?} ({:.0} rows/s)",
         total_rows,
         height_of(&summary),
         elapsed,
         total_rows as f64 / elapsed.as_secs_f64()
     );
 
-    // Spike #1 (Fase 0) midio group_by+mean nativo de polars en ~601us para 100k filas
-    // (`spike_polars_latency.rs`) -- referencia para juzgar si esto escala razonablemente,
-    // no una comparacion exacta (ahi era una sola agregacion, aca son cuatro distintas).
+    // Spike #1 (Phase 0) measured native polars group_by+mean at ~601us for 100k rows
+    // (`spike_polars_latency.rs`) -- reference for evaluating scaling,
+    // not an exact comparison (that was 1 aggregation, this evaluates 4 distinct aggregations).
     let projected_100k = elapsed.as_secs_f64() * (100_000.0 / total_rows as f64);
-    println!("Para contexto, esto mismo a 100k filas: ~{:.0}us (Spike #1 con 1 sola agregacion nativa: ~601us)", projected_100k * 1_000_000.0);
+    println!("For context, scaled to 100k rows: ~{:.0}us (Spike #1 with single native aggregation: ~601us)", projected_100k * 1_000_000.0);
 }

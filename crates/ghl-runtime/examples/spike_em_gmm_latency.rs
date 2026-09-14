@@ -1,17 +1,17 @@
-//! Fase 6, Caso 3.4 (Suite 03: Modelado Estadístico y Métodos MCMC)
+//! Phase 6, Case 3.4 (Suite 03: Statistical Modeling and MCMC Methods)
 //!
-//! Benchmark / Spike del Algoritmo EM (Expectation-Maximization) para Mezcla de Gaussianas
-//! multivariadas ejecutado íntegramente como programa GHL sobre el intérprete de `ghl-runtime`.
+//! Benchmark / Spike for the EM (Expectation-Maximization) algorithm for multivariate
+//! Gaussian Mixture Models executed entirely as a GHL program on the `ghl-runtime` interpreter.
 //!
-//! Especificación Suite 03:
-//!   - K = 10 componentes gaussianas multivariadas
-//!   - D = 20 dimensiones
-//!   - N observaciones (default: 1.000)
-//!   - 500 iteraciones de ajuste EM
-//!   - Estabilidad numérica en log-sum-exp, cálculo matricial repetitivo y vectorización.
+//! Suite 03 Specification:
+//!   - K = 10 multivariate Gaussian components
+//!   - D = 20 dimensions
+//!   - N observations (default: 1,000)
+//!   - 500 EM iterations
+//!   - Numerical stability in log-sum-exp, repetitive matrix computation, and vectorization.
 //!
-//! Uso:
-//!   cargo run --release --example spike_em_gmm_latency -p ghl-runtime -- [iteraciones] [n_obs]
+//! Usage:
+//!   cargo run --release --example spike_em_gmm_latency -p ghl-runtime -- [iterations] [n_obs]
 
 use std::time::Instant;
 use rand::SeedableRng;
@@ -30,15 +30,15 @@ fn main() {
     let d_dim: usize = 20;
 
     println!("================================================================================");
-    println!(" GHL Suite 03 - Caso 3.4: Algoritmo EM para Mezcla de Gaussianas");
+    println!(" GHL Suite 03 - Case 3.4: EM Algorithm for Gaussian Mixture Models");
     println!("================================================================================");
-    println!("Configuración:");
-    println!("  - Componentes (K):   {k_clusters}");
-    println!("  - Dimensiones (D):   {d_dim}");
-    println!("  - Observaciones (N): {n_obs}");
-    println!("  - Iteraciones EM:    {num_iterations} (ajustable por CLI)");
+    println!("Configuration:");
+    println!("  - Components (K):   {k_clusters}");
+    println!("  - Dimensions (D):   {d_dim}");
+    println!("  - Observations (N): {n_obs}");
+    println!("  - EM Iterations:    {num_iterations} (CLI adjustable)");
 
-    // 1. Generar datos sintéticos multivariados en K clusters separados
+    // 1. Generate synthetic multivariate data across K distinct clusters
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(42);
     let mut x_data = Vec::with_capacity(n_obs * d_dim);
 
@@ -54,12 +54,12 @@ fn main() {
         }
     }
 
-    // 2. Programa completo en GHL
+    // 2. Full GHL Program
     let ghl_code = r#"
         fn run_gmm_em(X, K, D, max_iter) {
             let N = len(X);
 
-            // Inicializar pesos pi uniformemente: 1/K
+            // Initialize weights pi uniformly: 1/K
             let mut pi = zeros(K);
             let mut k_init = 0;
             while k_init < K {
@@ -67,7 +67,7 @@ fn main() {
                 k_init = k_init + 1;
             };
 
-            // Inicializar medias mu (K x D) tomando K puntos distintos de X
+            // Initialize means mu (K x D) taking K distinct points from X
             let mut mu = zeros(K, D);
             let step = N / K;
             let mut k_mu = 0;
@@ -77,7 +77,7 @@ fn main() {
                 k_mu = k_mu + 1;
             };
 
-            // Inicializar varianzas diagonales (K x D) en 1.0
+            // Initialize diagonal variances (K x D) to 1.0
             let mut vars = zeros(K, D);
             let mut k_var = 0;
             while k_var < K {
@@ -138,11 +138,11 @@ fn main() {
                     let N_c = sum(gamma_c);
                     pi = set(pi, c3, N_c / N);
 
-                    // Medias actualizadas
+                    // Updated means
                     let new_mu_c = get_row(weighted_X, c3) / N_c;
                     mu = set_row(mu, c3, new_mu_c);
 
-                    // Varianzas diagonales actualizadas con regularización ridge
+                    // Updated diagonal variances with ridge regularization
                     let mut sum_sq = zeros(D);
                     let mut i2 = 0;
                     while i2 < N {
@@ -175,7 +175,7 @@ fn main() {
         let mean_dim0 = get(first_cluster_mean, 0);
     "#;
 
-    let program = parse(ghl_code).expect("Código GHL parseado con éxito");
+    let program = parse(ghl_code).expect("GHL code parsed successfully");
 
     let mut interp = Interpreter::new();
     interp.env.set(
@@ -188,29 +188,29 @@ fn main() {
     );
     interp.env.set("iterations".to_string(), Value::I64(num_iterations));
 
-    println!("\nIniciando ajuste EM en GHL...");
+    println!("\nStarting EM fit in GHL...");
     let start = Instant::now();
-    interp.eval_program(&program).expect("Evaluación GHL exitosa");
+    interp.eval_program(&program).expect("GHL evaluation successful");
     let elapsed = start.elapsed();
 
     let per_iter = elapsed.as_secs_f64() / (num_iterations as f64);
     let iter_per_sec = (num_iterations as f64) / elapsed.as_secs_f64();
     let mean_d0 = interp.env.get("mean_dim0").and_then(|v| v.as_f64()).unwrap_or(f64::NAN);
 
-    println!("\nResultados del ajuste EM:");
-    println!("  - Dimensión 0 del cluster 0: {:>8.4}", mean_d0);
-    println!("  - Convergencia y estabilidad: log_sum_exp previno bajo flujo/desbordamiento.");
+    println!("\nEM Fit Results:");
+    println!("  - Dimension 0 of Cluster 0: {:>8.4}", mean_d0);
+    println!("  - Convergence and stability: log_sum_exp prevented underflow/overflow.");
 
-    println!("\nRendimiento (GHL Script):");
-    println!("  - Tiempo total:          {elapsed:?}");
-    println!("  - Tiempo por iteración:  {:>8.3} ms", per_iter * 1000.0);
-    println!("  - Rendimiento:           {:>8.1} iteraciones/segundo", iter_per_sec);
+    println!("\nPerformance (GHL Script):");
+    println!("  - Total time:          {elapsed:?}");
+    println!("  - Time per iteration:  {:>8.3} ms", per_iter * 1000.0);
+    println!("  - Throughput:          {:>8.1} iterations/second", iter_per_sec);
     if num_iterations < 500 {
         let est_500 = per_iter * 500.0;
-        println!("  - Estimado 500 iter:     {:>8.2} s", est_500);
+        println!("  - Estimated 500 iter:  {:>8.2} s", est_500);
     }
 
-    // 3. Ejecución Nativa de NEKO (fit_gmm) con Cockpit Visual
+    // 3. NEKO Native Execution (fit_gmm) with Cockpit Visual
     println!("\n================================================================================");
     println!(" NEKO Native GMM (fit_gmm) & Terminal Cockpit");
     println!("================================================================================");
@@ -219,7 +219,7 @@ fn main() {
         let model = fit_gmm(X, 10, iterations, 0.00001);
         summary(model);
     "#;
-    let neko_prog = parse(neko_code).expect("Código GHL parseado con éxito");
+    let neko_prog = parse(neko_code).expect("GHL code parsed successfully");
     let mut interp_neko = Interpreter::new();
     interp_neko.env.set(
         "X".to_string(),
@@ -232,14 +232,14 @@ fn main() {
     interp_neko.env.set("iterations".to_string(), Value::I64(num_iterations));
 
     let start_neko = Instant::now();
-    interp_neko.eval_program(&neko_prog).expect("Evaluación NEKO exitosa");
+    interp_neko.eval_program(&neko_prog).expect("NEKO evaluation successful");
     let elapsed_neko = start_neko.elapsed();
     let per_iter_neko = elapsed_neko.as_secs_f64() / (num_iterations as f64);
     let speedup = per_iter / per_iter_neko;
 
-    println!("\nRendimiento Comparativo (NEKO Nativo vs GHL Script):");
-    println!("  - Tiempo total NEKO:      {elapsed_neko:?}");
-    println!("  - Tiempo por iteración:   {:>8.3} ms ({:>8.1} µs)", per_iter_neko * 1000.0, per_iter_neko * 1_000_000.0);
-    println!("  - Speedup NEKO vs Script: {:>8.1}x más rápido", speedup);
+    println!("\nComparative Performance (NEKO Native vs GHL Script):");
+    println!("  - Total NEKO time:        {elapsed_neko:?}");
+    println!("  - Time per iteration:     {:>8.3} ms ({:>8.1} µs)", per_iter_neko * 1000.0, per_iter_neko * 1_000_000.0);
+    println!("  - Speedup NEKO vs Script: {:>8.1}x faster", speedup);
     println!("================================================================================");
 }

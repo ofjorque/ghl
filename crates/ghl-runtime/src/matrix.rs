@@ -6,8 +6,8 @@
 //! real library's types for the actual work" pattern the DataFrame/polars migration
 //! (Fase 0/1) already established. `solve()`'s LU-based path and `mul()`'s `*` operator
 //! both use faer's own multithreaded, blocked kernels (the `gemm`/`gemm-f64` crates
-//! already pulled in transitively) -- Caso 1.2 ("multiplicación matricial densa
-//! multinúcleo por bloques") falls out of this for free, it isn't hand-implemented here.
+//! already pulled in transitively) -- Case 1.2 ("multithreaded blocked dense matrix
+//! multiplication") falls out of this for free; it is not hand-implemented here.
 
 use faer::prelude::*;
 use faer::Mat;

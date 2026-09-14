@@ -1,23 +1,23 @@
-//! Fase 6, Caso 3.1 (Suite 03: Modelado Estadístico y Métodos MCMC)
+//! Phase 6, Case 3.1 (Suite 03: Statistical Modeling and MCMC Methods)
 //!
-//! Benchmark / Spike del Muestreador MCMC Personalizado (Gibbs Sampler Jerárquico)
-//! ejecutado íntegramente como programa GHL sobre el intérprete de `ghl-runtime`.
+//! Benchmark / Spike for the Custom MCMC Sampler (Hierarchical Gibbs Sampler)
+//! executed entirely as a GHL program on the `ghl-runtime` interpreter.
 //!
-//! Modelo:
+//! Model:
 //!   y_ij ~ Normal(mu_j, 1 / tau)
-//!   mu_j ~ Normal(0, 1) [prior estándar]
-//!   tau ~ Gamma(1, 1)   [prior estándar]
+//!   mu_j ~ Normal(0, 1) [standard prior]
+//!   tau ~ Gamma(1, 1)   [standard prior]
 //!
-//! En cada iteración:
-//!   1. Actualización de cada mu_j condicional a los datos del grupo y tau:
+//! In each iteration:
+//!   1. Update each mu_j conditional on group data and tau:
 //!      mu_j | y_j, tau ~ Normal( (sum(y_j)*tau)/(n_j*tau + 1), 1/sqrt(n_j*tau + 1) )
-//!   2. Actualización de la precisión global tau condicional a los residuos:
+//!   2. Update global precision tau conditional on residuals:
 //!      diff = y - get(mu_vec, groups)
 //!      ssq = dot(diff, diff)
 //!      tau | y, mu ~ Gamma(1 + N/2, 1 + ssq/2)
 //!
-//! Uso:
-//!   cargo run --release --example spike_gibbs_mcmc_latency -p ghl-runtime -- [iteraciones] [n_por_grupo]
+//! Usage:
+//!   cargo run --release --example spike_gibbs_mcmc_latency -p ghl-runtime -- [iterations] [n_per_group]
 
 use std::time::Instant;
 use rand::SeedableRng;
@@ -35,14 +35,14 @@ fn main() {
     let n_per_group: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1000);
 
     println!("================================================================================");
-    println!(" GHL Suite 03 - Caso 3.1: Hierarchical Gibbs Sampler");
+    println!(" GHL Suite 03 - Case 3.1: Hierarchical Gibbs Sampler");
     println!("================================================================================");
-    println!("Configuración:");
-    println!("  - Iteraciones MCMC: {num_iterations}");
-    println!("  - N por grupo:      {n_per_group} (3 grupos, N_total = {})", n_per_group * 3);
-    println!("  - Parámetros reales: mu = [3.0, 8.0, -4.0], sigma = 0.8 (tau ~ 1.5625)");
+    println!("Configuration:");
+    println!("  - MCMC Iterations: {num_iterations}");
+    println!("  - N per group:     {n_per_group} (3 groups, N_total = {})", n_per_group * 3);
+    println!("  - True parameters: mu = [3.0, 8.0, -4.0], sigma = 0.8 (tau ~ 1.5625)");
 
-    // 1. Generar datos sintéticos en Rust
+    // 1. Generate synthetic data in Rust
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(42);
     let true_means = [3.0, 8.0, -4.0];
     let mut y = Vec::with_capacity(n_per_group * 3);
@@ -56,7 +56,7 @@ fn main() {
         }
     }
 
-    // 2. Definir el programa completo en GHL
+    // 2. Define the full GHL program
     let ghl_code = r#"
         fn run_gibbs(y, groups, num_iterations) {
             let num_groups = max(groups) + 1;
@@ -100,7 +100,7 @@ fn main() {
         let mean2 = mean(col2);
     "#;
 
-    let program = parse(ghl_code).expect("Código GHL parseado con éxito");
+    let program = parse(ghl_code).expect("GHL code parsed successfully");
 
     let mut interp = Interpreter::new();
     interp.env.set("y".to_string(), Value::Vector(VectorData::from_f64(y)));
@@ -110,9 +110,9 @@ fn main() {
     );
     interp.env.set("iterations".to_string(), Value::I64(num_iterations));
 
-    println!("\nIniciando muestreo Gibbs en GHL...");
+    println!("\nStarting Gibbs sampling in GHL...");
     let start = Instant::now();
-    interp.eval_program(&program).expect("Evaluación GHL exitosa");
+    interp.eval_program(&program).expect("GHL evaluation successful");
     let elapsed = start.elapsed();
 
     let m0 = interp.env.get("mean0").and_then(|v| v.as_f64()).unwrap_or(f64::NAN);
@@ -122,14 +122,14 @@ fn main() {
     let per_iter = elapsed.as_secs_f64() / (num_iterations as f64);
     let iter_per_sec = (num_iterations as f64) / elapsed.as_secs_f64();
 
-    println!("\nResultados del muestreador:");
-    println!("  - Media posterior mu[0]: {:>8.4} (esperada: ~3.0000, error: {:>+.4})", m0, m0 - 3.0);
-    println!("  - Media posterior mu[1]: {:>8.4} (esperada: ~8.0000, error: {:>+.4})", m1, m1 - 8.0);
-    println!("  - Media posterior mu[2]: {:>8.4} (esperada: ~-4.0000, error: {:>+.4})", m2, m2 - (-4.0));
+    println!("\nSampler Results:");
+    println!("  - Posterior mean mu[0]: {:>8.4} (expected: ~3.0000, error: {:>+.4})", m0, m0 - 3.0);
+    println!("  - Posterior mean mu[1]: {:>8.4} (expected: ~8.0000, error: {:>+.4})", m1, m1 - 8.0);
+    println!("  - Posterior mean mu[2]: {:>8.4} (expected: ~-4.0000, error: {:>+.4})", m2, m2 - (-4.0));
 
-    println!("\nRendimiento:");
-    println!("  - Tiempo total:          {elapsed:?}");
-    println!("  - Tiempo por iteración:  {:>8.3} µs", per_iter * 1_000_000.0);
-    println!("  - Rendimiento:           {:>8.1} iteraciones/segundo", iter_per_sec);
+    println!("\nPerformance:");
+    println!("  - Total time:          {elapsed:?}");
+    println!("  - Time per iteration:  {:>8.3} µs", per_iter * 1_000_000.0);
+    println!("  - Throughput:          {:>8.1} iterations/second", iter_per_sec);
     println!("================================================================================");
 }

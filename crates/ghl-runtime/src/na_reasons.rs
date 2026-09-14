@@ -1,23 +1,24 @@
-//! NA-con-razón sobre un backend Arrow/polars.
+//! Side-channel table tracking NA reasons on top of an Arrow/Polars backend.
 //!
-//! Arrow (y por lo tanto `polars_core`) solo modela un bit de validez por celda — no
-//! tiene equivalente a la NA semántica de GHL (`NA:SensorDropout`, `Value::NA(Some(reason))`).
-//! Esta tabla lateral `(columna, fila) -> razón` se adjunta a cada `Value::DataFrame` real
-//! (backed por `polars_core::frame::DataFrame`) para no perder esa información.
+//! Arrow (and consequently `polars_core`) only models a 1-bit validity mask per cell
+//! — it has no native equivalent for GHL's semantic NAs (`NA:SensorDropout`,
+//! `Value::NA(Some(reason))`). This side table `(column, row) -> reason` attaches to
+//! each real `Value::DataFrame` (backed by `polars_core::frame::DataFrame`) to preserve
+//! that semantic metadata across operations.
 //!
-//! El mecanismo de reindexado (`reindex`) fue validado en el Spike #2 de la Fase 0
-//! (`tests/spike_na_reason.rs`) sobre `filter`; este módulo es la versión de producción
-//! del mismo diseño, ahora reutilizable desde cualquier verbo que preserve filas
-//! (`filter`, `arrange`, `slice`, joins, ...).
+//! The reindexing mechanism (`reindex`) was validated in Fase 0 Spike #2
+//! (`tests/spike_na_reason.rs`) on `filter`; this module represents the production
+//! version of that design, reusable across all row-preserving verbs
+//! (`filter`, `arrange`, `slice`, joins, etc.).
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Razones de NA para un `Value::DataFrame`, indexadas por `(nombre_columna, fila)`.
-/// Una celda nula sin entrada aquí es una NA "genérica" (`Value::NA(None)`).
-/// Los motivos se almacenan como `Arc<str>` para que múltiples entradas con el mismo
-/// texto (p.ej. 100 k celdas con `"SensorDropout"`) compartan el mismo descriptor
-/// inmutable en heap — sin duplicación por inserción.
+/// NA reasons for a `Value::DataFrame`, indexed by `(column_name, row)`.
+/// A null cell without an entry here is a generic NA (`Value::NA(None)`).
+/// Reasons are stored as `Arc<str>` so multiple entries with the same text
+/// (e.g. 100,000 cells with `"SensorDropout"`) share the same immutable heap descriptor
+/// without string duplication on insertion.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct NaReasonTable {
     reasons: HashMap<(String, usize), Arc<str>>,
@@ -44,10 +45,10 @@ impl NaReasonTable {
         self.reasons.remove(&(col.to_string(), row));
     }
 
-    /// Reindexa las razones tras una operación que selecciona un subconjunto de filas.
-    /// `kept_rows[new_row] == old_row` — el mapeo que produce un `BooleanChunked`
-    /// (filter), un slice/sort, o el lado izquierdo de un join. Las razones de filas
-    /// no presentes en `kept_rows` se descartan (esas filas ya no existen).
+    /// Reindexes reasons after an operation that selects a subset of rows.
+    /// `kept_rows[new_row] == old_row` — the mapping produced by a `BooleanChunked`
+    /// (filter), a slice/sort, or the left side of a join. Reasons for rows
+    /// not present in `kept_rows` are dropped (those rows no longer exist).
     pub fn reindex(&self, kept_rows: &[usize]) -> NaReasonTable {
         let position_of_old: HashMap<usize, usize> = kept_rows
             .iter()
@@ -64,7 +65,7 @@ impl NaReasonTable {
         out
     }
 
-    /// Renombra todas las entradas de `old_col` a `new_col` (usado por `rename()`).
+    /// Renames all entries from `old_col` to `new_col` (used by `rename()`).
     pub fn rename_column(&self, old_col: &str, new_col: &str) -> NaReasonTable {
         let mut out = NaReasonTable::default();
         for ((col, row), reason) in &self.reasons {
@@ -74,7 +75,7 @@ impl NaReasonTable {
         out
     }
 
-    /// Conserva solo las razones de las columnas en `keep_cols` (usado por `select()`/`drop()`).
+    /// Retains only the reasons for columns in `keep_cols` (used by `select()`/`drop()`).
     pub fn retain_columns(&self, keep_cols: &[String]) -> NaReasonTable {
         let mut out = NaReasonTable::default();
         for ((col, row), reason) in &self.reasons {
@@ -85,8 +86,8 @@ impl NaReasonTable {
         out
     }
 
-    /// Descarta las razones de una sola columna (usado por `fill_na()`: tras rellenar,
-    /// esa columna ya no tiene celdas NA, así que ninguna razón sigue siendo válida).
+    /// Drops the reasons for a single column (used by `fill_na()`: after filling,
+    /// that column no longer has NA cells, so none of its reasons remain valid).
     pub fn without_column(&self, col: &str) -> NaReasonTable {
         let mut out = NaReasonTable::default();
         for ((c, row), reason) in &self.reasons {
@@ -97,18 +98,18 @@ impl NaReasonTable {
         out
     }
 
-    /// Fusiona las entradas de otra tabla, sobrescribiendo en caso de choque
-    /// (usado por `mutate()` al reemplazar una columna: primero se descartan sus
-    /// razones viejas con [`without_column`], luego se insertan las nuevas).\
+    /// Merges entries from another table, overwriting on key collision
+    /// (used by `mutate()` when replacing a column: old reasons are first dropped
+    /// with [`without_column`], then new ones are inserted).
     pub fn merge(&mut self, other: &NaReasonTable) {
         for (k, v) in &other.reasons {
             self.reasons.insert(k.clone(), Arc::clone(v));
         }
     }
 
-    /// Desplaza las razones `periods` filas para una longitud total `len`.
-    /// `periods > 0` (lag): fila `r` pasa a `r + periods` (si `< len`).
-    /// `periods < 0` (lead): fila `r` pasa a `r + periods` (si `>= 0`).
+    /// Shifts reasons by `periods` rows for a total column length `len`.
+    /// `periods > 0` (lag): row `r` moves to `r + periods` (if `< len`).
+    /// `periods < 0` (lead): row `r` moves to `r + periods` (if `>= 0`).
     pub fn shift(&self, periods: i64, len: usize) -> NaReasonTable {
         if self.reasons.is_empty() || periods == 0 {
             return self.clone();
@@ -134,7 +135,7 @@ mod tests {
         t.set("score", 1, "SensorDropout");
         t.set("score", 3, "LowBattery");
 
-        // Sobreviven las filas originales 0,1,3,4 -> nuevas posiciones 0,1,2,3.
+        // Original rows 0, 1, 3, 4 survive -> new positions 0, 1, 2, 3.
         let reindexed = t.reindex(&[0, 1, 3, 4]);
         assert_eq!(reindexed.get("score", 1), Some("SensorDropout"));
         assert_eq!(reindexed.get("score", 2), Some("LowBattery"));

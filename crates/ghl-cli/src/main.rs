@@ -28,14 +28,14 @@ fn print_help(caps: &RenderCaps) {
     println!(r#"Usage: ghl <command> [options]
 
 Commands:
-    run <file.gh>     Execute a GHL script with fast Cranelift JIT
-    repl              Launch the interactive shell
-    check <file.gh>   Validate syntax, types, and Cranelift HIR lowering
-    new <name>        Create a new structured GHL project (RFC 06 §4)
-    fetch             Resolve dependencies and generate reproducible ghl.lock (RFC 06 §4)
-    test [dir]        Run unit and statistical tests
-    build <file.gh>   Compile standalone binary or shared library (--release, --shared, -o)
-    version           Display version information
+    run <file.gh|file.ghl>     Execute a GHL script with fast Cranelift JIT
+    repl                       Launch the interactive shell
+    check <file.gh|file.ghl>   Validate syntax, types, and Cranelift HIR lowering
+    new <name>                 Create a new structured GHL project (RFC 06 §4)
+    fetch                      Resolve dependencies and generate reproducible ghl.lock (RFC 06 §4)
+    test [dir]                 Run unit and statistical tests
+    build <file.gh|file.ghl>   Compile standalone binary or shared library (--release, --shared, -o)
+    version                    Display version information
 
 Examples:
     ghl run model.gh
@@ -57,6 +57,23 @@ fn run_repl(caps: &RenderCaps) {
 }
 
 fn main() {
+    const STACK_SIZE: usize = 16 * 1024 * 1024;
+    let child = std::thread::Builder::new()
+        .name("ghl-main".to_string())
+        .stack_size(STACK_SIZE)
+        .spawn(real_main);
+
+    match child {
+        Ok(handle) => {
+            if let Err(e) = handle.join() {
+                std::panic::resume_unwind(e);
+            }
+        }
+        Err(_) => real_main(),
+    }
+}
+
+fn real_main() {
     let caps = RenderCaps::detect();
     let args: Vec<String> = env::args().collect();
 

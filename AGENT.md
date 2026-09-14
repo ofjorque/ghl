@@ -83,3 +83,6 @@ Al implementar o modificar código en el compilador o runtime de GHL, el agente 
 - `08-compiler-implementation-stack.md`: Pila de crates en Rust (`chumsky`, `ariadne`, `cranelift`, `faer`, `polars`, `bumpalo`, `statrs`, `rayon`, `reedline`, `clap`, `plotters`).
 - `09-categorical-data-graphics-and-numerical-validation.md`: Factores categóricos con contrastes, gramática de gráficos `std::plot` y certificación NIST StRD.
 - `10-performance-budgets-and-ergonomic-guarantees.md`: Presupuestos innegociables de velocidad (<15ms), memoria (<10MB), tamaño (<15MB) y UX SLAs.
+- `11-neko-statistical-modeling-framework.md`: Arquitectura de modelado estadístico NEKO (desacoplamiento en 3 momentos, Blueprint, capacidades, RowDisposition y covarianzas robustas).
+- `12-cockpit-deck-telemetry-and-diagnostics.md`: Sistema unificado de telemetría y diagnóstico visual Cockpit Deck v0.5.0 (RenderCaps, SymbolRegistry, CockpitPanel y Sparklines).
+- `13-cranelift-jit-native-compilation.md`: Motor de compilación JIT nativa con Cranelift 0.135 (lowering HIR, SSA, control de flujo nativo y ejecución instantánea sub-milisegundo).

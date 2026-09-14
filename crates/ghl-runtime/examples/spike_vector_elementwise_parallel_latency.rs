@@ -1,15 +1,15 @@
-//! Fase 4, punto (a) — mide `vector_elementwise_op` (usado por `.+`/`.-`/`.*`/`./` y, desde
-//! el fix de Fase 3, los operadores planos `+`/`-`/`*`/`/` entre dos `Vector`s numéricos
-//! sin NA) en tres variantes, a varios tamaños, para elegir un `THRESHOLD` real de "vale la
-//! pena repartir entre hilos" en vez de adivinarlo:
+//! Phase 4, point (a) — benchmarks `vector_elementwise_op` (used by `.+`/`.-`/`.*`/`./` and,
+//! since Phase 3, standard operators `+`/`-`/`*`/`/` between two numerical `Vector`s
+//! without NA) across three variants at multiple sizes to determine a data-driven
+//! `THRESHOLD` for rayon work distribution:
 //!
-//!   1. boxed:    el loop original sobre `Vec<Value>` (via `Deref`, un `Value::F64` por
-//!                celda), tal como estaba antes de este punto.
-//!   2. seq_f64:  mismo cómputo pero sobre el `&[f64]` de `VectorData::as_f64_view()`
-//!                (cero boxing), un solo hilo.
-//!   3. par_f64:  igual que (2) pero repartido con `rayon`'s `par_iter().zip()`.
+//!   1. boxed:    original loop over `Vec<Value>` (via `Deref`, one `Value::F64` per
+//!                cell), as previously structured.
+//!   2. seq_f64:  same computation over the `&[f64]` from `VectorData::as_f64_view()`
+//!                (zero boxing), single thread.
+//!   3. par_f64:  same as (2) but partitioned with `rayon`'s `par_iter().zip()`.
 //!
-//! Uso: `cargo run --release --example spike_vector_elementwise_parallel_latency -p ghl-runtime`
+//! Usage: `cargo run --release --example spike_vector_elementwise_parallel_latency -p ghl-runtime`
 
 use std::time::{Duration, Instant};
 use rayon::prelude::*;
@@ -56,12 +56,12 @@ fn best_of<T>(f: impl Fn() -> T) -> (Duration, T) {
 }
 
 fn run_size(n: usize) {
-    println!("\nN = {n} elementos");
+    println!("\nN = {n} elements");
 
     let boxed_a = build_boxed(n);
     let boxed_b = build_boxed(n);
     let (t_boxed, r_boxed) = best_of(|| boxed_add(&boxed_a, &boxed_b));
-    println!("  boxed (Vec<Value>):    min sobre {REPEATS}: {t_boxed:>10.3?}");
+    println!("  boxed (Vec<Value>):    min over {REPEATS}: {t_boxed:>10.3?}");
 
     let flat_a: Vec<f64> = (0..n).map(|i| i as f64 * 0.5).collect();
     let flat_b: Vec<f64> = (0..n).map(|i| i as f64 * 0.5).collect();
@@ -72,10 +72,10 @@ fn run_size(n: usize) {
     let (a, b) = (view_a.as_slice(), view_b.as_slice());
 
     let (t_seq, r_seq) = best_of(|| seq_f64_add(a, b));
-    println!("  seq_f64 (sin boxing):  min sobre {REPEATS}: {t_seq:>10.3?}");
+    println!("  seq_f64 (no boxing):   min over {REPEATS}: {t_seq:>10.3?}");
 
     let (t_par, r_par) = best_of(|| par_f64_add(a, b));
-    println!("  par_f64 (rayon):       min sobre {REPEATS}: {t_par:>10.3?}");
+    println!("  par_f64 (rayon):       min over {REPEATS}: {t_par:>10.3?}");
 
     assert_eq!(r_boxed[0].as_f64(), Some(r_seq[0]));
     assert_eq!(r_seq, r_par);
@@ -89,16 +89,12 @@ fn run_size(n: usize) {
 }
 
 fn main() {
-    // `size_of::<Value>() == 160` bytes (medido con un chequeo aparte, no asumido) -- mucho
-    // más que lo estimado a ojo en sesiones previas. A diferencia de `dot()` (input+input+
-    // un f64 escalar), una op elementwise produce un vector de salida O(n) completo, así
-    // que el camino "boxed" sostiene hasta 3-4 buffers de tamaño N simultáneos (dos inputs
-    // + el resultado). Un primer intento con 20_000_000 terminó en un OOM-kill real
-    // (confirmado por `journalctl -k`: `anon-rss:11563088kB`) en este sandbox de 15GB --
-    // 5_000_000 ya deja ver el efecto con margen de sobra (~3.2GB de pico en el peor caso,
-    // bien lejos del límite) sin repetir el problema.
+    // `size_of::<Value>() == 160` bytes (measured explicitly, not guessed).
+    // Unlike `dot()` (input+input+scalar f64), an elementwise op produces a full O(n) output vector,
+    // meaning the boxed path holds up to 3-4 simultaneous size N buffers (two inputs + result).
+    // 5_000_000 provides clear benchmark measurements well within memory limits.
     println!("size_of::<Value>() = {} bytes", std::mem::size_of::<Value>());
-    println!("hilos disponibles para rayon: {}", rayon::current_num_threads());
+    println!("Threads available for rayon: {}", rayon::current_num_threads());
     for n in [1_000usize, 10_000, 20_000, 30_000, 50_000, 75_000, 100_000, 1_000_000, 5_000_000] {
         run_size(n);
     }

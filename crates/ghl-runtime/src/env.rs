@@ -780,7 +780,7 @@ fn native_gamma_cdf(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// redesigning that mechanism -- the mean, on the other hand, needs nothing but a scalar
 /// accumulator per replica, so it parallelizes cleanly as-is.
 ///
-/// "Memoria compartida sin duplicación de la muestra base" (the case's own wording) comes
+/// "Shared memory without duplicating the base sample" (the case's own wording) comes
 /// for free from `VectorData::as_f64_view()` (Punto 2, Fase 3): `base` below is a single
 /// borrowed `&[f64]`, taken once, shared read-only across every rayon task -- no replica
 /// ever copies the base sample, and no replica materializes its resampled subset either
@@ -1215,9 +1215,9 @@ fn native_ungroup(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Some(lf @ Value::LazyFrame { .. }) => Ok(lf.clone()),
         Some(other) => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `ungroup()` requires a GroupedDataFrame or GroupedLazyFrame, found `{}`", other.type_name()),
+            format!("`ungroup()` requires a GroupedDataFrame or GroupedLazyFrame, found `{}`", other.type_name()),
         )),
-        None => Err(Diagnostic::compute_error("C0201", "(ノ°□°)ノ `ungroup()` requires an argument")),
+        None => Err(Diagnostic::compute_error("C0201", "`ungroup()` requires an argument")),
     }
 }
 
@@ -1569,7 +1569,7 @@ fn native_cummin(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 fn native_lag(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "(ノ°□°)ノ `lag()` requires a Vector argument")
+        Diagnostic::compute_error("C0201", "`lag()` requires a Vector argument")
     })?;
     let len = vd.len();
     let n = args.get(1).and_then(|v| v.as_i64()).unwrap_or(1).max(0) as usize;
@@ -1583,7 +1583,7 @@ fn native_lag(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 fn native_lead(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "(ノ°□°)ノ `lead()` requires a Vector argument")
+        Diagnostic::compute_error("C0201", "`lead()` requires a Vector argument")
     })?;
     let len = vd.len();
     let n = args.get(1).and_then(|v| v.as_i64()).unwrap_or(1).max(0) as usize;
@@ -1639,9 +1639,9 @@ fn as_numeric_source(v: &Value, expected_len: usize) -> Option<NumericSource<'_>
 }
 
 fn native_if_else(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let cond = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "(ノ°□°)ノ `if_else()` requires 3 arguments"))?;
-    let yes = args.get(1).ok_or_else(|| Diagnostic::compute_error("C0201", "(ノ°□°)ノ `if_else()` requires 3 arguments"))?;
-    let no = args.get(2).ok_or_else(|| Diagnostic::compute_error("C0201", "(ノ°□°)ノ `if_else()` requires 3 arguments"))?;
+    let cond = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
+    let yes = args.get(1).ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
+    let no = args.get(2).ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
 
     match cond {
         Value::Bool(b) => Ok(if *b { yes.clone() } else { no.clone() }),
@@ -1688,7 +1688,7 @@ fn native_if_else(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("(ノ°□°)ノ `if_else()` condition must be Bool or Vector[Bool], found `{}`", other.type_name()),
+            format!("`if_else()` condition must be Bool or Vector[Bool], found `{}`", other.type_name()),
         )),
     }
 }
@@ -2011,7 +2011,7 @@ fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
             Err(Diagnostic::compute_error(
                 "C0202",
                 format!(
-                    "(ノ°□°)ノ `filter()` on LazyFrame does not understand the second argument (`{}`) as a predicate",
+                    "`filter()` on LazyFrame does not understand the second argument (`{}`) as a predicate",
                     predicate.type_name()
                 ),
             ))
@@ -3338,21 +3338,21 @@ fn native_write_parquet(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 fn native_lazy(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let df = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "(ノ°□°)ノ `lazy()` requires a DataFrame")
+        Diagnostic::compute_error("C0201", "`lazy()` requires a DataFrame")
     })?;
     crate::io::df_lazy(df)
 }
 
 fn native_collect(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let lf = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "(ノ°□°)ノ `collect()` requires a LazyFrame")
+        Diagnostic::compute_error("C0201", "`collect()` requires a LazyFrame")
     })?;
     crate::io::df_collect(lf)
 }
 
 fn native_explain(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let lf = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "(ノ°□°)ノ `explain()` requires a LazyFrame")
+        Diagnostic::compute_error("C0201", "`explain()` requires a LazyFrame")
     })?;
     let opt = args.get(1).and_then(|v| v.as_bool()).unwrap_or(true);
     crate::io::df_explain(lf, opt)
@@ -3360,14 +3360,14 @@ fn native_explain(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 fn native_scan_csv(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let path = args.first().and_then(|v| v.as_str()).ok_or_else(|| {
-        Diagnostic::compute_error("C0403", "(ノ°□°)ノ `scan_csv()` requires a file path string")
+        Diagnostic::compute_error("C0403", "`scan_csv()` requires a file path string")
     })?;
     crate::io::scan_csv_file(path)
 }
 
 fn native_scan_parquet(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let path = args.first().and_then(|v| v.as_str()).ok_or_else(|| {
-        Diagnostic::compute_error("C0405", "(ノ°□°)ノ `scan_parquet()` requires a file path string")
+        Diagnostic::compute_error("C0405", "`scan_parquet()` requires a file path string")
     })?;
     crate::io::scan_parquet_file(path)
 }

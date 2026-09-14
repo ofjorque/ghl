@@ -321,7 +321,7 @@ pub fn cmd_fetch(manifest_path: &Path, caps: &RenderCaps) -> Result<Vec<LockedPa
     Ok(locked_packages)
 }
 
-/// Executes all tests in `tests/` or files ending with `*_test.gh`.
+/// Executes all tests in `tests/` or files ending with `*_test.gh` / `*_test.ghl`.
 pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
     let mut test_files = Vec::new();
     let tests_dir = root_dir.join("tests");
@@ -329,7 +329,11 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
         if let Ok(entries) = fs::read_dir(tests_dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.is_file() && p.extension().map(|ext| ext == "gh").unwrap_or(false) {
+                if p.is_file()
+                    && p.extension()
+                        .map(|ext| ext == "gh" || ext == "ghl")
+                        .unwrap_or(false)
+                {
                     test_files.push(p);
                 }
             }
@@ -341,7 +345,12 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
         if let Ok(entries) = fs::read_dir(src_dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.is_file() && p.file_name().and_then(|n| n.to_str()).map(|s| s.ends_with("_test.gh")).unwrap_or(false) {
+                if p.is_file()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|s| s.ends_with("_test.gh") || s.ends_with("_test.ghl"))
+                        .unwrap_or(false)
+                {
                     test_files.push(p);
                 }
             }
@@ -349,7 +358,7 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
     }
 
     if test_files.is_empty() {
-        println!("{}", caps.dim("No GHL test files found in `tests/` or `src/*_test.gh`."));
+        println!("{}", caps.dim("No GHL test files found in `tests/` or `src/*_test.{gh,ghl}`."));
         return Ok(());
     }
 
@@ -459,7 +468,12 @@ mod tests {
         assert!(lock_content2.contains("name = \"helper\""), "ghl.lock must lock helper package");
         assert!(lock_content2.contains("checksum = \"sha256:"), "ghl.lock must record SHA-256 for package");
 
-        // 4. Test cmd_test
+        // 4. Test cmd_test (supporting both .gh and .ghl)
+        std::fs::write(
+            proj_path.join("tests/extended_test.ghl"),
+            "let x = 42;\n",
+        ).expect("write extended_test.ghl");
+
         let test_res = cmd_test(&proj_path, &caps);
         assert!(test_res.is_ok(), "cmd_test should discover and pass tests: {:?}", test_res.err());
 

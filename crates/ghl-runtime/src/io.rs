@@ -22,33 +22,30 @@ use crate::polars_bridge;
 use crate::value::{Value, LazyPlan};
 use crate::vector_data::VectorData;
 
-/// Extrae `&DataFrame`/`&Arc<NaReasonTable>` de un `Value`, o el diagnóstico de error
-/// estándar que usan los ~30 verbos de este módulo cuando el primer argumento no es un
-/// DataFrame. Devuelve el `Arc` en sí (no un `&NaReasonTable` ya destapado) para que un
-/// verbo que reutiliza las mismas razones sin cambios (`ungroup()`, una variable que solo
-/// se lee) pueda clonar el `Arc` -- barato, sin copiar la tabla -- en vez de perder esa
-/// posibilidad por haber "destapado" la referencia antes de tiempo (`&NaReasonTable` sigue
-/// funcionando igual para todo lo demás vía coerción automática de `Deref`).
+/// Extracts `&DataFrame` and `&Arc<NaReasonTable>` from a `Value`, or returns the
+/// standard diagnostic error used by the DataFrame verbs in this module when the
+/// first argument is not a DataFrame. Returns the `Arc` itself (rather than an unwrapped
+/// `&NaReasonTable`) so verbs that reuse reasons unchanged (`ungroup()`, variable reads)
+/// can clone the `Arc` cheaply without copying the underlying table.
 fn as_dataframe<'a>(df: &'a Value, verb: &str) -> Result<(&'a DataFrame, &'a Arc<NaReasonTable>), Diagnostic> {
     match df {
         Value::DataFrame { frame, na_reasons } => Ok((frame, na_reasons)),
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `{verb}()` requires a DataFrame, found `{}`", other.type_name()),
+            format!("`{verb}()` requires a DataFrame, found `{}`", other.type_name()),
         )),
     }
 }
 
-/// Aplica una permutación/subconjunto de filas (por posición absoluta en `frame`) a la
-/// vez sobre el `DataFrame` y su `NaReasonTable`, dejando ambos alineados — el mismo
-/// mecanismo validado en el Spike #2, ahora compartido por `arrange`/`slice`/`head`/
-/// `tail`/`sample_n`/`distinct`. Envuelve el resultado en `Arc` acá mismo (no en cada
-/// llamador) para que sea imposible que un llamador se olvide de hacerlo.
+/// Applies a row permutation/subset (by absolute row index in `frame`) simultaneously
+/// to the `DataFrame` and its `NaReasonTable`, keeping both aligned — shared across
+/// `arrange`/`slice`/`head`/`tail`/`sample_n`/`distinct`. Wraps the result in an `Arc`
+/// directly here to enforce consistent wrapping across all callers.
 pub(crate) fn take_rows(frame: &DataFrame, na_reasons: &NaReasonTable, indices: &[usize]) -> Result<(DataFrame, Arc<NaReasonTable>), Diagnostic> {
     let idx: Vec<IdxSize> = indices.iter().map(|&i| i as IdxSize).collect();
     let idx_ca = IdxCa::from_vec(PlSmallStr::EMPTY, idx);
     let new_frame = frame.take(&idx_ca).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("Error seleccionando filas: {e}"))
+        Diagnostic::compute_error("C0210", format!("Failed to take rows: {e}"))
     })?;
     Ok((new_frame, Arc::new(na_reasons.reindex(indices))))
 }
@@ -63,12 +60,11 @@ fn value_to_any_value(v: &Value) -> AnyValue<'static> {
     }
 }
 
-/// `col(...) OP scalar` (`filter(df, col("score") > 75.0)`) — Caso 2.3 de Suite 02:
-/// "filtrado vectorial mediante bitmasks de validez Arrow", en vez de boxear la columna
-/// entera a `Vec<Value>` y comparar celda por celda en Rust (lo que hacía la versión
-/// anterior de `filter()`). El escalar se envuelve en un `Column::Scalar` de largo
-/// lógico igual al frame (sin materializarlo — broadcast real, no una copia de N
-/// elementos) y la comparación corre nativa en polars, dando directo un `BooleanChunked`.
+/// `col(...) OP scalar` (`filter(df, col("score") > 75.0)`) — Case 2.3 of Suite 02:
+/// vectorized filtering using Arrow validity bitmasks, avoiding full column boxing
+/// into `Vec<Value>` and cell-by-cell Rust comparisons. The scalar is wrapped in a
+/// `Column::Scalar` matching the logical length of the frame (true broadcast without
+/// N-element allocations) and evaluated natively in Polars to produce a `BooleanChunked`.
 pub(crate) fn colref_predicate_mask(
     frame: &DataFrame,
     col: &str,
@@ -117,7 +113,7 @@ pub(crate) fn value_to_lazy_lit(v: &Value) -> Result<Expr, Diagnostic> {
         Value::String(s) => Ok(lit(s.as_str())),
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("(ノ°□°)ノ Value `{}` cannot be used as a literal in a lazy query expression", other.type_name()),
+            format!("Value `{}` cannot be used as a literal in a lazy query expression", other.type_name()),
         )),
     }
 }
@@ -137,7 +133,7 @@ pub(crate) fn predicate_to_lazy_expr(pred: &Value) -> Result<Expr, Diagnostic> {
                 BinaryOp::NotEq => Ok(left.neq(right)),
                 other => Err(Diagnostic::compute_error(
                     "C0202",
-                    format!("(ノ°□°)ノ `filter()` does not support operator `{:?}` in a lazy query", other),
+                    format!("`filter()` does not support operator `{:?}` in a lazy query", other),
                 )),
             }
         }
@@ -159,7 +155,7 @@ pub(crate) fn predicate_to_lazy_expr(pred: &Value) -> Result<Expr, Diagnostic> {
         other => Err(Diagnostic::compute_error(
             "C0202",
             format!(
-                "(ノ°□°)ノ `filter()` does not understand `{}` as a lazy predicate",
+                "`filter()` does not understand `{}` as a lazy predicate",
                 other.type_name()
             ),
         )),
@@ -230,7 +226,7 @@ pub fn df_filter_by_predicate(df: &Value, pred: &Value) -> Result<Value, Diagnos
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `filter()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!("`filter()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
         )),
     }
 }
@@ -575,7 +571,7 @@ pub fn df_lazy(val: &Value) -> Result<Value, Diagnostic> {
         Value::LazyFrame { .. } => Ok(val.clone()),
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `lazy()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!("`lazy()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
         )),
     }
 }
@@ -585,7 +581,7 @@ pub fn df_collect(val: &Value) -> Result<Value, Diagnostic> {
     match val {
         Value::LazyFrame { plan, na_reasons } => {
             let collected = plan.0.clone().collect().map_err(|e| {
-                Diagnostic::compute_error("C0210", format!("(ノ°□°)ノ `collect()` execution failed: {e}"))
+                Diagnostic::compute_error("C0210", format!("`collect()` execution failed: {e}"))
             })?;
             Ok(Value::DataFrame {
                 frame: collected,
@@ -595,7 +591,7 @@ pub fn df_collect(val: &Value) -> Result<Value, Diagnostic> {
         Value::DataFrame { .. } => Ok(val.clone()),
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `collect()` requires a LazyFrame or DataFrame, found `{}`", other.type_name()),
+            format!("`collect()` requires a LazyFrame or DataFrame, found `{}`", other.type_name()),
         )),
     }
 }
@@ -605,19 +601,19 @@ pub fn df_explain(val: &Value, optimized: bool) -> Result<Value, Diagnostic> {
     match val {
         Value::LazyFrame { plan, .. } => {
             let plan_str = plan.0.explain(optimized).map_err(|e| {
-                Diagnostic::compute_error("C0210", format!("(ノ°□°)ノ Failed to generate explain plan: {e}"))
+                Diagnostic::compute_error("C0210", format!("Failed to generate explain plan: {e}"))
             })?;
             Ok(Value::String(plan_str))
         }
         Value::DataFrame { frame, .. } => {
             let plan_str = frame.clone().lazy().explain(optimized).map_err(|e| {
-                Diagnostic::compute_error("C0210", format!("(ノ°□°)ノ Failed to generate explain plan: {e}"))
+                Diagnostic::compute_error("C0210", format!("Failed to generate explain plan: {e}"))
             })?;
             Ok(Value::String(plan_str))
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `explain()` requires a LazyFrame or DataFrame, found `{}`", other.type_name()),
+            format!("`explain()` requires a LazyFrame or DataFrame, found `{}`", other.type_name()),
         )),
     }
 }
@@ -627,7 +623,7 @@ pub fn scan_csv_file(path: &str) -> Result<Value, Diagnostic> {
     let plan = LazyCsvReader::new(path.into())
         .finish()
         .map_err(|e| {
-            Diagnostic::compute_error("C0403", format!("(ノ°□°)ノ Failed to scan CSV file `{path}`: {e}"))
+            Diagnostic::compute_error("C0403", format!("Failed to scan CSV file `{path}`: {e}"))
         })?;
     Ok(Value::LazyFrame {
         plan: LazyPlan(plan),
@@ -639,7 +635,7 @@ pub fn scan_csv_file(path: &str) -> Result<Value, Diagnostic> {
 pub fn scan_parquet_file(path: &str) -> Result<Value, Diagnostic> {
     let plan = LazyFrame::scan_parquet(path.into(), ScanArgsParquet::default())
         .map_err(|e| {
-            Diagnostic::compute_error("C0405", format!("(ノ°□°)ノ Failed to scan Parquet file `{path}`: {e}"))
+            Diagnostic::compute_error("C0405", format!("Failed to scan Parquet file `{path}`: {e}"))
         })?;
     Ok(Value::LazyFrame {
         plan: LazyPlan(plan),
@@ -681,7 +677,7 @@ pub fn df_select(df: &Value, cols_to_keep: &[String]) -> Result<Value, Diagnosti
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `select()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!("`select()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
         )),
     }
 }
@@ -702,7 +698,7 @@ pub fn df_head(df: &Value, n: usize) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `head()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!("`head()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
         )),
     }
 }
@@ -724,7 +720,7 @@ pub fn df_tail(df: &Value, n: usize) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `tail()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!("`tail()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
         )),
     }
 }
@@ -788,7 +784,7 @@ pub fn df_mutate(df: &Value, col_name: &str, new_values: Vec<Value>) -> Result<V
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `mutate()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!("`mutate()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
         )),
     }
 }
@@ -857,7 +853,7 @@ pub fn df_arrange(df: &Value, specs: &[(String, bool)]) -> Result<Value, Diagnos
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `arrange()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!("`arrange()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
         )),
     }
 }
@@ -1043,7 +1039,7 @@ pub fn df_group_by(df: &Value, keys: &[String]) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("(ノ°□°)ノ `group_by()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!("`group_by()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
         )),
     }
 }
@@ -1053,7 +1049,7 @@ const PROPAGATES_NA_KINDS: [&str; 7] = ["mean", "sum", "std_dev", "var", "min", 
 /// Builds the `Expr` for one `(kind, col)` aggregation, aliased to `alias` — one leaf of the
 /// single fused `LazyFrame::group_by().agg([...])` query `df_summarize` runs for every
 /// distinct aggregation the caller asked for, across ALL groups at once (this is the
-/// "optimización de seguimiento" TODO.md deferred when `summarize()` first shipped: one
+/// "follow-up optimization" TODO.md deferred when `summarize()` first shipped: one
 /// query-engine pass instead of one `take()`+reduce per group per spec).
 fn agg_expr_for(kind: &str, col_name: &str, alias: &str) -> Result<Expr, Diagnostic> {
     let base = col(col_name);
@@ -1100,7 +1096,7 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
                 (other, None) => {
                     return Err(Diagnostic::compute_error(
                         "C0201",
-                        format!("(ノ°□°)ノ Aggregation `{other}` requires a column argument in `summarize()`"),
+                        format!("Aggregation `{other}` requires a column argument in `summarize()`"),
                     ));
                 }
             };
@@ -1119,7 +1115,7 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
             return Err(Diagnostic::compute_error(
                 "C0201",
                 format!(
-                    "(ノ°□°)ノ `summarize()` requires a GroupedDataFrame or GroupedLazyFrame (did you forget `group_by()`?), found `{}`",
+                    "`summarize()` requires a GroupedDataFrame or GroupedLazyFrame (did you forget `group_by()`?), found `{}`",
                     other.type_name()
                 ),
             ));
@@ -1546,7 +1542,7 @@ fn df_join_dispatch(left: &Value, right: &Value, on: &[String], how: JoinType) -
             other => {
                 return Err(Diagnostic::compute_error(
                     "C0201",
-                    format!("(ノ°□°)ノ `{verb}()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+                    format!("`{verb}()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
                 ));
             }
         };
@@ -1556,7 +1552,7 @@ fn df_join_dispatch(left: &Value, right: &Value, on: &[String], how: JoinType) -
             other => {
                 return Err(Diagnostic::compute_error(
                     "C0201",
-                    format!("(ノ°□°)ノ `{verb}()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+                    format!("`{verb}()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
                 ));
             }
         };

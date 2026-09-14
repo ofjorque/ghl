@@ -1,19 +1,19 @@
-//! Fase 1 (`benchmarks/suites/02`, Caso 2.1) — generador reproducible del CSV sintético
-//! de gran escala: enteros, flotantes, strings y fechas (como texto — GHL no tiene un
-//! tipo Date todavía), con NA y `NA:Razon` esparcidos para ejercitar el side-channel de
-//! razones a escala real, no solo en pruebas de unidad con un puñado de filas.
+//! Phase 1 (`benchmarks/suites/02`, Case 2.1) — reproducible generator for large-scale
+//! synthetic CSV: integers, floats, strings, and dates (as text — GHL does not have a
+//! dedicated Date type yet), with NA and `NA:Reason` scattered to exercise the reason
+//! side-channel at scale, not just in unit tests with a handful of rows.
 //!
-//! El archivo en sí NUNCA se versiona (TODO.md, Fase 1) — se regenera con este script.
+//! The generated file itself is NEVER committed to git — it is generated with this script.
 //!
-//! Uso: `cargo run --release --example generate_synthetic_csv -p ghl-runtime -- <rows> <out_path>`
-//! Ejemplo para el caso completo de la Suite 02 (~25M filas, ~5GB):
+//! Usage: `cargo run --release --example generate_synthetic_csv -p ghl-runtime -- <rows> <out_path>`
+//! Example for the full Suite 02 case (~25M rows, ~5GB):
 //!   `cargo run --release --example generate_synthetic_csv -p ghl-runtime -- 25000000 target/synthetic_25m.csv`
 
 use std::io::{BufWriter, Write};
 use std::fs::File;
 
-// PRNG determinista (mismo xorshift64 de `crates/ghl-runtime/src/io.rs::sample_indices`,
-// no vale la pena una dependencia de `rand` solo para generar datos sintéticos).
+// Deterministic PRNG (same xorshift64 as `crates/ghl-runtime/src/io.rs::sample_indices`,
+// avoiding a dedicated `rand` dependency just for synthetic data generation).
 fn xorshift_next(state: &mut u64) -> u64 {
     let mut x = *state;
     x ^= x << 13;
@@ -24,7 +24,7 @@ fn xorshift_next(state: &mut u64) -> u64 {
 }
 
 const CATEGORIES: &[&str] = &["A", "B", "C", "D", "E"];
-const STATUSES: &[&str] = &["OK", "OK", "OK", "OK", "WARN", "ERROR"]; // OK ponderado
+const STATUSES: &[&str] = &["OK", "OK", "OK", "OK", "WARN", "ERROR"]; // Weighted OK
 const NA_REASONS: &[&str] = &["SensorDropout", "LowBattery", "Timeout", "OutOfRange"];
 
 fn main() {
@@ -39,8 +39,8 @@ fn main() {
     let file = File::create(&out_path).expect("could not create output CSV");
     let mut w = BufWriter::with_capacity(8 * 1024 * 1024, file);
 
-    // 12 columnas mixtas, como pide el Caso 2.1: 3 enteras, 3 flotantes, 4 strings
-    // (una de ellas fecha-como-texto), 2 booleanas.
+    // 12 mixed columns as required by Case 2.1: 3 integers, 3 floats, 4 strings
+    // (one of them date-as-text), 2 booleans.
     writeln!(
         w,
         "id,value_a,value_b,value_c,category,name,flag_a,flag_b,event_date,status,notes,score"
@@ -66,7 +66,7 @@ fn main() {
         let year = 2020 + (r1 % 6);
         let status = STATUSES[(r2 as usize) % STATUSES.len()];
 
-        // ~4% NA sin razón, ~2% NA con razón, en las dos columnas "sensibles".
+        // ~4% NA without reason, ~2% NA with reason, across the two sensitive columns.
         let notes_bucket = r3 % 100;
         let notes = if notes_bucket < 2 {
             format!("NA:{}", NA_REASONS[(r1 as usize) % NA_REASONS.len()])
@@ -95,7 +95,7 @@ fn main() {
     let elapsed = start.elapsed();
     let size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
     println!(
-        "Generadas {rows} filas / 12 columnas en {out_path} ({:.1} MB) en {:.2?}",
+        "Generated {rows} rows / 12 columns in {out_path} ({:.1} MB) in {:.2?}",
         size as f64 / (1024.0 * 1024.0),
         elapsed
     );
