@@ -108,9 +108,9 @@ Este documento audita y contrasta sistemáticamente el estado de implementación
   - [x] PRNG determinista bit-for-bit: `Xoshiro256PlusPlus`.
 - [x] **`std::core`:**
   - [x] Tipos primitivos, E/S estándar, operaciones de texto y funciones matemáticas avanzadas (`sqrt`, `log`, `exp`, `erf`, `gamma`).
-- [ ] **Gaps / Extensiones pendientes de RFC 04:**
-  - [ ] **`std::autodiff`:** Diferenciación automática modo reversa y forward (`grad(f)` para optimizadores y HMC) (RFC 04 §5).
-  - [ ] **Cliente/servidor asíncrono en `std::core`:** Primitivas de red TCP/HTTP para servir modelos estadísticos como microservicios (RFC 04 §6).
+- [x] **Gaps / Extensiones pendientes de RFC 04:**
+  - [x] **`std::autodiff`:** Diferenciación automática modo reversa y forward (`grad(f)` para optimizadores y HMC) (RFC 04 §5).
+  - [x] **Cliente/servidor asíncrono en `std::core`:** Primitivas de red TCP/HTTP para servir modelos estadísticos como microservicios (RFC 04 §6).
 
 ---
 

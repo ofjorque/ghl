@@ -88,6 +88,18 @@ pub fn get_module_item_names(path: &[String]) -> Option<Vec<&'static str>> {
             "scope", "alloc_vector", "alloc_matrix", "reset", "allocated_bytes",
         ]),
 
+        ["autodiff"] | ["std", "autodiff"] => Some(vec![
+            "grad", "diff", "value_and_grad", "jacobian",
+        ]),
+
+        ["http"] | ["std", "http"] => Some(vec![
+            "serve", "response", "get", "post",
+        ]),
+
+        ["net"] | ["std", "net"] => Some(vec![
+            "tcp_connect",
+        ]),
+
         _ => None,
     }
 }
@@ -109,6 +121,12 @@ pub fn is_valid_module_path(path: &[String]) -> bool {
             | ["std", "plot"]
             | ["std", "arena"]
             | ["arena"]
+            | ["std", "autodiff"]
+            | ["autodiff"]
+            | ["std", "http"]
+            | ["http"]
+            | ["std", "net"]
+            | ["net"]
     )
 }
 
@@ -129,7 +147,16 @@ pub fn lookup_module_item(path: &[String]) -> Option<Value> {
     let (mod_path, item_name) = path.split_at(path.len() - 1);
     let name = &item_name[0];
     if is_item_in_module(mod_path, name) {
-        PRELUDE_ENV.get(name)
+        let full_name = path.join("::");
+        let short_name = if path.len() >= 2 && path[0] == "std" {
+            path[1..].join("::")
+        } else {
+            full_name.clone()
+        };
+        PRELUDE_ENV
+            .get(&full_name)
+            .or_else(|| PRELUDE_ENV.get(&short_name))
+            .or_else(|| PRELUDE_ENV.get(name))
     } else {
         None
     }
@@ -140,7 +167,8 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Value)>> {
     let names = get_module_item_names(path)?;
     let mut items = Vec::with_capacity(names.len());
     for name in names {
-        if let Some(val) = PRELUDE_ENV.get(name) {
+        let full_name = format!("{}::{}", path.join("::"), name);
+        if let Some(val) = PRELUDE_ENV.get(&full_name).or_else(|| PRELUDE_ENV.get(name)) {
             items.push((name.to_string(), val));
         }
     }

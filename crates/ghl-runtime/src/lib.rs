@@ -16,6 +16,8 @@ pub mod polars_bridge;
 pub mod vector_data;
 pub mod modules;
 pub mod arena;
+pub mod autodiff;
+pub mod net;
 
 pub use value::Value;
 pub use env::RuntimeEnv;
@@ -3990,5 +3992,113 @@ mod tests {
         interp.eval_program(&program).expect("evaluation ok");
 
         assert_eq!(interp.env.get("total").unwrap(), Value::F64(10.0));
+    }
+
+    #[test]
+    fn test_autodiff_scalar_and_vector_gradients() {
+        let code = r#"
+            // Scalar differentiation: f(x) = x^3 - 2x => f'(3) = 25.0
+            let f = |x| x * x * x - 2.0 * x;
+            let df = grad(f);
+            let d_scalar = df(3.0);
+
+            // Vector gradient: loss(w) = w[0]^2 + 3*w[0]*w[1] + 2*w[1]^2
+            // ∇loss([1, 2]) = [2*(1) + 3*(2), 3*(1) + 4*(2)] = [8.0, 11.0]
+            let loss = |w| w[0] * w[0] + 3.0 * w[0] * w[1] + 2.0 * w[1] * w[1];
+            let dloss = grad(loss);
+            let g = dloss([1.0, 2.0]);
+            let g0 = g[0];
+            let g1 = g[1];
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let d_scalar = interp.env.get("d_scalar").unwrap().as_f64().unwrap();
+        assert!((d_scalar - 25.0).abs() < 1e-6, "Expected 25.0, got {d_scalar}");
+
+        let g0 = interp.env.get("g0").unwrap().as_f64().unwrap();
+        let g1 = interp.env.get("g1").unwrap().as_f64().unwrap();
+        assert!((g0 - 8.0).abs() < 1e-6, "Expected 8.0, got {g0}");
+        assert!((g1 - 11.0).abs() < 1e-6, "Expected 11.0, got {g1}");
+    }
+
+    #[test]
+    fn test_autodiff_value_and_grad_and_jacobian() {
+        let code = r#"
+            let loss = |w| w[0] * w[0] + w[1] * w[1];
+            let vg = value_and_grad(loss, [3.0, 4.0]);
+            let v = vg.value;
+            let g = vg.grad;
+            let g0 = g[0];
+            let g1 = g[1];
+
+            // Jacobian for f(w) = [w[0] * w[1], w[0] + w[1]]
+            // J = [w[1], w[0] ; 1, 1] => at [2, 3] => [3, 2 ; 1, 1]
+            let f_vec = |w| [w[0] * w[1], w[0] + w[1]];
+            let J = jacobian(f_vec, [2.0, 3.0]);
+            let j00 = J[0, 0];
+            let j01 = J[0, 1];
+            let j10 = J[1, 0];
+            let j11 = J[1, 1];
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let v = interp.env.get("v").unwrap().as_f64().unwrap();
+        assert!((v - 25.0).abs() < 1e-6, "Expected 25.0, got {v}");
+
+        let g0 = interp.env.get("g0").unwrap().as_f64().unwrap();
+        let g1 = interp.env.get("g1").unwrap().as_f64().unwrap();
+        assert!((g0 - 6.0).abs() < 1e-6, "Expected 6.0, got {g0}");
+        assert!((g1 - 8.0).abs() < 1e-6, "Expected 8.0, got {g1}");
+
+        let j00 = interp.env.get("j00").unwrap().as_f64().unwrap();
+        let j01 = interp.env.get("j01").unwrap().as_f64().unwrap();
+        let j10 = interp.env.get("j10").unwrap().as_f64().unwrap();
+        let j11 = interp.env.get("j11").unwrap().as_f64().unwrap();
+        assert!((j00 - 3.0).abs() < 1e-6, "Expected 3.0, got {j00}");
+        assert!((j01 - 2.0).abs() < 1e-6, "Expected 2.0, got {j01}");
+        assert!((j10 - 1.0).abs() < 1e-6, "Expected 1.0, got {j10}");
+        assert!((j11 - 1.0).abs() < 1e-6, "Expected 1.0, got {j11}");
+    }
+
+    #[test]
+    fn test_http_microservice_server_and_client() {
+        let code = r#"
+            let server = http::serve("127.0.0.1:0", |req| {
+                if req.path == "/predict" {
+                    http::response(200, "{\"prediction\": 42.0}")
+                } else {
+                    http::response(404, "Not Found")
+                }
+            });
+
+            let url_predict = "http://" + server.addr + "/predict";
+            let url_missing = "http://" + server.addr + "/other";
+
+            let resp_ok = http::get(url_predict);
+            let resp_not_found = http::get(url_missing);
+
+            let ok_status = resp_ok.status;
+            let ok_body = resp_ok.body;
+            let ok_flag = resp_ok.ok;
+            let not_found_status = resp_not_found.status;
+
+            let post_resp = http::post(url_predict, "{\"input\": 10}", "application/json");
+            let post_status = post_resp.status;
+
+            server.stop();
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        assert_eq!(interp.env.get("ok_status").unwrap(), Value::I64(200));
+        assert_eq!(interp.env.get("ok_body").unwrap(), Value::String("{\"prediction\": 42.0}".into()));
+        assert_eq!(interp.env.get("ok_flag").unwrap(), Value::Bool(true));
+        assert_eq!(interp.env.get("not_found_status").unwrap(), Value::I64(404));
+        assert_eq!(interp.env.get("post_status").unwrap(), Value::I64(200));
     }
 }

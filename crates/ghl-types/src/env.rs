@@ -723,6 +723,32 @@ impl TypeEnv {
             );
         }
 
+        // Automatic Differentiation (RFC 04 §5)
+        for name in [
+            "grad", "autodiff::grad", "diff", "autodiff::diff",
+            "value_and_grad", "autodiff::value_and_grad",
+            "jacobian", "autodiff::jacobian",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
+        // Network & HTTP Microservices (RFC 04 §6)
+        for name in [
+            "http::serve", "http_serve", "http::response", "http_response",
+            "http::get", "http_get", "http::post", "http_post",
+            "net::tcp_connect", "tcp_connect",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
         env
     }
 

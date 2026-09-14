@@ -229,6 +229,24 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("allocated_bytes".into(), any_fn()),
         ]),
 
+        ["autodiff"] | ["std", "autodiff"] => Some(vec![
+            ("grad".into(), any_fn()),
+            ("diff".into(), any_fn_multi(2)),
+            ("value_and_grad".into(), any_fn_multi(2)),
+            ("jacobian".into(), any_fn_multi(2)),
+        ]),
+
+        ["http"] | ["std", "http"] => Some(vec![
+            ("serve".into(), any_fn_multi(2)),
+            ("response".into(), any_fn()),
+            ("get".into(), any_fn()),
+            ("post".into(), any_fn_multi(2)),
+        ]),
+
+        ["net"] | ["std", "net"] => Some(vec![
+            ("tcp_connect".into(), any_fn()),
+        ]),
+
         _ => None,
     }
 }
@@ -250,6 +268,12 @@ pub fn is_valid_module_path(path: &[String]) -> bool {
             | ["std", "plot"]
             | ["std", "arena"]
             | ["arena"]
+            | ["std", "autodiff"]
+            | ["autodiff"]
+            | ["std", "http"]
+            | ["http"]
+            | ["std", "net"]
+            | ["net"]
     )
 }
 

@@ -295,6 +295,28 @@ impl RuntimeEnv {
         env.set("allocated_bytes".into(),        Value::NativeFn(native_arena_allocated_bytes));
         env.set("arena::allocated_bytes".into(), Value::NativeFn(native_arena_allocated_bytes));
 
+        // Automatic Differentiation (RFC 04 §5)
+        env.set("grad".into(),                     Value::NativeFnCtx(crate::autodiff::native_autodiff_grad));
+        env.set("autodiff::grad".into(),           Value::NativeFnCtx(crate::autodiff::native_autodiff_grad));
+        env.set("diff".into(),                     Value::NativeFnCtx(crate::autodiff::native_autodiff_diff));
+        env.set("autodiff::diff".into(),           Value::NativeFnCtx(crate::autodiff::native_autodiff_diff));
+        env.set("value_and_grad".into(),           Value::NativeFnCtx(crate::autodiff::native_autodiff_value_and_grad));
+        env.set("autodiff::value_and_grad".into(), Value::NativeFnCtx(crate::autodiff::native_autodiff_value_and_grad));
+        env.set("jacobian".into(),                 Value::NativeFnCtx(crate::autodiff::native_autodiff_jacobian));
+        env.set("autodiff::jacobian".into(),       Value::NativeFnCtx(crate::autodiff::native_autodiff_jacobian));
+
+        // Network & HTTP Microservices (RFC 04 §6)
+        env.set("http::serve".into(),              Value::NativeFnCtx(crate::net::native_http_serve));
+        env.set("http_serve".into(),               Value::NativeFnCtx(crate::net::native_http_serve));
+        env.set("http::response".into(),           Value::NativeFn(crate::net::native_http_response));
+        env.set("http_response".into(),            Value::NativeFn(crate::net::native_http_response));
+        env.set("http::get".into(),                Value::NativeFn(crate::net::native_http_get));
+        env.set("http_get".into(),                 Value::NativeFn(crate::net::native_http_get));
+        env.set("http::post".into(),               Value::NativeFn(crate::net::native_http_post));
+        env.set("http_post".into(),                Value::NativeFn(crate::net::native_http_post));
+        env.set("net::tcp_connect".into(),         Value::NativeFn(crate::net::native_tcp_connect));
+        env.set("tcp_connect".into(),              Value::NativeFn(crate::net::native_tcp_connect));
+
         env
     }
 
