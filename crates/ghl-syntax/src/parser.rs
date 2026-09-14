@@ -794,12 +794,12 @@ pub fn use_stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Cl
 pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone {
     let fn_prefix = just(Token::Hash)
         .then_ignore(just(Token::LBracket))
-        .then_ignore(select! { Token::Ident(name) if name == "export_ffi" => () })
+        .then_ignore(just(Token::Ident("export_ffi".to_string())))
         .then_ignore(just(Token::RBracket))
         .to(true)
         .or(
             just(Token::Extern)
-                .then_ignore(select! { Token::StringLit(s) if s == "C" => () })
+                .then_ignore(just(Token::StringLit("C".to_string())))
                 .to(true),
         );
 

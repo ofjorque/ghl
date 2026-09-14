@@ -170,7 +170,7 @@ pub fn native_par_sum(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let all_ints = items.iter().all(|it| matches!(it, Value::I64(_)));
     if all_ints {
         let s: i64 = items.par_iter().map(|it| match it {
-            Value::I64(n) => *n,
+            &Value::I64(n) => n,
             _ => 0,
         }).sum();
         Ok(Value::I64(s))
