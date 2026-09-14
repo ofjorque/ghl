@@ -34,6 +34,13 @@ impl Interpreter {
         }
     }
 
+    pub fn with_env(env: RuntimeEnv) -> Self {
+        Self {
+            env,
+            pending_return: None,
+        }
+    }
+
     pub fn eval_program(&mut self, program: &Program) -> Result<Value, Diagnostic> {
         let mut last_val = Value::Unit;
         for stmt in &program.statements {
@@ -557,6 +564,22 @@ impl Interpreter {
             }
 
             ExprKind::Placeholder => Ok(Value::Unit),
+
+            ExprKind::Range { start, end, inclusive } => {
+                let start_val = self.eval_expr(start)?;
+                let end_val = self.eval_expr(end)?;
+                match (start_val, end_val) {
+                    (Value::I64(s), Value::I64(e)) => Ok(Value::Range {
+                        start: s,
+                        end: e,
+                        inclusive: *inclusive,
+                    }),
+                    (s, e) => Err(Diagnostic::compute_error(
+                        "C0104",
+                        format!("Range requires integer bounds, got `{}` and `{}`", s.type_name(), e.type_name()),
+                    )),
+                }
+            }
 
             ExprKind::Path(segments) => {
                 if segments.len() == 2 && (segments[0] == "NAReason" || segments[0] == "NAReasons") {

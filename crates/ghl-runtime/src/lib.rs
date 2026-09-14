@@ -18,6 +18,8 @@ pub mod modules;
 pub mod arena;
 pub mod autodiff;
 pub mod net;
+pub mod concurrency;
+pub mod gpu;
 
 pub use value::Value;
 pub use env::RuntimeEnv;
@@ -4100,5 +4102,115 @@ mod tests {
         assert_eq!(interp.env.get("ok_flag").unwrap(), Value::Bool(true));
         assert_eq!(interp.env.get("not_found_status").unwrap(), Value::I64(404));
         assert_eq!(interp.env.get("post_status").unwrap(), Value::I64(200));
+    }
+
+    #[test]
+    fn test_rfc05_parallel_iterators() {
+        let code = r#"
+            let mapped = (0..5).par_iter().map(|x| x * 2).collect();
+            let sum_val = (1..=10).par_iter().sum();
+            let count_val = (0..50).par_iter().count();
+            let reduced = (1..=4).par_iter().reduce(|a, b| a + b);
+            let filtered = [1.0, 5.0, 2.0, 8.0].par_iter().filter(|x| x > 3.0).collect();
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let mapped = interp.env.get("mapped").unwrap();
+        if let Value::Vector(vd) = mapped {
+            assert_eq!(vd.to_vec(), vec![Value::I64(0), Value::I64(2), Value::I64(4), Value::I64(6), Value::I64(8)]);
+        } else {
+            panic!("Expected Vector for mapped, got {:?}", mapped);
+        }
+
+        assert_eq!(interp.env.get("sum_val").unwrap(), Value::I64(55));
+        assert_eq!(interp.env.get("count_val").unwrap(), Value::I64(50));
+        assert_eq!(interp.env.get("reduced").unwrap(), Value::I64(10));
+
+        let filtered = interp.env.get("filtered").unwrap();
+        if let Value::Vector(vd) = filtered {
+            assert_eq!(vd.to_vec(), vec![Value::F64(5.0), Value::F64(8.0)]);
+        } else {
+            panic!("Expected Vector for filtered, got {:?}", filtered);
+        }
+    }
+
+    #[test]
+    fn test_rfc05_gpu_and_philox_prng() {
+        let code = r#"
+            let dev = Device::default_gpu();
+            let a = mat [1.0, 2.0; 3.0, 4.0];
+            let b = mat [2.0, 0.0; 1.0, 2.0];
+            let gpu_a = a.to_gpu(dev);
+            let gpu_b = b.to_gpu(dev);
+            let gpu_c = gpu_a.matmul(gpu_b);
+            let c = gpu_c.to_cpu();
+
+            // Cholesky on symmetric positive-definite matrix
+            let spd = mat [4.0, 12.0; 12.0, 45.0];
+            let gpu_spd = spd.to_gpu(dev);
+            let gpu_l = gpu_spd.cholesky();
+            let l = gpu_l.to_cpu();
+
+            // Vector reduce_sum
+            let v = [1.0, 2.0, 3.0, 4.0, 5.0];
+            let gpu_v = v.to_gpu(dev);
+            let total = gpu_v.reduce_sum();
+
+            // Philox PRNG
+            let rng = PhiloxRng::seed(42);
+            let uniform_sample = rng.sample_uniform(dev, 100, 0.0, 1.0).to_cpu();
+            let normal_sample = rng.sample_normal(dev, 100, 0.0, 1.0).to_cpu();
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        // Check GEMM result: [[1, 2], [3, 4]] * [[2, 0], [1, 2]] = [[4, 4], [10, 8]]
+        let c = interp.env.get("c").unwrap();
+        if let Value::Matrix { rows, cols, data } = c {
+            assert_eq!(rows, 2);
+            assert_eq!(cols, 2);
+            assert_eq!(*data, vec![4.0, 4.0, 10.0, 8.0]);
+        } else {
+            panic!("Expected Matrix for c, got {:?}", c);
+        }
+
+        // Check Cholesky result: L * L^T = [[4, 12], [12, 45]] => L = [[2, 0], [6, 3]]
+        let l = interp.env.get("l").unwrap();
+        if let Value::Matrix { rows, cols, data } = l {
+            assert_eq!(rows, 2);
+            assert_eq!(cols, 2);
+            assert!((data[0] - 2.0).abs() < 1e-6);
+            assert!((data[1] - 0.0).abs() < 1e-6);
+            assert!((data[2] - 6.0).abs() < 1e-6);
+            assert!((data[3] - 3.0).abs() < 1e-6);
+        } else {
+            panic!("Expected Matrix for l, got {:?}", l);
+        }
+
+        // Check reduce_sum: 1 + 2 + 3 + 4 + 5 = 15.0
+        assert_eq!(interp.env.get("total").unwrap(), Value::F64(15.0));
+
+        // Check Philox PRNG samples length and bounds
+        let uniform_sample = interp.env.get("uniform_sample").unwrap();
+        if let Value::Vector(vd) = uniform_sample {
+            assert_eq!(vd.len(), 100);
+            for &x in vd.as_f64_view().unwrap().as_slice() {
+                assert!(x >= 0.0 && x <= 1.0, "Uniform sample out of bounds: {x}");
+            }
+        }
+
+        let normal_sample = interp.env.get("normal_sample").unwrap();
+        if let Value::Vector(vd) = normal_sample {
+            assert_eq!(vd.len(), 100);
+        }
+
+        // Verify WGSL shader caching
+        let cache = crate::gpu::ComputePipelineCache::global();
+        assert!(cache.get_shader("gemm").unwrap().contains("@compute"));
+        assert!(cache.get_shader("reduce_sum").unwrap().contains("@compute"));
+        assert!(cache.get_shader("philox_rng").unwrap().contains("@compute"));
     }
 }

@@ -993,6 +993,30 @@ impl TypeChecker {
                 }
             }
 
+            ExprKind::Range { start, end, .. } => {
+                let start_ty = self.check_expr_ctx(start, col_ctx);
+                let end_ty = self.check_expr_ctx(end, col_ctx);
+                if start_ty != Type::I64 && start_ty != Type::Any {
+                    self.diagnostics.push(
+                        Diagnostic::compute_error(
+                            "C0103",
+                            format!("Range start must be `i64`, found `{}`", start_ty),
+                        )
+                        .with_location(&self.source_file, start.span.start, start.span.end),
+                    );
+                }
+                if end_ty != Type::I64 && end_ty != Type::Any {
+                    self.diagnostics.push(
+                        Diagnostic::compute_error(
+                            "C0103",
+                            format!("Range end must be `i64`, found `{}`", end_ty),
+                        )
+                        .with_location(&self.source_file, end.span.start, end.span.end),
+                    );
+                }
+                Type::Custom("Range".into())
+            }
+
             ExprKind::Path(segments) => {
                 if segments.len() == 2 && (segments[0] == "NAReason" || segments[0] == "NAReasons") {
                     Type::NA

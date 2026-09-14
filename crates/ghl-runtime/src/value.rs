@@ -202,6 +202,12 @@ pub enum Value {
         name: String,
         fields: std::sync::Arc<std::collections::BTreeMap<String, Value>>,
     },
+    /// Range expression `start..end` or `start..=end` (RFC 05 §2)
+    Range {
+        start: i64,
+        end: i64,
+        inclusive: bool,
+    },
 }
 
 impl Value {
@@ -295,6 +301,7 @@ impl Value {
             Value::Arena(_) => "Arena",
             Value::Record(_) => "Record",
             Value::Struct { .. } => "Struct",
+            Value::Range { .. } => "Range",
         }
     }
 }
@@ -375,6 +382,10 @@ impl PartialEq for Value {
                 Value::Struct { name: n1, fields: f1 },
                 Value::Struct { name: n2, fields: f2 },
             ) => n1 == n2 && f1 == f2,
+            (
+                Value::Range { start: s1, end: e1, inclusive: i1 },
+                Value::Range { start: s2, end: e2, inclusive: i2 },
+            ) => s1 == s2 && e1 == e2 && i1 == i2,
             _ => false,
         }
     }
@@ -653,6 +664,13 @@ impl Value {
                     parts.push(format!("{}: {}", k, v.render_styled(caps)));
                 }
                 format!("{} {{ {} }}", name, parts.join(", "))
+            }
+            Value::Range { start, end, inclusive } => {
+                if *inclusive {
+                    format!("{}..={}", start, end)
+                } else {
+                    format!("{}..{}", start, end)
+                }
             }
         }
     }

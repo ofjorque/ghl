@@ -247,6 +247,19 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("tcp_connect".into(), any_fn()),
         ]),
 
+        ["concurrency"] | ["std", "concurrency"] => Some(vec![
+            ("par_iter".into(), any_fn()),
+        ]),
+
+        ["gpu"] | ["std", "gpu"] => Some(vec![
+            ("Device".into(), any_fn()),
+            ("GpuMatrix".into(), any_fn()),
+            ("GpuVector".into(), any_fn()),
+            ("PhiloxRng".into(), any_fn()),
+            ("gemm".into(), any_fn_multi(2)),
+            ("reduce_sum".into(), any_fn()),
+        ]),
+
         _ => None,
     }
 }
@@ -274,6 +287,10 @@ pub fn is_valid_module_path(path: &[String]) -> bool {
             | ["http"]
             | ["std", "net"]
             | ["net"]
+            | ["std", "concurrency"]
+            | ["concurrency"]
+            | ["std", "gpu"]
+            | ["gpu"]
     )
 }
 

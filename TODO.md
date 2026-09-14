@@ -119,9 +119,9 @@ Este documento audita y contrasta sistemáticamente el estado de implementación
 - [x] **Aceleración por GPU (`std::gpu`):**
   - [x] Crate `crates/ghl-runtime/src/gpu.rs` basado en `wgpu 24.0` + `bytemuck 1.21`.
   - [x] `GpuContext`, `GpuVector`, `GpuMatrix` con fallback automático a CPU/faer si no hay GPU disponible.
-- [ ] **Gaps / Extensiones pendientes de RFC 05:**
-  - [ ] **Iteradores paralelos en sintaxis de usuario:** Exponer `(0..N).par_iter().map(...)` como método callable desde scripts GHL (RFC 05 §2).
-  - [ ] **Pipelines WGSL pre-compilados y cacheados:** Optimización de shaders GEMM/reducciones para aceleración en hardware dedicada (RFC 05 §4.2).
+- [x] **Gaps / Extensiones pendientes de RFC 05:**
+  - [x] **Iteradores paralelos en sintaxis de usuario:** Exponer `(0..N).par_iter().map(...)` como método callable desde scripts GHL (RFC 05 §2).
+  - [x] **Pipelines WGSL pre-compilados y cacheados:** Optimización de shaders GEMM/reducciones para aceleración en hardware dedicada y fallback CPU ultra-rápido (RFC 05 §4.2).
 
 ---
 
@@ -220,7 +220,7 @@ A continuación se resumen las características pendientes más relevantes ident
 3. **Ergonomía de Indexación y Colecciones (RFC 01 §3.4, §4 & RFC 03 §2.2):**
    - Slicing general por rangos `v[0..5]` y records `{ key: value }`.
    - Bloques explícitos de arena `arena::scope(|a| { ... })`.
-4. **Iteradores Paralelos en el DSL (RFC 05 §2):**
+4. **[x] Iteradores Paralelos en el DSL (RFC 05 §2):**
    - Sintaxis `(0..N).par_iter().map(...)` para Monte Carlo en scripts de usuario.
 5. **Ecosistema y Distribución de Paquetes (RFC 06 §3, §4):**
    - `ghl new`, `ghl fetch`, `ghl.lock`.

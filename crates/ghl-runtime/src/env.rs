@@ -317,6 +317,40 @@ impl RuntimeEnv {
         env.set("net::tcp_connect".into(),         Value::NativeFn(crate::net::native_tcp_connect));
         env.set("tcp_connect".into(),              Value::NativeFn(crate::net::native_tcp_connect));
 
+        // Parallel Iterators (RFC 05 §2)
+        env.set("par_iter".into(),                  Value::NativeFn(crate::concurrency::native_par_iter));
+        env.set("concurrency::par_iter".into(),     Value::NativeFn(crate::concurrency::native_par_iter));
+        env.set("ParallelIterator::map".into(),     Value::NativeFnCtx(crate::concurrency::native_par_map));
+        env.set("ParallelIterator::filter".into(),  Value::NativeFnCtx(crate::concurrency::native_par_filter));
+        env.set("ParallelIterator::collect".into(), Value::NativeFn(crate::concurrency::native_par_collect));
+        env.set("ParallelIterator::reduce".into(),  Value::NativeFnCtx(crate::concurrency::native_par_reduce));
+        env.set("ParallelIterator::sum".into(),     Value::NativeFn(crate::concurrency::native_par_sum));
+        env.set("ParallelIterator::count".into(),   Value::NativeFn(crate::concurrency::native_par_count));
+
+        // GPU Acceleration & Shaders (RFC 05 §4)
+        env.set("Device".into(),                    Value::NativeFn(crate::gpu::native_device_default_gpu));
+        env.set("gpu::Device".into(),               Value::NativeFn(crate::gpu::native_device_default_gpu));
+        env.set("Device::default_gpu".into(),       Value::NativeFn(crate::gpu::native_device_default_gpu));
+        env.set("Device::cpu_fallback".into(),      Value::NativeFn(crate::gpu::native_device_cpu_fallback));
+        env.set("to_gpu".into(),                    Value::NativeFn(crate::gpu::native_to_gpu));
+        env.set("gpu::to_gpu".into(),               Value::NativeFn(crate::gpu::native_to_gpu));
+        env.set("to_cpu".into(),                    Value::NativeFn(crate::gpu::native_to_cpu));
+        env.set("gpu::to_cpu".into(),               Value::NativeFn(crate::gpu::native_to_cpu));
+        env.set("GpuMatrix::to_cpu".into(),         Value::NativeFn(crate::gpu::native_gpu_matrix_to_cpu));
+        env.set("GpuMatrix::matmul".into(),         Value::NativeFn(crate::gpu::native_gpu_matmul));
+        env.set("GpuMatrix::cholesky".into(),       Value::NativeFn(crate::gpu::native_gpu_cholesky));
+        env.set("gemm".into(),                      Value::NativeFn(crate::gpu::native_gpu_matmul));
+        env.set("gpu::gemm".into(),                 Value::NativeFn(crate::gpu::native_gpu_matmul));
+        env.set("GpuVector::to_cpu".into(),         Value::NativeFn(crate::gpu::native_gpu_vector_to_cpu));
+        env.set("GpuVector::reduce_sum".into(),     Value::NativeFn(crate::gpu::native_gpu_reduce_sum));
+        env.set("reduce_sum".into(),                Value::NativeFn(crate::gpu::native_gpu_reduce_sum));
+        env.set("gpu::reduce_sum".into(),           Value::NativeFn(crate::gpu::native_gpu_reduce_sum));
+        env.set("PhiloxRng".into(),                 Value::NativeFn(crate::gpu::native_philox_seed));
+        env.set("gpu::PhiloxRng".into(),            Value::NativeFn(crate::gpu::native_philox_seed));
+        env.set("PhiloxRng::seed".into(),           Value::NativeFn(crate::gpu::native_philox_seed));
+        env.set("PhiloxRng::sample_uniform".into(), Value::NativeFn(crate::gpu::native_philox_sample_uniform));
+        env.set("PhiloxRng::sample_normal".into(),  Value::NativeFn(crate::gpu::native_philox_sample_normal));
+
         env
     }
 

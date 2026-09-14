@@ -749,6 +749,33 @@ impl TypeEnv {
             );
         }
 
+        // Parallel Iterators (RFC 05 §2)
+        for name in [
+            "par_iter", "concurrency::par_iter",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
+        // GPU Acceleration & Shaders (RFC 05 §4)
+        for name in [
+            "Device", "gpu::Device",
+            "GpuMatrix", "gpu::GpuMatrix",
+            "GpuVector", "gpu::GpuVector",
+            "PhiloxRng", "gpu::PhiloxRng",
+            "gemm", "gpu::gemm",
+            "reduce_sum", "gpu::reduce_sum",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
         env
     }
 

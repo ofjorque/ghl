@@ -100,6 +100,14 @@ pub fn get_module_item_names(path: &[String]) -> Option<Vec<&'static str>> {
             "tcp_connect",
         ]),
 
+        ["concurrency"] | ["std", "concurrency"] => Some(vec![
+            "par_iter",
+        ]),
+
+        ["gpu"] | ["std", "gpu"] => Some(vec![
+            "Device", "GpuMatrix", "GpuVector", "PhiloxRng", "gemm", "reduce_sum",
+        ]),
+
         _ => None,
     }
 }
@@ -127,6 +135,10 @@ pub fn is_valid_module_path(path: &[String]) -> bool {
             | ["http"]
             | ["std", "net"]
             | ["net"]
+            | ["std", "concurrency"]
+            | ["concurrency"]
+            | ["std", "gpu"]
+            | ["gpu"]
     )
 }
 

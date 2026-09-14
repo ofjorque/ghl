@@ -390,28 +390,40 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 )
             });
 
-        // For-range expression: for ident in start..end { block }
-        // `..` is exclusive (like Rust's `a..b`); `..=` inclusive is not yet supported.
+        // For-range expression: for ident in expr { block }
         let for_expr = just(Token::For)
             .map_with_span(|_, span| span)
             .then(select! { Token::Ident(name) => name })
             .then_ignore(just(Token::In))
             .then(expr.clone())
-            .then_ignore(just(Token::DotDot))
-            .then(expr.clone())
             .then(block.clone())
-            .map(|((((for_span, var), range_start), range_end), body)| {
-                let start = for_span.start;
-                let end = body.span.end;
-                Expr::new(
-                    ExprKind::For {
-                        var,
-                        start: Box::new(range_start),
-                        end: Box::new(range_end),
-                        body: Box::new(body),
-                    },
-                    start..end,
-                )
+            .map(|(((for_span, var), iter_expr), body)| {
+                let start_idx = for_span.start;
+                let end_idx = body.span.end;
+                match iter_expr.kind {
+                    ExprKind::Range { start, end, inclusive: _ } => {
+                        Expr::new(
+                            ExprKind::For {
+                                var,
+                                start,
+                                end,
+                                body: Box::new(body),
+                            },
+                            start_idx..end_idx,
+                        )
+                    }
+                    _ => {
+                        Expr::new(
+                            ExprKind::For {
+                                var,
+                                start: Box::new(Expr::new(ExprKind::Lit(Literal::Int(0)), 0..0)),
+                                end: Box::new(iter_expr),
+                                body: Box::new(body),
+                            },
+                            start_idx..end_idx,
+                        )
+                    }
+                }
             });
 
         let atom = val
@@ -485,7 +497,14 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                     .or(empty().to(None))
             )
             .map(|(first, opt_range)| match opt_range {
-                None => IndexSpec::Expr(first),
+                None => match first.kind {
+                    ExprKind::Range { start, end, inclusive } => IndexSpec::Range {
+                        start: Some(start),
+                        end: Some(end),
+                        inclusive,
+                    },
+                    _ => IndexSpec::Expr(first),
+                },
                 Some((inclusive, end)) => IndexSpec::Range {
                     start: Some(Box::new(first)),
                     end: end.map(Box::new),
@@ -631,10 +650,36 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 )
             });
 
-        // Logical AND: &&
-        let logical_and = comparison
+        // Range: start..end or start..=end
+        let range_expr = comparison
             .clone()
-            .then(just(Token::AndAnd).to(BinaryOp::And).then(comparison).repeated())
+            .then(
+                just(Token::DotDotEq).to(true)
+                    .or(just(Token::DotDot).to(false))
+                    .then(comparison.clone())
+                    .or_not()
+            )
+            .map(|(start, opt_end)| {
+                match opt_end {
+                    Some((inclusive, end)) => {
+                        let span = start.span.start..end.span.end;
+                        Expr::new(
+                            ExprKind::Range {
+                                start: Box::new(start),
+                                end: Box::new(end),
+                                inclusive,
+                            },
+                            span,
+                        )
+                    }
+                    None => start,
+                }
+            });
+
+        // Logical AND: &&
+        let logical_and = range_expr
+            .clone()
+            .then(just(Token::AndAnd).to(BinaryOp::And).then(range_expr).repeated())
             .foldl(|lhs, (op, rhs)| {
                 let span = lhs.span.start..rhs.span.end;
                 Expr::new(
@@ -1562,6 +1607,40 @@ mod tests {
                 }
             }
             _ => panic!("expected Let"),
+        }
+    }
+
+    #[test]
+    fn test_parse_range_and_par_iter() {
+        let code = r#"
+            let r = 0..10;
+            let res = (0..100).par_iter().map(|x| x * 2).collect();
+            for i in 1..=5 {
+                let y = i;
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        assert_eq!(program.statements.len(), 3);
+
+        match &program.statements[0].kind {
+            StmtKind::Let { init, .. } => {
+                assert!(matches!(init.kind, ExprKind::Range { inclusive: false, .. }));
+            }
+            _ => panic!("expected Let"),
+        }
+
+        match &program.statements[1].kind {
+            StmtKind::Let { init, .. } => {
+                assert!(matches!(init.kind, ExprKind::Call { .. }));
+            }
+            _ => panic!("expected Let"),
+        }
+
+        match &program.statements[2].kind {
+            StmtKind::Expr(e) => {
+                assert!(matches!(e.kind, ExprKind::For { ref var, .. } if var == "i"));
+            }
+            _ => panic!("expected Expr(For)"),
         }
     }
 }

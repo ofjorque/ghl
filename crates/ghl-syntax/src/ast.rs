@@ -178,6 +178,12 @@ pub enum ExprKind {
     },
     /// Qualified path, e.g. `std::math::sqrt` or `std::linalg::eye`
     Path(Vec<String>),
+    /// Standalone range expression: `start..end` or `start..=end`
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        inclusive: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
