@@ -3,7 +3,10 @@
 pub mod lexer;
 pub mod ast;
 pub mod parser;
+pub mod source;
 
 pub use lexer::{Token, SpannedToken, lex};
 pub use ast::*;
-pub use parser::parse;
+pub use parser::{parse, parse_spanned};
+pub use source::{SourceIndex, SyntaxError};
+

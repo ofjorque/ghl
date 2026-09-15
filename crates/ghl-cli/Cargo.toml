@@ -17,6 +17,9 @@ ghl-types = { path = "../ghl-types" }
 ghl-runtime = { path = "../ghl-runtime" }
 ghl-ir = { path = "../ghl-ir" }
 ghl-codegen = { path = "../ghl-codegen" }
+ghl-lsp = { path = "../ghl-lsp" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 rustyline = "18.0.1"
 sha2 = "0.10"
+
 

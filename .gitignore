@@ -25,3 +25,9 @@ benchmarks/scripts/**/*.pdb
 benchmarks/scripts/**/__pycache__/
 benchmarks/scripts/**/*.nbc
 benchmarks/scripts/**/*.nbi
+
+# Node / VS Code extension build artifacts
+editors/**/node_modules/
+editors/**/out/
+editors/**/*.vsix
+

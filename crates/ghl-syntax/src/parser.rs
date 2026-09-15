@@ -1023,7 +1023,7 @@ pub fn program_parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
         .map(|statements| Program { statements })
 }
 
-pub fn parse(source: &str) -> Result<Program, Vec<String>> {
+pub fn parse_spanned(source: &str) -> Result<Program, Vec<crate::source::SyntaxError>> {
     let tokens_raw = lex(source);
     let mut tokens = Vec::new();
     let mut lex_errors = Vec::new();
@@ -1031,7 +1031,7 @@ pub fn parse(source: &str) -> Result<Program, Vec<String>> {
     for (res, span) in tokens_raw {
         match res {
             Ok(tok) => tokens.push((tok, span)),
-            Err(()) => lex_errors.push(format!("Unrecognized token at {:?}", span)),
+            Err(()) => lex_errors.push(crate::source::SyntaxError::new("Unrecognized token", span)),
         }
     }
 
@@ -1044,7 +1044,15 @@ pub fn parse(source: &str) -> Result<Program, Vec<String>> {
 
     program_parser()
         .parse(stream)
-        .map_err(|errs| errs.into_iter().map(|e| format!("{}", e)).collect())
+        .map_err(|errs| {
+            errs.into_iter()
+                .map(|e| crate::source::SyntaxError::new(format!("{}", e), e.span()))
+                .collect()
+        })
+}
+
+pub fn parse(source: &str) -> Result<Program, Vec<String>> {
+    parse_spanned(source).map_err(|errs| errs.into_iter().map(|e| e.message).collect())
 }
 
 #[cfg(test)]
@@ -1691,4 +1699,14 @@ mod tests {
             _ => panic!("expected Fn"),
         }
     }
+
+    #[test]
+    fn test_parse_spanned_error_locations() {
+        let code = "let x = ;";
+        let errs = parse_spanned(code).expect_err("should have syntax error");
+        assert!(!errs.is_empty());
+        assert!(errs[0].span.start <= code.len());
+        assert!(errs[0].span.end <= code.len());
+    }
 }
+

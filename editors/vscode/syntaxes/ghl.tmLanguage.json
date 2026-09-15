@@ -1,0 +1,205 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "GHL",
+  "scopeName": "source.ghl",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#attributes" },
+    { "include": "#macros" },
+    { "include": "#strings" },
+    { "include": "#constants" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#operators" },
+    { "include": "#functions" },
+    { "include": "#numbers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.documentation.ghl",
+          "match": "///.*$"
+        },
+        {
+          "name": "comment.line.double-slash.ghl",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.ghl",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "attributes": {
+      "name": "meta.attribute.ghl",
+      "begin": "#\\[",
+      "end": "\\]",
+      "patterns": [
+        {
+          "name": "entity.other.attribute-name.ghl",
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "macros": {
+      "patterns": [
+        {
+          "name": "entity.name.function.macro.ghl",
+          "match": "\\b(pounce|purr|println|panic|print|assert|format)!\\b"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.ghl",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.ghl",
+          "match": "\\\\."
+        },
+        {
+          "name": "meta.interpolation.ghl",
+          "begin": "\\{",
+          "end": "\\}",
+          "patterns": [
+            {
+              "name": "variable.other.interpolated.ghl",
+              "match": "[a-zA-Z_][a-zA-Z0-9_]*"
+            }
+          ]
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.na.reason.ghl",
+          "match": "\\bNA:[A-Za-z0-9_]+\\b"
+        },
+        {
+          "name": "constant.language.na.ghl",
+          "match": "\\bNA\\b"
+        },
+        {
+          "name": "constant.language.boolean.ghl",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.ghl",
+          "match": "\\b(if|else|match|while|for|in|return|break|continue)\\b"
+        },
+        {
+          "name": "keyword.declaration.ghl",
+          "match": "\\b(let|mut|const|fn|struct|enum|trait|impl|type)\\b"
+        },
+        {
+          "name": "keyword.other.ghl",
+          "match": "\\b(use|pub|mod|as|extern|async|await)\\b"
+        },
+        {
+          "name": "keyword.other.constructor.ghl",
+          "match": "\\b(dataframe|mat|col)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "entity.name.type.primitive.ghl",
+          "match": "\\b(f64|f32|i64|i32|usize|isize|String|str|Bool|bool)\\b"
+        },
+        {
+          "name": "entity.name.type.composite.ghl",
+          "match": "\\b(Vector|Matrix|DataFrame|ModelFit|Factor|OrderedFactor|Option|Result|Some|None|Ok|Err|Self)\\b"
+        },
+        {
+          "name": "entity.name.type.custom.ghl",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.pipe.ghl",
+          "match": "\\|>"
+        },
+        {
+          "name": "keyword.operator.formula.ghl",
+          "match": "~"
+        },
+        {
+          "name": "keyword.operator.matrix.solve.ghl",
+          "match": "\\\\"
+        },
+        {
+          "name": "keyword.operator.matrix.elementwise.ghl",
+          "match": "\\.(\\*|\\+|\\-|\\/)"
+        },
+        {
+          "name": "keyword.operator.arrow.ghl",
+          "match": "(->|=>)"
+        },
+        {
+          "name": "keyword.operator.comparison.ghl",
+          "match": "(==|!=|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.logical.ghl",
+          "match": "(&&|\\|\\||!)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.ghl",
+          "match": "(\\+|\\-|\\*|\\/|%|\\^)"
+        },
+        {
+          "name": "keyword.operator.range.ghl",
+          "match": "(\\.\\.=|\\.\\.)"
+        },
+        {
+          "name": "keyword.operator.error.propagation.ghl",
+          "match": "\\?"
+        },
+        {
+          "name": "keyword.operator.assignment.ghl",
+          "match": "(=)"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "support.function.dataframe.ghl",
+          "match": "\\b(filter|select|drop|mutate|arrange|group_by|summarize|join|inner_join|left_join|distinct|pivot_wider|pivot_longer|impute|pull|count|fill_na|slice_min|slice_max|desc|na_reasons|filter_na_reason)\\b"
+        },
+        {
+          "name": "support.function.stats.ghl",
+          "match": "\\b(ols|fit|predict|residuals|summary|sample|sample_n|log_pdf|pdf|cdf|quantile|mean|median|std|var|min|max|sum|t_test|anova|chisq_test|plot|show|geom_point|geom_line|geom_bar|geom_boxplot)\\b"
+        },
+        {
+          "name": "entity.name.function.ghl",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*\\()"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.ghl",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.ghl",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}

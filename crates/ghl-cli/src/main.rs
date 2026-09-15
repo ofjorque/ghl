@@ -35,6 +35,7 @@ Commands:
     fetch                      Resolve dependencies and generate reproducible ghl.lock (RFC 06 §4)
     test [dir]                 Run unit and statistical tests
     build <file.gh|file.ghl>   Compile standalone binary or shared library (--release, --shared, -o)
+    lsp                        Start the Language Server Protocol (stdio)
     version                    Display version information
 
 Examples:
@@ -84,6 +85,13 @@ fn real_main() {
 
     match args[1].as_str() {
         "repl" => run_repl(&caps),
+        "lsp" => {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to initialize tokio runtime for LSP");
+            rt.block_on(ghl_lsp::run_server());
+        }
         "version" | "-v" | "--version" => {
             println!("ghl version 0.1.0 (built with Cranelift 0.135 JIT for x86_64-unknown-linux-gnu)");
         }

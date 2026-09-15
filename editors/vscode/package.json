@@ -1,0 +1,102 @@
+{
+  "name": "ghl-lang",
+  "displayName": "GHL (Generalized Hypothesis Language)",
+  "description": "Rich language support, syntax highlighting, snippets, and Language Server Protocol for GHL",
+  "version": "0.1.0",
+  "publisher": "ghl-lang",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ofjorque/ghl"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Linters"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:ghl"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "ghl",
+        "aliases": ["GHL", "ghl"],
+        "extensions": [".gh", ".ghl"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ghl",
+        "scopeName": "source.ghl",
+        "path": "./syntaxes/ghl.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "ghl",
+        "path": "./snippets/ghl.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "ghl.restartServer",
+        "title": "GHL: Restart Language Server"
+      },
+      {
+        "command": "ghl.sendSelectionToREPL",
+        "title": "GHL: Send Selection or Current Line to REPL"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ghl.sendSelectionToREPL",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && editorLangId == ghl"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "GHL",
+      "properties": {
+        "ghl.server.path": {
+          "type": "string",
+          "default": "ghl",
+          "description": "Custom path to the `ghl` CLI binary."
+        },
+        "ghl.server.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable the GHL Language Server."
+        },
+        "ghl.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication between VS Code/Positron and the GHL Language Server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^2.24.0",
+    "typescript": "^5.3.3"
+  }
+}

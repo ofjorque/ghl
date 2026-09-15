@@ -21,3 +21,9 @@ Creación del directorio `docs/guides/` con material didáctico para usuarios fi
   - [ ] Receta 3: Clasificación Binaria con Regresión Logística (IRLS).
   - [ ] Receta 4: Agrupamiento no supervisado con Modelos de Mezclas Gaussianas (GMM / EM).
   - [ ] Receta 5: Muestreo Bayesiano MCMC y Bootstrap paralelo reproducible.
+- [ ] **Generador de Documentación de Código (`ghl doc` — estilo roxygen2 / rustdoc):**
+  - [ ] Captura de comentarios de documentación `///` en declaraciones `fn`, `struct`, `trait`.
+  - [ ] Soporte de Markdown y tags semánticos (`@param`, `@return`, `@example`, `@formula`).
+  - [ ] Generación automática de páginas de ayuda en Markdown/HTML navegables para paquetes y proyectos.
+  - [ ] Integración con el LSP para enriquecer el Hover de funciones del usuario y soporte de ayuda en el REPL (`?fun`).
+

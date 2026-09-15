@@ -1,0 +1,68 @@
+{
+  "Function declaration": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:params}) -> ${3:f64} {",
+      "\t${0:// body}",
+      "}"
+    ],
+    "description": "Declare a GHL function"
+  },
+  "Statistical Model (OLS)": {
+    "prefix": "ols",
+    "body": [
+      "let ${1:model} = ols(${2:response} ~ ${3:predictor}, data: &${4:df})?;"
+    ],
+    "description": "Fit an Ordinary Least Squares (OLS) model"
+  },
+  "Data Pipeline": {
+    "prefix": "pipeline",
+    "body": [
+      "${1:df}",
+      "\t|> filter(${2:col(\"age\") > 18})",
+      "\t|> select([\"${3:col_a}\", \"${4:col_b}\"])",
+      "\t|> group_by([\"${5:group}\"])",
+      "\t|> summarize([",
+      "\t\t${6:col(\"col_a\").mean().as(\"mean_a\")},",
+      "\t\tcount().as(\"n\")",
+      "\t]);$0"
+    ],
+    "description": "Data transformation pipeline using canonical verbs and |>"
+  },
+  "Plot specification": {
+    "prefix": "plot",
+    "body": [
+      "plot(${1:data})",
+      "\t|> geom_point(x: \"${2:x_col}\", y: \"${3:y_col}\")",
+      "\t|> show();$0"
+    ],
+    "description": "Create a Grammar of Graphics plot"
+  },
+  "DataFrame literal": {
+    "prefix": "dataframe",
+    "body": [
+      "let ${1:df} = dataframe {",
+      "\t${2:id}: [${3:1, 2, 3}],",
+      "\t${4:value}: [${5:10.5, 20.2, 15.8}]",
+      "};$0"
+    ],
+    "description": "Define a columnar DataFrame literal"
+  },
+  "Matrix literal": {
+    "prefix": "mat",
+    "body": [
+      "let ${1:m} = mat[",
+      "\t${2:1.0, 2.0};",
+      "\t${3:3.0, 4.0}",
+      "];$0"
+    ],
+    "description": "Define a 2D Matrix literal"
+  },
+  "Pounce assertion": {
+    "prefix": "pounce",
+    "body": [
+      "pounce!(${1:condition}, \"${2:error message}\");$0"
+    ],
+    "description": "Assert with friendly feline Kaomoji diagnostics"
+  }
+}

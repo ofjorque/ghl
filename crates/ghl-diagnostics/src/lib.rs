@@ -80,6 +80,7 @@ pub struct Diagnostic {
     pub code: String,
     pub message: String,
     pub location: Option<SourceLocation>,
+    pub span: Option<std::ops::Range<usize>>,
     pub help: Option<String>,
 }
 
@@ -90,6 +91,7 @@ impl Diagnostic {
             code: code.into(),
             message: message.into(),
             location: None,
+            span: None,
             help: None,
         }
     }
@@ -100,6 +102,7 @@ impl Diagnostic {
             code: code.into(),
             message: message.into(),
             location: None,
+            span: None,
             help: None,
         }
     }
@@ -110,6 +113,7 @@ impl Diagnostic {
             code: code.into(),
             message: message.into(),
             location: None,
+            span: None,
             help: None,
         }
     }
@@ -120,6 +124,11 @@ impl Diagnostic {
             line,
             column,
         });
+        self
+    }
+
+    pub fn with_span(mut self, span: std::ops::Range<usize>) -> Self {
+        self.span = Some(span);
         self
     }
 

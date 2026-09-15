@@ -7,6 +7,7 @@ members = [
     "crates/ghl-codegen",
     "crates/ghl-runtime",
     "crates/ghl-cli",
+    "crates/ghl-lsp",
 ]
 resolver = "2"
 
