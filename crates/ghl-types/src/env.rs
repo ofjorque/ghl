@@ -243,6 +243,30 @@ impl TypeEnv {
             },
             false,
         );
+        env.insert(
+            "rm".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
+            "help".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
+            "doc".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
 
         // NEKO Statistical Modeling Verbs
         env.insert(
@@ -798,6 +822,15 @@ impl TypeEnv {
     pub fn lookup(&self, name: &str) -> Option<&SymbolInfo> {
         for scope in self.scopes.iter().rev() {
             if let Some(info) = scope.get(name) {
+                return Some(info);
+            }
+        }
+        None
+    }
+
+    pub fn remove(&mut self, name: &str) -> Option<SymbolInfo> {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(info) = scope.remove(name) {
                 return Some(info);
             }
         }

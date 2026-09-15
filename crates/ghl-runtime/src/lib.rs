@@ -20,6 +20,7 @@ pub mod autodiff;
 pub mod net;
 pub mod concurrency;
 pub mod gpu;
+pub mod doc;
 
 pub use value::Value;
 pub use env::RuntimeEnv;
@@ -27,6 +28,7 @@ pub use eval::Interpreter;
 pub use neko::{Blueprint, FittedModel, RowDisposition, VcovKind};
 pub use glm::FittedGlm;
 pub use gmm::FittedGmm;
+pub use doc::{FunctionDoc, lookup_doc};
 
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::Program;

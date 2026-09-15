@@ -642,11 +642,12 @@ impl Value {
                 format!("aes({})", parts.join(", "))
             }
             Value::Geom(g) => format!("{:?}", g.kind),
-            Value::Closure { params, .. } => {
-                format!("fn({}) -> <closure>", params.join(", "))
+            Value::Closure { params, body, .. } => {
+                format!("fn({}) {{\n    {}\n}}", params.join(", "), body)
             }
-            Value::NativeFn(_) => "<native_fn>".to_string(),
-            Value::NativeFnCtx(_) => "<native_fn>".to_string(),
+            Value::NativeFn(_) | Value::NativeFnCtx(_) => {
+                "<builtin_fn> (type ?<name> or doc(\"<name>\") for details)".to_string()
+            }
             Value::Arena(a) => {
                 let bytes = a.lock().map(|st| st.allocated_bytes()).unwrap_or(0);
                 format!("<Arena ({} bytes allocated)>", bytes)

@@ -68,21 +68,22 @@ impl CockpitPanel {
         let title_clean = strip_ansi(&self.title);
         let badge_clean = self.badge.as_deref().map(strip_ansi).unwrap_or_default();
 
-        let header_text_len = title_clean.chars().count() + if !badge_clean.is_empty() { badge_clean.chars().count() + 1 } else { 0 };
-        let remaining_dashes = inner_width.saturating_sub(header_text_len + 2);
-
         let top_border = if let Some(badge) = &self.badge {
+            let fixed_len = 8 + title_clean.chars().count() + badge_clean.chars().count();
+            let dashes = width.saturating_sub(fixed_len);
             format!(
-                "{tl}{hz} {} {}{hz} {} {hz}{tr}",
+                "{tl}{hz} {} {} {} {hz}{tr}",
                 self.title,
-                hz.to_string().repeat(remaining_dashes),
+                hz.to_string().repeat(dashes),
                 badge,
             )
         } else {
+            let fixed_len = 5 + title_clean.chars().count();
+            let dashes = width.saturating_sub(fixed_len);
             format!(
-                "{tl}{hz} {} {}{hz}{tr}",
+                "{tl}{hz} {} {}{tr}",
                 self.title,
-                hz.to_string().repeat(inner_width.saturating_sub(title_clean.chars().count() + 1))
+                hz.to_string().repeat(dashes),
             )
         };
         out.push_str(&caps.dim(&top_border));
@@ -203,6 +204,27 @@ mod tests {
         assert!(rendered.contains("+- NEKO Model Fit"));
         assert!(rendered.contains("| Status: Clean"));
         assert!(!rendered.contains("╭"));
+    }
+
+    #[test]
+    fn test_panel_lines_have_consistent_width() {
+        let width = 70;
+        let caps = RenderCaps::rich_terminal(width);
+        let mut panel = CockpitPanel::new("GHL Interactive Shell (REPL)");
+        panel.with_badge("READY");
+        panel.add_line("Gojo & Haru High-Performance Statistical System");
+        panel.add_line("Type :help for session commands or :quit to exit.");
+        panel.add_divider();
+        panel.add_kv("Status", "Operational");
+
+        let rendered = panel.render(&caps);
+        for (i, line) in rendered.lines().enumerate() {
+            let line_len = visual_width(line);
+            assert_eq!(
+                line_len, width as usize,
+                "Line {i} visual width {line_len} does not match target width {width}: {line:?}"
+            );
+        }
     }
 
     #[test]

@@ -2,8 +2,42 @@ use std::io::{self, Write};
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps};
 use ghl_runtime::{Interpreter, Value};
 use ghl_types::TypeEnv;
+use rustyline::completion::Completer;
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::history::DefaultHistory;
+use rustyline::validate::Validator;
+use rustyline::{Editor, Helper};
+
+#[derive(Clone)]
+struct GhlPromptHelper {
+    caps: RenderCaps,
+}
+
+impl Helper for GhlPromptHelper {}
+impl Completer for GhlPromptHelper {
+    type Candidate = String;
+}
+impl Hinter for GhlPromptHelper {
+    type Hint = String;
+}
+impl Validator for GhlPromptHelper {}
+impl Highlighter for GhlPromptHelper {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
+        &'s self,
+        prompt: &'p str,
+        _default: bool,
+    ) -> std::borrow::Cow<'b, str> {
+        if prompt.contains("(=^･ω･^=)") {
+            std::borrow::Cow::Owned(format!("ghl{}> ", self.caps.cyan("(=^･ω･^=)")))
+        } else if prompt.contains("...") {
+            std::borrow::Cow::Owned(format!("   {} ", self.caps.dim("...")))
+        } else {
+            std::borrow::Cow::Borrowed(prompt)
+        }
+    }
+}
 
 pub struct ReplSession {
     pub interpreter: Interpreter,
@@ -29,8 +63,9 @@ impl ReplSession {
             .ok()
             .map(|h| std::path::PathBuf::from(h).join(".ghl_history"));
 
-        let mut rl = match DefaultEditor::new() {
+        let mut rl = match Editor::<GhlPromptHelper, DefaultHistory>::new() {
             Ok(mut editor) => {
+                editor.set_helper(Some(GhlPromptHelper { caps: self.caps.clone() }));
                 if let Some(ref p) = history_path {
                     let _ = editor.load_history(p);
                 }
@@ -43,13 +78,13 @@ impl ReplSession {
 
         loop {
             let prompt = if multi_line_accum.is_empty() {
-                format!("ghl{}> ", self.caps.cyan("(=^･ω･^=)"))
+                "ghl(=^･ω･^=)> "
             } else {
-                format!("   {} ", self.caps.dim("..."))
+                "   ... "
             };
 
             let line = if let Some(ref mut editor) = rl {
-                match editor.readline(&prompt) {
+                match editor.readline(prompt) {
                     Ok(l) => l,
                     Err(ReadlineError::Interrupted) => {
                         println!("^C");
@@ -63,7 +98,12 @@ impl ReplSession {
                     }
                 }
             } else {
-                print!("{}", prompt);
+                let styled_prompt = if multi_line_accum.is_empty() {
+                    format!("ghl{}> ", self.caps.cyan("(=^･ω･^=)"))
+                } else {
+                    format!("   {} ", self.caps.dim("..."))
+                };
+                print!("{}", styled_prompt);
                 io::stdout().flush().unwrap_or(());
                 let mut buf = String::new();
                 match io::stdin().read_line(&mut buf) {
@@ -81,7 +121,21 @@ impl ReplSession {
                 continue;
             }
 
-            // Handle REPL commands (e.g. :quit, :help, :vars)
+            // Handle doc lookup shorthand e.g. `?mean` or `?ols`
+            if multi_line_accum.is_empty() && trimmed.starts_with('?') {
+                if let Some(ref mut editor) = rl {
+                    let _ = editor.add_history_entry(trimmed);
+                }
+                let query = trimmed.trim_start_matches('?').trim();
+                if query.is_empty() {
+                    self.list_docs();
+                } else {
+                    self.show_doc(query);
+                }
+                continue;
+            }
+
+            // Handle REPL commands (e.g. :quit, :help, :vars, :rm, :doc)
             if multi_line_accum.is_empty() && trimmed.starts_with(':') {
                 if let Some(ref mut editor) = rl {
                     let _ = editor.add_history_entry(trimmed);
@@ -122,8 +176,9 @@ impl ReplSession {
         panel.with_badge("READY");
         panel.add_line("Gojo & Haru High-Performance Statistical System");
         panel.add_line(format!(
-            "Type {} for session commands or {} to exit.",
+            "Type {} for session commands, {} for docs, or {} to exit.",
             self.caps.bold(":help"),
+            self.caps.bold("?<fn>"),
             self.caps.bold(":quit")
         ));
         println!("{}\n", panel.render(&self.caps));
@@ -143,6 +198,9 @@ impl ReplSession {
                 let mut panel = CockpitPanel::new("REPL Commands");
                 panel.add_kv(":help, :h", "Show this help table");
                 panel.add_kv(":vars, :v", "List active user-defined variables and types");
+                panel.add_kv(":rm <vars>", "Remove one or more variables from session (or :rm *)");
+                panel.add_kv(":clear-vars", "Clear all user-defined variables");
+                panel.add_kv(":doc <fn>, ?<fn>", "View documentation & formula for a function");
                 panel.add_kv(":clear, :c", "Clear the terminal screen");
                 panel.add_kv(":reset, :r", "Reset the environment to initial clean state");
                 panel.add_kv(":quit, :q", "Exit the interactive shell");
@@ -197,6 +255,40 @@ impl ReplSession {
                 println!("(=^･ω･^=) Session environment successfully reset.\n");
                 false
             }
+            ":clear-vars" => {
+                self.clear_all_vars();
+                false
+            }
+            cmd if cmd.starts_with(":rm") => {
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                if parts.len() < 2 {
+                    let err = Diagnostic::compute_error("C0006", "Usage: `:rm <var1> [var2...]` or `:clear-vars`");
+                    eprintln!("{}\n", err.render_with_caps(&self.caps));
+                    return false;
+                }
+                if parts[1] == "*" {
+                    self.clear_all_vars();
+                    return false;
+                }
+                let mut removed = Vec::new();
+                for var in &parts[1..] {
+                    self.interpreter.env.remove(var);
+                    self.type_env.remove(var);
+                    self.user_vars.retain(|v| v != var);
+                    removed.push(*var);
+                }
+                println!("(=^･ω･^=) Removed variable(s): {}\n", removed.join(", "));
+                false
+            }
+            cmd if cmd.starts_with(":doc") => {
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                if parts.len() < 2 {
+                    self.list_docs();
+                } else {
+                    self.show_doc(parts[1]);
+                }
+                false
+            }
             other => {
                 let diag = Diagnostic::compute_error(
                     "C0005",
@@ -207,6 +299,66 @@ impl ReplSession {
                 false
             }
         }
+    }
+
+    fn clear_all_vars(&mut self) {
+        let count = self.user_vars.len();
+        for var in &self.user_vars {
+            self.interpreter.env.remove(var);
+            self.type_env.remove(var);
+        }
+        self.user_vars.clear();
+        println!("(=^･ω･^=) Cleared {count} user variable(s).\n");
+    }
+
+    fn show_doc(&self, name: &str) {
+        if let Some(doc) = ghl_runtime::lookup_doc(name) {
+            println!("{}\n", doc.render(&self.caps));
+        } else if let Some(val) = self.interpreter.env.get(name) {
+            match val {
+                Value::Closure { params, body, .. } => {
+                    let mut panel = CockpitPanel::new(format!("User Function: {}()", name));
+                    panel.with_badge("CLOSURE");
+                    panel.add_line("User-defined function in current session");
+                    panel.add_divider();
+                    panel.add_kv("Signature", format!("fn({})", params.join(", ")));
+                    panel.add_divider();
+                    panel.add_line(self.caps.dim("Definition:"));
+                    panel.add_line(format!("  fn {}({}) {{\n      {}\n  }}", name, params.join(", "), body));
+                    println!("{}\n", panel.render(&self.caps));
+                }
+                other => {
+                    let ty_str = self
+                        .type_env
+                        .lookup(name)
+                        .map(|info| info.ty.to_string())
+                        .unwrap_or_else(|| other.type_name().to_string());
+                    let mut panel = CockpitPanel::new(format!("Variable: {}", name));
+                    panel.with_badge("VARIABLE");
+                    panel.add_kv("Type", ty_str);
+                    panel.add_kv("Value", format!("{}", other));
+                    println!("{}\n", panel.render(&self.caps));
+                }
+            }
+        } else {
+            let diag = Diagnostic::compute_error(
+                "C0204",
+                format!("No documentation or variable found for `{name}`"),
+            )
+            .with_help("Type `:doc` to see all documented standard library functions.");
+            eprintln!("{}\n", diag.render_with_caps(&self.caps));
+        }
+    }
+
+    fn list_docs(&self) {
+        let mut panel = CockpitPanel::new("Standard Library Functions");
+        panel.with_badge("DOCS");
+        panel.add_line("Use `?<name>` or `:doc <name>` to view signatures and mathematical formulas.");
+        panel.add_divider();
+        for doc in ghl_runtime::doc::all_docs() {
+            panel.add_kv(format!("{}()", doc.name), doc.summary);
+        }
+        println!("{}\n", panel.render(&self.caps));
     }
 
     fn eval_input(&mut self, code: &str) {
@@ -221,6 +373,19 @@ impl ReplSession {
                 return;
             }
         };
+
+        // If user simply typed a documented standard library function name (e.g. `mean`, `ols`)
+        // like in R, show its documentation and mathematical formula directly!
+        if program.statements.len() == 1 {
+            if let ghl_syntax::ast::StmtKind::Expr(ref expr) = program.statements[0].kind {
+                if let ghl_syntax::ast::ExprKind::Ident(ref id) = expr.kind {
+                    if let Some(doc) = ghl_runtime::lookup_doc(id) {
+                        println!("{}\n", doc.render(&self.caps));
+                        return;
+                    }
+                }
+            }
+        }
 
         // 2. Track new variable declarations
         for stmt in &program.statements {
@@ -253,6 +418,15 @@ impl ReplSession {
         // 4. Evaluate
         match self.interpreter.eval_program(&program) {
             Ok(final_val) => {
+                // Synchronize variables if `rm` was called in code
+                let before_vars = self.user_vars.clone();
+                self.user_vars.retain(|v| self.interpreter.env.get(v).is_some());
+                for v in before_vars {
+                    if !self.user_vars.contains(&v) {
+                        self.type_env.remove(&v);
+                    }
+                }
+
                 if !matches!(final_val, Value::Unit) {
                     // Check if last statement was an expression
                     let is_expr = program
@@ -319,5 +493,44 @@ mod tests {
         assert!(!ReplSession::has_unbalanced_brackets("fn add(a, b) { a + b }"));
         assert!(ReplSession::has_unbalanced_brackets("let v = [1, 2,"));
         assert!(!ReplSession::has_unbalanced_brackets("let v = [1, 2, 3];"));
+    }
+
+    #[test]
+    fn test_repl_variable_management() {
+        let caps = RenderCaps::detect();
+        let mut session = ReplSession::new(caps);
+
+        // Define variables
+        session.eval_input("let x = 42;");
+        session.eval_input("let y = 100;");
+        assert_eq!(session.user_vars, vec!["x".to_string(), "y".to_string()]);
+        assert!(session.interpreter.env.get("x").is_some());
+        assert!(session.interpreter.env.get("y").is_some());
+
+        // Remove x via REPL command
+        session.handle_command(":rm x");
+        assert_eq!(session.user_vars, vec!["y".to_string()]);
+        assert!(session.interpreter.env.get("x").is_none());
+        assert!(session.interpreter.env.get("y").is_some());
+
+        // Remove y via code `rm("y")`
+        session.eval_input("rm(\"y\");");
+        assert!(session.user_vars.is_empty());
+        assert!(session.interpreter.env.get("y").is_none());
+    }
+
+    #[test]
+    fn test_repl_doc_lookup() {
+        let caps = RenderCaps::detect();
+        let _session = ReplSession::new(caps);
+
+        assert!(ghl_runtime::lookup_doc("mean").is_some());
+        assert!(ghl_runtime::lookup_doc("ols").is_some());
+        assert!(ghl_runtime::lookup_doc("fit_logistic").is_some());
+        assert!(ghl_runtime::lookup_doc("nonexistent_fn").is_none());
+
+        let doc = ghl_runtime::lookup_doc("mean").unwrap();
+        assert_eq!(doc.name, "mean");
+        assert!(doc.formula.unwrap().contains("x̄"));
     }
 }

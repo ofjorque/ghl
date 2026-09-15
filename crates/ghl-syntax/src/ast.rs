@@ -329,3 +329,250 @@ pub struct Program {
     pub statements: Vec<Stmt>,
 }
 
+impl std::fmt::Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Literal::Int(i) => write!(f, "{i}"),
+            Literal::Float(v) => {
+                if v.fract() == 0.0 {
+                    write!(f, "{v:.1}")
+                } else {
+                    write!(f, "{v}")
+                }
+            }
+            Literal::String(s) => write!(f, "\"{s}\""),
+            Literal::Bool(b) => write!(f, "{b}"),
+            Literal::NA(None) => write!(f, "NA"),
+            Literal::NA(Some(r)) => write!(f, "NA:{r}"),
+        }
+    }
+}
+
+impl std::fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op_str = match self {
+            BinaryOp::Add => "+",
+            BinaryOp::Sub => "-",
+            BinaryOp::Mul => "*",
+            BinaryOp::Div => "/",
+            BinaryOp::Mod => "%",
+            BinaryOp::Pow => "^",
+            BinaryOp::MatSolve => "\\",
+            BinaryOp::DotMul => ".*",
+            BinaryOp::DotAdd => ".+",
+            BinaryOp::DotSub => ".-",
+            BinaryOp::DotDiv => "./",
+            BinaryOp::Eq => "==",
+            BinaryOp::NotEq => "!=",
+            BinaryOp::Lt => "<",
+            BinaryOp::LtEq => "<=",
+            BinaryOp::Gt => ">",
+            BinaryOp::GtEq => ">=",
+            BinaryOp::And => "&&",
+            BinaryOp::Or => "||",
+        };
+        write!(f, "{op_str}")
+    }
+}
+
+impl std::fmt::Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.kind)
+    }
+}
+
+impl std::fmt::Display for ExprKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExprKind::Lit(l) => write!(f, "{l}"),
+            ExprKind::Ident(id) => write!(f, "{id}"),
+            ExprKind::Binary { op, lhs, rhs } => write!(f, "({lhs} {op} {rhs})"),
+            ExprKind::UnaryNot(e) => write!(f, "!{e}"),
+            ExprKind::UnaryNeg(e) => write!(f, "-{e}"),
+            ExprKind::Pipe { expr, target } => write!(f, "{expr} |> {target}"),
+            ExprKind::Call { callee, args } => {
+                write!(f, "{callee}(")?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{arg}")?;
+                }
+                write!(f, ")")
+            }
+            ExprKind::Block { stmts, expr } => {
+                writeln!(f, "{{")?;
+                for stmt in stmts {
+                    writeln!(f, "    {stmt}")?;
+                }
+                if let Some(e) = expr {
+                    writeln!(f, "    {e}")?;
+                }
+                write!(f, "}}")
+            }
+            ExprKind::Formula { response, terms } => {
+                write!(f, "{response} ~ ")?;
+                for (i, t) in terms.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " + ")?;
+                    }
+                    write!(f, "{t}")?;
+                }
+                Ok(())
+            }
+            ExprKind::If { cond, then_branch, else_branch } => {
+                write!(f, "if {cond} {then_branch}")?;
+                if let Some(eb) = else_branch {
+                    write!(f, " else {eb}")?;
+                }
+                Ok(())
+            }
+            ExprKind::Match { expr, arms } => {
+                writeln!(f, "match {expr} {{")?;
+                for arm in arms {
+                    write!(f, "    {} => {},", arm.pattern, arm.body)?;
+                }
+                write!(f, "}}")
+            }
+            ExprKind::While { cond, body } => write!(f, "while {cond} {body}"),
+            ExprKind::For { var, start, end, body } => write!(f, "for {var} in {start}..{end} {body}"),
+            ExprKind::DataFrameLit(cols) => {
+                write!(f, "dataframe [")?;
+                for (i, (col, expr)) in cols.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{col}: {expr}")?;
+                }
+                write!(f, "]")
+            }
+            ExprKind::MatrixLit { rows } => {
+                write!(f, "mat [")?;
+                for (i, row) in rows.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ; ")?;
+                    }
+                    for (j, cell) in row.iter().enumerate() {
+                        if j > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{cell}")?;
+                    }
+                }
+                write!(f, "]")
+            }
+            ExprKind::Lambda { params, body } => {
+                write!(f, "\\{} -> {body}", params.join(", "))
+            }
+            ExprKind::VectorLit(items) => {
+                write!(f, "[")?;
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{item}")?;
+                }
+                write!(f, "]")
+            }
+            ExprKind::Placeholder => write!(f, "_"),
+            ExprKind::NamedArg { name, value } => write!(f, "{name} = {value}"),
+            ExprKind::RecordLit(fields) => {
+                write!(f, "#[")?;
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{k} = {v}")?;
+                }
+                write!(f, "]")
+            }
+            ExprKind::StructLit { name, fields } => {
+                write!(f, "{name} {{ ")?;
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{k}: {v}")?;
+                }
+                write!(f, " }}")
+            }
+            ExprKind::FieldAccess { target, field } => write!(f, "{target}.{field}"),
+            ExprKind::Index { target, indices } => {
+                write!(f, "{target}[")?;
+                for (i, idx) in indices.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    match idx {
+                        IndexSpec::Expr(e) => write!(f, "{e}")?,
+                        IndexSpec::Range { start, end, inclusive } => {
+                            if let Some(s) = start { write!(f, "{s}")?; }
+                            if *inclusive { write!(f, "..=")?; } else { write!(f, "..")?; }
+                            if let Some(e) = end { write!(f, "{e}")?; }
+                        }
+                        IndexSpec::All => write!(f, "..")?,
+                    }
+                }
+                write!(f, "]")
+            }
+            ExprKind::Path(parts) => write!(f, "{}", parts.join("::")),
+            ExprKind::Range { start, end, inclusive } => {
+                if *inclusive {
+                    write!(f, "{start}..={end}")
+                } else {
+                    write!(f, "{start}..{end}")
+                }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for Pattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Pattern::Wildcard => write!(f, "_"),
+            Pattern::Lit(l) => write!(f, "{l}"),
+            Pattern::Ident(id) => write!(f, "{id}"),
+            Pattern::NA => write!(f, "NA"),
+            Pattern::NAReason(r) => write!(f, "NA:{r}"),
+        }
+    }
+}
+
+impl std::fmt::Display for Stmt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind {
+            StmtKind::Let { name, is_mut, ty, init } => {
+                let mut_str = if *is_mut { "mut " } else { "" };
+                if let Some(t) = ty {
+                    write!(f, "let {mut_str}{name}: {t} = {init};")
+                } else {
+                    write!(f, "let {mut_str}{name} = {init};")
+                }
+            }
+            StmtKind::Fn { name, params, ret_ty, body, .. } => {
+                write!(f, "fn {name}(")?;
+                for (i, p) in params.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", p.name)?;
+                    if let Some(t) = &p.ty { write!(f, ": {t}")?; }
+                }
+                write!(f, ")")?;
+                if let Some(r) = ret_ty { write!(f, " -> {r}")?; }
+                write!(f, " {body}")
+            }
+            StmtKind::Expr(e) => write!(f, "{e};"),
+            StmtKind::Return(e) => {
+                if let Some(expr) = e {
+                    write!(f, "return {expr};")
+                } else {
+                    write!(f, "return;")
+                }
+            }
+            StmtKind::Assign { name, value } => write!(f, "{name} = {value};"),
+            StmtKind::Use(u) => write!(f, "use {};", u.path.join("::")),
+            _ => write!(f, "<stmt>"),
+        }
+    }
+}
+

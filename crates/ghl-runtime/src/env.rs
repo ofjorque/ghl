@@ -351,6 +351,11 @@ impl RuntimeEnv {
         env.set("PhiloxRng::sample_uniform".into(), Value::NativeFn(crate::gpu::native_philox_sample_uniform));
         env.set("PhiloxRng::sample_normal".into(),  Value::NativeFn(crate::gpu::native_philox_sample_normal));
 
+        // Environment inspection & manipulation (R-like)
+        env.set("rm".into(),                        Value::NativeFnCtx(native_rm));
+        env.set("help".into(),                      Value::NativeFn(native_help));
+        env.set("doc".into(),                       Value::NativeFn(native_help));
+
         env
     }
 
@@ -387,6 +392,15 @@ impl RuntimeEnv {
         None
     }
 
+    pub fn remove(&mut self, name: &str) -> Option<Value> {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(val) = scope.remove(name) {
+                return Some(val);
+            }
+        }
+        None
+    }
+
     pub fn assign(&mut self, name: &str, val: Value) -> bool {
         for scope in self.scopes.iter_mut().rev() {
             if scope.contains_key(name) {
@@ -399,6 +413,51 @@ impl RuntimeEnv {
 }
 
 // Built-in Native Functions
+
+pub(crate) fn native_rm(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+    for arg in args {
+        match arg {
+            Value::String(name) => {
+                interp.env.remove(&name);
+            }
+            Value::ColRef(name) => {
+                interp.env.remove(&name);
+            }
+            other => {
+                let s = format!("{}", other);
+                interp.env.remove(&s);
+            }
+        }
+    }
+    Ok(Value::Unit)
+}
+
+pub(crate) fn native_help(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let caps = RenderCaps::rich_terminal(72);
+    if let Some(arg) = args.first() {
+        let name = match arg {
+            Value::String(s) => s.clone(),
+            Value::ColRef(s) => s.clone(),
+            other => format!("{}", other),
+        };
+        if let Some(doc) = crate::doc::lookup_doc(&name) {
+            println!("{}\n", doc.render(&caps));
+            return Ok(Value::Unit);
+        } else {
+            return Err(Diagnostic::compute_error(
+                "C0204",
+                format!("No documentation found for `{name}`. Type `help()` to list common functions."),
+            ));
+        }
+    }
+
+    println!("(=^･ω･^=) GHL Help System:");
+    println!("Type `help(\"mean\")` or `?mean` to see signature and mathematical formula.");
+    println!("Common functions: mean, sum, var, std_dev, median, ols, fit_logistic, fit_gmm,");
+    println!("                  summary, predict, residuals, dot, cholesky, qr, svd, eigen,");
+    println!("                  filter, select, mutate, group_by, summarize, plot, rm\n");
+    Ok(Value::Unit)
+}
 
 /// Shared native-reduce path for `mean`/`sum`/`min`/`max`/`median` (TODO.md Fase 3, Track
 /// 2, Punto 2): reduces on `VectorData`'s underlying `Column` directly (Arrow-vectorized,

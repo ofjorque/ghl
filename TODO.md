@@ -1,228 +1,270 @@
-# TODO — Roadmap de Conformidad y Paridad Integral por RFC
+# TODO — Roadmap de Ecosistema, Herramientas y Experiencia de Desarrollo (DX)
 
-Este documento audita y contrasta sistemáticamente el estado de implementación de **GHL** frente a cada uno de los 14 documentos de diseño normativos (**RFC 00 a RFC 13** en `docs/design/`).
+Este documento define la hoja de ruta integral para transformar el motor de **GHL** en un entorno de desarrollo productivo y ergonómico, enfocado en la integración con **Positron IDE**, soporte de **Quarto & Notebooks**, validación cruzada frente a **R, Python y Julia**, benchmarks abiertos de **DataFrames (H2O.ai / TPC-H)**, **pruebas profundas del sistema (gráficos, autodiff, GPU, PRNG, lógica Kleene y arenas)**, **retos computacionales universales de compiladores (CLBG)**, **validación con diversidad real de DataFrames masivos** y **tooling de producción (`ghl fmt`, fuzzing, CI/CD)**.
 
-> **Histórico:** El roadmap original de optimización y benchmarks (Fases 0 a 10) se encuentra 100% completado y archivado en [`docs/archive/TODO_PHASES_0_TO_10_BENCHMARKS.md`](file:///run/media/oscarjorquera/4c6467bc-3d2b-40af-81c2-e1ec18ac9825/Rust%20Projects/Lang/docs/archive/TODO_PHASES_0_TO_10_BENCHMARKS.md).
-
----
-
-## Índice de Auditoría por RFC
-
-- [RFC 00: Visión y Filosofía](#rfc-00-visión-y-filosofía)
-- [RFC 01: Sintaxis, Gramática y Ergonomía](#rfc-01-sintaxis-gramática-y-ergonomía)
-- [RFC 02: Sistema de Tipos y Semántica](#rfc-02-sistema-de-tipos-y-semántica)
-- [RFC 03: Modelo de Memoria y Ejecución](#rfc-03-modelo-de-memoria-y-ejecución)
-- [RFC 04: Biblioteca Estándar y Primitivas](#rfc-04-biblioteca-estándar-y-primitivas)
-- [RFC 05: Concurrencia, Paralelismo y GPU](#rfc-05-concurrencia-paralelismo-y-gpu)
-- [RFC 06: Interoperabilidad y Ecosistema](#rfc-06-interoperabilidad-y-ecosistema)
-- [RFC 07: Herramientas, DX y Diagnósticos](#rfc-07-herramientas-dx-y-diagnósticos)
-- [RFC 08: Pila Tecnológica del Compilador en Rust](#rfc-08-pila-tecnológica-del-compilador-en-rust)
-- [RFC 09: Factores Categóricos, Gráficos y NIST StRD](#rfc-09-factores-categóricos-gráficos-y-nist-strd)
-- [RFC 10: Presupuestos de Rendimiento y SLAs](#rfc-10-presupuestos-de-rendimiento-y-slas)
-- [RFC 11: Framework de Modelado Estadístico NEKO](#rfc-11-framework-de-modelado-estadístico-neko)
-- [RFC 12: Cockpit Deck Telemetría y Diagnóstico Visual](#rfc-12-cockpit-deck-telemetría-y-diagnóstico-visual)
-- [RFC 13: Compilación JIT Nativa con Cranelift](#rfc-13-compilación-jit-nativa-con-cranelift)
+> **Histórico de Fases Anteriores:**
+> - El roadmap normativo de especificación y paridad de diseño por RFC (RFC 00 a RFC 13) se encuentra completado y archivado en [`docs/archive/TODO_RFC_COMPLIANCE_ROADMAP.md`](file:///docs/archive/TODO_RFC_COMPLIANCE_ROADMAP.md).
+> - El roadmap de aceleración de kernel, paralelismo y suites empíricas se encuentra archivado en [`docs/archive/TODO_PHASES_0_TO_10_BENCHMARKS.md`](file:///docs/archive/TODO_PHASES_0_TO_10_BENCHMARKS.md).
 
 ---
 
-## RFC 00: Visión y Filosofía
-- [x] **Identidad dual Gojo & Haru:** Diagnósticos de ciencias de la computación fríos y certeros junto con calidez empática y Kaomojis felinos en estadística.
-- [x] **Cero latencia TTFX:** Arranque en frío < 15 ms (< 1 ms en modo AOT).
-- [x] **Memoria determinista sin Tracing GC:** Modelo ARC + CoW + Arenas de liberación instantánea.
-- [x] **Interoperabilidad C-ABI / Arrow pura:** Sin puentes pesados ni dependencias runtime obligatorias de C++.
+## Índice de Trabajo
+
+1. [Fase 1: Extensión de Editor para Positron / VS Code (`editors/vscode/`)](#fase-1-extensión-de-editor-para-positron--vs-code)
+2. [Fase 2: Language Server Protocol (`ghl lsp`)](#fase-2-language-server-protocol-ghl-lsp)
+3. [Fase 3: Soporte Quarto, Notebooks y Flujo Interactivo en Positron](#fase-3-soporte-quarto-notebooks-y-flujo-interactivo-en-positron)
+4. [Fase 4: Validación Cruzada de Precisión Numérica (R, Python, Julia & NIST StRD)](#fase-4-validación-cruzada-de-precisión-numérica-r-python-julia--nist-strd)
+5. [Fase 5: Benchmarks Abiertos Estándar de DataFrames (H2O.ai & TPC-H)](#fase-5-benchmarks-abiertos-estándar-de-dataframes-h2oai--tpc-h)
+6. [Fase 6: Batería de Pruebas Profundas del Sistema (Gráficos, Autodiff, GPU, PRNG, Kleene, Arenas y Cero Fugas)](#fase-6-batería-de-pruebas-profundas-del-sistema)
+7. [Fase 7: Retos Computacionales Universales de Compiladores (CLBG & Systems Benchmarks)](#fase-7-retos-computacionales-universales-de-compiladores)
+8. [Fase 8: Documentación de Usuario, Guías de Migración y Cookbook](#fase-8-documentación-de-usuario-guías-de-migración-y-cookbook)
+9. [Fase 9: Validación Extensiva con Diversidad Real de DataFrames (Stress & Real-World Schemas)](#fase-9-validación-extensiva-con-diversidad-real-de-dataframes)
+10. [Fase 10: Formateo Canónico (`ghl fmt`), Fuzzing del Compilador, CI/CD y Distribución](#fase-10-formateo-canónico-ghl-fmt-fuzzing-del-compilador-cicd-y-distribución)
 
 ---
 
-## RFC 01: Sintaxis, Gramática y Ergonomía
-- [x] **Operador de tubería (`|>`):** Reescritura funcional de primer argumento (`df |> filter(...)`) y soporte de marcador de posición `_`.
-- [x] **Operador de fórmulas estadísticas (`~`):** `y ~ x1 + x2 + (1 | id)` con parsing y AST `ExprKind::Formula`.
-- [x] **Literales de colecciones de primera clase:**
-  - [x] Vectores 1D tipados: `[1.0, 2.0, NA]`.
-  - [x] Matrices 2D nativas: `mat[1.0, 2.0; 3.0, 4.0]`.
-  - [x] DataFrames columnares: `dataframe { col_a: [1, 2], col_b: ["x", "y"] }`.
-- [x] **Estructuras de Control como Expresiones:**
-  - [x] `if / else` con evaluación de expresiones y ramas tipadas.
-  - [x] `match` exhaustivo con patrones literales, wildcards, guardas y desestructuración `NA:Reason`.
-  - [x] `while cond { ... }` con mutabilidad y TCO.
-  - [x] `for var in start..end { ... }` con reuso de scope y cero alocaciones de heap por iteración.
-- [x] **Funciones y Expresiones Lambda:**
-  - [x] `fn name(params) { body }`.
-  - [x] Lambdas concisas `x => x * 2` y `(x, y) => x + y`.
-- [x] **Verbos canónicos de transformación tabular (`std::dataframe`):**
-  - [x] `filter`, `select`, `drop`, `mutate`, `arrange`, `group_by`, `summarize`.
-  - [x] `inner_join`, `left_join`, `outer_join`, `distinct`, `slice`, `slice_min`, `slice_max`.
-  - [x] `head`, `tail`, `sample_n`, `sample_frac`, `fill_na`, `rename`, `count`, `pull`, `glimpse`.
-- [x] **Gaps / Extensiones pendientes de RFC 01:**
-  - [x] **`pivot_wider` y `pivot_longer`:** Verbos de transformación de forma tabular (RFC 01 §7.3).
-  - [x] **`impute(col, strategy: Mean, only_for: [NAReason::...])` y `filter_na_reason`:** Imputación condicional y filtrado de filas por motivo de NA (RFC 01 §7.3 y RFC 02 §2.2).
-  - [x] **Literales de Registros / Named Tuples (`{ a: 1, b: 2 }`):** Soporte sintáctico para records estructurales en AST/eval (RFC 01 §3.4).
-  - [x] **Indexación general por corchetes (`v[0..5]`, `mat[0..2, :]`, `v[v > 0.0]`):** Azúcar sintáctico para rebanado directo en expresiones de vectores y matrices (RFC 01 §4).
+## Fase 1: Extensión de Editor para Positron / VS Code
+
+Ubicación: `editors/vscode/` (mismo repositorio, sincronización atómica).
+
+- [ ] **Configuración de Lenguaje (`language-configuration.json`):**
+  - [ ] Definir comentarios de línea (`//`) y bloque (`/* ... */`) para habilitar atajos `Ctrl + /` y `Shift + Alt + A`.
+  - [ ] Configurar autocierre y coincidencia de parejas: `()`, `[]`, `{}`, `#[ ... ]` y `""`.
+  - [ ] Reglas de auto-indentación tras apertura de llaves y delimitadores tabulares (`dataframe [`, `mat [`).
+  - [ ] Reglas de plegado de código (*code folding*) para bloques `fn`, `struct`, `impl` y comentarios.
+- [ ] **Gramática TextMate (`syntaxes/ghl.tmLanguage.json`):**
+  - [ ] Palabras clave y control de flujo: `let`, `mut`, `fn`, `struct`, `trait`, `impl`, `use`, `if`, `else`, `match`, `while`, `for`, `in`, `return`.
+  - [ ] Literales semánticos Kleene: `NA` y valores con motivo `NA:Reason` (`constant.language.na.ghl`).
+  - [ ] Operadores pipeline y fórmulas estadísticas: `|>` y `~`.
+  - [ ] Operadores matriciales y vectorizados: `\`, `.*`, `.+`, `.-`, `./`.
+  - [ ] Funciones nativas y verbos estándar destacados: `ols`, `fit`, `summary`, `filter`, `select`, `mutate`, `plot`, `mean`, etc.
+  - [ ] Anotaciones de tipos: `f64`, `i64`, `String`, `Bool`, `Vector[T]`, `Matrix`, `DataFrame`, `ModelFit`.
+- [ ] **Snippets Ergonómicos (`snippets/ghl.json`):**
+  - [ ] Plantilla de función `fn`.
+  - [ ] Plantilla de modelo estadístico `ols(y ~ x, df)`.
+  - [ ] Plantilla de pipeline de datos `df |> filter(...) |> summarize(...)`.
+  - [ ] Plantilla de gráfico `plot(...) |> geom_point() |> show()`.
+- [ ] **Manifiesto y Empaquetado VSIX:**
+  - [ ] `package.json` con asociación para archivos `.gh` y `.ghl`.
+  - [ ] Generación del paquete `ghl-0.1.0.vsix` listo para instalar en Positron (*Install from VSIX*).
 
 ---
 
-## RFC 02: Sistema de Tipos y Semántica
-- [x] **Inferencia de tipos bidireccional local:** Sistema Hindley-Milner extendido para escalares, vectores, matrices y DataFrames (`ghl-types`).
-- [x] **Semántica unificada de `NA` y `NA:Reason`:**
-  - [x] Distinción formal entre `NaN` (IEEE-754) y `NA` (dato faltante estadístico).
-  - [x] Sintaxis `NA:Reason` en lexer y AST (`NA:SensorDropout`, `NA:NoResponse`, etc.).
-  - [x] Lógica ternaria de Kleene en comparaciones y operadores lógicos (`&&`, `||`, `!`).
-  - [x] Propagación transparente en funciones estadísticas (`mean`, `sum`, etc.) con flag `skip_na`.
-  - [x] Representación eficiente: bitmask de 1 bit de Arrow para NA base + tabla `NaReasonTable` con interning `Arc<str>` para motivos.
-  - [x] Funciones de inspección semántica: `na_reason(x)` y `na_reasons(df, col)`.
-- [x] **Manejo de errores algebraicos:** `Result<T, E>` y separación entre `ComputeError` y `StatisticalError`.
-- [x] **Gaps / Extensiones pendientes de RFC 02:**
-  - [x] **`filter_na_reason(col, drop: [...])`:** Filtrado de filas según el motivo semántico de ausencia (RFC 02 §2.2).
-  - [x] **Comprobación estática de dimensiones matriciales (`Matrix<f64, ROWS, COLS>`):** Validación de dimensiones en tiempo de compilación mediante const generics en el type-checker (RFC 02 §3).
-  - [x] **Sintaxis de Traits y polimorfismo de usuario (`trait Distribution`, `impl Trait for Struct`):** Exposición de traits definidos por el usuario en el frontend del lenguaje (RFC 02 §4).
-    - [x] **Tokens de primera clase para `Self` y `self`:** Palabras clave dedicadas en el lexer (`Token::SelfType`, `Token::SelfValue`) para evitar ambigüedades con identificadores comunes.
-    - [x] **Resolución contextual de `Self` y tipos asociados (`Self::Output`):** Sustitución estática en el type-checker de `Self` por el tipo receptor en bloques `impl Trait for Struct` y proyección de tipos asociados.
+## Fase 2: Language Server Protocol (`ghl lsp`)
+
+Creación de crate dedicado o subcomando `ghl lsp` para comunicación estándar JSON-RPC sobre stdio.
+
+- [ ] **Infraestructura del Servidor:**
+  - [ ] Integración de biblioteca LSP (ej. `tower-lsp`).
+  - [ ] Comando CLI `ghl lsp` para iniciar el servidor de lenguaje.
+  - [ ] Conexión del cliente en la extensión de VS Code/Positron al binario `ghl`.
+- [ ] **Diagnósticos en Tiempo Real (as-you-type):**
+  - [ ] Notificación de errores de sintaxis (`textDocument/publishDiagnostics`) en cada cambio de documento.
+  - [ ] Subrayado ondulado rojo/amarillo para errores de tipos e inconsistencias de dimensiones matriciales.
+- [ ] **Hover Documentation:**
+  - [ ] Respuesta a `textDocument/hover`: renderizar tooltip flotante en Markdown con:
+    - Firma de la función.
+    - Fórmula matemática en notación limpia (ej. $\hat{\beta} = (X^TX)^{-1}X^Ty$).
+    - Descripción de parámetros y ejemplo de uso proveniente de `FunctionDoc`.
+- [ ] **Autocompletado Contextual:**
+  - [ ] Autocompletado de funciones de la biblioteca estándar (`mean`, `ols`, `filter`, etc.).
+  - [ ] Autocompletado de variables locales y funciones declaradas en el archivo actual.
+  - [ ] Autocompletado inteligente de nombres de columnas en contextos de verbos DataFrames (`filter`, `select`, `mutate`).
+- [ ] **Navegación:**
+  - [ ] *Go to Definition* (`textDocument/definition`) para saltar a la declaración de funciones y variables de usuario.
 
 ---
 
-## RFC 03: Modelo de Memoria y Ejecución
-- [x] **Semántica de valor estructural con Copy-on-Write (CoW):**
-  - [x] Clonado $O(1)$ de DataFrames mediante columnas Arrow envueltas en `Arc`.
-  - [x] Clonado $O(1)$ de Matrices mediante `Value::Matrix { data: Arc<Vec<f64>> }`.
-  - [x] Clonado $O(1)$ de Vectores mediante `VectorData`.
-  - [x] Clonado $O(1)$ de tablas de motivos mediante `Arc<str>`.
-- [x] **Invariante de asignaciones de Heap en bucles:** 0 allocaciones por iteración en `for` y `while` mediante reutilización de variables locales en scope.
-- [x] **Arenas regionales (`bumpalo`):** Módulo `crates/ghl-runtime/src/arena.rs` con asignador bump de recolección instantánea $O(1)$.
-- [x] **Niveles de ejecución (Tiering):**
-  - [x] Tier-1 REPL / Scripting interactivo instantáneo (< 15 ms).
-  - [x] Compilación nativa JIT / AOT con Cranelift (`ghl-codegen`).
-  - [x] Binarios standalone livianos (< 1 MB, muy por debajo de la meta de 15 MB).
-- [x] **Gaps / Extensiones pendientes de RFC 03:**
-  - [x] **Sintaxis de superficie para arenas regionales:** Exponer `arena::scope(|arena| { ... })` directamente en el lenguaje para scripts de usuario (RFC 03 §2.2).
+## Fase 3: Soporte Quarto, Notebooks y Flujo Interactivo en Positron
+
+Habilitar la experiencia de computación científica y *Literate Programming* nativa en Positron:
+
+- [ ] **Envío Interactivo al REPL (`Ctrl + Enter`):**
+  - [ ] Comando en la extensión para enviar línea actual o bloque seleccionado al REPL de GHL en la terminal integrada.
+- [ ] **Jupyter Kernel de GHL (`ghl kernel`):**
+  - [ ] Implementar un kernel ligero que responda al protocolo Jupyter (ZeroMQ / JSON).
+  - [ ] Soporte para ejecutar archivos `.ipynb` con kernel GHL dentro de Positron y VS Code.
+- [ ] **Soporte Quarto (`.qmd`):**
+  - [ ] Habilitar chunks ejecutables ````{ghl}`` en Quarto.
+  - [ ] Generación de documentos reproducibles (HTML, PDF, Typst) combinando prosa, código, tablas y gráficos.
+- [ ] **Visor de Datos Nativo de Positron (*Data Explorer*):**
+  - [ ] Integración con la API de exploración tabular de Positron (`View(df)`).
+  - [ ] Transmisión de DataFrames mediante Apache Arrow IPC sin copia de memoria para exploración interactiva en cuadrícula con filtros y ordenamiento.
+- [ ] **Panel Gráfico Lateral (*Plots Pane*):**
+  - [ ] Salida de gráficos de *Grammar of Graphics* en SVG para visualización inmediata en la pestaña de Plots de Positron.
 
 ---
 
-## RFC 04: Biblioteca Estándar y Primitivas
-- [x] **`std::linalg`:**
-  - [x] Matrices, vectores, operador `\` (solve), QR, Cholesky, SVD, autovalores/autovectores (eigen), matrices de varianza-covarianza.
-- [x] **`std::dataframe`:**
-  - [x] Lectura y escritura multihilo de CSV y Parquet.
-  - [x] Suite completa de verbos relacionales y agregaciones.
-- [x] **`std::stats`:**
-  - [x] Distribuciones: `Normal`, `Poisson`, `Gamma`, `Bernoulli`, `Uniform`, `Exponential`, `Beta`.
-  - [x] Métodos: `sample`, `sample_n`, `pdf`, `log_pdf`, `cdf`, `quantile`.
-  - [x] PRNG determinista bit-for-bit: `Xoshiro256PlusPlus`.
-- [x] **`std::core`:**
-  - [x] Tipos primitivos, E/S estándar, operaciones de texto y funciones matemáticas avanzadas (`sqrt`, `log`, `exp`, `erf`, `gamma`).
-- [x] **Gaps / Extensiones pendientes de RFC 04:**
-  - [x] **`std::autodiff`:** Diferenciación automática modo reversa y forward (`grad(f)` para optimizadores y HMC) (RFC 04 §5).
-  - [x] **Cliente/servidor asíncrono en `std::core`:** Primitivas de red TCP/HTTP para servir modelos estadísticos como microservicios (RFC 04 §6).
+## Fase 4: Validación Cruzada de Precisión Numérica (R, Python, Julia & NIST StRD)
+
+Creación del harness automatizado `tests/cross_validation/` para auditar la precisión de GHL frente a los estándares de referencia de la industria:
+
+- [ ] **Paridad con R (`stats::lm`, `glm`, `MASS`):**
+  - [ ] OLS: Coeficientes $\hat{\beta}$, errores estándar, $t$-stat, $p$-values, $R^2$, $R^2$ ajustado, F-statistic, residuos ($|error| < 10^{-10}$).
+  - [ ] GLM Logit: Estimaciones IRLS, deviance, log-likelihood, matrices de dispersión ($|error| < 10^{-9}$).
+  - [ ] Resúmenes de modelo con paridad exacta en salidas de `summary()`.
+- [ ] **Paridad con Python (`statsmodels`, `scipy.stats`):**
+  - [ ] Matrices de covarianza robustas frente a heterocedasticidad (HC0, HC1, HC2, HC3).
+  - [ ] Álgebra lineal: Singular Value Decomposition (SVD), factorización Cholesky ($|error| < 10^{-10}$).
+- [ ] **Paridad con Julia (`GLM.jl`, `LinearAlgebra`):**
+  - [ ] Descomposición QR y valores/vectores propios (Eigenvalues / Eigenvectors) en matrices simétricas.
+  - [ ] Desempeño y precisión en resolución de sistemas lineales (`A \ b`).
+- [ ] **Certificación NIST StRD (Datasets Canónicos de Referencia Estadística):**
+  - [ ] Dataset *Pontius* (polinomio de segundo grado).
+  - [ ] Dataset *Filippelli* (polinomio de décimo grado).
+  - [ ] Dataset *Longley* (problema clásico de multicolinealidad extrema).
+  - [ ] Dataset *Wampler* (evaluación de estabilidad numérica frente a errores de redondeo).
 
 ---
 
-## RFC 05: Concurrencia, Paralelismo y GPU
-- [x] **Paralelismo de memoria compartida:** Uso transversal de `rayon` en lectura CSV, agregaciones de DataFrames y operaciones matriciales.
-- [x] **Aceleración por GPU (`std::gpu`):**
-  - [x] Crate `crates/ghl-runtime/src/gpu.rs` basado en `wgpu 24.0` + `bytemuck 1.21`.
-  - [x] `GpuContext`, `GpuVector`, `GpuMatrix` con fallback automático a CPU/faer si no hay GPU disponible.
-- [x] **Gaps / Extensiones pendientes de RFC 05:**
-  - [x] **Iteradores paralelos en sintaxis de usuario:** Exponer `(0..N).par_iter().map(...)` como método callable desde scripts GHL (RFC 05 §2).
-  - [x] **Pipelines WGSL pre-compilados y cacheados:** Optimización de shaders GEMM/reducciones para aceleración en hardware dedicada y fallback CPU ultra-rápido (RFC 05 §4.2).
+## Fase 5: Benchmarks Abiertos Estándar de DataFrames (H2O.ai & TPC-H)
+
+Contrastar el motor de DataFrames de GHL frente a los benchmarks de código abierto más respetados del ecosistema tabular:
+
+- [ ] **H2O.ai Database-like Ops Benchmark (`h2oai/db-benchmark`):**
+  - [ ] Tarea 1: GroupBy con agregación simple (suma, media) en cardinalidad pequeña (K=100) y alta (K=1,000,000).
+  - [ ] Tarea 2: GroupBy multi-columna con múltiples agregaciones concurrentes.
+  - [ ] Tarea 3: Joins relacionales (Inner join y Left join sobre claves enteras y de texto).
+  - [ ] Tarea 4: Ordenamiento y filtrado de alto volumen (0.5 GB, 5 GB).
+  - [ ] Tabla comparativa de throughput y consumo de RAM frente a `polars`, `duckdb`, `data.table` (R) y `pandas`.
+- [ ] **TPC-H Analytical Queries (Subconjunto Canónico):**
+  - [ ] Query 1: Pricing Summary Report Query (agrupación multi-métrica y ordenamiento).
+  - [ ] Query 6: Forecasting Revenue Change Query (filtrado por rango de fechas y producto escalar).
+- [ ] **NYC Taxi Trip Dataset (Prueba de Ingesta Masiva y Feature Engineering):**
+  - [ ] Pipeline end-to-end: Carga de CSV/Parquet -> Filtrado -> Cálculo de distancias -> Agrupamiento -> Regresión OLS.
 
 ---
 
-## RFC 06: Interoperabilidad y Ecosistema
-- [x] **Apache Arrow C Data Interface:** Interoperabilidad nativa zero-copy mediante buffers Arrow.
-- [x] **Herramienta de Línea de Comandos (`ghl`):**
-  - [x] `ghl run`: Ejecución directa de scripts.
-  - [x] `ghl repl`: Shell interactiva con resaltado y diagnóstico.
-  - [x] `ghl test`: Ejecución de pruebas unitarias.
-  - [x] `ghl bench`: Harness de micro-benchmarks y suites.
-  - [x] `ghl check`: Verificación de sintaxis y tipos sin ejecutar.
-  - [x] `ghl aot` / `ghl jit`: Compilación y ejecución nativa con Cranelift.
-- [x] **Gaps / Extensiones pendientes de RFC 06:**
-  - [x] **Gestor de paquetes completo (`ghl new`, `ghl fetch`, `ghl.lock`):** Resolución de dependencias externas reproducibles con hashes SHA-256 (RFC 06 §4).
-  - [x] **Directiva de exportación FFI (`#[export_ffi]` / `extern "C"`):** Generación automática de bibliotecas compartidas (`.so` / `.dylib`) consumibles desde Python y R (RFC 06 §3).
+## Fase 6: Batería de Pruebas Profundas del Sistema
+
+Pruebas especializadas para subsistemas críticos de GHL:
+
+- [ ] **Visual Regression & Renderizado Gráfico:**
+  - [ ] *SVG Snapshot Testing*: Comparación de árboles SVG generados contra archivos "golden" canónicos (puntos, líneas, histogramas, boxplots).
+  - [ ] *Stress Rendering*: Medición de latencia y uso de memoria graficando $100,000$ puntos en scatter plot y $1,000,000$ en histograma vs `ggplot2` y `matplotlib`.
+  - [ ] Validación de mapeo estético exacto (`aes`) para escalas continuas, discretas y paletas de color.
+- [ ] **Diferenciación Automática (Taylor Test / Gradient Checking):**
+  - [ ] Verificación de gradientes exactos de `grad()` y `value_and_grad()` contra aproximación numérica central de Taylor:
+    $$\frac{f(x + \epsilon) - f(x - \epsilon)}{2\epsilon} \approx \nabla f(x) \quad (\text{tolerancia } \epsilon = 10^{-7}, \text{error relativo} < 10^{-6})$$
+  - [ ] Pruebas de convergencia de descenso de gradiente en funciones de prueba clásicas (*Rosenbrock*, *Rastrigin*) contra JAX y Julia `ForwardDiff.jl`.
+- [ ] **Arenas Regionales de Memoria (`bumpalo` / RFC 03):**
+  - [ ] *Desalocación Instantánea O(1)*: Comprobar que tras alocar 10,000 vectores y matrices en un `arena::scope`, la liberación sea en tiempo constante $O(1)$ sin destructores per-objeto.
+  - [ ] *Cero Fragmentación de Heap*: Ejecutar 100,000 ciclos continuos de `reset()` en bucle verificando que la memoria RSS no crezca.
+  - [ ] *Aislamiento y Seguridad de Punteros*: Garantizar que los valores asignados dentro de una arena no puedan escapar del scope ni provocar *use-after-free*.
+  - [ ] *Arenas Thread-Local en Rayon*: Comprobar que cada hilo de paralelismo tenga su propia arena sin contención de locks ni condiciones de carrera.
+- [ ] **Generación Pseudoaleatoria y Distribuciones (Batería PRNG):**
+  - [ ] Test formal de bondad de ajuste Kolmogorov-Smirnov y $\chi^2$ sobre $1,000,000$ de muestras de `random_normal` y `random_gamma` ($p > 0.05$).
+  - [ ] Verificación de independencia estadística y ausencia de autocorrelación serial entre streams paralelos generados con `Xoshiro256PlusPlus::jump()`.
+- [ ] **GPU vs CPU (WGPU & Shaders):**
+  - [ ] Paridad numérica GPU-CPU en `matmul` para matrices de $1024 \times 1024$ y $2048 \times 2048$ ($\|C_{\text{gpu}} - C_{\text{cpu}}\| < 10^{-5}$).
+  - [ ] Determinación del punto de cruce de rendimiento (*latency crossover point*) para transferencias de datos CPU <-> GPU.
+- [ ] **Lógica Kleene 3VL y Semántica de Valores Faltantes:**
+  - [ ] Matriz exhaustiva $3 \times 3$ ($\text{True}, \text{False}, \text{NA}$) para todos los operadores lógicos (`&&`, `||`, `!`) y relacionales (`==`, `!=`, `<`, `>`).
+  - [ ] Trazabilidad de motivos semánticos (`NA:Reason`) en pipelines multi-etapa complejos (Filter -> Mutate -> Impute -> Summarize).
+- [ ] **Zero-Leak & Estabilidad a Largo Plazo:**
+  - [ ] Prueba de resistencia de $1,000,000$ de iteraciones midiendo que el Resident Set Size (RSS) en RAM se mantenga estrictamente plano.
+  - [ ] *Parquet / Arrow Round-Trip Interoperability*: Escribir y leer archivos Parquet y streams Arrow entre GHL, Python Polars y R `arrow` verificando integridad binaria bit a bit.
 
 ---
 
-## RFC 07: Herramientas, DX y Diagnósticos
-- [x] **Taxonomía dual de diagnósticos:**
-  - [x] Errores computacionales `[Compute Error Cxxxx]` con Kaomojis de Gojo (`(ノ°□°)ノ`, `(╯°□°)╯︵ ┻━┻`).
-  - [x] Errores estadísticos `[Statistical Error Sxxxx]` con Kaomojis de Haru/NEKO (`(=^･ω･^=)`, `ฅ(ﾐΦ ﻌ Φﾐ)ฅ`).
-- [x] **Renderizado enriquecido con `ariadne`:** Snippets de código, subrayado multicolor de tokens infractores y sugerencias accionables.
-- [x] **Shell interactiva con `reedline`:** Historial, autocompletado y renderizado visual.
+## Fase 7: Retos Computacionales Universales de Compiladores
+
+Demostrar que el compilador y runtime de GHL compiten en rendimiento contra C, Rust y Julia más allá de la estadística:
+
+- [ ] **N-Body Simulation (CLBG Canonical Problem):**
+  - [ ] Simulación orbital gravitacional del sistema solar (Júpiter, Saturno, Urano, Neptuno) con $50,000,000$ de iteraciones.
+  - [ ] Auditar vectorización SIMD, alocación de registros de punto flotante `f64` de Cranelift y ausencia de *boxing*.
+  - [ ] Meta de rendimiento: Estar a menos de $1.5\times$ del tiempo de ejecución de C (`gcc -O3`) y Rust (`rustc --release`).
+- [ ] **Mandelbrot Fractal (Cálculo de Bits en Matriz Masiva):**
+  - [ ] Renderizado del conjunto de Mandelbrot en $16,000 \times 16,000$ puntos con salida de bytes empaquetados.
+  - [ ] Auditar optimización de bucles sin predicción fallida de ramas (*branch-free execution*).
+- [ ] **Spectral Norm (Iteración de Potencias en Matriz de Hilbert):**
+  - [ ] Cálculo de norma espectral con 20 iteraciones sobre matriz de orden $N = 5,500$.
+  - [ ] Medición de escalabilidad de paralelismo con Rayon vs OpenMP en C y Julia Threads.
+- [ ] **Binary Trees con Arenas Regionales (El Desafío Anti-GC):**
+  - [ ] Alocación y destrucción de millones de árboles binarios de profundidad 20.
+  - [ ] Demostrar que el modelo de Arenas de GHL (`bumpalo`) supera a lenguajes con Garbage Collection (Java, Julia, R) al liberar árboles enteros en tiempo $O(1)$.
+- [ ] **Fannkuch-Redux (Indexación Contigua y Permutaciones In-Place):**
+  - [ ] Cálculo de permutaciones de orden $N = 12$ mediante volteo de vectores en memoria contigua.
+  - [ ] Auditar cero alocaciones de heap intermedias y latencia mínima de indexación vectorial.
+- [ ] **The "Time-to-First-Plot" (TTFX) Challenge:**
+  - [ ] Medir tiempo de arranque en frío (*Cold Start*): inicio de proceso + parsing de script + JIT Cranelift + OLS + renderizado gráfico.
+  - [ ] Demostrar latencia $< 20\text{ ms}$, superando contundentemente a Julia ($> 3\text{ s}$) y Python ($> 500\text{ ms}$).
+- [ ] **Throughput de Inferencia HTTP Concurrente (TechEmpower Benchmark):**
+  - [ ] Endpoint de microservicio con `http::serve` bajo $10,000$ peticiones concurrentes (ingesta de JSON, evaluación de modelo OLS/Logit y respuesta JSON).
+  - [ ] Medir latencia de percentil $P_{99} < 2\text{ ms}$ y saturación de conexiones TCP sin fugas.
+- [ ] **Deep Tail Recursion & TCO (Tail Call Optimization):**
+  - [ ] Ejecución de función de Ackermann y Collatz con $10,000,000$ de llamadas recursivas anidadas.
+  - [ ] Garantizar consumo de memoria de stack plano ($0$ crecimiento del call stack, $0$ stack overflow).
+- [ ] **Recorrido de Grafos Irregulares (BFS / DFS en 10M de Nodos):**
+  - [ ] Búsqueda en grafos dispersos con acceso no contiguo a memoria (*pointer chasing*).
+  - [ ] Auditar el rendimiento de las referencias CoW y ARC frente a la fragmentación de caché L1/L2/L3.
 
 ---
 
-## RFC 08: Pila Tecnológica del Compilador en Rust
-- [x] **100% de crates integradas y verificadas:**
-  - `logos` (lexer DFA), `chumsky` (parser con recuperación de errores), `ariadne` (diagnósticos).
-  - `polars-core` + `polars-lazy` (DataFrames columnares y optimizador de consultas).
-  - `faer` (álgebra lineal pura en Rust), `rayon` (paralelismo work-stealing).
-  - `statrs` + `rand_distr` (distribuciones), `rand_xoshiro` (PRNG determinista), `bumpalo` (arenas).
-  - `plotters` (exportación gráfica PNG/SVG), `cranelift` (JIT nativo), `reedline` (REPL).
+## Fase 8: Documentación de Usuario, Guías de Migración y Cookbook
+
+Creación del directorio `docs/guides/` con material didáctico para usuarios finales:
+
+- [ ] **Guía de Migración para Usuarios de R (`docs/guides/ghl_for_r_users.md`):**
+  - [ ] Tabla de equivalencias de funciones: `lm()` -> `ols()`, `glm()` -> `fit_logistic()`, `summary()`, `predict()`.
+  - [ ] Comparativa Tidyverse vs GHL: `%>%` / `|>` con `filter()`, `mutate()`, `group_by()`.
+  - [ ] Manejo de `NA`: del `is.na()` tradicional a los motivos semánticos `NA:Reason` y lógica de Kleene.
+- [ ] **Guía de Migración para Usuarios de Python / Pandas (`docs/guides/ghl_for_python_users.md`):**
+  - [ ] Comparativa Pandas/Polars vs DataFrames GHL.
+  - [ ] Equivalencias de Álgebra Lineal: NumPy/SciPy vs GHL `dot()`, `\`, `cholesky()`, `qr()`.
+  - [ ] Sintaxis de expresiones funcionales frente a métodos de objetos.
+- [ ] **Tutorial Rápido "GHL en 15 Minutos" (`docs/guides/quickstart.md`):**
+  - [ ] Instalación del binario y uso del REPL.
+  - [ ] Hola Mundo estadístico: carga de CSV, filtrado, regresión OLS y visualización.
+- [ ] **The GHL Statistical Cookbook (`docs/guides/cookbook.md`):**
+  - [ ] Receta 1: Limpieza e imputación de datos faltantes con motivos semánticos (`impute`, `filter_na_reason`).
+  - [ ] Receta 2: Regresión Lineal Robusta con errores estándar corregidos por heterocedasticidad (HC0 a HC3).
+  - [ ] Receta 3: Clasificación Binaria con Regresión Logística (IRLS).
+  - [ ] Receta 4: Agrupamiento no supervisado con Modelos de Mezclas Gaussianas (GMM / EM).
+  - [ ] Receta 5: Muestreo Bayesiano MCMC y Bootstrap paralelo reproducible.
 
 ---
 
-## RFC 09: Factores Categóricos, Gráficos y NIST StRD
-- [x] **Factores categóricos nominales y ordinales:**
-  - [x] `Factor<T>` y `OrderedFactor<T>` con codificación de diccionario Arrow.
-  - [x] Matrices de contraste: `Treatment` (Dummy), `Sum` (Deviation), `Helmert`, `Poly` (Polinomial).
-- [x] **Gramática de Gráficos declarativa (`std::plot`):**
-  - [x] Geometrías: `geom_point`, `geom_line`, `geom_bar`, `geom_histogram`, `geom_smooth` (OLS trend line), `geom_boxplot`.
-  - [x] Mapeo estético `aes(x, y, color, size, fill)`.
-  - [x] Salida dual: Renderizado en terminal interactiva Cockpit (Unicode/Braille) con `show()` y exportación a archivos alta resolución PNG/SVG con `save("path")`.
-- [x] **Validación numérica NIST StRD:** Precisión de hasta 15 dígitos en estimaciones OLS.
+## Fase 9: Validación Extensiva con Diversidad Real de DataFrames
+
+Auditar el comportamiento del motor columnar de GHL frente a la complejidad estructural y tipos de datos del mundo real:
+
+- [ ] **Higgs Boson Dataset (CERN / UCI):**
+  - [ ] Volumen: $11,000,000$ de filas densas de punto flotante `f64` (28 variables cinemáticas continuas).
+  - [ ] Prueba: Ingesta masiva, normalización estadística y clasificación logística IRLS a gran escala.
+- [ ] **Airline On-Time Performance (ASA Data Expo):**
+  - [ ] Volumen: Más de $120,000,000$ de registros de vuelos históricos.
+  - [ ] Prueba: Cardinalidad extrema en variables categóricas (aeropuertos de origen/destino, transportistas), `group_by` multi-clave y joins con tablas maestras.
+- [ ] **Genómica y Single-Cell RNA-seq (Matrices Ultra-Anchas):**
+  - [ ] Estructura: Matrices transponibles de alta dimensionalidad ($20,000$ genes $\times 50,000$ células).
+  - [ ] Prueba: Manejo de matrices dispersas (sparse) con alta proporción de ceros estructurales y conteos enteros de expresión génica.
+- [ ] **IMDb Reviews / Tabular Textual:**
+  - [ ] Estructura: Columnas de texto de longitud variable con caracteres Unicode arbitrarios, tildes, signos de puntuación y emojis.
+  - [ ] Prueba: Vectorización de cadenas con `str_contains`, `str_replace`, `str_lower` y filtrado sin corrupción de memoria.
+- [ ] **Datos Financieros de Alta Frecuencia (LOB / Limit Order Book):**
+  - [ ] Estructura: Timestamps a nivel de microsegundo con millones de ticks por día de negociación.
+  - [ ] Prueba: Ventanas móviles y funciones de series temporales (`cumsum`, `lag`, `lead`, `between`, cálculo de spreads bid-ask y volatilidad realizada).
+- [ ] **Validación en Entornos Host Reales:**
+  - [ ] Pruebas locales de instalación limpia de Positron IDE en **Windows** (entorno nativo de trabajo) y **Linux** (vía WSL / contenedores).
 
 ---
 
-## RFC 10: Presupuestos de Rendimiento y SLAs
-- [x] **Revisión 2 formalmente auditada y calibrada:**
-  - [x] Cold start: GHL AOT `0.9 ms` (SLA: $\le 15\text{ ms}$).
-  - [x] Bucles escalares: Gibbs sampler `27.1 ms` — 18.1x más rápido que NumPy.
-  - [x] Dot product: `153.1 ms` — 2.28x más rápido que NumPy.
-  - [x] Ingestión CSV: 1M filas en `429.7 ms` (1.07x de Python Polars, 2.7x más rápido que R data.table).
-  - [x] Clonado de DataFrames, Matrices y NA Reasons: estrictamente $O(1)$ CoW.
-  - [x] Huella de memoria y tamaño de binario AOT: `~114.5 KB` (SLA: $\le 20\text{ MB}$).
+## Fase 10: Formateo Canónico (`ghl fmt`), Fuzzing del Compilador, CI/CD y Distribución
 
----
+Cerrar la brecha de calidad de ingeniería y entrega continua del lenguaje:
 
-## RFC 11: Framework de Modelado Estadístico NEKO
-- [x] **Desacoplamiento en tres momentos:** `ModelSpec` $\to$ `Blueprint` $\to$ `FittedModel`.
-- [x] **Sistema de Capacidades implementadas:**
-  - [x] `ols(formula, data)` / `linear_model`.
-  - [x] `glm(formula, data, family: "binomial")` (Logit / Probit).
-  - [x] `gmm(data, k)` (Gaussian Mixture Models con algoritmo EM multivariado).
-  - [x] `summary(m)`, `tidy(m)`, `glance(m)`, `augment(m, data)`, `predict(m, newdata)`.
-  - [x] `vcov(m, kind)` con matrices clásicas y robustas heterocedásticas (`HC0`–`HC3`).
-- [x] **Trazabilidad de datos ausentes (`RowDisposition`):** Columnas `.used_in_fit` y `.na_reason` generadas de forma determinista en `augment()`.
-
----
-
-## RFC 12: Cockpit Deck Telemetría y Diagnóstico Visual
-- [x] **`RenderCaps`:** Detección de capacidades de terminal (Color ANSI 24-bit / 256 / NO_COLOR, Unicode vs ASCII puro, TTY interactivo, geometría de columnas).
-- [x] **`SymbolRegistry`:** Catálogo canónico de símbolos de compilador (Gojo) y estadística (Haru/NEKO).
-- [x] **Componentes Cockpit Deck:** Tablas con bordes redondeados y alineación estricta, paneles de telemetría, sparklines y barras de progreso.
-
----
-
-## RFC 13: Compilación JIT Nativa con Cranelift
-- [x] **Representación Intermedia (`ghl-ir`):** Tipos escalares (`I64`, `F64`, `Bool`, `Unit`), expresiones, sentencias y funciones lowering tipado.
-- [x] **Generador de código SSA (`ghl-codegen`):** Traducción a Cranelift IR, asignación de memoria ejecutable `RX` y ejecución directa en memoria a velocidad nativa.
-- [x] **Comandos CLI:** `ghl jit` y `ghl aot` integrados en la interfaz de línea de comandos.
-
----
-
-## Resumen Ejecutivo de Gaps para Decisión de Próximos Pasos
-
-A continuación se resumen las características pendientes más relevantes identificadas en los RFCs, agrupadas por área técnica para facilitar la priorización:
-
-1. **Transformaciones Avanzadas de DataFrames (RFC 01 §7.3 & RFC 02 §2.2):**
-   - `pivot_wider` y `pivot_longer` (reshape tabular).
-   - `impute(col, strategy, only_for)` y `filter_na_reason(col, drop)`.
-2. **Diferenciación Automática (`std::autodiff`, RFC 04 §5):**
-   - Implementación de `grad(f)` para optimizadores y algoritmos bayesianos.
-3. **Ergonomía de Indexación y Colecciones (RFC 01 §3.4, §4 & RFC 03 §2.2):**
-   - Slicing general por rangos `v[0..5]` y records `{ key: value }`.
-   - Bloques explícitos de arena `arena::scope(|a| { ... })`.
-4. **[x] Iteradores Paralelos en el DSL (RFC 05 §2):**
-   - Sintaxis `(0..N).par_iter().map(...)` para Monte Carlo en scripts de usuario.
-5. **Ecosistema y Distribución de Paquetes (RFC 06 §3, §4):**
-   - `ghl new`, `ghl fetch`, `ghl.lock`.
-   - `#[export_ffi]` para compilar extensiones `.so`/`.dylib` para Python y R.
-
+- [ ] **Formateador Canónico de Código (`ghl fmt`):**
+  - [ ] Subcomando `ghl fmt <file.gh|file.ghl>` que utiliza el pretty-printer del AST para normalizar automáticamente la indentación a 4 espacios y los saltos de línea canónicos.
+  - [ ] Bandera `--check` para integración en pipelines de CI (falla si el archivo no está formateado).
+  - [ ] Integración con Positron / VS Code para formateo automático al guardar (`editor.formatOnSave`).
+- [ ] **Fuzz Testing del Compilador (`cargo-fuzz` / AFL):**
+  - [ ] Generación de entradas de bytes pseudoaleatorias y sintaxis maliciosa contra `ghl-syntax` y `ghl-types`.
+  - [ ] Invariante: Garantizar $0$ *panics*, $0$ *crashes* y $0$ desbordamientos de búfer ante cualquier código malformado, retornando siempre diagnósticos limpios.
+- [ ] **CI/CD Automatizado con GitHub Actions:**
+  - [ ] Matriz de compilación y tests automáticos en cada pull request para **Windows** y **Linux** (con runners automáticos de macOS en la nube para releases sin requerir hardware Mac local).
+  - [ ] Alerta automatizada de regresión de rendimiento: Notificar si algún commit degrada los benchmarks empíricos más de un 5%.
+- [ ] **Empaquetado y Distribución Automatizada:**
+  - [ ] Script de instalación en una línea para entornos Unix/Linux: `curl -fsSL https://ghl-lang.org/install.sh | sh`.
+  - [ ] Manifiesto de instalación para Windows (`winget` o script PowerShell automatizado).
+  - [ ] Publicación automática de binarios precompilados y del paquete `.vsix` en los Releases de GitHub.
