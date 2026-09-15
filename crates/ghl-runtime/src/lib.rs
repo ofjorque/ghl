@@ -4215,4 +4215,61 @@ mod tests {
         assert!(cache.get_shader("reduce_sum").unwrap().contains("@compute"));
         assert!(cache.get_shader("philox_rng").unwrap().contains("@compute"));
     }
+
+    #[test]
+    fn test_view_dataframe_parquet_export() {
+        let code = r#"
+            let df = dataframe {
+                id: [1, 2, 3],
+                val: [10.5, 20.0, 31.5]
+            };
+            let path = view(df);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let path_val = interp.env.get("path").unwrap();
+        if let Value::String(s) = path_val {
+            assert!(s.ends_with(".parquet"));
+            assert!(std::path::Path::new(&s).exists());
+            let _ = std::fs::remove_file(&s);
+        } else {
+            panic!("Expected string path from view()");
+        }
+    }
+
+    #[test]
+    fn test_show_plot_svg_export() {
+        let temp_dir = std::env::temp_dir().join("ghl_test_plots");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        unsafe {
+            std::env::set_var("GHL_PLOTS_DIR", &temp_dir);
+        }
+
+        let code = r#"
+            let df = dataframe {
+                x: [1.0, 2.0, 3.0],
+                y: [2.0, 4.0, 6.0]
+            };
+            let p = df |> plot(aes(col("x"), col("y"))) |> geom_point();
+            show(p);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let files: Vec<_> = std::fs::read_dir(&temp_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("svg"))
+            .collect();
+        assert!(!files.is_empty(), "Expected SVG plot to be saved to GHL_PLOTS_DIR");
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        unsafe {
+            std::env::remove_var("GHL_PLOTS_DIR");
+        }
+    }
 }

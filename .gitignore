@@ -31,3 +31,10 @@ editors/**/node_modules/
 editors/**/out/
 editors/**/*.vsix
 
+
+/.quarto/
+**/*.quarto_ipynb
+*_files/
+quarto_figures/
+examples/*.html
+examples/target/

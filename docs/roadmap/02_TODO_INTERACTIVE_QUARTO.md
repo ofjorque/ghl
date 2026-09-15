@@ -4,13 +4,13 @@
 
 Habilitar la experiencia de computación científica y *Literate Programming* nativa en Positron, apoyándose en lo que Positron/VS Code ya ofrecen en lugar de reimplementar un protocolo de notebooks:
 
-- [ ] **Envío Interactivo al REPL (`Ctrl + Enter`):**
-  - [ ] Comando en la extensión para enviar línea actual o bloque seleccionado al REPL de GHL en la terminal integrada.
-- [ ] **Soporte Quarto (`.qmd`):**
-  - [ ] Habilitar chunks ejecutables ````{ghl}`` en Quarto.
-  - [ ] Generación de documentos reproducibles (HTML, PDF, Typst) combinando prosa, código, tablas y gráficos.
-- [ ] **Visor de Datos Nativo de Positron (*Data Explorer*):**
-  - [ ] Integración con la API de exploración tabular de Positron (`View(df)`).
-  - [ ] Transmisión de DataFrames mediante Apache Arrow IPC sin copia de memoria para exploración interactiva en cuadrícula con filtros y ordenamiento.
-- [ ] **Panel Gráfico Lateral (*Plots Pane*):**
-  - [ ] Salida de gráficos de *Grammar of Graphics* en SVG para visualización inmediata en la pestaña de Plots de Positron.
+- [x] **Envío Interactivo al REPL (`Ctrl + Enter`):**
+  - [x] Comando en la extensión para enviar línea actual o bloque seleccionado al REPL de GHL en la terminal integrada.
+- [x] **Soporte Quarto (`.qmd`):**
+  - [x] Habilitar chunks ejecutables ````{ghl}`` en Quarto.
+  - [x] Generación de documentos reproducibles (HTML, PDF, Typst) combinando prosa, código, tablas y gráficos.
+- [x] **Visor de Datos Nativo de Positron (*Data Explorer*):**
+  - [x] Integración con la API de exploración tabular de Positron (`view(df)`).
+  - [x] Transmisión de DataFrames mediante Apache Arrow IPC sin copia de memoria para exploración interactiva en cuadrícula con filtros y ordenamiento.
+- [x] **Panel Gráfico Lateral (*Plots Pane*):**
+  - [x] Salida de gráficos de *Grammar of Graphics* en SVG para visualización inmediata en la pestaña de Plots de Positron.

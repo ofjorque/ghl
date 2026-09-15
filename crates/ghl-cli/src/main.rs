@@ -28,7 +28,8 @@ fn print_help(caps: &RenderCaps) {
     println!(r#"Usage: ghl <command> [options]
 
 Commands:
-    run <file.gh|file.ghl>     Execute a GHL script with fast Cranelift JIT
+    run <file|options>         Execute a GHL script with fast Cranelift JIT
+                               (Options: -e "code" for inline, - for stdin, -q for quiet)
     repl                       Launch the interactive shell
     check <file.gh|file.ghl>   Validate syntax, types, and Cranelift HIR lowering
     new <name>                 Create a new structured GHL project (RFC 06 §4)
@@ -136,88 +137,137 @@ fn real_main() {
         }
         "run" => {
             if args.len() < 3 {
-                let err = Diagnostic::compute_error("C0001", "Missing file path to run")
-                    .with_help("Provide a script: `ghl run script.gh`");
+                let err = Diagnostic::compute_error("C0001", "Missing file or code to run")
+                    .with_help("Usage: `ghl run <script.gh>`, `ghl run -e 'code'`, or `ghl run -`");
                 eprintln!("{}", err.render_with_caps(&caps));
                 std::process::exit(1);
             }
-            let file = &args[2];
-            match std::fs::read_to_string(file) {
-                Ok(content) => {
-                    let step_mark = SemanticCode::PipelineStep.glyph(&caps);
 
-                    // 1. Parsing phase
-                    let program = match ghl_syntax::parse(&content) {
-                        Ok(prog) => prog,
-                        Err(errors) => {
-                            for err_msg in errors {
-                                let err = Diagnostic::compute_error("C0100", err_msg)
-                                    .with_location(file, 1, 1);
-                                eprintln!("{}", err.render_with_caps(&caps));
-                            }
+            let mut quiet = false;
+            let mut eval_code: Option<String> = None;
+            let mut file_target: Option<String> = None;
+
+            let mut idx = 2;
+            while idx < args.len() {
+                match args[idx].as_str() {
+                    "-q" | "--quiet" => quiet = true,
+                    "-e" | "-c" => {
+                        if idx + 1 < args.len() {
+                            eval_code = Some(args[idx + 1].clone());
+                            idx += 1;
+                        } else {
+                            let err = Diagnostic::compute_error("C0001", "Missing code string for -e / -c flag");
+                            eprintln!("{}", err.render_with_caps(&caps));
                             std::process::exit(1);
                         }
-                    };
+                    }
+                    "-" => {
+                        file_target = Some("-".to_string());
+                    }
+                    other if !other.starts_with('-') && file_target.is_none() && eval_code.is_none() => {
+                        file_target = Some(other.to_string());
+                    }
+                    _ => {}
+                }
+                idx += 1;
+            }
 
-                    // 2. Semantic and type checking
-                    if let Err(diags) = ghl_types::check(&program, file) {
-                        for diag in diags {
-                            eprintln!("{}", diag.render_with_caps(&caps));
-                        }
+            let (content, filename) = if let Some(code) = eval_code {
+                (code, "<inline>".to_string())
+            } else if let Some(target) = file_target {
+                if target == "-" {
+                    use std::io::Read;
+                    let mut buffer = String::new();
+                    if let Err(e) = std::io::stdin().read_to_string(&mut buffer) {
+                        let err = Diagnostic::compute_error("C0004", format!("Failed to read stdin: {e}"));
+                        eprintln!("{}", err.render_with_caps(&caps));
                         std::process::exit(1);
                     }
-
-                    // 3. JIT Precompilation (Cranelift)
-                    let jit_start = Instant::now();
-                    let jit_info = (|| -> Option<String> {
-                        let hir_module = ghl_ir::lower_ast(&program).ok()?;
-                        if hir_module.functions.is_empty() {
-                            return None;
-                        }
-                        let mut jit = ghl_codegen::JitEngine::new().ok()?;
-                        jit.compile_module(&hir_module).ok()?;
-                        let elapsed = jit_start.elapsed().as_secs_f64() * 1000.0;
-                        Some(format!("({} functions compiled in {:.2}ms)", hir_module.functions.len(), elapsed))
-                    })();
-
-                    // Telemetry indicator for interactive users
-                    if caps.is_tty {
-                        let jit_label = if let Some(info) = &jit_info {
-                            format!("{} {}", caps.cyan("CRANELIFT JIT ▶"), caps.dim(info))
-                        } else {
-                            format!("{}", caps.cyan("EXECUTE ▶"))
-                        };
-
-                        let header = format!(
-                            "{} {}  {} {}  [3/3 {}]",
-                            caps.dim("[1/3 PARSE]"),
-                            caps.green(step_mark),
-                            caps.dim("[2/3 TYPECHECK]"),
-                            caps.green(step_mark),
-                            jit_label,
-                        );
-                        println!("{}\n", header);
-                    }
-
-                    // 4. High-performance execution runtime
-                    let mut interpreter = ghl_runtime::Interpreter::new();
-                    match interpreter.eval_program(&program) {
-                        Ok(final_val) => {
-                            if !matches!(final_val, ghl_runtime::Value::Unit) {
-                                println!("{}", final_val);
-                            }
-                        }
-                        Err(err) => {
+                    (buffer, "<stdin>".to_string())
+                } else {
+                    match std::fs::read_to_string(&target) {
+                        Ok(c) => (c, target),
+                        Err(io_err) => {
+                            let err = Diagnostic::compute_error(
+                                "C0004",
+                                format!("Failed to read file `{}`: {}", target, io_err),
+                            );
                             eprintln!("{}", err.render_with_caps(&caps));
                             std::process::exit(1);
                         }
                     }
                 }
-                Err(io_err) => {
-                    let err = Diagnostic::compute_error(
-                        "C0004",
-                        format!("Failed to read file `{}`: {}", file, io_err),
-                    );
+            } else {
+                let err = Diagnostic::compute_error("C0001", "No input file or inline code provided")
+                    .with_help("Usage: `ghl run <script.gh>`, `ghl run -e 'code'`, or `ghl run -`");
+                eprintln!("{}", err.render_with_caps(&caps));
+                std::process::exit(1);
+            };
+
+            let step_mark = SemanticCode::PipelineStep.glyph(&caps);
+
+            // 1. Parsing phase
+            let program = match ghl_syntax::parse(&content) {
+                Ok(prog) => prog,
+                Err(errors) => {
+                    for err_msg in errors {
+                        let err = Diagnostic::compute_error("C0100", err_msg)
+                            .with_location(&filename, 1, 1);
+                        eprintln!("{}", err.render_with_caps(&caps));
+                    }
+                    std::process::exit(1);
+                }
+            };
+
+            // 2. Semantic and type checking
+            if let Err(diags) = ghl_types::check(&program, &filename) {
+                for diag in diags {
+                    eprintln!("{}", diag.render_with_caps(&caps));
+                }
+                std::process::exit(1);
+            }
+
+            // 3. JIT Precompilation (Cranelift)
+            let jit_start = Instant::now();
+            let jit_info = (|| -> Option<String> {
+                let hir_module = ghl_ir::lower_ast(&program).ok()?;
+                if hir_module.functions.is_empty() {
+                    return None;
+                }
+                let mut jit = ghl_codegen::JitEngine::new().ok()?;
+                jit.compile_module(&hir_module).ok()?;
+                let elapsed = jit_start.elapsed().as_secs_f64() * 1000.0;
+                Some(format!("({} functions compiled in {:.2}ms)", hir_module.functions.len(), elapsed))
+            })();
+
+            // Telemetry indicator for interactive users
+            if caps.is_tty && !quiet {
+                let jit_label = if let Some(info) = &jit_info {
+                    format!("{} {}", caps.cyan("CRANELIFT JIT ▶"), caps.dim(info))
+                } else {
+                    format!("{}", caps.cyan("EXECUTE ▶"))
+                };
+
+                let header = format!(
+                    "{} {}  {} {}  [3/3 {}]",
+                    caps.dim("[1/3 PARSE]"),
+                    caps.green(step_mark),
+                    caps.dim("[2/3 TYPECHECK]"),
+                    caps.green(step_mark),
+                    jit_label,
+                );
+                println!("{}\n", header);
+            }
+
+            // 4. High-performance execution runtime
+            let mut interpreter = ghl_runtime::Interpreter::new();
+            match interpreter.eval_program(&program) {
+                Ok(final_val) => {
+                    if !matches!(final_val, ghl_runtime::Value::Unit) {
+                        println!("{}", final_val);
+                    }
+                }
+                Err(err) => {
                     eprintln!("{}", err.render_with_caps(&caps));
                     std::process::exit(1);
                 }

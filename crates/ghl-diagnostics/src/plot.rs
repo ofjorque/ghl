@@ -199,6 +199,17 @@ impl PlotSpec {
         Ok(())
     }
 
+    /// Renders the plot directly to an SVG vector string.
+    pub fn to_svg(&self, width: u32, height: u32) -> Result<String, String> {
+        let mut buf = String::new();
+        {
+            let root = SVGBackend::with_string(&mut buf, (width, height)).into_drawing_area();
+            self.draw_chart(&root)?;
+            root.present().map_err(|e| format!("Failed to render SVG: {e}"))?;
+        }
+        Ok(buf)
+    }
+
     fn draw_chart<DB: DrawingBackend>(&self, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
         root.fill(&WHITE).map_err(|e| format!("{e}"))?;
 

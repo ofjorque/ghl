@@ -578,6 +578,22 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "view".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::String),
+            },
+            false,
+        );
+        env.insert(
+            "View".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::String),
+            },
+            false,
+        );
+        env.insert(
             "head".into(),
             Type::Function {
                 params: vec![Type::Any],

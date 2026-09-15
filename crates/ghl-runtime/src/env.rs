@@ -155,6 +155,8 @@ impl RuntimeEnv {
         env.set("slice".into(),    Value::NativeFn(native_slice));
         env.set("pivot_wider".into(),  Value::NativeFn(native_pivot_wider));
         env.set("pivot_longer".into(), Value::NativeFn(native_pivot_longer));
+        env.set("view".into(),         Value::NativeFn(native_view));
+        env.set("View".into(),         Value::NativeFn(native_view));
 
         // Joins
         env.set("inner_join".into(), Value::NativeFn(native_inner_join));
@@ -3178,12 +3180,73 @@ fn native_show(args: Vec<Value>) -> Result<Value, Diagnostic> {
     match target {
         Value::Plot(p) => {
             println!("{}\n", p.render(&caps));
+
+            // Check if Positron or GHL plots directory is configured
+            if let Some(plots_dir) = std::env::var("POSITRON_PLOTS_DIR")
+                .ok()
+                .or_else(|| std::env::var("GHL_PLOTS_DIR").ok())
+            {
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                let plot_path = std::path::Path::new(&plots_dir).join(format!("ghl_plot_{}_{}.svg", std::process::id(), timestamp));
+                if let Err(e) = p.save_file(&plot_path.to_string_lossy()) {
+                    eprintln!("(=^･ω･^=) [Plots Pane] Warning: failed to save SVG plot: {e}");
+                }
+            }
         }
         other => {
             println!("{}\n", other.render_styled(&caps));
         }
     }
     Ok(Value::Unit)
+}
+
+fn native_view(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let df_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`view()` requires a DataFrame: `view(df)` or `df |> view()`")
+    })?;
+
+    let (nrow, ncol) = match df_val {
+        Value::DataFrame { frame, .. } => (frame.height(), frame.width()),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                format!("`view()` requires a DataFrame, found `{}`", other.type_name()),
+            ));
+        }
+    };
+
+    let temp_dir = std::env::temp_dir();
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let filename = format!("ghl_data_{}_{}.parquet", std::process::id(), timestamp);
+    let file_path = temp_dir.join(&filename);
+    let path_str = file_path.to_string_lossy().to_string();
+
+    crate::io::write_parquet_file(df_val, &path_str)?;
+
+    let opened = if let Ok(mut child) = std::process::Command::new("positron").arg(&path_str).spawn() {
+        let _ = child.wait();
+        true
+    } else if let Ok(mut child) = std::process::Command::new("code").arg(&path_str).spawn() {
+        let _ = child.wait();
+        true
+    } else {
+        false
+    };
+
+    if opened {
+        println!("(=^･ω･^=) [Data Explorer] Opened {} ({} rows, {} cols) in Positron Data Explorer", filename, nrow, ncol);
+    } else {
+        println!("(=^･ω･^=) [Data Explorer] Exported {} ({} rows, {} cols) to:\n   {}", filename, nrow, ncol, path_str);
+        println!("   (U・ᴥ・U) Haru ready! Open this Parquet file in Positron Data Explorer");
+    }
+
+    Ok(Value::String(path_str))
 }
 
 fn native_scatter(args: Vec<Value>) -> Result<Value, Diagnostic> {

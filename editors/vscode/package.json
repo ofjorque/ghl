@@ -35,6 +35,11 @@
         "language": "ghl",
         "scopeName": "source.ghl",
         "path": "./syntaxes/ghl.tmLanguage.json"
+      },
+      {
+        "path": "./syntaxes/ghl-markdown.json",
+        "scopeName": "markdown.ghl.codeblock",
+        "injectTo": ["text.html.markdown", "source.qmd"]
       }
     ],
     "snippets": [
@@ -51,6 +56,10 @@
       {
         "command": "ghl.sendSelectionToREPL",
         "title": "GHL: Send Selection or Current Line to REPL"
+      },
+      {
+        "command": "ghl.openDataExplorer",
+        "title": "GHL: Open in Positron Data Explorer"
       }
     ],
     "keybindings": [
@@ -58,7 +67,7 @@
         "command": "ghl.sendSelectionToREPL",
         "key": "ctrl+enter",
         "mac": "cmd+enter",
-        "when": "editorTextFocus && editorLangId == ghl"
+        "when": "editorTextFocus && (editorLangId == ghl || editorLangId == quarto || editorLangId == markdown)"
       }
     ],
     "configuration": {

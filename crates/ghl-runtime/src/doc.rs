@@ -62,7 +62,7 @@ pub fn all_docs() -> &'static [FunctionDoc] {
     &DOCS
 }
 
-static DOCS: [FunctionDoc; 35] = [
+static DOCS: [FunctionDoc; 37] = [
     // 1. Descriptive Statistics
     FunctionDoc {
         name: "mean",
@@ -469,5 +469,29 @@ static DOCS: [FunctionDoc; 35] = [
         ],
         returns: "Transformed Vector",
         example: "let v = [1.0, 2.0, 3.0];\nv |> map(\\x -> x * 2.0 + 1.0);",
+    },
+    FunctionDoc {
+        name: "view",
+        signature: "view(df: DataFrame) -> String",
+        formula: None,
+        summary: "Export and open DataFrame in Positron Data Explorer (alias: View)",
+        description: "Serializes the DataFrame to a zero-copy Parquet file and launches Positron's interactive data grid with sorting and filtering.",
+        parameters: &[
+            ("df", "Input DataFrame to inspect interactively"),
+        ],
+        returns: "Temporary file path string",
+        example: "df |> view();",
+    },
+    FunctionDoc {
+        name: "show",
+        signature: "show(target: Plot | Value) -> ()",
+        formula: None,
+        summary: "Render plot or value to terminal Cockpit Deck and Positron Plots Pane",
+        description: "Outputs an ASCII/Unicode visualization to stdout, and exports an SVG vector figure when running inside Positron IDE.",
+        parameters: &[
+            ("target", "PlotSpec or value to display"),
+        ],
+        returns: "Unit ()",
+        example: "plot(df, aes(\"x\", \"y\")) |> geom_point() |> show();",
     },
 ];

@@ -1,0 +1,73 @@
+---
+title: "GHL Reproducible Statistical Report"
+author: "GHL Team & Positron"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    code-fold: show
+engine: markdown
+filters:
+  - ghl
+---
+
+## Introduction
+
+This reproducible scientific document demonstrates native execution of **GHL** (*Generalized Hypothesis Language*) code chunks directly within Quarto (`.qmd`) in the Positron IDE.
+
+GHL combines high-performance columnar DataFrames (compatible with Apache Arrow), first-class statistical modeling, and Wilkinson's Grammar of Graphics.
+
+## Data Generation & Wrangling
+
+We start by generating an experimental dataset containing sensor readings and biological response metrics.
+
+```{ghl}
+#| echo: true
+#| eval: true
+let df = dataframe {
+    id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    sensor: [10.2, 14.8, 19.5, 25.1, 31.0, 36.8, 41.2, 47.9, 53.4, 59.8],
+    response: [24.5, 31.0, 42.8, 51.2, 63.4, 75.1, 82.9, 97.4, 108.2, 121.5]
+};
+
+println("Dataset dimensions: ", nrow(df), " rows by ", ncol(df), " columns.");
+println("First 5 records:");
+df |> head(5) |> println();
+```
+
+## Exploratory Data Analysis & Statistics
+
+Next, we compute descriptive statistics and regression diagnostics for our variables.
+
+```{ghl}
+#| echo: true
+#| eval: true
+let x = df |> pull("sensor");
+let y = df |> pull("response");
+
+println("Sensor Mean:   ", mean(x));
+println("Sensor StdDev: ", std_dev(x));
+println("Response Mean: ", mean(y));
+println("Response StdDev: ", std_dev(y));
+```
+
+## Data Visualization with Grammar of Graphics
+
+We build a publication-ready vector visualization using GHL's Grammar of Graphics pipeline (`plot |> geom_point |> geom_smooth |> labs`) and export it as an SVG figure for automated embedding in this report.
+
+```{ghl}
+#| echo: true
+#| eval: true
+#| fig-cap: "Linear response curve with OLS trend line rendered by GHL"
+let p = df |> plot(aes(col("sensor"), col("response")))
+           |> geom_point()
+           |> geom_smooth()
+           |> labs("Sensor Readings vs Biological Response");
+
+// Export publication-quality vector graphic (SVG)
+p |> save("target/quarto_sensor_plot.svg");
+```
+
+## Summary
+
+This report was rendered reproducibly with Quarto and GHL without requiring any external Python or R kernel dependencies.
