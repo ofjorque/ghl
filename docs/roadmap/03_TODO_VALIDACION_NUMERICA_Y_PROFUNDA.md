@@ -55,3 +55,20 @@ Pruebas especializadas para subsistemas críticos de GHL:
 - [ ] **Zero-Leak & Estabilidad a Largo Plazo:**
   - [ ] Prueba de resistencia de $1,000,000$ de iteraciones midiendo que el Resident Set Size (RSS) en RAM se mantenga estrictamente plano.
   - [ ] *Parquet / Arrow Round-Trip Interoperability*: Escribir y leer archivos Parquet y streams Arrow entre GHL, Python Polars y R `arrow` verificando integridad binaria bit a bit.
+
+---
+
+## Parte C: Brechas de Implementación Detectadas — Neko, Cockpit y Gramática de Gráficos (Auditoría 2026-09-15)
+
+Al revisar el código actual contra las RFC 09 (Gráficos/Factores) y RFC 11 (Neko) aparecieron huecos concretos entre lo especificado y lo implementado. No son tareas de validación sino de completitud de features — se listan aquí porque son prerequisito directo de las pruebas de Parte A y B:
+
+- [ ] **Matrices de Contraste para Fórmulas (RFC 09 §2.4):**
+  - [ ] Implementar `Contrast::Treatment(ref_level)`, `Contrast::Sum`, `Contrast::Helmert` y `Contrast::Polynomial` — hoy `Factor`/`OrderedFactor` existen como tipos pero no se expanden a matriz de diseño configurable en `y ~ factor` (no hay ningún `Contrast::` en `ghl-runtime`/`ghl-types`, solo en el texto del RFC).
+  - [ ] Sin esto, la paridad con R/Python/Julia de Parte A no puede certificarse para modelos con predictores categóricos.
+- [ ] **Backend de Exportación Raster/Vectorial Incompleto (RFC 09 §3):**
+  - [ ] `draw_plotters_*` en `ghl-diagnostics/src/plot.rs` solo cubre `geom_point` (scatter) y `geom_histogram`. `geom_boxplot` y `geom_bar` únicamente renderizan en terminal — falta su backend PNG/SVG vía `plotters`.
+  - [ ] Sin esto, *SVG Snapshot Testing* de Parte A queda limitado a dos geoms.
+- [ ] **Sistema de Temas Inexistente:**
+  - [ ] `theme_minimal()` aparece en el ejemplo canónico del RFC 09 pero no existe ninguna función `theme_*` en el runtime (`std::plot` no expone temas).
+- [ ] **Cockpit Deck — Cobertura de Consumidores en Neko:**
+  - [ ] `render_cockpit` (RFC 12 §5.3) solo se invoca automáticamente para modelos OLS/GLM (`summary(model)`). El motor GMM/EM (`gmm.rs`) no emite telemetría de convergencia por iteración en Cockpit Deck.

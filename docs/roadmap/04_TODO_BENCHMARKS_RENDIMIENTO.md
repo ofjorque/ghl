@@ -19,6 +19,8 @@ Contrastar el motor de DataFrames de GHL frente a los benchmarks de código abie
   - [ ] Query 6: Forecasting Revenue Change Query (filtrado por rango de fechas y producto escalar).
 - [ ] **NYC Taxi Trip Dataset (Prueba de Ingesta Masiva y Feature Engineering):**
   - [ ] Pipeline end-to-end: Carga de CSV/Parquet -> Filtrado -> Cálculo de distancias -> Agrupamiento -> Regresión OLS.
+- [ ] **Telemetría Cockpit Deck en Operaciones Largas (hueco detectado en auditoría 2026-09-15):**
+  - [ ] Hoy Cockpit Deck (RFC 12) solo se integra en `ghl run`, `ghl check`, `summary(model)` y `ghl repl`. GroupBy/Join/Sort de alto volumen (Tareas 1-4 de H2O.ai y las queries TPC-H) no tienen barra de progreso ni telemetría — agregar antes de correr los benchmarks para poder diagnosticar cuellos de botella en vivo.
 
 ---
 

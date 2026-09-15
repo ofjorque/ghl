@@ -11,6 +11,8 @@ Cerrar la brecha de calidad de ingeniería y entrega continua del lenguaje:
 - [ ] **Fuzz Testing del Compilador (`cargo-fuzz` / AFL):**
   - [ ] Generación de entradas de bytes pseudoaleatorias y sintaxis maliciosa contra `ghl-syntax` y `ghl-types`.
   - [ ] Invariante: Garantizar $0$ *panics*, $0$ *crashes* y $0$ desbordamientos de búfer ante cualquier código malformado, retornando siempre diagnósticos limpios.
+- [ ] **Telemetría Cockpit Deck en `fmt`/Fuzzing (hueco detectado en auditoría 2026-09-15):**
+  - [ ] `ghl fmt --check` y las corridas de `cargo-fuzz`/AFL no emiten paneles Cockpit Deck (RFC 12) — hoy los únicos consumidores son `ghl run`, `ghl check`, `summary(model)` y `ghl repl`. Agregar telemetría consistente ayuda a diagnosticar fallos de formateo/fuzzing con el mismo lenguaje visual del resto del CLI.
 - [ ] **CI/CD Automatizado con GitHub Actions:**
   - [ ] Matriz de compilación y tests automáticos en cada pull request para **Windows** y **Linux** (con runners automáticos de macOS en la nube para releases sin requerir hardware Mac local).
   - [ ] Alerta automatizada de regresión de rendimiento: Notificar si algún commit degrada los benchmarks empíricos más de un 5%.

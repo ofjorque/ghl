@@ -24,4 +24,9 @@ Este documento es el índice activo del trabajo pendiente de GHL. Se mantiene de
 
 ## En Trabajo Activo
 
-_(vacío — mover aquí las tareas puntuales del backlog a medida que se empiecen a trabajar)_
+**Auditoría 2026-09-15 — brechas de implementación en Neko, Cockpit y Gramática de Gráficos** (código vs. RFC 09 / RFC 11 / RFC 12):
+
+- [ ] Matrices de contraste (`Contrast::Treatment/Sum/Helmert/Polynomial`) para fórmulas con `Factor`/`OrderedFactor` — no implementadas. Ver [`03_TODO_VALIDACION_NUMERICA_Y_PROFUNDA.md`](docs/roadmap/03_TODO_VALIDACION_NUMERICA_Y_PROFUNDA.md#parte-c-brechas-de-implementación-detectadas--neko-cockpit-y-gramática-de-gráficos-auditoría-2026-09-15).
+- [ ] Backend PNG/SVG (`plotters`) incompleto: `geom_boxplot` y `geom_bar` solo renderizan en terminal. Mismo enlace que arriba.
+- [ ] Sistema de temas (`theme_minimal()`) inexistente en `std::plot`. Mismo enlace que arriba.
+- [ ] Cockpit Deck sin cobertura en: convergencia de GMM/EM (ver doc 03), operaciones largas de DataFrame para benchmarks H2O/TPC-H (ver [`04_TODO_BENCHMARKS_RENDIMIENTO.md`](docs/roadmap/04_TODO_BENCHMARKS_RENDIMIENTO.md)), y `ghl fmt --check`/fuzzing (ver [`07_TODO_CALIDAD_DISTRIBUCION.md`](docs/roadmap/07_TODO_CALIDAD_DISTRIBUCION.md)).
