@@ -92,53 +92,25 @@ pub fn compute_hover(text: &str, line: usize, col: usize, program: Option<&Progr
 
     // 2. User-defined symbols in the AST
     if let Some(prog) = program {
+        let user_docs = ghl_syntax::extract_doc_comments(text, prog);
+        if let Some(user_doc) = user_docs.iter().find(|d| d.name == ident) {
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: user_doc.to_hover_markdown(),
+                }),
+                range: None,
+            });
+        }
+
         for stmt in &prog.statements {
             match &stmt.kind {
-                StmtKind::Fn { name, params, ret_ty, .. } if name == &ident => {
-                    let mut sig = format!("fn {}(", name);
-                    for (i, p) in params.iter().enumerate() {
-                        if i > 0 {
-                            sig.push_str(", ");
-                        }
-                        sig.push_str(&p.name);
-                        if let Some(ty) = &p.ty {
-                            sig.push_str(&format!(": {}", ty));
-                        }
-                    }
-                    sig.push(')');
-                    if let Some(ret) = ret_ty {
-                        sig.push_str(&format!(" -> {}", ret));
-                    }
-
-                    let val = format!("```ghl\n{}\n```\n\n*User-defined function*", sig);
-                    return Some(Hover {
-                        contents: HoverContents::Markup(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: val,
-                        }),
-                        range: None,
-                    });
-                }
                 StmtKind::Let { name, is_mut, ty, .. } if name == &ident => {
                     let mut decl = format!("let {}{}", if *is_mut { "mut " } else { "" }, name);
                     if let Some(ty) = ty {
                         decl.push_str(&format!(": {}", ty));
                     }
                     let val = format!("```ghl\n{}\n```\n\n*Local variable*", decl);
-                    return Some(Hover {
-                        contents: HoverContents::Markup(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: val,
-                        }),
-                        range: None,
-                    });
-                }
-                StmtKind::Struct(decl) if &decl.name == &ident => {
-                    let mut val = format!("```ghl\nstruct {} {{\n", decl.name);
-                    for f in &decl.fields {
-                        val.push_str(&format!("    {}: {},\n", f.name, f.ty));
-                    }
-                    val.push_str("}\n```\n\n*User-defined struct*");
                     return Some(Hover {
                         contents: HoverContents::Markup(MarkupContent {
                             kind: MarkupKind::Markdown,
@@ -355,6 +327,23 @@ mod tests {
         if let HoverContents::Markup(content) = hover.contents {
             assert!(content.value.contains("fn calculate(a: f64) -> f64"));
             assert!(content.value.contains("User-defined function"));
+        } else {
+            panic!("expected markdown content");
+        }
+    }
+
+    #[test]
+    fn test_hover_user_defined_function_with_doc_comment() {
+        let text = "/// Multiply a float by two.\n///\n/// @param a Input float scalar\n/// @return Scaled float\n/// @formula y = 2a\nfn scale_two(a: f64) -> f64 { a * 2.0 }\nlet res = scale_two(10.0);";
+        let program = parse(text).expect("syntax ok");
+        let hover = compute_hover(text, 6, 12, Some(&program)).expect("hover for user fn with doc");
+        if let HoverContents::Markup(content) = hover.contents {
+            assert!(content.value.contains("Multiply a float by two."));
+            assert!(content.value.contains("$$"));
+            assert!(content.value.contains("y = 2a"));
+            assert!(content.value.contains("Parameters:"));
+            assert!(content.value.contains("Input float scalar"));
+            assert!(content.value.contains("Returns:"));
         } else {
             panic!("expected markdown content");
         }

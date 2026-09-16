@@ -38,3 +38,7 @@ editors/**/*.vsix
 quarto_figures/
 examples/*.html
 examples/target/
+
+# Massive validation datasets (Roadmap 05)
+validation/data/
+validation/snapshots/*.svg

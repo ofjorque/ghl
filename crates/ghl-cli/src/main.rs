@@ -35,6 +35,7 @@ Commands:
     new <name>                 Create a new structured GHL project (RFC 06 §4)
     fetch                      Resolve dependencies and generate reproducible ghl.lock (RFC 06 §4)
     test [dir]                 Run unit and statistical tests
+    doc [path] [options]       Generate documentation from /// comments (--html, --md, -o <dir>)
     fmt [options] [path]       Format GHL source files to canonical style (--check)
     build <file.gh|file.ghl>   Compile standalone binary or shared library (--release, --shared, -o)
     lsp                        Start the Language Server Protocol (stdio)
@@ -136,6 +137,56 @@ fn real_main() {
                 std::path::PathBuf::from(".")
             };
             if let Err(_) = package::cmd_test(&root, &caps) {
+                std::process::exit(1);
+            }
+        }
+        "doc" => {
+            let mut target_path = std::path::PathBuf::from(".");
+            let mut out_dir = std::path::PathBuf::from("docs/api");
+            let mut html = true;
+            let mut md = true;
+            let mut custom_title = None;
+
+            let mut idx = 2;
+            while idx < args.len() {
+                match args[idx].as_str() {
+                    "--html" => {
+                        html = true;
+                        md = false;
+                    }
+                    "--markdown" | "--md" => {
+                        md = true;
+                        html = false;
+                    }
+                    "-o" | "--out" => {
+                        if idx + 1 < args.len() {
+                            out_dir = std::path::PathBuf::from(&args[idx + 1]);
+                            idx += 1;
+                        }
+                    }
+                    "--title" => {
+                        if idx + 1 < args.len() {
+                            custom_title = Some(args[idx + 1].clone());
+                            idx += 1;
+                        }
+                    }
+                    other if !other.starts_with('-') => {
+                        target_path = std::path::PathBuf::from(other);
+                    }
+                    _ => {}
+                }
+                idx += 1;
+            }
+
+            if let Err(e) = package::cmd_doc(
+                &target_path,
+                &out_dir,
+                html,
+                md,
+                custom_title.as_deref(),
+                &caps,
+            ) {
+                eprintln!("{}", e.render_with_caps(&caps));
                 std::process::exit(1);
             }
         }

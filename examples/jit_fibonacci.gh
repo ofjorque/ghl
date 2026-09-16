@@ -1,5 +1,12 @@
 // JIT Compilation and Native Execution in GHL (Cranelift Backend)
 
+/// Compute the n-th Fibonacci number using recursive definition.
+///
+/// @param n Integer position in the Fibonacci sequence
+/// @return n-th Fibonacci number
+/// @formula F_n = F_{n-1} + F_{n-2}
+/// @example
+/// let res = fib(10);
 fn fib(n) {
     if n <= 1 {
         n
@@ -8,6 +15,14 @@ fn fib(n) {
     }
 }
 
+/// Calculate classical kinetic energy of a body given mass and velocity.
+///
+/// @param mass Mass of the object in kilograms (kg)
+/// @param velocity Velocity of the object in meters per second (m/s)
+/// @return Kinetic energy in Joules (J)
+/// @formula E_k = (1/2) m v^2
+/// @example
+/// let energy = compute_kinetic_energy(2.0, 3.0);
 fn compute_kinetic_energy(mass: f64, velocity: f64) -> f64 {
     let half = 0.5;
     let v2 = velocity * velocity;

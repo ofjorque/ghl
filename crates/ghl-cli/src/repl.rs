@@ -44,6 +44,7 @@ pub struct ReplSession {
     pub type_env: TypeEnv,
     pub caps: RenderCaps,
     pub user_vars: Vec<String>,
+    pub user_docs: std::collections::HashMap<String, ghl_syntax::ItemDoc>,
 }
 
 impl ReplSession {
@@ -53,6 +54,7 @@ impl ReplSession {
             type_env: TypeEnv::with_prelude(),
             caps,
             user_vars: Vec::new(),
+            user_docs: std::collections::HashMap::new(),
         }
     }
 
@@ -252,6 +254,7 @@ impl ReplSession {
                 self.interpreter = Interpreter::new();
                 self.type_env = TypeEnv::with_prelude();
                 self.user_vars.clear();
+                self.user_docs.clear();
                 println!("(=^･ω･^=) Session environment successfully reset.\n");
                 false
             }
@@ -314,6 +317,8 @@ impl ReplSession {
     fn show_doc(&self, name: &str) {
         if let Some(doc) = ghl_runtime::lookup_doc(name) {
             println!("{}\n", doc.render(&self.caps));
+        } else if let Some(user_doc) = self.user_docs.get(name) {
+            println!("{}\n", user_doc.render_cockpit(&self.caps));
         } else if let Some(val) = self.interpreter.env.get(name) {
             match val {
                 Value::Closure { params, body, .. } => {
@@ -387,7 +392,14 @@ impl ReplSession {
             }
         }
 
-        // 2. Track new variable declarations
+        // 2. Track new variable declarations and doc comments
+        let extracted_docs = ghl_syntax::extract_doc_comments(code, &program);
+        for d in extracted_docs {
+            if d.has_doc {
+                self.user_docs.insert(d.name.clone(), d);
+            }
+        }
+
         for stmt in &program.statements {
             if let ghl_syntax::ast::StmtKind::Let { name, .. } = &stmt.kind {
                 if !self.user_vars.contains(name) {

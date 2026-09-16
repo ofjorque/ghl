@@ -416,6 +416,172 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
     }
 }
 
+/// Discovers source files, extracts documentation comments, and generates HTML/Markdown documentation.
+pub fn cmd_doc(
+    target_path: &Path,
+    out_dir: &Path,
+    generate_html: bool,
+    generate_md: bool,
+    custom_title: Option<&str>,
+    caps: &RenderCaps,
+) -> Result<(), Diagnostic> {
+    // 1. Determine title
+    let title = if let Some(t) = custom_title {
+        t.to_string()
+    } else {
+        let manifest_path = if target_path.is_dir() {
+            target_path.join("ghl.toml")
+        } else {
+            target_path.parent().unwrap_or_else(|| Path::new(".")).join("ghl.toml")
+        };
+        if manifest_path.exists() {
+            fs::read_to_string(&manifest_path)
+                .ok()
+                .and_then(|c| parse_manifest(&c).ok())
+                .map(|m| m.name)
+                .unwrap_or_else(|| "GHL Package".to_string())
+        } else if target_path.is_file() {
+            target_path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "GHL Module".to_string())
+        } else {
+            target_path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "GHL Project".to_string())
+        }
+    };
+
+    // 2. Discover source files
+    let mut files = Vec::new();
+    if target_path.is_file() {
+        files.push(target_path.to_path_buf());
+    } else if target_path.is_dir() {
+        discover_gh_files(target_path, &mut files);
+    } else {
+        return Err(Diagnostic::compute_error(
+            "C0610",
+            format!("Target path `{}` does not exist", target_path.display()),
+        ));
+    }
+
+    if files.is_empty() {
+        return Err(Diagnostic::compute_error(
+            "C0611",
+            format!("No .gh or .ghl source files found in `{}`", target_path.display()),
+        ));
+    }
+
+    // 3. Extract documentation items from each file
+    let mut all_items = Vec::new();
+    for file in &files {
+        let content = fs::read_to_string(file).map_err(|e| {
+            Diagnostic::compute_error(
+                "C0612",
+                format!("Failed to read file `{}`: {e}", file.display()),
+            )
+        })?;
+
+        let program = match ghl_syntax::parse(&content) {
+            Ok(p) => p,
+            Err(errs) => {
+                let msg = errs.first().cloned().unwrap_or_else(|| "Syntax error".to_string());
+                return Err(Diagnostic::compute_error(
+                    "C0100",
+                    format!("Failed to parse `{}`: {msg}", file.display()),
+                ));
+            }
+        };
+
+        let docs = ghl_syntax::extract_doc_comments(&content, &program);
+        all_items.extend(docs);
+    }
+
+    // 4. Generate outputs
+    fs::create_dir_all(out_dir).map_err(|e| {
+        Diagnostic::compute_error(
+            "C0613",
+            format!("Failed to create output directory `{}`: {e}", out_dir.display()),
+        )
+    })?;
+
+    if generate_md {
+        let md = ghl_syntax::generate_project_docs_markdown(&title, &all_items);
+        let md_path = out_dir.join("index.md");
+        fs::write(&md_path, md).map_err(|e| {
+            Diagnostic::compute_error(
+                "C0614",
+                format!("Failed to write Markdown documentation to `{}`: {e}", md_path.display()),
+            )
+        })?;
+    }
+
+    if generate_html {
+        let html = ghl_syntax::generate_project_docs_html(&title, &all_items);
+        let html_path = out_dir.join("index.html");
+        fs::write(&html_path, html).map_err(|e| {
+            Diagnostic::compute_error(
+                "C0614",
+                format!("Failed to write HTML documentation to `{}`: {e}", html_path.display()),
+            )
+        })?;
+    }
+
+    // 5. Visual summary with CockpitPanel
+    let mut panel = CockpitPanel::new("GHL Documentation Deck");
+    panel.with_badge("DOCS");
+    panel.add_line("Gojo & Haru Code Documentation Generator");
+    panel.add_divider();
+    panel.add_kv("Project", &title);
+    panel.add_kv("Target Path", target_path.display().to_string());
+    panel.add_kv("Scanned Files", files.len().to_string());
+    panel.add_kv("Total Symbols", all_items.len().to_string());
+
+    let doc_count = all_items.iter().filter(|i| i.has_doc).count();
+    let pct = if !all_items.is_empty() {
+        (doc_count as f64 / all_items.len() as f64) * 100.0
+    } else {
+        100.0
+    };
+    panel.add_kv("Documented", format!("{}/{} ({:.1}%)", doc_count, all_items.len(), pct));
+    panel.add_kv("Output Directory", out_dir.display().to_string());
+    if generate_html {
+        panel.add_kv("HTML Output", out_dir.join("index.html").display().to_string());
+    }
+    if generate_md {
+        panel.add_kv("Markdown Output", out_dir.join("index.md").display().to_string());
+    }
+    panel.add_divider();
+    panel.add_line(format!(
+        "{} Haru generated the documentation deck! (U・ᴥ・U)",
+        caps.green("✔")
+    ));
+
+    println!("{}\n", panel.render(caps));
+    Ok(())
+}
+
+fn discover_gh_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+                if name != "target" && name != ".git" && name != ".cargo" && name != "api" {
+                    discover_gh_files(&path, out);
+                }
+            } else if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if ext == "gh" || ext == "ghl" {
+                        out.push(path);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,5 +646,56 @@ mod tests {
         // Clean up
         let _ = std::fs::remove_dir_all(&proj_path);
         let _ = std::fs::remove_dir_all(&dep_dir);
+    }
+
+    #[test]
+    fn test_package_cmd_doc() {
+        let temp_dir = std::env::temp_dir();
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let proj_dir = temp_dir.join(format!("test_ghl_doc_{pid}_{nanos}"));
+        let src_dir = proj_dir.join("src");
+        let out_dir = proj_dir.join("docs/api");
+        let _ = std::fs::create_dir_all(&src_dir);
+
+        let code = r#"
+/// Compute weighted average of vector x.
+///
+/// @param x Numeric values
+/// @param w Weights vector
+/// @return Weighted average scalar
+/// @formula x̄_w = (Σ w_i x_i) / (Σ w_i)
+fn weighted_mean(x: Vector[f64], w: Vector[f64]) -> f64 {
+    0.0
+}
+
+struct WeightedModel {
+    weights: Vector[f64],
+}
+"#;
+        std::fs::write(src_dir.join("stats.gh"), code).expect("write stats.gh");
+
+        let caps = RenderCaps::detect();
+        let res = cmd_doc(&proj_dir, &out_dir, true, true, Some("TestDocProject"), &caps);
+        assert!(res.is_ok(), "cmd_doc must succeed: {:?}", res.err());
+
+        let md_file = out_dir.join("index.md");
+        let html_file = out_dir.join("index.html");
+        assert!(md_file.exists(), "index.md must exist");
+        assert!(html_file.exists(), "index.html must exist");
+
+        let md_content = std::fs::read_to_string(&md_file).unwrap();
+        assert!(md_content.contains("# Referencia de API — TestDocProject"));
+        assert!(md_content.contains("`weighted_mean`"));
+        assert!(md_content.contains("x̄_w = (Σ w_i x_i) / (Σ w_i)"));
+
+        let html_content = std::fs::read_to_string(&html_file).unwrap();
+        assert!(html_content.contains("TestDocProject — GHL Documentation"));
+        assert!(html_content.contains("Haru Docs"));
+
+        let _ = std::fs::remove_dir_all(&proj_dir);
     }
 }

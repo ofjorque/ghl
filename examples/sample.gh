@@ -2,6 +2,14 @@
 // Demonstrating functions, first-class statistical data structures,
 // pattern matching with reasoned NAs, pipelines and formulas.
 
+/// Solve ordinary least squares regression via the first-class backslash operator.
+///
+/// @param x Design matrix of regressors
+/// @param y Response vector of observations
+/// @return Vector of estimated parameter coefficients
+/// @formula β̂ = X \ y
+/// @example
+/// let beta = solve_ols(X, y);
 fn solve_ols(x: Matrix[f64], y: Vector[f64]) -> Vector[f64] {
     let xt = x;
     xt \ y
