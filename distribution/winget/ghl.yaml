@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.6.0.schema.json
+PackageIdentifier: GojoHaru.GHL
+PackageVersion: 0.1.0
+DefaultLocale: en-US
+Publisher: ofjorque
+PublisherUrl: https://github.com/ofjorque/ghl
+PublisherSupportUrl: https://github.com/ofjorque/ghl/issues
+PackageName: GHL (Generalized Hypothesis Language)
+PackageUrl: https://github.com/ofjorque/ghl
+License: MIT
+LicenseUrl: https://github.com/ofjorque/ghl/blob/main/LICENSE
+ShortDescription: High-Performance Statistical Computing Language with Cranelift JIT & Polars columnar engine.
+Description: |
+  GHL is a high-performance statistical language fusing the interactive ergonomics
+  of R and tidyverse with the zero-cost execution and safety of Rust and Cranelift JIT.
+Moniker: ghl
+Tags:
+  - statistics
+  - data-science
+  - compiler
+  - dataframe
+  - cranelift
+  - rust
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: ghl.exe
+        PortableCommandAlias: ghl
+    InstallerUrl: https://github.com/ofjorque/ghl/releases/download/v0.1.0/ghl-x86_64-pc-windows-msvc.zip
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+ManifestType: singleton
+ManifestVersion: 1.6.0

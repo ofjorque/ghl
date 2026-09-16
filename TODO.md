@@ -30,3 +30,4 @@ Este documento es el índice activo del trabajo pendiente de GHL. Se mantiene de
 - [ ] Backend PNG/SVG (`plotters`) incompleto: `geom_boxplot` y `geom_bar` solo renderizan en terminal. Mismo enlace que arriba.
 - [ ] Sistema de temas (`theme_minimal()`) inexistente en `std::plot`. Mismo enlace que arriba.
 - [ ] Cockpit Deck sin cobertura en: convergencia de GMM/EM (ver doc 03), operaciones largas de DataFrame para benchmarks H2O/TPC-H (ver [`04_TODO_BENCHMARKS_RENDIMIENTO.md`](docs/roadmap/04_TODO_BENCHMARKS_RENDIMIENTO.md)), y `ghl fmt --check`/fuzzing (ver [`07_TODO_CALIDAD_DISTRIBUCION.md`](docs/roadmap/07_TODO_CALIDAD_DISTRIBUCION.md)).
+- [ ] Descarga externa de BBDD masivas (11M Higgs, 120M Airline) en carpeta gitignored (`validation/data/`) para estrés de disco/RAM a escala de producción (Roadmap 05).
