@@ -15,6 +15,49 @@ pub struct JitEngine {
     pub compiled_ptrs: HashMap<String, *const u8>,
 }
 
+extern "C" fn ghl_host_clock_now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
+extern "C" fn ghl_host_sqrt(x: f64) -> f64 {
+    x.sqrt()
+}
+
+extern "C" fn ghl_host_sin(x: f64) -> f64 {
+    x.sin()
+}
+
+extern "C" fn ghl_host_cos(x: f64) -> f64 {
+    x.cos()
+}
+
+extern "C" fn ghl_host_exp(x: f64) -> f64 {
+    x.exp()
+}
+
+extern "C" fn ghl_host_ln(x: f64) -> f64 {
+    x.ln()
+}
+
+extern "C" fn ghl_host_pow(x: f64, y: f64) -> f64 {
+    x.powf(y)
+}
+
+extern "C" fn ghl_host_abs(x: f64) -> f64 {
+    x.abs()
+}
+
+extern "C" fn ghl_host_floor(x: f64) -> f64 {
+    x.floor()
+}
+
+extern "C" fn ghl_host_ceil(x: f64) -> f64 {
+    x.ceil()
+}
+
 impl Default for JitEngine {
     fn default() -> Self {
         Self::new().expect("Failed to initialize native Cranelift JIT engine")
@@ -40,7 +83,18 @@ impl JitEngine {
             Diagnostic::compute_error("C0413", format!("Failed to configure native ISA: {e}"))
         })?;
 
-        let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        builder.symbol("clock_now", ghl_host_clock_now as *const u8);
+        builder.symbol("sqrt", ghl_host_sqrt as *const u8);
+        builder.symbol("sin", ghl_host_sin as *const u8);
+        builder.symbol("cos", ghl_host_cos as *const u8);
+        builder.symbol("exp", ghl_host_exp as *const u8);
+        builder.symbol("ln", ghl_host_ln as *const u8);
+        builder.symbol("pow", ghl_host_pow as *const u8);
+        builder.symbol("abs", ghl_host_abs as *const u8);
+        builder.symbol("floor", ghl_host_floor as *const u8);
+        builder.symbol("ceil", ghl_host_ceil as *const u8);
+
         let module = JITModule::new(builder);
         let ctx = module.make_context();
         let fn_builder_ctx = FunctionBuilderContext::new();
@@ -57,6 +111,31 @@ impl JitEngine {
     pub fn compile_module(&mut self, hir: &HirModule) -> Result<&HashMap<String, *const u8>, Diagnostic> {
         let mut func_ids = HashMap::new();
         let mut signatures = HashMap::new();
+
+        // Register host math functions in module
+        let host_math_unary = ["sqrt", "sin", "cos", "exp", "ln", "abs", "floor", "ceil"];
+        for name in host_math_unary {
+            let mut sig = self.module.make_signature();
+            sig.params.push(AbiParam::new(types::F64));
+            sig.returns.push(AbiParam::new(types::F64));
+            if let Ok(id) = self.module.declare_function(name, Linkage::Import, &sig) {
+                func_ids.insert(name.to_string(), id);
+            }
+        }
+
+        let mut pow_sig = self.module.make_signature();
+        pow_sig.params.push(AbiParam::new(types::F64));
+        pow_sig.params.push(AbiParam::new(types::F64));
+        pow_sig.returns.push(AbiParam::new(types::F64));
+        if let Ok(id) = self.module.declare_function("pow", Linkage::Import, &pow_sig) {
+            func_ids.insert("pow".to_string(), id);
+        }
+
+        let mut clock_sig = self.module.make_signature();
+        clock_sig.returns.push(AbiParam::new(types::F64));
+        if let Ok(id) = self.module.declare_function("clock_now", Linkage::Import, &clock_sig) {
+            func_ids.insert("clock_now".to_string(), id);
+        }
 
         // 1. First pass: declare all function signatures in the module
         for (name, func) in &hir.functions {
@@ -103,10 +182,12 @@ impl JitEngine {
             Diagnostic::compute_error("C0416", format!("Failed to finalize JIT module definitions: {e}"))
         })?;
 
-        // 4. Retrieve native code pointers
-        for (name, func_id) in func_ids {
-            let code_ptr = self.module.get_finalized_function(func_id);
-            self.compiled_ptrs.insert(name, code_ptr);
+        // 4. Retrieve native code pointers for defined module functions
+        for name in hir.functions.keys() {
+            if let Some(&func_id) = func_ids.get(name) {
+                let code_ptr = self.module.get_finalized_function(func_id);
+                self.compiled_ptrs.insert(name.clone(), code_ptr);
+            }
         }
 
         Ok(&self.compiled_ptrs)

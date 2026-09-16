@@ -1,0 +1,115 @@
+// CLBG N-Body Gravitational Simulation in Pure GHL
+// Simulates the Jovian planets (Sun, Jupiter, Saturn, Uranus, Neptune) using tight numerical scalar loops.
+
+println("=== CLBG Benchmark: N-Body Gravitational Simulation ===");
+
+let pi = 3.141592653589793;
+let days_per_year = 365.24;
+let solar_mass = 4.0 * pi * pi;
+
+// Masses
+let m0 = solar_mass;
+let m1 = 9.54791938424326609e-04 * solar_mass; // Jupiter
+let m2 = 2.85885980666130812e-04 * solar_mass; // Saturn
+let m3 = 4.36624404267780702e-05 * solar_mass; // Uranus
+let m4 = 5.15138902046611451e-05 * solar_mass; // Neptune
+
+// Positions
+let mut x0 = 0.0;
+let mut y0 = 0.0;
+let mut z0 = 0.0;
+
+let mut x1 = 4.84143144246472090e+00;
+let mut y1 = -1.16032004402742839e+00;
+let mut z1 = -1.03622044471123109e-01;
+
+let mut x2 = 8.34336671824457987e+00;
+let mut y2 = 4.12479856412430479e+00;
+let mut z2 = -4.03523417114321381e-01;
+
+let mut x3 = 1.28945812893406454e+01;
+let mut y3 = -1.51111514016986312e+01;
+let mut z3 = -2.23307578892655734e-01;
+
+let mut x4 = 1.53796971148509165e+01;
+let mut y4 = -2.59193146099879641e+01;
+let mut z4 = 1.79258772950371181e-01;
+
+// Velocities
+let mut vx0 = 0.0;
+let mut vy0 = 0.0;
+let mut vz0 = 0.0;
+
+let mut vx1 = 1.66007664274403694e-03 * days_per_year;
+let mut vy1 = 7.69901118419740425e-03 * days_per_year;
+let mut vz1 = -6.90460016972063023e-05 * days_per_year;
+
+let mut vx2 = -2.76742510726862411e-03 * days_per_year;
+let mut vy2 = 4.99852801234917238e-03 * days_per_year;
+let mut vz2 = 2.30417297573763929e-05 * days_per_year;
+
+let mut vx3 = 2.96460137564761618e-03 * days_per_year;
+let mut vy3 = 2.37847173959480950e-03 * days_per_year;
+let mut vz3 = -2.96589568540237556e-05 * days_per_year;
+
+let mut vx4 = 2.68067772490389322e-03 * days_per_year;
+let mut vy4 = 1.62824170038242295e-03 * days_per_year;
+let mut vz4 = -9.51592254519715870e-05 * days_per_year;
+
+let dt = 0.01;
+let n_steps = 10000;
+
+println("Simulating", n_steps, "N-body integration steps...");
+let t0 = clock_now();
+
+let mut s = 0;
+while s < n_steps {
+    // Pair 0-1
+    let dx01 = x0 - x1; let dy01 = y0 - y1; let dz01 = z0 - z1;
+    let d2_01 = dx01*dx01 + dy01*dy01 + dz01*dz01;
+    let mag01 = dt / (d2_01 * sqrt(d2_01));
+    vx0 = vx0 - dx01 * m1 * mag01; vy0 = vy0 - dy01 * m1 * mag01; vz0 = vz0 - dz01 * m1 * mag01;
+    vx1 = vx1 + dx01 * m0 * mag01; vy1 = vy1 + dy01 * m0 * mag01; vz1 = vz1 + dz01 * m0 * mag01;
+
+    // Pair 0-2
+    let dx02 = x0 - x2; let dy02 = y0 - y2; let dz02 = z0 - z2;
+    let d2_02 = dx02*dx02 + dy02*dy02 + dz02*dz02;
+    let mag02 = dt / (d2_02 * sqrt(d2_02));
+    vx0 = vx0 - dx02 * m2 * mag02; vy0 = vy0 - dy02 * m2 * mag02; vz0 = vz0 - dz02 * m2 * mag02;
+    vx2 = vx2 + dx02 * m0 * mag02; vy2 = vy2 + dy02 * m0 * mag02; vz2 = vz2 + dz02 * m0 * mag02;
+
+    // Pair 0-3
+    let dx03 = x0 - x3; let dy03 = y0 - y3; let dz03 = z0 - z3;
+    let d2_03 = dx03*dx03 + dy03*dy03 + dz03*dz03;
+    let mag03 = dt / (d2_03 * sqrt(d2_03));
+    vx0 = vx0 - dx03 * m3 * mag03; vy0 = vy0 - dy03 * m3 * mag03; vz0 = vz0 - dz03 * m3 * mag03;
+    vx3 = vx3 + dx03 * m0 * mag03; vy3 = vy3 + dy03 * m0 * mag03; vz3 = vz3 + dz03 * m0 * mag03;
+
+    // Pair 0-4
+    let dx04 = x0 - x4; let dy04 = y0 - y4; let dz04 = z0 - z4;
+    let d2_04 = dx04*dx04 + dy04*dy04 + dz04*dz04;
+    let mag04 = dt / (d2_04 * sqrt(d2_04));
+    vx0 = vx0 - dx04 * m4 * mag04; vy0 = vy0 - dy04 * m4 * mag04; vz0 = vz0 - dz04 * m4 * mag04;
+    vx4 = vx4 + dx04 * m0 * mag04; vy4 = vy4 + dy04 * m0 * mag04; vz4 = vz4 + dz04 * m0 * mag04;
+
+    // Pair 1-2
+    let dx12 = x1 - x2; let dy12 = y1 - y2; let dz12 = z1 - z2;
+    let d2_12 = dx12*dx12 + dy12*dy12 + dz12*dz12;
+    let mag12 = dt / (d2_12 * sqrt(d2_12));
+    vx1 = vx1 - dx12 * m2 * mag12; vy1 = vy1 - dy12 * m2 * mag12; vz1 = vz1 - dz12 * m2 * mag12;
+    vx2 = vx2 + dx12 * m1 * mag12; vy2 = vy2 + dy12 * m1 * mag12; vz2 = vz2 + dz12 * m1 * mag12;
+
+    // Position updates
+    x0 = x0 + dt * vx0; y0 = y0 + dt * vy0; z0 = z0 + dt * vz0;
+    x1 = x1 + dt * vx1; y1 = y1 + dt * vy1; z1 = z1 + dt * vz1;
+    x2 = x2 + dt * vx2; y2 = y2 + dt * vy2; z2 = z2 + dt * vz2;
+    x3 = x3 + dt * vx3; y3 = y3 + dt * vy3; z3 = z3 + dt * vz3;
+    x4 = x4 + dt * vx4; y4 = y4 + dt * vy4; z4 = z4 + dt * vz4;
+
+    s = s + 1;
+}
+
+let t1 = clock_now();
+println("N-Body Duration (seconds):", t1 - t0);
+println("Final Jupiter Position:", x1, y1, z1);
+println("(=^･ω･^=) N-Body benchmark completed successfully!");

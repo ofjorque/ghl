@@ -51,6 +51,7 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
         self.builder.switch_to_block(entry_block);
         self.builder.seal_block(entry_block);
 
+        let mut param_vars = Vec::with_capacity(func.params.len());
         // Declare parameters as local variables
         for (i, param) in func.params.iter().enumerate() {
             let clif_ty = Self::to_clif_type(param.ty);
@@ -59,16 +60,96 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
             let param_val = self.builder.block_params(entry_block)[i];
             self.builder.def_var(var, param_val);
             self.var_map.insert(param.name.clone(), var);
+            param_vars.push(var);
         }
 
-        let ret_val = self.compile_expr(&func.body)?;
-        if !self.is_current_block_terminated() {
-            self.builder.ins().return_(&[ret_val]);
+        // Create loop_header block for zero-stack Tail Call Optimization (TCO)
+        let loop_header = self.builder.create_block();
+        self.builder.ins().jump(loop_header, &[]);
+        self.builder.switch_to_block(loop_header);
+
+        let ret_val = self.compile_expr_tail(&func.body, loop_header, &param_vars, &func.name)?;
+        if let Some(val) = ret_val {
+            if !self.is_current_block_terminated() {
+                self.builder.ins().return_(&[val]);
+            }
         }
+        self.builder.seal_block(loop_header);
+
         let target_config = self.module.target_config();
         self.builder.finalize(target_config);
 
         Ok(())
+    }
+
+    /// Compile expression in tail position. If it is a self-call to `func_name`,
+    /// reassign parameters and jump back to `loop_header` without allocating stack frames.
+    pub fn compile_expr_tail(
+        &mut self,
+        expr: &HirExpr,
+        loop_header: Block,
+        param_vars: &[Variable],
+        func_name: &str,
+    ) -> Result<Option<Value>, Diagnostic> {
+        match expr {
+            HirExpr::IfElse { cond, then_branch, else_branch, .. } => {
+                let cond_val = self.compile_expr(cond)?;
+
+                let then_block = self.builder.create_block();
+                let else_block = self.builder.create_block();
+
+                self.builder.ins().brif(cond_val, then_block, &[], else_block, &[]);
+
+                self.builder.switch_to_block(then_block);
+                self.builder.seal_block(then_block);
+                let then_res = self.compile_expr_tail(then_branch, loop_header, param_vars, func_name)?;
+                if let Some(val) = then_res {
+                    if !self.is_current_block_terminated() {
+                        self.builder.ins().return_(&[val]);
+                    }
+                }
+
+                self.builder.switch_to_block(else_block);
+                self.builder.seal_block(else_block);
+                let else_res = self.compile_expr_tail(else_branch, loop_header, param_vars, func_name)?;
+                if let Some(val) = else_res {
+                    if !self.is_current_block_terminated() {
+                        self.builder.ins().return_(&[val]);
+                    }
+                }
+
+                Ok(None)
+            }
+            HirExpr::Block { statements, result, .. } => {
+                for stmt in statements {
+                    self.compile_stmt(stmt)?;
+                }
+                if let Some(res_expr) = result {
+                    self.compile_expr_tail(res_expr, loop_header, param_vars, func_name)
+                } else {
+                    let zero = self.builder.ins().iconst(types::I64, 0);
+                    Ok(Some(zero))
+                }
+            }
+            HirExpr::Call { func, args, .. } if func == func_name && args.len() == param_vars.len() => {
+                // TCO: Evaluate all arguments first into temporary Cranelift values
+                let mut evaluated_args = Vec::with_capacity(args.len());
+                for arg in args {
+                    evaluated_args.push(self.compile_expr(arg)?);
+                }
+                // Reassign parameter variables to the new values
+                for (i, &var) in param_vars.iter().enumerate() {
+                    self.builder.def_var(var, evaluated_args[i]);
+                }
+                // Jump back to the loop header with zero stack frame allocation
+                self.builder.ins().jump(loop_header, &[]);
+                Ok(None)
+            }
+            _ => {
+                let val = self.compile_expr(expr)?;
+                Ok(Some(val))
+            }
+        }
     }
 
     pub fn compile_expr(&mut self, expr: &HirExpr) -> Result<Value, Diagnostic> {

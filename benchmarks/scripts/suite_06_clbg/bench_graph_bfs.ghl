@@ -1,0 +1,62 @@
+// Sparse Graph BFS Traversal Benchmark in Pure GHL
+// Measures memory locality, dynamic allocation, and queue-driven graph search on 65,535 nodes.
+
+println("=== CLBG Benchmark: Graph Traversal (Breadth-First Search) ===");
+
+let n_nodes = 65535; // Complete binary tree of depth 16: 2^16 - 1 = 65,535 nodes
+println("Constructing graph with nodes:", n_nodes);
+
+let t0 = clock_now();
+
+// Preallocate visited tracking array with 0
+let visited = [0; n_nodes];
+
+// Queue for BFS traversal
+let queue = [0; n_nodes + 2];
+let mut head = 0;
+let mut tail = 0;
+
+// Enqueue root (node 0)
+queue = set(queue, tail, 0);
+tail = tail + 1;
+visited = set(visited, 0, 1);
+
+let mut visited_count = 0;
+
+while head < tail {
+    let curr = queue[head];
+    head = head + 1;
+    visited_count = visited_count + 1;
+
+    // Left child in binary tree graph
+    let left_child = 2 * curr + 1;
+    if left_child < n_nodes {
+        if visited[left_child] == 0 {
+            visited = set(visited, left_child, 1);
+            queue = set(queue, tail, left_child);
+            tail = tail + 1;
+        }
+    }
+
+    // Right child in binary tree graph
+    let right_child = 2 * curr + 2;
+    if right_child < n_nodes {
+        if visited[right_child] == 0 {
+            visited = set(visited, right_child, 1);
+            queue = set(queue, tail, right_child);
+            tail = tail + 1;
+        }
+    }
+};
+
+let t1 = clock_now();
+let elapsed = t1 - t0;
+
+println("BFS traversal completed!");
+println("Visited nodes:", visited_count);
+println("Elapsed time (seconds):", elapsed);
+let throughput = n_nodes / elapsed;
+println("Throughput (nodes/sec):", throughput);
+
+pounce(visited_count == n_nodes, "All 65,535 nodes must be visited in BFS order");
+println("(=^･ω･^=) Graph BFS benchmark passed!");

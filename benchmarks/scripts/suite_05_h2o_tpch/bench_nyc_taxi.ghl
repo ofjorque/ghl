@@ -1,0 +1,62 @@
+// NYC Taxi Trip Pipeline Benchmark in Pure GHL
+// End-to-end data ingestion, spatial bounding filtering, feature engineering,
+// zonal aggregation, and statistical OLS modeling.
+
+set_telemetry(true);
+
+println("=== NYC Taxi Trip Analytics & Modeling Pipeline ===");
+
+let n_trips = 50000;
+
+// 1. Generate synthetic trip logs
+let raw_p_lon  = random_uniform(n_trips, 111) |> map(\x -> -74.05 + x * 0.15);
+let raw_p_lat  = random_uniform(n_trips, 222) |> map(\x -> 40.65 + x * 0.20);
+let raw_d_lon  = random_uniform(n_trips, 333) |> map(\x -> -74.05 + x * 0.15);
+let raw_d_lat  = random_uniform(n_trips, 444) |> map(\x -> 40.65 + x * 0.20);
+let raw_pass   = random_uniform(n_trips, 555) |> map(\x -> floor(x * 5.0) + 1.0);
+let raw_dist   = random_uniform(n_trips, 666) |> map(\x -> x * 10.0 + 0.5);
+let raw_fares  = raw_dist |> map(\d -> 2.50 + d * 2.75 + (random_uniform(1, 777)[0] - 0.5) * 2.0);
+let raw_zones  = raw_p_lat |> map(\lat -> floor((lat - 40.65) * 50.0));
+
+let df_taxi = dataframe {
+    pickup_lon: raw_p_lon,
+    pickup_lat: raw_p_lat,
+    dropoff_lon: raw_d_lon,
+    dropoff_lat: raw_d_lat,
+    passengers: raw_pass,
+    trip_distance: raw_dist,
+    fare_amount: raw_fares,
+    zone_id: raw_zones
+};
+
+let t_start = clock_now();
+
+// 2. Spatial bounding filter & outlier rejection
+println("\n[1/3] Filtering spatial coordinates and valid fares...");
+let df_clean = df_taxi
+    |> filter(fare_amount > 2.50 && fare_amount < 200.0 && passengers >= 1.0 && passengers <= 6.0);
+
+println("Cleaned trips count:", df_clean |> pull("fare_amount") |> len());
+
+// 3. Zonal aggregation: average fare and distance per zone
+println("\n[2/3] Performing zonal aggregation...");
+let df_zones = df_clean
+    |> group_by(zone_id)
+    |> summarize(
+        avg_fare = mean(fare_amount),
+        avg_dist = mean(trip_distance),
+        trips = count()
+    )
+    |> arrange(desc(trips));
+
+println("Top pickup zones by volume:");
+glimpse(df_zones);
+
+// 4. Econometric regression: Fare ~ Distance + Passengers
+println("\n[3/3] Fitting OLS Hedonic Pricing Model...");
+let model_taxi = ols(fare_amount ~ trip_distance + passengers, df_clean);
+summary(model_taxi);
+
+let t_end = clock_now();
+println("Total NYC Taxi Pipeline Wall-Clock Duration (seconds):", t_end - t_start);
+println("(=^･ω･^=) NYC Taxi end-to-end analytical pipeline completed successfully!");

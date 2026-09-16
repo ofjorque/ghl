@@ -1,0 +1,44 @@
+// Deep Tail Recursion & TCO Benchmark in Pure GHL
+// Demonstrates constant stack space execution across deep recursive calls.
+
+println("=== CLBG Benchmark: Deep Tail Recursion & TCO ===");
+
+// 1. Tail-recursive accumulator with 100,000 iterations
+fn sum_tail_rec(n: i64, acc: i64) -> i64 {
+    if n <= 0 {
+        acc
+    } else {
+        sum_tail_rec(n - 1, acc + n)
+    }
+}
+
+// 2. Collatz orbit steps
+fn collatz_steps(n: i64, steps: i64) -> i64 {
+    if n <= 1 {
+        steps
+    } else {
+        if n % 2 == 0 {
+            collatz_steps(n / 2, steps + 1)
+        } else {
+            collatz_steps(3 * n + 1, steps + 1)
+        }
+    }
+}
+
+println("Testing 100,000 depth tail recursion...");
+let t0 = clock_now();
+let total_sum = sum_tail_rec(100000, 0);
+let t1 = clock_now();
+println("Tail-recursive sum result:", total_sum);
+println("Duration (seconds):", t1 - t0);
+
+println("\nTesting deep Collatz orbits...");
+let t2 = clock_now();
+let steps = collatz_steps(27, 0);
+let t3 = clock_now();
+println("Collatz steps for 27:", steps);
+println("Duration (seconds):", t3 - t2);
+
+pounce(total_sum == 5000050000, "100k tail-recursive sum must match Gauss formula");
+pounce(steps == 111, "Collatz sequence for 27 takes exactly 111 steps");
+println("(=^･ω･^=) Deep tail recursion & TCO benchmark passed!");

@@ -12,6 +12,32 @@ use crate::gmm::FittedGmm;
 
 pub type NativeFunction = fn(Vec<Value>) -> Result<Value, Diagnostic>;
 
+/// First-class callable wrapper around Cranelift JIT-compiled native machine code (RFC 13).
+#[derive(Clone)]
+pub struct JitFunction(pub std::sync::Arc<dyn Fn(Vec<Value>) -> Result<Value, Diagnostic> + Send + Sync>);
+
+impl JitFunction {
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(Vec<Value>) -> Result<Value, Diagnostic> + Send + Sync + 'static,
+    {
+        Self(std::sync::Arc::new(f))
+    }
+}
+
+impl std::fmt::Debug for JitFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "JitFunction({:p})", std::sync::Arc::as_ptr(&self.0))
+    }
+}
+
+impl std::ops::Deref for JitFunction {
+    type Target = dyn Fn(Vec<Value>) -> Result<Value, Diagnostic> + Send + Sync;
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
 /// Wrapper around `polars_lazy::frame::LazyFrame` that provides `Debug` and `Deref`.
 #[derive(Clone)]
 pub struct LazyPlan(pub polars_lazy::frame::LazyFrame);
@@ -187,6 +213,11 @@ pub enum Value {
         env: RuntimeEnv,
     },
     NativeFn(NativeFunction),
+    /// Native machine code function compiled JIT via Cranelift (RFC 13)
+    JitFn {
+        name: String,
+        func: JitFunction,
+    },
     /// A native function that needs to call back into the interpreter (TODO.md Fase 3,
     /// Track 2, Punto 3) -- `NativeFunction` is a plain `fn(Vec<Value>) -> ...` pointer
     /// with no way to invoke a `Closure`/`NativeFn` passed as an argument (e.g. `map`'s
@@ -298,6 +329,7 @@ impl Value {
             Value::Closure { .. } => "Function",
             Value::NativeFn(_) => "NativeFunction",
             Value::NativeFnCtx(_) => "NativeFunction",
+            Value::JitFn { .. } => "JitFunction",
             Value::Arena(_) => "Arena",
             Value::Record(_) => "Record",
             Value::Struct { .. } => "Struct",
@@ -386,6 +418,10 @@ impl PartialEq for Value {
                 Value::Range { start: s1, end: e1, inclusive: i1 },
                 Value::Range { start: s2, end: e2, inclusive: i2 },
             ) => s1 == s2 && e1 == e2 && i1 == i2,
+            (
+                Value::JitFn { name: n1, func: f1 },
+                Value::JitFn { name: n2, func: f2 },
+            ) => n1 == n2 && std::sync::Arc::ptr_eq(&f1.0, &f2.0),
             _ => false,
         }
     }
@@ -647,6 +683,9 @@ impl Value {
             }
             Value::NativeFn(_) | Value::NativeFnCtx(_) => {
                 "<builtin_fn> (type ?<name> or doc(\"<name>\") for details)".to_string()
+            }
+            Value::JitFn { name, .. } => {
+                format!("<jit_fn `{}` (Cranelift x86_64)>", name)
             }
             Value::Arena(a) => {
                 let bytes = a.lock().map(|st| st.allocated_bytes()).unwrap_or(0);

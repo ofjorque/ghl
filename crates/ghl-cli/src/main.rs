@@ -52,6 +52,7 @@ Examples:
 
 mod repl;
 mod package;
+mod jit_bridge;
 
 fn run_repl(caps: &RenderCaps) {
     let mut session = repl::ReplSession::new(caps.clone());
@@ -227,18 +228,22 @@ fn real_main() {
                 std::process::exit(1);
             }
 
-            // 3. JIT Precompilation (Cranelift)
+            // 3. JIT Native Compilation (Cranelift)
             let jit_start = Instant::now();
-            let jit_info = (|| -> Option<String> {
+            let opt_jit: Option<(std::sync::Arc<ghl_codegen::JitEngine>, ghl_ir::HirModule)> = (|| {
                 let hir_module = ghl_ir::lower_ast(&program).ok()?;
                 if hir_module.functions.is_empty() {
                     return None;
                 }
                 let mut jit = ghl_codegen::JitEngine::new().ok()?;
                 jit.compile_module(&hir_module).ok()?;
-                let elapsed = jit_start.elapsed().as_secs_f64() * 1000.0;
-                Some(format!("({} functions compiled in {:.2}ms)", hir_module.functions.len(), elapsed))
+                Some((std::sync::Arc::new(jit), hir_module))
             })();
+
+            let jit_info = opt_jit.as_ref().map(|(_jit, hir)| {
+                let elapsed = jit_start.elapsed().as_secs_f64() * 1000.0;
+                format!("({} functions compiled in {:.2}ms)", hir.functions.len(), elapsed)
+            });
 
             // Telemetry indicator for interactive users
             if caps.is_tty && !quiet {
@@ -261,6 +266,21 @@ fn real_main() {
 
             // 4. High-performance execution runtime
             let mut interpreter = ghl_runtime::Interpreter::new();
+
+            // Bridge Cranelift JIT compiled functions into runtime environment
+            if let Some((jit_arc, hir_module)) = &opt_jit {
+                for (name, hir_fn) in &hir_module.functions {
+                    if let Some(ptr) = jit_arc.get_fn_ptr(name) {
+                        if let Some(trampoline) = jit_bridge::create_jit_trampoline(hir_fn, ptr, jit_arc.clone()) {
+                            interpreter.env.set(name.clone(), ghl_runtime::Value::JitFn {
+                                name: name.clone(),
+                                func: trampoline,
+                            });
+                        }
+                    }
+                }
+            }
+
             match interpreter.eval_program(&program) {
                 Ok(final_val) => {
                     if !matches!(final_val, ghl_runtime::Value::Unit) {

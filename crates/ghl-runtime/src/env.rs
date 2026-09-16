@@ -71,6 +71,23 @@ impl RuntimeEnv {
             }
         }));
 
+        // Native function: clock_now (high-resolution seconds)
+        env.set("clock_now".into(), Value::NativeFn(|_| {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0);
+            Ok(Value::F64(now))
+        }));
+
+        // Native function: set_telemetry (toggle Cockpit Deck operation telemetry)
+        env.set("set_telemetry".into(), Value::NativeFn(|args| {
+            let enable = args.first().and_then(|v| v.as_bool()).unwrap_or(true);
+            crate::io::set_telemetry_enabled(enable);
+            Ok(Value::Bool(enable))
+        }));
+
         // Print helpers
         env.set("println".into(), Value::NativeFn(|args| {
             for (i, a) in args.iter().enumerate() {
@@ -2304,9 +2321,14 @@ fn native_set(mut args: Vec<Value>) -> Result<Value, Diagnostic> {
         3 => {
             // set(vector, index, val)
             let val = args.pop().unwrap();
-            let idx = args.pop().unwrap().as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`set(vector, index, val)` requires an integer index")
-            })?;
+            let idx_val = args.pop().unwrap();
+            let idx = match &idx_val {
+                Value::I64(i) => *i,
+                Value::F64(f) if f.fract() == 0.0 => *f as i64,
+                _ => {
+                    return Err(Diagnostic::compute_error("C0201", "`set(vector, index, val)` requires an integer index"));
+                }
+            };
             let collection = args.pop().unwrap();
             if let Value::Vector(vd) = collection {
                 let i = idx as usize;

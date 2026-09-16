@@ -1,0 +1,78 @@
+// H2O.ai Database-like Operations Benchmark in Pure GHL
+// Measures Tasks 1-4: GroupBy (low/high cardinality), Multi-agg, Joins, and Sorting.
+
+set_telemetry(true);
+
+println("=== H2O.ai Benchmark: Task 1 (Single-key GroupBy & Aggregations) ===");
+
+// 1. Generate synthetic dataset with 50,000 observations
+let n = 50000;
+let raw_id1 = random_uniform(n, 101) |> map(\x -> floor(x * 100.0));
+let raw_v1  = random_uniform(n, 202) |> map(\x -> x * 10.0);
+let raw_v2  = random_uniform(n, 303) |> map(\x -> x * 100.0);
+
+let df_h2o = dataframe {
+    id1: raw_id1,
+    v1: raw_v1,
+    v2: raw_v2
+};
+
+let t0 = clock_now();
+let g1 = df_h2o 
+    |> group_by(id1)
+    |> summarize(
+        v1_sum = sum(v1),
+        v1_mean = mean(v1),
+        n_obs = count()
+    );
+let t1 = clock_now();
+println("Task 1 Completed in seconds:", t1 - t0);
+println("Task 1 Result Sample:");
+glimpse(g1);
+
+println("\n=== H2O.ai Benchmark: Task 2 (Multi-key GroupBy with Multiple Aggs) ===");
+let raw_id2 = random_uniform(n, 404) |> map(\x -> floor(x * 20.0));
+let df_multi = df_h2o |> mutate("id2", raw_id2);
+
+let t2 = clock_now();
+let g2 = df_multi
+    |> group_by(id1, id2)
+    |> summarize(
+        sum_v1 = sum(v1),
+        mean_v2 = mean(v2),
+        min_v1 = min(v1),
+        max_v2 = max(v2),
+        sd_v1 = std_dev(v1),
+        total_count = count()
+    );
+let t3 = clock_now();
+println("Task 2 Completed in seconds:", t3 - t2);
+
+println("\n=== H2O.ai Benchmark: Task 3 (Relational Joins) ===");
+let n_lookup = 100;
+let lookup_keys = random_uniform(n_lookup, 555) |> map(\x -> floor(x * 100.0));
+let lookup_weights = random_uniform(n_lookup, 505);
+let df_lookup = dataframe {
+    id1: lookup_keys,
+    weight: lookup_weights
+};
+
+let t4 = clock_now();
+let df_joined = df_h2o |> inner_join(df_lookup, id1);
+let t5 = clock_now();
+println("Task 3 (Inner Join) Completed in seconds:", t5 - t4);
+
+let t6 = clock_now();
+let df_left = df_h2o |> left_join(df_lookup, id1);
+let t7 = clock_now();
+println("Task 3 (Left Join) Completed in seconds:", t7 - t6);
+
+println("\n=== H2O.ai Benchmark: Task 4 (Sort & Filter) ===");
+let t8 = clock_now();
+let df_filtered = df_h2o 
+    |> filter(v1 > 5.0)
+    |> arrange(desc(v2));
+let t9 = clock_now();
+println("Task 4 (Filter & Descending Sort) Completed in seconds:", t9 - t8);
+
+println("(=^･ω･^=) H2O.ai benchmark completed successfully!");

@@ -226,6 +226,22 @@ impl TypeEnv {
             },
             false,
         );
+        env.insert(
+            "clock_now".into(),
+            Type::Function {
+                params: vec![],
+                ret: Box::new(Type::F64),
+            },
+            false,
+        );
+        env.insert(
+            "set_telemetry".into(),
+            Type::Function {
+                params: vec![Type::Bool],
+                ret: Box::new(Type::Bool),
+            },
+            false,
+        );
 
         // Print helpers
         env.insert(

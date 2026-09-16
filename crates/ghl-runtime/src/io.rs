@@ -22,6 +22,20 @@ use crate::polars_bridge;
 use crate::value::{Value, LazyPlan};
 use crate::vector_data::VectorData;
 
+static TELEMETRY_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Explicitly enable or disable Cockpit Deck operation telemetry for high-volume verbs.
+pub fn set_telemetry_enabled(enabled: bool) {
+    TELEMETRY_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Returns true if Cockpit Deck telemetry should report performance for the given row volume.
+pub fn is_telemetry_active(rows: usize) -> bool {
+    TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+        || std::env::var("GHL_TELEMETRY").map(|v| v != "0").unwrap_or(false)
+        || rows >= 100_000
+}
+
 /// Extracts `&DataFrame` and `&Arc<NaReasonTable>` from a `Value`, or returns the
 /// standard diagnostic error used by the DataFrame verbs in this module when the
 /// first argument is not a DataFrame. Returns the `Arc` itself (rather than an unwrapped
@@ -825,6 +839,7 @@ pub fn df_arrange(df: &Value, specs: &[(String, bool)]) -> Result<Value, Diagnos
                 sort_cols.push((col_vals, *desc));
             }
 
+            let start = std::time::Instant::now();
             let num_rows = frame.height();
             let mut indices: Vec<usize> = (0..num_rows).collect();
             indices.sort_by(|&a, &b| {
@@ -838,6 +853,13 @@ pub fn df_arrange(df: &Value, specs: &[(String, bool)]) -> Result<Value, Diagnos
             });
 
             let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
+            if is_telemetry_active(num_rows) {
+                let elapsed = start.elapsed().as_secs_f64();
+                let caps = ghl_diagnostics::RenderCaps::detect();
+                let note = format!("specs: {:?}", specs);
+                let panel = ghl_diagnostics::CockpitPanel::operation_telemetry("df_arrange", num_rows, elapsed, Some(&note));
+                eprintln!("{}", panel.render(&caps));
+            }
             Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
         }
         Value::LazyFrame { plan, na_reasons } => {
@@ -1121,6 +1143,7 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
             ));
         }
     };
+    let start = std::time::Instant::now();
 
     const ROW_IDX_COL: &str = "__ghl_row_idx__";
     const FIRST_IDX_ALIAS: &str = "__ghl_first_idx__";
@@ -1249,6 +1272,13 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
         .map(|c| (c.clone(), out_data.remove(c).unwrap_or_default()))
         .collect();
     let (result_frame, result_reasons) = polars_bridge::build_dataframe(&cols)?;
+    if is_telemetry_active(frame.height()) {
+        let elapsed = start.elapsed().as_secs_f64();
+        let caps = ghl_diagnostics::RenderCaps::detect();
+        let note = format!("Keys: {} | Aggs: {} | Output: {} groups", keys.len(), specs.len(), result_frame.height());
+        let panel = ghl_diagnostics::CockpitPanel::operation_telemetry("df_summarize", frame.height(), elapsed, Some(&note));
+        eprintln!("{}", panel.render(&caps));
+    }
     Ok(Value::DataFrame { frame: result_frame, na_reasons: result_reasons })
 }
 
@@ -1587,6 +1617,7 @@ fn df_join(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<
     };
     let (left_frame, left_na_reasons) = as_dataframe(left, verb)?;
     let (right_frame, right_na_reasons) = as_dataframe(right, verb)?;
+    let start = std::time::Instant::now();
 
     for k in on {
         if left_frame.column(k).is_err() {
@@ -1686,6 +1717,13 @@ fn df_join(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<
     }
 
     let joined = joined.drop_many([LEFT_IDX_COL, RIGHT_IDX_COL]);
+    if is_telemetry_active(joined.height()) {
+        let elapsed = start.elapsed().as_secs_f64();
+        let caps = ghl_diagnostics::RenderCaps::detect();
+        let note = format!("Join: {} | On: {:?} | Output: {} rows", verb, on, joined.height());
+        let panel = ghl_diagnostics::CockpitPanel::operation_telemetry(verb, joined.height(), elapsed, Some(&note));
+        eprintln!("{}", panel.render(&caps));
+    }
     Ok(Value::DataFrame { frame: joined, na_reasons: Arc::new(result_reasons) })
 }
 

@@ -1,0 +1,61 @@
+// TPC-H Analytical Benchmark in Pure GHL
+// Implements canonical analytical queries Q1 (Pricing Summary Report) and Q6 (Forecasting Revenue Change).
+
+set_telemetry(true);
+
+println("=== TPC-H Analytical Benchmark ===");
+
+// 1. Generate synthetic lineitem dataset (50,000 rows)
+let n = 50000;
+let raw_qty       = random_uniform(n, 101) |> map(\x -> floor(x * 50.0) + 1.0);
+let raw_price     = random_uniform(n, 202) |> map(\x -> x * 1000.0 + 100.0);
+let raw_disc      = random_uniform(n, 303) |> map(\x -> floor(x * 10.0) * 0.01);
+let raw_tax       = random_uniform(n, 404) |> map(\x -> floor(x * 8.0) * 0.01);
+let raw_flag_code = random_uniform(n, 505) |> map(\x -> floor(x * 3.0));
+let raw_status    = random_uniform(n, 606) |> map(\x -> floor(x * 2.0));
+let raw_shipdays  = random_uniform(n, 707) |> map(\x -> floor(x * 365.0));
+
+let df_lineitem = dataframe {
+    quantity: raw_qty,
+    extendedprice: raw_price,
+    discount: raw_disc,
+    tax: raw_tax,
+    returnflag: raw_flag_code,
+    linestatus: raw_status,
+    shipdays: raw_shipdays
+};
+
+println("\n--- Running TPC-H Query 1: Pricing Summary Report ---");
+let t0 = clock_now();
+let q1_result = df_lineitem
+    |> filter(shipdays <= 300.0)
+    |> group_by(returnflag, linestatus)
+    |> summarize(
+        sum_qty = sum(quantity),
+        sum_base_price = sum(extendedprice),
+        avg_qty = mean(quantity),
+        avg_price = mean(extendedprice),
+        avg_disc = mean(discount),
+        count_order = count()
+    )
+    |> arrange(returnflag, linestatus);
+let t1 = clock_now();
+println("TPC-H Q1 completed in seconds:", t1 - t0);
+println("Q1 Aggregated Report:");
+glimpse(q1_result);
+
+println("\n--- Running TPC-H Query 6: Forecasting Revenue Change ---");
+let t2 = clock_now();
+let q6_filtered = df_lineitem
+    |> filter(shipdays >= 30.0 && shipdays <= 180.0 && discount >= 0.03 && discount <= 0.07 && quantity < 25.0);
+
+// Revenue impact: sum(extendedprice * discount)
+let p_filtered = q6_filtered |> pull("extendedprice");
+let d_filtered = q6_filtered |> pull("discount");
+let revenue = dot(p_filtered, d_filtered);
+let t3 = clock_now();
+
+println("TPC-H Q6 completed in seconds:", t3 - t2);
+println("Forecasted Total Revenue:", revenue);
+
+println("(=^･ω･^=) TPC-H canonical queries benchmark passed!");

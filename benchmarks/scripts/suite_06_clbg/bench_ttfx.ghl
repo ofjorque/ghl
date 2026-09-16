@@ -1,0 +1,16 @@
+// The "Time-to-First-Plot" (TTFX) Challenge in Pure GHL
+// Measures cold-start pipeline: process startup, parsing, typecheck, OLS fit, and SVG plot generation.
+
+let df = dataframe {
+    x: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+    y: [2.1, 3.9, 6.2, 8.0, 10.1, 12.2, 13.9, 16.1, 18.2, 20.0]
+};
+
+let fit = ols(y ~ x, df);
+
+let p = plot(df, aes(col("x"), col("y")))
+    |> geom_point()
+    |> theme_minimal();
+
+save(p, "target/ttfx_output.svg");
+println("(=^･ω･^=) TTFX cold-start plot rendered successfully!");

@@ -1,0 +1,61 @@
+// CLBG Mandelbrot Fractal Benchmark in Pure GHL
+// Computes Mandelbrot set escape iterations across a 200x200 complex plane grid.
+
+println("=== CLBG Benchmark: Mandelbrot Fractal Computation ===");
+
+let width = 200;
+let height = 200;
+let max_iter = 50;
+
+let x_min = -2.0;
+let x_max = 0.5;
+let y_min = -1.25;
+let y_max = 1.25;
+
+let dx = (x_max - x_min) / (width * 1.0);
+let dy = (y_max - y_min) / (height * 1.0);
+
+println("Rendering Mandelbrot grid:", width, "x", height, "with max_iter =", max_iter);
+let t0 = clock_now();
+
+let mut in_set_count = 0;
+let mut j = 0;
+while j < height {
+    let cy = y_min + (j * 1.0) * dy;
+    let mut i = 0;
+    while i < width {
+        let cx = x_min + (i * 1.0) * dx;
+        let mut zx = 0.0;
+        let mut zy = 0.0;
+        let mut iter = 0;
+        let mut escaped = false;
+
+        while iter < max_iter && !escaped {
+            let zx2 = zx * zx;
+            let zy2 = zy * zy;
+            if zx2 + zy2 > 4.0 {
+                escaped = true;
+            } else {
+                let new_zx = zx2 - zy2 + cx;
+                zy = 2.0 * zx * zy + cy;
+                zx = new_zx;
+                iter = iter + 1;
+            };
+        };
+
+        if !escaped {
+            in_set_count = in_set_count + 1;
+        };
+
+        i = i + 1;
+    };
+    j = j + 1;
+};
+
+let t1 = clock_now();
+println("Mandelbrot Completed in seconds:", t1 - t0);
+println("Pixels computed:", width * height);
+println("In-set points detected:", in_set_count);
+println("Throughput (pixels/sec):", (width * height * 1.0) / (t1 - t0));
+pounce(in_set_count > 0, "mandelbrot set not empty");
+println("(=^･ω･^=) Mandelbrot benchmark passed!");

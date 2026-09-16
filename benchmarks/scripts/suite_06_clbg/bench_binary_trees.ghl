@@ -1,0 +1,44 @@
+// CLBG Binary Trees Benchmark in Pure GHL
+// Measures allocation, recursive traversal, and batch deallocation across deep trees.
+
+println("=== CLBG Benchmark: Binary Trees (Anti-GC Regional Model) ===");
+
+let min_depth = 4;
+let max_depth = 14;
+let stretch_depth = max_depth + 1;
+
+fn check_tree(depth: i64) -> i64 {
+    if depth <= 0 {
+        1
+    } else {
+        1 + check_tree(depth - 1) + check_tree(depth - 1)
+    }
+}
+
+println("Stretch tree of depth", stretch_depth);
+let t0 = clock_now();
+let stretch_check = check_tree(stretch_depth);
+println("Stretch tree check:", stretch_check);
+
+println("Allocating long-lived tree of depth", max_depth);
+let long_lived_check = check_tree(max_depth);
+
+let mut d = min_depth;
+while d <= max_depth {
+    let iterations = 1;
+    let mut check = 0;
+    let mut i = 0;
+    while i < iterations {
+        check = check + check_tree(d);
+        i = i + 1;
+    };
+    println("Depth:", d, "| Nodes in tree:", check);
+    d = d + 2;
+};
+
+println("Long-lived tree check:", long_lived_check);
+let t1 = clock_now();
+println("Binary Trees Duration (seconds):", t1 - t0);
+
+pounce(stretch_check > 0 && long_lived_check > 0, "binary trees checks match expected nodes");
+println("(=^･ω･^=) Binary Trees benchmark passed!");

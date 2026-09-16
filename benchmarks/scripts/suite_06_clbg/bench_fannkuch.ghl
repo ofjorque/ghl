@@ -1,0 +1,89 @@
+// CLBG Fannkuch-Redux Benchmark in Pure GHL
+// Measures contiguous indexing, in-place permutation flips, and branch-free computation.
+
+println("=== CLBG Benchmark: Fannkuch-Redux ===");
+
+let n = 7;
+println("Computing Fannkuch-redux for N =", n);
+
+let t0 = clock_now();
+
+let mut p = zeros(n);
+let mut init_i = 0;
+while init_i < n {
+    p = set(p, init_i, init_i * 1.0);
+    init_i = init_i + 1;
+};
+
+let mut count = zeros(n);
+let mut max_flips = 0;
+let mut checksum = 0;
+let mut sign = 1;
+
+let mut running = true;
+while running {
+    // Check flips for current permutation
+    let mut q = zeros(n);
+    let mut i = 0;
+    while i < n {
+        q = set(q, i, p[i]);
+        i = i + 1;
+    };
+
+    let mut flips = 0;
+    let mut first = q[0];
+    while first > 0.0 {
+        // Reverse elements from 0 to first
+        let mut left = 0;
+        let mut right = floor(first);
+        while left < right {
+            let tmp = q[left];
+            q = set(q, left, q[right]);
+            q = set(q, right, tmp);
+            left = left + 1;
+            right = right - 1;
+        };
+        flips = flips + 1;
+        first = q[0];
+    };
+
+    if flips > max_flips {
+        max_flips = flips;
+    };
+    checksum = checksum + sign * flips;
+
+    // Generate next permutation
+    let mut more = true;
+    let mut r = 1;
+    while more && r < n {
+        // Rotate 0..r
+        let p0 = p[0];
+        let mut j = 0;
+        while j < r {
+            p = set(p, j, p[j + 1]);
+            j = j + 1;
+        };
+        p = set(p, r, p0);
+
+        count = set(count, r, count[r] + 1.0);
+        if count[r] <= (r * 1.0) {
+            more = false;
+        } else {
+            count = set(count, r, 0.0);
+            r = r + 1;
+        };
+    };
+
+    if r >= n && more {
+        running = false;
+    };
+    sign = -sign;
+};
+
+let t1 = clock_now();
+println("Checksum:", checksum);
+println("Max Flips for N =", n, ":", max_flips);
+println("Fannkuch Duration (seconds):", t1 - t0);
+
+pounce(max_flips > 0, "max flips must be positive");
+println("(=^･ω･^=) Fannkuch-Redux benchmark passed!");

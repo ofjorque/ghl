@@ -61,6 +61,10 @@ impl Interpreter {
                 Ok(val)
             }
             StmtKind::Fn { name, params, body, .. } => {
+                // If precompiled to native machine code via Cranelift JIT, preserve it
+                if let Some(existing @ Value::JitFn { .. }) = self.env.get(name) {
+                    return Ok(existing);
+                }
                 let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
                 let mut captured_env = self.env.clone();
                 let placeholder = Value::Closure {
@@ -381,7 +385,7 @@ impl Interpreter {
                 if let ExprKind::FieldAccess { target, field } = &callee.kind {
                     let target_val = self.eval_expr(target)?;
                     let is_record_fn = match &target_val {
-                        Value::Record(map) => map.get(field).map(|v| matches!(v, Value::NativeFn(_) | Value::NativeFnCtx(_) | Value::Closure { .. })).unwrap_or(false),
+                        Value::Record(map) => map.get(field).map(|v| matches!(v, Value::NativeFn(_) | Value::NativeFnCtx(_) | Value::JitFn { .. } | Value::Closure { .. })).unwrap_or(false),
                         _ => false,
                     };
 
@@ -684,7 +688,7 @@ impl Interpreter {
                 if let ExprKind::FieldAccess { target, field } = &callee.kind {
                     let target_val = self.eval_expr(target)?;
                     let is_record_fn = match &target_val {
-                        Value::Record(map) => map.get(field).map(|v| matches!(v, Value::NativeFn(_) | Value::NativeFnCtx(_) | Value::Closure { .. })).unwrap_or(false),
+                        Value::Record(map) => map.get(field).map(|v| matches!(v, Value::NativeFn(_) | Value::NativeFnCtx(_) | Value::JitFn { .. } | Value::Closure { .. })).unwrap_or(false),
                         _ => false,
                     };
 
@@ -765,6 +769,7 @@ impl Interpreter {
         match callee {
             Value::NativeFn(func) => func(args),
             Value::NativeFnCtx(func) => func(self, args),
+            Value::JitFn { func, .. } => (func)(args),
             Value::Closure { params, body, env } => {
                 // Trampoline: a self/mutual-recursive GHL call in tail position (see
                 // `eval_expr_tail`) comes back as `TailOutcome::TailCall` instead of
@@ -855,6 +860,16 @@ impl Interpreter {
                         let idx_val = self.eval_expr_ctx(e, col_ctx)?;
                         match idx_val {
                             Value::I64(i) => {
+                                if i < 0 || (i as usize) >= vd.len() {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0203",
+                                        format!("Index out of bounds: index {i} for vector of length {}", vd.len()),
+                                    ));
+                                }
+                                Ok(vd.value_at(i as usize).unwrap_or(Value::NA(None)))
+                            }
+                            Value::F64(f) if f.fract() == 0.0 => {
+                                let i = f as i64;
                                 if i < 0 || (i as usize) >= vd.len() {
                                     return Err(Diagnostic::compute_error(
                                         "C0203",
@@ -1356,7 +1371,11 @@ impl Interpreter {
                         if right.is_na() {
                             return Ok(right);
                         }
-                        Ok(Value::Bool(left == right))
+                        if let (Some(a), Some(b)) = (left.as_f64(), right.as_f64()) {
+                            Ok(Value::Bool(a == b))
+                        } else {
+                            Ok(Value::Bool(left == right))
+                        }
                     }
                     BinaryOp::NotEq => {
                         if left.is_na() {
@@ -1365,7 +1384,11 @@ impl Interpreter {
                         if right.is_na() {
                             return Ok(right);
                         }
-                        Ok(Value::Bool(left != right))
+                        if let (Some(a), Some(b)) = (left.as_f64(), right.as_f64()) {
+                            Ok(Value::Bool(a != b))
+                        } else {
+                            Ok(Value::Bool(left != right))
+                        }
                     }
                     BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
                         if left.is_na() {

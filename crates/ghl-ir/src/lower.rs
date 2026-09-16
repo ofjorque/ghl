@@ -121,31 +121,43 @@ impl LoweringContext {
                 (&top_level_stmts[..], None)
             };
 
+            let mut lower_ok = true;
             for stmt in stmts_to_lower {
-                hir_stmts.push(self.lower_stmt(stmt)?);
+                match self.lower_stmt(stmt) {
+                    Ok(s) => hir_stmts.push(s),
+                    Err(_) => {
+                        lower_ok = false;
+                        break;
+                    }
+                }
             }
 
-            let (result_expr, return_ty) = if let Some(e) = trailing_expr {
-                let lowered = self.lower_expr(e)?;
-                let ty = lowered.ty();
-                (Some(Box::new(lowered)), ty)
-            } else {
-                (Some(Box::new(HirExpr::Literal(HirLiteral::I64(0), HirType::I64))), HirType::I64)
-            };
+            if lower_ok {
+                let result_pair = if let Some(e) = trailing_expr {
+                    self.lower_expr(e).ok().map(|lowered| {
+                        let ty = lowered.ty();
+                        (Some(Box::new(lowered)), ty)
+                    })
+                } else {
+                    Some((Some(Box::new(HirExpr::Literal(HirLiteral::I64(0), HirType::I64))), HirType::I64))
+                };
+
+                if let Some((result_expr, return_ty)) = result_pair {
+                    let main_fn = HirFunction {
+                        name: "__ghl_main".to_string(),
+                        params: Vec::new(),
+                        return_ty,
+                        body: HirExpr::Block {
+                            statements: hir_stmts,
+                            result: result_expr,
+                            ty: return_ty,
+                        },
+                    };
+                    module.add_function(main_fn);
+                }
+            }
 
             self.pop_scope();
-
-            let main_fn = HirFunction {
-                name: "__ghl_main".to_string(),
-                params: Vec::new(),
-                return_ty,
-                body: HirExpr::Block {
-                    statements: hir_stmts,
-                    result: result_expr,
-                    ty: return_ty,
-                },
-            };
-            module.add_function(main_fn);
         }
 
         Ok(module)

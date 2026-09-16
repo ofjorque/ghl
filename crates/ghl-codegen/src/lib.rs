@@ -198,5 +198,51 @@ mod tests {
         let symbols: Vec<_> = obj_file.symbols().filter_map(|s| s.name().ok()).collect();
         assert!(symbols.contains(&"__ghl_main"), "Object should export `__ghl_main`");
     }
+
+    #[test]
+    fn test_jit_tail_recursion_100k() {
+        let code = r#"
+            fn sum_tail_rec(n: i64, acc: i64) -> i64 {
+                if n <= 0 {
+                    acc
+                } else {
+                    sum_tail_rec(n - 1, acc + n)
+                }
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let hir_module = lower_ast(&program).expect("hir ok");
+
+        let mut jit = JitEngine::new().expect("jit init ok");
+        jit.compile_module(&hir_module).expect("jit compilation ok");
+
+        let sum_fn = jit.get_fn_i64_2("sum_tail_rec").expect("compiled sum_tail_rec");
+
+        let t0 = std::time::Instant::now();
+        let res = sum_fn(100_000, 0);
+        let elapsed = t0.elapsed();
+
+        assert_eq!(res, 5000050000, "100k tail-recursive sum must match Gauss formula");
+        assert!(elapsed.as_millis() < 50, "Native TCO must run 100k iterations in milliseconds (took {:?})", elapsed);
+    }
+
+    #[test]
+    fn test_jit_host_math_libcall() {
+        let code = r#"
+            fn calc_hypot(a: f64, b: f64) -> f64 {
+                let sum_sq = a * a + b * b;
+                sqrt(sum_sq)
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let hir_module = lower_ast(&program).expect("hir ok");
+
+        let mut jit = JitEngine::new().expect("jit init ok");
+        jit.compile_module(&hir_module).expect("jit compilation ok");
+
+        let hypot_fn = jit.get_fn_f64_2("calc_hypot").expect("compiled calc_hypot");
+        let res = hypot_fn(3.0, 4.0);
+        assert!((res - 5.0).abs() < 1e-6, "sqrt(3^2 + 4^2) must equal 5.0");
+    }
 }
 
