@@ -1,0 +1,130 @@
+// GHL Real Data Validation: Single-Cell RNA-seq Genomics & Ultra-Wide Matrices
+// Tests high-dimensional matrix handling, structural sparsity (zero proportion),
+// library size normalization (CPM + log1p), highly variable gene (HVG) selection,
+// and matrix transposition invariance.
+
+println("=== 1. Simulating Single-Cell RNA-seq Count Matrix (Genes x Cells) ===");
+
+// 10 genes x 8 cells count matrix (discrete UMI counts with dropouts)
+let counts = mat [
+    0.0,  5.0,  0.0, 12.0,  0.0,  0.0,  8.0,  0.0 ; // Gene 0: Marker A (variable)
+    1.0,  0.0,  0.0,  0.0,  2.0,  0.0,  0.0,  1.0 ; // Gene 1: Low-expressed
+   45.0, 52.0, 38.0, 60.0, 48.0, 55.0, 42.0, 50.0 ; // Gene 2: Housekeeping (constitutive)
+    0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0 ; // Gene 3: Silent in this cell type
+    0.0, 18.0,  0.0, 25.0,  0.0,  0.0, 15.0,  0.0 ; // Gene 4: Marker B (variable)
+    2.0,  3.0,  1.0,  4.0,  2.0,  3.0,  2.0,  4.0 ; // Gene 5: Stable low
+    0.0,  0.0,  3.0,  0.0,  0.0,  5.0,  0.0,  0.0 ; // Gene 6: Rare burst
+    0.0,  0.0,  0.0,  1.0,  0.0,  0.0,  0.0,  0.0 ; // Gene 7: Single dropout escape
+   10.0,  0.0, 15.0,  0.0, 22.0,  0.0, 18.0,  0.0 ; // Gene 8: Cell cycle phase specific
+    0.0,  2.0,  0.0,  1.0,  0.0,  0.0,  0.0,  2.0   // Gene 9: Stochastic basal
+];
+
+let n_genes = 10;
+let n_cells = 8;
+
+println("Matrix Dimensions: Genes =", n_genes, ", Cells =", n_cells);
+
+println("\n=== 2. Structural Sparsity Audit (Dropouts) ===");
+let mut total_zeros = 0.0;
+let total_elements = (n_genes * n_cells) * 1.0;
+
+let mut g = 0;
+while g < n_genes {
+    let row = get_row(counts, g);
+    let mut c = 0;
+    while c < n_cells {
+        if row[c] == 0.0 {
+            total_zeros = total_zeros + 1.0;
+        };
+        c = c + 1;
+    };
+    g = g + 1;
+};
+
+let sparsity = total_zeros / total_elements;
+println("Observed Matrix Sparsity (Zero Fraction):", sparsity * 100.0, "%");
+pounce(sparsity >= 0.55 && sparsity <= 0.75, "Single-cell sparsity must realistically be between 55% and 75%");
+
+println("\n=== 3. Library Size Computation & CPM Normalization ===");
+// Compute sequencing depth (total UMI counts) per cell
+let mut library_sizes = zeros(n_cells);
+let mut c_idx = 0;
+while c_idx < n_cells {
+    let col = get_col(counts, c_idx);
+    let cell_total = sum(col);
+    library_sizes = set(library_sizes, c_idx, cell_total);
+    pounce(cell_total > 30.0, "Every viable cell must have library size > 30 UMIs");
+    c_idx = c_idx + 1;
+};
+
+println("Cell Library Sizes (UMIs per cell):", library_sizes);
+
+// Normalize to CPM (Counts Per Million) and log1p: ln(1 + (count / depth) * 10,000)
+// Using scale factor 10,000 (standard in Seurat / Scanpy)
+let scale_factor = 10000.0;
+let mut norm_counts = zeros(n_genes, n_cells);
+
+let mut gi = 0;
+while gi < n_genes {
+    let row = get_row(counts, gi);
+    let mut ci = 0;
+    while ci < n_cells {
+        let raw = row[ci];
+        let depth = library_sizes[ci];
+        let cpm = (raw / depth) * scale_factor;
+        let log_norm = log(1.0 + cpm);
+        norm_counts = set(norm_counts, gi, ci, log_norm);
+        ci = ci + 1;
+    };
+    gi = gi + 1;
+};
+
+println("Normalized Expression Matrix (first gene row normalized):");
+println(get_row(norm_counts, 0));
+
+println("\n=== 4. Highly Variable Genes (HVG) Selection ===");
+// Identify genes with high variance across normalized cells
+let mut gene_means = zeros(n_genes);
+let mut gene_vars = zeros(n_genes);
+let mut dispersions = zeros(n_genes);
+
+let mut hvg_i = 0;
+while hvg_i < n_genes {
+    let expr_vec = get_row(norm_counts, hvg_i);
+    let mu = mean(expr_vec);
+    let v = var(expr_vec);
+    gene_means = set(gene_means, hvg_i, mu);
+    gene_vars = set(gene_vars, hvg_i, v);
+    let disp = if_else(mu > 0.001, v / mu, 0.0);
+    dispersions = set(dispersions, hvg_i, disp);
+    hvg_i = hvg_i + 1;
+};
+
+println("Gene Variances:", gene_vars);
+println("Gene Dispersions (Var / Mean):", dispersions);
+
+// Housekeeping gene (index 2) should have low dispersion relative to high mean
+pounce(gene_means[2] > 6.0, "Housekeeping gene should exhibit high baseline expression");
+// Silent gene (index 3) should have zero mean and zero variance
+pounce(gene_means[3] == 0.0, "Silent gene expression must be strictly 0.0");
+pounce(gene_vars[3] == 0.0, "Silent gene variance must be strictly 0.0");
+
+println("\n=== 5. Matrix Transposition Invariance ===");
+// Transpose from (Genes x Cells) to (Cells x Genes)
+let transposed = transpose(counts);
+
+let mut test_g = 0;
+while test_g < n_genes {
+    let mut test_c = 0;
+    while test_c < n_cells {
+        let original_val = get(counts, test_g, test_c);
+        let transposed_val = get(transposed, test_c, test_g);
+        pounce(original_val == transposed_val, "Transpose element must match: M[g, c] == M_T[c, g]");
+        test_c = test_c + 1;
+    };
+    test_g = test_g + 1;
+};
+
+println("Transposition Invariance Verified across all", n_genes * n_cells, "coordinates.");
+
+println("(=^･ω･^=) Single-Cell RNA-seq Genomics Validation passed successfully!");

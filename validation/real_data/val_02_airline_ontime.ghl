@@ -1,0 +1,116 @@
+// GHL Real Data Validation: Airline On-Time Performance
+// Tests high-cardinality categorical variables, relational joins (inner/left),
+// multi-key group_by, aggregations, and on-time performance metrics.
+
+println("=== 1. Flight Performance Dataset Ingestion ===");
+
+// 24 representative commercial flight records
+let flights = dataframe {
+    flight_id: [
+        101, 102, 103, 104, 105, 106, 107, 108,
+        109, 110, 111, 112, 113, 114, 115, 116,
+        117, 118, 119, 120, 121, 122, 123, 124
+    ],
+    carrier: [
+        "AA", "AA", "AA", "AA", "DL", "DL", "DL", "DL",
+        "UA", "UA", "UA", "UA", "WN", "WN", "WN", "WN",
+        "B6", "B6", "B6", "B6", "AS", "AS", "AS", "AS"
+    ],
+    origin: [
+        "JFK", "ORD", "DFW", "LAX", "ATL", "JFK", "LAX", "ORD",
+        "ORD", "SFO", "DEN", "EWR", "MDW", "DAL", "HOU", "PHX",
+        "JFK", "BOS", "FLL", "MCO", "SEA", "PDX", "SFO", "ANC"
+    ],
+    dest: [
+        "LAX", "DFW", "ORD", "JFK", "LAX", "ATL", "ORD", "JFK",
+        "DEN", "ORD", "ORD", "SFO", "DAL", "HOU", "MDW", "LAS",
+        "BOS", "JFK", "MCO", "FLL", "PDX", "SEA", "ANC", "SEA"
+    ],
+    dep_delay: [
+        -2.0,  5.0, 45.0,  0.0,  12.0, -1.0,  3.0, 25.0,
+        18.0, 50.0, -4.0,  8.0,   2.0, 30.0, 15.0, -3.0,
+         4.0, -2.0, 60.0, 10.0,  -5.0,  0.0, 14.0,  2.0
+    ],
+    arr_delay: [
+         5.0, 10.0, 52.0, -5.0,   8.0, -8.0,  0.0, 30.0,
+        22.0, 55.0, -2.0, 12.0,  -1.0, 35.0, 18.0, -7.0,
+        12.0, -4.0, 75.0,  8.0, -10.0, -2.0, 20.0, -1.0
+    ],
+    distance: [
+        2475.0, 802.0, 802.0, 2475.0, 1947.0,  760.0, 1744.0,  760.0,
+         888.0, 1846.0, 888.0, 2565.0,  793.0,  239.0,  937.0,  255.0,
+         187.0,  187.0, 177.0,  177.0,  129.0,  129.0, 2016.0, 2016.0
+    ],
+    air_time: [
+        320.0, 130.0, 135.0, 315.0, 260.0, 120.0, 240.0, 125.0,
+        140.0, 250.0, 145.0, 340.0, 130.0,  55.0, 150.0,  60.0,
+         45.0,  42.0,  40.0,  41.0,  35.0,  33.0, 220.0, 225.0
+    ]
+};
+
+println("Flight Records Ingested:", nrow(flights), "rows,", ncol(flights), "columns");
+pounce(nrow(flights) == 24, "Total flights must be 24");
+pounce(ncol(flights) == 8, "Total flight columns must be 8");
+
+println("\n=== 2. Master Tables & Relational Hash Joins ===");
+
+// Master Airport Catalog
+let airports = dataframe {
+    origin: ["JFK", "LAX", "ORD", "ATL", "DFW", "SFO", "SEA", "BOS", "DEN"],
+    city:   ["New York", "Los Angeles", "Chicago", "Atlanta", "Dallas", "San Francisco", "Seattle", "Boston", "Denver"],
+    state:  ["NY", "CA", "IL", "GA", "TX", "CA", "WA", "MA", "CO"]
+};
+
+// Carrier Master Catalog
+let carriers = dataframe {
+    carrier: ["AA", "DL", "UA", "WN", "B6", "AS"],
+    carrier_name: [
+        "American Airlines", "Delta Air Lines", "United Airlines",
+        "Southwest Airlines", "JetBlue Airways", "Alaska Airlines"
+    ]
+};
+
+// Left join flights with carrier catalog to attach full carrier name
+let flights_with_carrier = flights |> left_join(carriers, carrier);
+println("Joined with Carrier Catalog:", nrow(flights_with_carrier), "rows");
+pounce(nrow(flights_with_carrier) == 24, "Left join must preserve all 24 flight records");
+
+// Inner join flights with airports catalog on origin
+let flights_matched_origin = flights |> inner_join(airports, origin);
+println("Matched with Airport Catalog (Origin):", nrow(flights_matched_origin), "rows");
+// Unmatched origin airports (MDW, DAL, HOU, PHX, EWR, FLL, MCO, PDX, ANC) should be filtered out
+pounce(nrow(flights_matched_origin) < 24, "Inner join should retain only matched airports");
+pounce(nrow(flights_matched_origin) > 10, "Inner join should retain majority of hub flights");
+
+println("\n=== 3. High-Cardinality Grouped Aggregations ===");
+
+// Group by carrier and compute average departure delay and sum of distance
+let carrier_summary = flights |> group_by(["carrier"]) |> summarize(
+    mean_dep_delay = mean(dep_delay),
+    max_arr_delay = max(arr_delay),
+    total_distance = sum(distance),
+    flight_count = count()
+);
+
+println("Carrier Summary Table:");
+println(carrier_summary);
+pounce(nrow(carrier_summary) == 6, "Carrier summary should contain 6 carriers");
+
+// Multi-key grouping: carrier and origin
+let carrier_origin_summary = flights |> group_by(["carrier", "origin"]) |> summarize(
+    avg_arr_delay = mean(arr_delay),
+    total_air_time = sum(air_time),
+    n = count()
+);
+println("Multi-key Grouping (Carrier x Origin):", nrow(carrier_origin_summary), "routes");
+pounce(nrow(carrier_origin_summary) >= 20, "Should have fine-grained carrier-origin groupings");
+
+println("\n=== 4. On-Time Performance (OTP) Calculations ===");
+// A flight is on-time if arrival delay <= 15 minutes
+let arr_delays = flights |> pull("arr_delay");
+let on_time_indicator = if_else(arr_delays <= 15.0, 1.0, 0.0);
+let overall_otp = mean(on_time_indicator);
+println("Systemwide On-Time Arrival Rate (<= 15m):", overall_otp * 100.0, "%");
+pounce(overall_otp > 0.65 && overall_otp < 0.85, "System OTP should be realistically between 65% and 85%");
+
+println("(=^･ω･^=) Airline On-Time Performance Validation passed successfully!");

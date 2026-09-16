@@ -1,0 +1,132 @@
+// GHL Real Data Validation: High-Frequency Limit Order Book (LOB) Financial Data
+// Tests microsecond-resolution tick series, market microstructure metrics
+// (bid-ask spread, basis points, micro-price, OFI), and time-series window verbs
+// (lag, lead, cumsum, between, realized volatility).
+
+println("=== 1. Ingesting High-Frequency LOB Tick Stream ===");
+
+// 12 sequential microsecond-resolution ticks (AAPL mock order book snapshot)
+let timestamp_us = [
+    34200000120.0, 34200000350.0, 34200000890.0, 34200001200.0,
+    34200001750.0, 34200002100.0, 34200002600.0, 34200003150.0,
+    34200003800.0, 34200004200.0, 34200004750.0, 34200005300.0
+];
+
+let bid_price = [
+    180.25, 180.25, 180.26, 180.26,
+    180.27, 180.27, 180.26, 180.28,
+    180.28, 180.29, 180.29, 180.30
+];
+
+let ask_price = [
+    180.27, 180.27, 180.28, 180.28,
+    180.29, 180.28, 180.28, 180.30,
+    180.30, 180.31, 180.31, 180.32
+];
+
+let bid_vol = [
+    500.0, 400.0, 800.0, 600.0,
+    1200.0, 300.0, 450.0, 900.0,
+    700.0, 1500.0, 1100.0, 850.0
+];
+
+let ask_vol = [
+    300.0, 600.0, 400.0, 750.0,
+    500.0, 1100.0, 800.0, 600.0,
+    550.0, 400.0, 650.0, 900.0
+];
+
+let trade_vol = [
+    100.0, 50.0, 200.0, 150.0,
+    300.0, 400.0, 100.0, 250.0,
+    150.0, 500.0, 200.0, 350.0
+];
+
+let df_lob = dataframe {
+    timestamp_us: timestamp_us,
+    bid_price: bid_price,
+    ask_price: ask_price,
+    bid_vol: bid_vol,
+    ask_vol: ask_vol,
+    trade_vol: trade_vol
+};
+
+println("LOB Tick Records:", nrow(df_lob), "ticks,", ncol(df_lob), "fields");
+pounce(nrow(df_lob) == 12, "LOB ticks must equal 12");
+pounce(ncol(df_lob) == 6, "LOB fields must equal 6");
+
+println("\n=== 2. Market Microstructure: Spreads & Mid-Prices ===");
+// Invariant: ask_price > bid_price for all non-crossed books
+let spreads = ask_price - bid_price;
+println("Bid-Ask Spreads ($):", spreads);
+
+let mut i = 0;
+while i < 12 {
+    let s = spreads[i];
+    pounce(s > 0.0, "Spread must be strictly positive (no crossed book)");
+    pounce(s <= 0.03, "Liquid spread must be <= 3 cents ($0.03)");
+    i = i + 1;
+};
+
+// Mid-Price calculation
+let mid_price = (bid_price + ask_price) * 0.5;
+println("Mid Prices ($):", mid_price);
+
+// Spread in Basis Points (bps): (ask - bid) / mid * 10000
+let spread_bps = (spreads / mid_price) * 10000.0;
+println("Spreads in bps:", spread_bps);
+let avg_spread_bps = mean(spread_bps);
+println("Average Spread (bps):", avg_spread_bps);
+pounce(avg_spread_bps > 0.5 && avg_spread_bps < 2.0, "Average liquid spread should be ~1 bps");
+
+// Micro-price (volume-weighted top of book price)
+let total_top_vol = bid_vol + ask_vol;
+let micro_price = (bid_price * ask_vol + ask_price * bid_vol) / total_top_vol;
+println("Micro Prices ($):", micro_price);
+
+println("\n=== 3. Time Series Operations: lag, lead & Returns ===");
+// Lagged mid-price to compute tick returns
+let lag_mid = lag(mid_price, 1);
+println("Lagged Mid Price (1 tick):", lag_mid);
+
+let lead_mid = lead(mid_price, 1);
+println("Leading Mid Price (1 tick):", lead_mid);
+
+// Compute price differences (mid_price - lag_mid)
+let price_deltas = mid_price - lag_mid;
+println("Tick-by-Tick Price Deltas ($):", price_deltas);
+
+// Realized volatility proxy: sqrt(sum(delta^2)) over valid tick deltas (ticks 1..11)
+let mut sum_sq_deltas = 0.0;
+let mut t = 1;
+while t < 12 {
+    let d = price_deltas[t];
+    sum_sq_deltas = sum_sq_deltas + d * d;
+    t = t + 1;
+};
+let realized_vol = sqrt(sum_sq_deltas);
+println("Sample Realized Volatility ($):", realized_vol);
+pounce(realized_vol > 0.01 && realized_vol < 0.10, "Realized volatility must be within reasonable range");
+
+println("\n=== 4. Cumulative Flow & Window Slicing ===");
+// Cumulative Traded Volume
+let cum_volume = cumsum(trade_vol);
+println("Cumulative Traded Volume (shares):", cum_volume);
+pounce(cum_volume[11] == 2750.0, "Final cumulative volume must match sum of trade_vol (2750)");
+
+// Window filtering using between: isolate mid-morning burst (timestamp between 34200001000 and 34200004000)
+let in_burst_window = between(timestamp_us, 34200001000.0, 34200004000.0);
+println("In Microsecond Burst Window:", in_burst_window);
+
+let mut burst_ticks = 0;
+let mut w = 0;
+while w < 12 {
+    if in_burst_window[w] {
+        burst_ticks = burst_ticks + 1;
+    };
+    w = w + 1;
+};
+println("Ticks captured in burst window:", burst_ticks);
+pounce(burst_ticks >= 5, "Should capture at least 5 ticks in burst window");
+
+println("(=^･ω･^=) High-Frequency Limit Order Book Validation passed successfully!");

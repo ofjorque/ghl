@@ -1,0 +1,98 @@
+// GHL Real Data Validation: IMDb Textual Reviews & Arbitrary Unicode
+// Tests variable-length text columns, multi-byte UTF-8, accents, emojis,
+// and vectorized string verbs (str_contains, str_replace, str_lower, str_len, str_split).
+
+println("=== 1. Ingesting IMDb Textual Reviews with Arbitrary Unicode & Emojis ===");
+
+let review_ids = [1, 2, 3, 4, 5, 6, 7, 8];
+
+let review_texts = [
+    "An absolute MASTERPIECE! The cinematography was breathtaking. ⭐⭐⭐⭐⭐ 🎬",
+    "Una película absolutamente brillante y llena de emoción, ¡qué éxito! 🍿",
+    "Terrible, boring, and a complete waste of time. Do not watch. 👎",
+    "Très magnifique! Une réalisation cinématographique d'une beauté rare.",
+    "Decent popcorn movie with stunning visual effects! 🚀 Highly entertaining.",
+    "A total catastrophe. Poor acting, senseless plot, thoroughly uninspired.",
+    "Outstanding performances by the entire ensemble cast. Simply poetic! ✨",
+    "Boring from start to finish. Overhyped nonsense with zero depth. 💤"
+];
+
+let sentiment_labels = [
+    "positive", "positive", "negative", "positive",
+    "positive", "negative", "positive", "negative"
+];
+
+let df_reviews = dataframe {
+    id: review_ids,
+    text: review_texts,
+    sentiment: sentiment_labels
+};
+
+println("Ingested Reviews:", nrow(df_reviews), "rows,", ncol(df_reviews), "columns");
+pounce(nrow(df_reviews) == 8, "Total reviews must be 8");
+pounce(ncol(df_reviews) == 3, "Total columns must be 3");
+
+println("\n=== 2. Unicode Character Counting & Case Normalization ===");
+// Verify str_len counts Unicode graphemes/characters, not raw UTF-8 bytes
+let text_lengths = str_len(review_texts);
+println("Review character counts:", text_lengths);
+// Review 1 has multi-byte emojis (⭐ is 3 bytes, 🎬 is 4 bytes). str_len counts characters!
+pounce(text_lengths[0] > 60 && text_lengths[0] < 80, "Review 1 length must reflect character count");
+
+// Case conversion respecting Unicode accents (ÉXITO -> éxito, MASTERPIECE -> masterpiece)
+let lower_texts = str_lower(review_texts);
+println("First lowercased text:", lower_texts[0]);
+let contains_lower_masterpiece = str_contains(lower_texts[0], "masterpiece");
+pounce(contains_lower_masterpiece, "str_lower must convert uppercase to lowercase");
+
+// Check Spanish accent lowercase conversion
+println("Spanish text lowercased:", lower_texts[1]);
+let contains_lower_pelicula = str_contains(lower_texts[1], "película");
+pounce(contains_lower_pelicula, "str_lower must preserve accented characters like 'í'");
+
+println("\n=== 3. Vectorized Keyword Search (Sentiment Clues) ===");
+// Check presence of positive and negative keywords
+let has_masterpiece = str_contains(lower_texts, "masterpiece");
+let has_boring = str_contains(lower_texts, "boring");
+let has_waste = str_contains(lower_texts, "waste of time");
+let has_brillante = str_contains(lower_texts, "brillante");
+
+println("Reviews containing 'masterpiece':", has_masterpiece);
+println("Reviews containing 'boring':", has_boring);
+
+pounce(has_masterpiece[0] == true, "Review 1 must contain 'masterpiece'");
+pounce(has_masterpiece[1] == false, "Review 2 should not contain 'masterpiece'");
+pounce(has_brillante[1] == true, "Review 2 must contain 'brillante'");
+pounce(has_boring[2] == true, "Review 3 must contain 'boring'");
+pounce(has_boring[7] == true, "Review 8 must contain 'boring'");
+pounce(has_waste[2] == true, "Review 3 must contain 'waste of time'");
+
+println("\n=== 4. Text Sanitization & Punctuation Cleaning ===");
+// Clean punctuation and emojis via str_replace
+let mut clean_sample = str_replace(lower_texts[0], "!", ".");
+clean_sample = str_replace(clean_sample, "⭐⭐⭐⭐⭐", "[5-stars]");
+println("Sanitized Text:", clean_sample);
+pounce(str_contains(clean_sample, "[5-stars]"), "str_replace must replace multi-byte emojis");
+
+println("\n=== 5. Vectorized Tokenization via str_split ===");
+// Split first review on spaces to extract word tokens
+let tokens = str_split(lower_texts[0], " ");
+println("Review 1 tokens:", tokens);
+let n_tokens = len(tokens);
+println("Extracted token count:", n_tokens);
+pounce(n_tokens >= 8, "Review 1 must produce at least 8 tokens");
+
+println("\n=== 6. Memory Safety & Boundary Audit ===");
+// Rapidly iterate across all strings verifying no panics, out-of-bounds, or UTF-8 corruption
+let mut idx = 0;
+while idx < 8 {
+    let t = review_texts[idx];
+    let l = str_len(t);
+    let upper = str_upper(t);
+    let trimmed = str_trim(t);
+    pounce(str_len(upper) == l, "Uppercase string character count must match original");
+    pounce(str_len(trimmed) <= l, "Trimmed string length must be <= original");
+    idx = idx + 1;
+};
+
+println("(=^･ω･^=) IMDb Textual Reviews & Unicode Validation passed successfully!");
