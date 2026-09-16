@@ -1,0 +1,125 @@
+// GHL Comprehensive Profiling Workload for Samply / Performance Auditing
+// Exercises:
+// 1. Data Wrangling & Relational Operations (joins, multi-key group_by)
+// 2. High-Performance Linear Algebra (Matrix Multiplication, QR, Cholesky, SVD)
+// 3. Statistical Model Estimation (OLS, Robust HC3 Covariances, IRLS Logistic)
+// 4. Heavy Iterative Algorithmic Computation
+
+use std::dataframe::{scan_csv, collect};
+use std::linalg::*;
+
+println("================================================================");
+println(" GHL Core Functions Profiling Benchmark (Samply ETW Audit)");
+println("================================================================");
+
+// -----------------------------------------------------------------
+// 1. TABULAR WRANGLING & RELATIONAL JOINS
+// -----------------------------------------------------------------
+println("\n[1/4] Profiling Relational DataFrames & Multi-Key GroupBy...");
+let airline_path = "validation/data/airline_120m.csv";
+if (file_exists(airline_path)) {
+    let raw_flights = head(read_csv(airline_path), 50000);
+    let flights = raw_flights
+        |> rename("UniqueCarrier", "carrier")
+        |> rename("Origin", "origin")
+        |> rename("Distance", "distance");
+
+    let carriers = read_csv("validation/data/carriers_master.csv")
+        |> rename("Code", "carrier")
+        |> rename("Description", "carrier_name");
+
+    let airports = read_csv("validation/data/airports_master.csv")
+        |> rename("iata", "origin");
+
+    // Relational Hash Joins
+    let joined1 = flights |> left_join(carriers, carrier);
+    let joined2 = flights |> inner_join(airports, origin);
+
+    // High-Cardinality Multi-Key Aggregations
+    let summary1 = flights |> group_by(["carrier"]) |> summarize(
+        tot_dist = sum(distance),
+        cnt = count()
+    );
+    let summary2 = flights |> group_by(["carrier", "origin"]) |> summarize(
+        tot_dist = sum(distance),
+        cnt = count()
+    );
+    println("   ✓ Processed 50k flights across joins & multi-key groupings");
+} else {
+    println("   (Notice: airline dataset not found, skipping tabular benchmark)");
+};
+
+// -----------------------------------------------------------------
+// 2. LINEAR ALGEBRA & MATRIX DECOMPOSITIONS
+// -----------------------------------------------------------------
+println("\n[2/4] Profiling HPC Linear Algebra Subsystems (faer / SIMD)...");
+let dim = 250;
+let m = identity(dim);
+
+// Matrix Multiplication (A * A^T)
+let ata = m * transpose(m);
+
+// Cholesky Decomposition
+let chol_l = cholesky(ata);
+
+// QR Factorization
+let qr_res = qr(m);
+
+// SVD (Singular Value Decomposition)
+let svd_res = svd(m);
+
+println("   ✓ Computed 250x250 GEMM, Cholesky, QR & SVD decompositions");
+
+// -----------------------------------------------------------------
+// 3. STATISTICAL MODEL ESTIMATION (NEKO ENGINE)
+// -----------------------------------------------------------------
+println("\n[3/4] Profiling Statistical Estimators (OLS, IRLS Logistic)...");
+let higgs_path = "validation/data/higgs_11m.csv";
+if (file_exists(higgs_path)) {
+    let lf = scan_csv(higgs_path);
+    let higgs_sample = lf |> head(10000) |> collect();
+
+    let label = higgs_sample |> pull("label");
+    let pt = higgs_sample |> pull("lepton_pt");
+    let met = higgs_sample |> pull("met");
+    let mjj = higgs_sample |> pull("m_jj");
+
+    let pt_z = (pt - mean(pt)) / std_dev(pt);
+    let met_z = (met - mean(met)) / std_dev(met);
+    let mjj_z = (mjj - mean(mjj)) / std_dev(mjj);
+
+    let df_model = dataframe {
+        label: label,
+        pt_z: pt_z,
+        met_z: met_z,
+        mjj_z: mjj_z
+    };
+
+    // 3a. OLS with Robust HC3 Covariances
+    let ols_fit = ols(pt_z ~ met_z + mjj_z, df_model);
+    let vcov_hc3 = vcov(ols_fit, "HC3");
+
+    // 3b. Logistic Regression (Iteratively Reweighted Least Squares)
+    let log_fit = fit_logistic(label ~ pt_z + met_z + mjj_z, df_model);
+    let preds = predict(log_fit, df_model);
+
+    println("   ✓ Fitted OLS (HC3) & IRLS Logistic Regression on 10k observations");
+} else {
+    println("   (Notice: higgs dataset not found, skipping statistical modeling)");
+};
+
+// -----------------------------------------------------------------
+// 4. VECTORIZED SCIENTIFIC LOOPS & ELEMENTWISE ARITHMETIC
+// -----------------------------------------------------------------
+println("\n[4/4] Profiling Vectorized Math & Distribution Evaluators...");
+let mut s = 0;
+while (s < 100) {
+    let r = random_normal(1000, 0.0, 1.0);
+    let d = (r * 2.5) + 10.0;
+    let m = mean(d);
+    let v = std_dev(d);
+    s = s + 1;
+};
+println("   ✓ Executed 100 iterations of PRNG & vectorized moment calculations");
+
+println("\n(=^･ω･^=) Profiling workload completed successfully!");
