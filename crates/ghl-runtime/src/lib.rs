@@ -4272,4 +4272,67 @@ mod tests {
             std::env::remove_var("GHL_PLOTS_DIR");
         }
     }
+
+    #[test]
+    fn test_factor_creation_and_levels() {
+        let code = r#"
+            let f = factor(["low", "med", "high", "med"]);
+            let lvls = levels(f);
+            let ord = ordered_factor(["small", "large", "small"]);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let lvls = interp.env.get("lvls").expect("lvls exists");
+        if let Value::Vector(vec) = lvls {
+            let str_lvls: Vec<String> = vec.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+            assert_eq!(str_lvls, vec!["high", "low", "med"]);
+        } else {
+            panic!("Expected Vector for levels");
+        }
+    }
+
+    #[test]
+    fn test_ols_categorical_factor_expansion() {
+        // Group A: y ~ 10, Group B: y ~ 20, Group C: y ~ 30
+        let code = r#"
+            let df = dataframe {
+                grp: ["A", "A", "B", "B", "C", "C"],
+                y: [10.0, 10.0, 20.0, 20.0, 30.0, 30.0]
+            };
+            let model = ols(y ~ grp, df);
+            let coefficients = coef(model);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let model = interp.env.get("model").expect("model exists");
+        if let Value::ModelFit(m) = model {
+            // (Intercept) = 10.0, grpB = 10.0, grpC = 20.0
+            assert_eq!(m.blueprint.term_names, vec!["(Intercept)", "grpB", "grpC"]);
+            assert!((m.coefficients[0] - 10.0).abs() < 1e-10);
+            assert!((m.coefficients[1] - 10.0).abs() < 1e-10);
+            assert!((m.coefficients[2] - 20.0).abs() < 1e-10);
+        } else {
+            panic!("Expected ModelFit");
+        }
+    }
+
+    #[test]
+    fn test_plot_themes_minimal_classic_dark() {
+        let code = r#"
+            let df = dataframe { x: [1.0, 2.0, 3.0], y: [2.0, 4.0, 6.0] };
+            let p1 = plot(df, aes(col("x"), col("y"))) |> geom_point() |> theme_minimal();
+            let p2 = plot(df, aes(col("x"), col("y"))) |> geom_point() |> theme_classic();
+            let p3 = plot(df, aes(col("x"), col("y"))) |> geom_point() |> theme_dark();
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+        assert!(interp.env.get("p1").is_some());
+        assert!(interp.env.get("p2").is_some());
+        assert!(interp.env.get("p3").is_some());
+    }
 }

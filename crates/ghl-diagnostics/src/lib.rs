@@ -21,7 +21,7 @@ pub mod table;
 
 pub use caps::RenderCaps;
 pub use panel::CockpitPanel;
-pub use plot::{AestheticMap, GeomKind, GeomLayer, PlotLabels, PlotSpec};
+pub use plot::{AestheticMap, GeomKind, GeomLayer, PlotLabels, PlotSpec, PlotTheme};
 pub use registry::{SemanticCode, SymbolEntry, SymbolRegistry};
 pub use sparkline::Sparkline;
 pub use table::{CockpitTable, TableAlignment, TableColumn};

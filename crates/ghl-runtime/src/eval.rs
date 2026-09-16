@@ -213,6 +213,9 @@ impl Interpreter {
                     let col_val = self.eval_expr(col_expr)?;
                     let values = match col_val {
                         Value::Vector(vec_data) => vec_data.iter().cloned().collect(),
+                        Value::Factor { levels, indices, .. } => {
+                            indices.iter().map(|&i| Value::String(levels[i].clone())).collect()
+                        }
                         single => vec![single],
                     };
                     columns.push((name.clone(), values));

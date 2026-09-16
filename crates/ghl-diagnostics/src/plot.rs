@@ -93,6 +93,15 @@ impl GeomLayer {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlotTheme {
+    #[default]
+    Default,
+    Minimal,
+    Classic,
+    Dark,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PlotLabels {
     pub title: Option<String>,
@@ -112,6 +121,7 @@ pub struct PlotSpec {
     pub categories: Vec<String>,
     pub width: usize,
     pub height: usize,
+    pub theme: PlotTheme,
 }
 
 impl PlotSpec {
@@ -125,7 +135,23 @@ impl PlotSpec {
             categories: Vec::new(),
             width: 58,
             height: 12,
+            theme: PlotTheme::Default,
         }
+    }
+
+    pub fn theme_minimal(mut self) -> Self {
+        self.theme = PlotTheme::Minimal;
+        self
+    }
+
+    pub fn theme_classic(mut self) -> Self {
+        self.theme = PlotTheme::Classic;
+        self
+    }
+
+    pub fn theme_dark(mut self) -> Self {
+        self.theme = PlotTheme::Dark;
+        self
     }
 
     pub fn with_mapping(mut self, map: AestheticMap) -> Self {
@@ -211,12 +237,22 @@ impl PlotSpec {
     }
 
     fn draw_chart<DB: DrawingBackend>(&self, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
-        root.fill(&WHITE).map_err(|e| format!("{e}"))?;
+        let bg_color = match self.theme {
+            PlotTheme::Dark => RGBColor(24, 24, 27),
+            _ => WHITE,
+        };
+        root.fill(&bg_color).map_err(|e| format!("{e}"))?;
 
         let is_hist = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Histogram { .. }));
+        let is_box = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Boxplot));
+        let is_bar = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Bar));
 
         if is_hist {
             self.draw_plotters_histogram(root)?;
+        } else if is_box {
+            self.draw_plotters_boxplot(root)?;
+        } else if is_bar {
+            self.draw_plotters_bar(root)?;
         } else {
             self.draw_plotters_scatter(root)?;
         }
@@ -351,6 +387,179 @@ impl PlotSpec {
             chart
                 .draw_series(std::iter::once(Rectangle::new([(x0, 0), (x1, count)], style)))
                 .map_err(|e| format!("Histogram bar draw error: {e}"))?;
+        }
+
+        Ok(())
+    }
+
+    fn draw_plotters_boxplot<DB: DrawingBackend>(&self, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
+        let n = self.x_data.len();
+        if n < 4 {
+            return Err("At least 4 observations required for boxplot".to_string());
+        }
+
+        let mut sorted = self.x_data.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        let min_v = sorted[0];
+        let max_v = sorted[n - 1];
+        let q1 = sorted[n / 4];
+        let median = sorted[n / 2];
+        let q3 = sorted[(3 * n) / 4];
+        let iqr = q3 - q1;
+        let lower_fence = (q1 - 1.5 * iqr).max(min_v);
+        let upper_fence = (q3 + 1.5 * iqr).min(max_v);
+
+        let outliers: Vec<f64> = sorted.iter().copied().filter(|&x| x < lower_fence || x > upper_fence).collect();
+
+        let pad_y = if (max_v - min_v).abs() < 1e-6 { 1.0 } else { (max_v - min_v) * 0.1 };
+        let y_range = (min_v - pad_y)..(max_v + pad_y);
+
+        let title = self.labels.title.as_deref().unwrap_or("Tukey Box-and-Whisker Plot");
+        let x_label = self.labels.x_label.as_deref().unwrap_or("Group");
+        let y_label = self.labels.y_label.as_deref().unwrap_or("Value");
+
+        let text_color = match self.theme {
+            PlotTheme::Dark => RGBColor(240, 240, 240),
+            _ => BLACK,
+        };
+
+        let mut chart = ChartBuilder::on(root)
+            .caption(title, ("sans-serif", 24).into_font().color(&text_color))
+            .margin(20)
+            .x_label_area_size(40)
+            .y_label_area_size(50)
+            .build_cartesian_2d(0.0..2.0, y_range)
+            .map_err(|e| format!("Chart build error: {e}"))?;
+
+        chart
+            .configure_mesh()
+            .x_desc(x_label)
+            .y_desc(y_label)
+            .axis_desc_style(("sans-serif", 16).into_font().color(&text_color))
+            .label_style(("sans-serif", 12).into_font().color(&text_color))
+            .draw()
+            .map_err(|e| format!("Mesh draw error: {e}"))?;
+
+        let center_x = 1.0;
+        let box_half_w = 0.35;
+        let whisker_half_w = 0.18;
+        let box_color = RGBColor(66, 133, 244);
+        let border_color = RGBColor(26, 82, 118);
+
+        // 1. Vertical whisker lines
+        chart.draw_series(std::iter::once(PathElement::new(
+            vec![(center_x, lower_fence), (center_x, q1)],
+            ShapeStyle::from(&border_color).stroke_width(2),
+        ))).map_err(|e| format!("Whisker draw error: {e}"))?;
+
+        chart.draw_series(std::iter::once(PathElement::new(
+            vec![(center_x, q3), (center_x, upper_fence)],
+            ShapeStyle::from(&border_color).stroke_width(2),
+        ))).map_err(|e| format!("Whisker draw error: {e}"))?;
+
+        // 2. Whisker end caps
+        chart.draw_series(std::iter::once(PathElement::new(
+            vec![(center_x - whisker_half_w, lower_fence), (center_x + whisker_half_w, lower_fence)],
+            ShapeStyle::from(&border_color).stroke_width(2),
+        ))).map_err(|e| format!("Whisker cap draw error: {e}"))?;
+
+        chart.draw_series(std::iter::once(PathElement::new(
+            vec![(center_x - whisker_half_w, upper_fence), (center_x + whisker_half_w, upper_fence)],
+            ShapeStyle::from(&border_color).stroke_width(2),
+        ))).map_err(|e| format!("Whisker cap draw error: {e}"))?;
+
+        // 3. IQR Box
+        chart.draw_series(std::iter::once(Rectangle::new(
+            [(center_x - box_half_w, q1), (center_x + box_half_w, q3)],
+            ShapeStyle::from(&box_color.mix(0.6)).filled(),
+        ))).map_err(|e| format!("Box draw error: {e}"))?;
+
+        chart.draw_series(std::iter::once(PathElement::new(
+            vec![
+                (center_x - box_half_w, q1),
+                (center_x + box_half_w, q1),
+                (center_x + box_half_w, q3),
+                (center_x - box_half_w, q3),
+                (center_x - box_half_w, q1),
+            ],
+            ShapeStyle::from(&border_color).stroke_width(2),
+        ))).map_err(|e| format!("Box border error: {e}"))?;
+
+        // 4. Median line
+        chart.draw_series(std::iter::once(PathElement::new(
+            vec![(center_x - box_half_w, median), (center_x + box_half_w, median)],
+            ShapeStyle::from(&RED).stroke_width(3),
+        ))).map_err(|e| format!("Median line error: {e}"))?;
+
+        // 5. Outliers
+        for &o in &outliers {
+            chart.draw_series(std::iter::once(Circle::new(
+                (center_x, o),
+                4,
+                ShapeStyle::from(&RED).filled(),
+            ))).map_err(|e| format!("Outlier draw error: {e}"))?;
+        }
+
+        Ok(())
+    }
+
+    fn draw_plotters_bar<DB: DrawingBackend>(&self, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
+        let cats: Vec<String> = if !self.categories.is_empty() {
+            self.categories.clone()
+        } else if !self.x_data.is_empty() {
+            self.x_data.iter().map(|x| format!("{x}")).collect()
+        } else {
+            return Err("No categories to plot in bar chart".to_string());
+        };
+
+        let mut counts_map: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        for cat in &cats {
+            *counts_map.entry(cat.clone()).or_insert(0) += 1;
+        }
+
+        let n_cats = counts_map.len();
+        let max_count = *counts_map.values().max().unwrap_or(&1);
+
+        let title = self.labels.title.as_deref().unwrap_or("Category Frequencies");
+        let x_label = self.labels.x_label.as_deref().unwrap_or("Category");
+        let y_label = self.labels.y_label.as_deref().unwrap_or("Count");
+
+        let text_color = match self.theme {
+            PlotTheme::Dark => RGBColor(240, 240, 240),
+            _ => BLACK,
+        };
+
+        let mut chart = ChartBuilder::on(root)
+            .caption(title, ("sans-serif", 24).into_font().color(&text_color))
+            .margin(20)
+            .x_label_area_size(40)
+            .y_label_area_size(50)
+            .build_cartesian_2d(0.0..(n_cats as f64 + 1.0), 0u32..(max_count as u32 + 1))
+            .map_err(|e| format!("Chart build error: {e}"))?;
+
+        chart
+            .configure_mesh()
+            .x_desc(x_label)
+            .y_desc(y_label)
+            .axis_desc_style(("sans-serif", 16).into_font().color(&text_color))
+            .label_style(("sans-serif", 12).into_font().color(&text_color))
+            .draw()
+            .map_err(|e| format!("Mesh draw error: {e}"))?;
+
+        let bar_half_w = 0.35;
+        let bar_color = RGBColor(52, 168, 83);
+
+        for (i, (_cat, &count)) in counts_map.iter().enumerate() {
+            let cx = (i + 1) as f64;
+            let x0 = cx - bar_half_w;
+            let x1 = cx + bar_half_w;
+            chart
+                .draw_series(std::iter::once(Rectangle::new(
+                    [(x0, 0), (x1, count as u32)],
+                    ShapeStyle::from(&bar_color).filled(),
+                )))
+                .map_err(|e| format!("Bar draw error: {e}"))?;
         }
 
         Ok(())

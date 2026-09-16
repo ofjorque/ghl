@@ -1,6 +1,8 @@
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps, Sparkline};
+use ghl_types::ContrastScheme;
 use polars_core::prelude::*;
 use rayon::prelude::*;
 use crate::matrix::MatrixOps;
@@ -34,12 +36,91 @@ pub enum VcovKind {
     HC3,
 }
 
+/// Generates a k x (k - 1) contrast matrix for a given ContrastScheme.
+pub fn contrast_matrix(scheme: ContrastScheme, k: usize) -> Vec<Vec<f64>> {
+    if k < 2 {
+        return Vec::new();
+    }
+    let cols = k - 1;
+    let mut mat = vec![vec![0.0; cols]; k];
+
+    match scheme {
+        ContrastScheme::Treatment => {
+            // Level 0 is baseline (all zeros).
+            // Level i (1 <= i < k) has 1.0 at column i - 1.
+            for i in 1..k {
+                mat[i][i - 1] = 1.0;
+            }
+        }
+        ContrastScheme::Sum => {
+            // Levels 0..k-2 have 1.0 at diagonal.
+            // Level k-1 has -1.0 across all columns.
+            for i in 0..cols {
+                mat[i][i] = 1.0;
+            }
+            for j in 0..cols {
+                mat[k - 1][j] = -1.0;
+            }
+        }
+        ContrastScheme::Helmert => {
+            // Column j (0 <= j < cols):
+            // rows 0..=j have -1.0
+            // row j + 1 has (j + 1)
+            // rows > j + 1 have 0.0
+            for j in 0..cols {
+                for i in 0..=j {
+                    mat[i][j] = -1.0;
+                }
+                mat[j + 1][j] = (j + 1) as f64;
+            }
+        }
+        ContrastScheme::Polynomial => {
+            // Orthogonal polynomial contrast over k equally spaced points (centered).
+            let x: Vec<f64> = (0..k).map(|i| i as f64 - (k - 1) as f64 / 2.0).collect();
+            let mut basis: Vec<Vec<f64>> = Vec::with_capacity(cols + 1);
+            basis.push(vec![1.0; k]); // degree 0 constant
+
+            for d in 1..=cols {
+                let mut v: Vec<f64> = x.iter().map(|&xi| xi.powi(d as i32)).collect();
+                for b in &basis {
+                    let dot_vb: f64 = v.iter().zip(b).map(|(vi, bi)| vi * bi).sum();
+                    let dot_bb: f64 = b.iter().map(|bi| bi * bi).sum();
+                    if dot_bb > 1e-12 {
+                        let factor = dot_vb / dot_bb;
+                        for i in 0..k {
+                            v[i] -= factor * b[i];
+                        }
+                    }
+                }
+                let norm: f64 = v.iter().map(|vi| vi * vi).sum::<f64>().sqrt();
+                if norm > 1e-12 {
+                    for val in &mut v {
+                        *val /= norm;
+                    }
+                }
+                basis.push(v);
+            }
+
+            for j in 0..cols {
+                let poly_col = &basis[j + 1];
+                for i in 0..k {
+                    mat[i][j] = poly_col[i];
+                }
+            }
+        }
+    }
+
+    mat
+}
+
 /// Frozen recipe of predictors and response learned from data.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Blueprint {
     pub response: String,
     pub terms: Vec<String>,
     pub term_names: Vec<String>,
+    pub contrast: ContrastScheme,
+    pub term_levels: HashMap<String, Vec<String>>,
 }
 
 impl Blueprint {
@@ -53,23 +134,24 @@ impl Blueprint {
             response,
             terms,
             term_names,
+            contrast: ContrastScheme::Treatment,
+            term_levels: HashMap::new(),
         }
     }
 
+    pub fn with_contrast(mut self, contrast: ContrastScheme) -> Self {
+        self.contrast = contrast;
+        self
+    }
+
     /// Bakes a DataFrame into design matrix X and response y.
-    /// Preserves row disposition for all rows.
-    ///
-    /// Reads straight from the real `polars_core::DataFrame`/`NaReasonTable` pair instead
-    /// of a boxed `HashMap<String, Vec<Value>>` -- that boxed shape cost `size_of::<Value>()
-    /// == 160` bytes/cell (measured Fase 3/4), ~6.5GB at N=1M/P=41, and caused a real
-    /// OOM-kill before this fix. Same `as_f64_view()` idiom Fase 3/4 already built for
-    /// `Value::Vector` (`vector_data::column_as_f64_view`), applied here to DataFrame
-    /// columns instead of a lone Vector.
+    /// Preserves row disposition for all rows, and expands categorical factor terms
+    /// into contrast columns based on the configured ContrastScheme.
     pub fn bake(
         &self,
         frame: &DataFrame,
         na_reasons: &NaReasonTable,
-    ) -> Result<(Vec<f64>, Vec<f64>, Vec<RowDisposition>, usize, usize), Diagnostic> {
+    ) -> Result<(Vec<f64>, Vec<f64>, Vec<RowDisposition>, usize, usize, Vec<String>, HashMap<String, Vec<String>>), Diagnostic> {
         let resp_col = frame.column(&self.response).map_err(|_| {
             Diagnostic::statistical_error(
                 "S0202",
@@ -90,14 +172,86 @@ impl Blueprint {
             .collect::<Result<_, _>>()?;
 
         let total_rows = frame.height();
-        let p = self.terms.len() + 1; // Intercept + terms
 
+        struct TermInfo {
+            term: String,
+            is_categorical: bool,
+            levels: Vec<String>,
+            contrast_mat: Vec<Vec<f64>>,
+        }
+
+        let mut term_infos = Vec::with_capacity(term_cols.len());
+        let mut baked_term_names = Vec::new();
+        let mut baked_term_levels = self.term_levels.clone();
+        baked_term_names.push("(Intercept)".to_string());
+
+        for (term, col) in self.terms.iter().zip(&term_cols) {
+            let is_categorical = col.dtype() == &DataType::String || col.dtype().is_categorical();
+            if is_categorical {
+                let levels: Vec<String> = if let Some(existing) = self.term_levels.get(term) {
+                    existing.clone()
+                } else {
+                    let mut levels_set = BTreeSet::new();
+                    for r in 0..total_rows {
+                        if let Ok(av) = col.get(r) {
+                            match av {
+                                AnyValue::String(s) => { levels_set.insert(s.to_string()); }
+                                AnyValue::StringOwned(s) => { levels_set.insert(s.to_string()); }
+                                _ => {}
+                            }
+                        }
+                    }
+                    levels_set.into_iter().collect()
+                };
+
+                if levels.len() < 2 {
+                    return Err(Diagnostic::statistical_error(
+                        "S0206",
+                        format!("Categorical predictor `{}` must have at least 2 distinct levels, found {}", term, levels.len()),
+                    ));
+                }
+
+                let k = levels.len();
+                let contrast_mat = contrast_matrix(self.contrast, k);
+                for j in 0..k - 1 {
+                    let col_name = match self.contrast {
+                        ContrastScheme::Treatment => format!("{}{}", term, levels[j + 1]),
+                        ContrastScheme::Sum | ContrastScheme::Helmert => format!("{}{}", term, j + 1),
+                        ContrastScheme::Polynomial => {
+                            let suffix = match j + 1 {
+                                1 => ".L",
+                                2 => ".Q",
+                                3 => ".C",
+                                d => Box::leak(format!("^{}", d).into_boxed_str()),
+                            };
+                            format!("{}{}", term, suffix)
+                        }
+                    };
+                    baked_term_names.push(col_name);
+                }
+
+                baked_term_levels.insert(term.clone(), levels.clone());
+                term_infos.push(TermInfo {
+                    term: term.clone(),
+                    is_categorical: true,
+                    levels,
+                    contrast_mat,
+                });
+            } else {
+                baked_term_names.push(term.clone());
+                term_infos.push(TermInfo {
+                    term: term.clone(),
+                    is_categorical: false,
+                    levels: Vec::new(),
+                    contrast_mat: Vec::new(),
+                });
+            }
+        }
+
+        let p = baked_term_names.len();
         let any_nulls = resp_col.null_count() > 0 || term_cols.iter().any(|c| c.null_count() > 0);
 
-        if !any_nulls {
-            // Fast path (the common case): every involved column is fully populated, so
-            // there's no row disposition to compute at all -- zero `Value` boxing, zero
-            // per-row branching.
+        if !any_nulls && term_infos.iter().all(|info| !info.is_categorical) {
             let y_view = column_as_f64_view(resp_col)?;
             let term_views = term_cols
                 .iter()
@@ -111,13 +265,9 @@ impl Blueprint {
                     x_rows.push(view.as_slice()[i]);
                 }
             }
-            return Ok((x_rows, y_data, vec![RowDisposition::Included; total_rows], total_rows, p));
+            return Ok((x_rows, y_data, vec![RowDisposition::Included; total_rows], total_rows, p, baked_term_names, baked_term_levels));
         }
 
-        // Fallback path: at least one involved column has nulls. Still no `Vec<Value>`
-        // boxing -- reads each cell as an `AnyValue` (stack-resident) and looks up its NA
-        // reason directly in `na_reasons`, the same mechanism `any_value_to_value` uses,
-        // just without ever materializing a `Value` for it.
         let mut dispositions = Vec::with_capacity(total_rows);
         let mut x_rows = Vec::new();
         let mut y_vals = Vec::new();
@@ -133,19 +283,19 @@ impl Blueprint {
                 };
             }
 
-            for (term, col) in self.terms.iter().zip(&term_cols) {
+            for (term_info, col) in term_infos.iter().zip(&term_cols) {
                 let av = col.get(i).expect("row index is always in bounds");
                 if av.is_null() {
-                    let term_reason = na_reasons.get(term, i).map(|s| s.to_string());
+                    let term_reason = na_reasons.get(&term_info.term, i).map(|s| s.to_string());
                     if row_disp == RowDisposition::Included {
                         row_disp = RowDisposition::DroppedNA {
-                            col: term.clone(),
+                            col: term_info.term.clone(),
                             reason: term_reason,
                         };
                     } else if let RowDisposition::DroppedNA { reason: ref curr_reason, .. } = row_disp {
                         if curr_reason.is_none() && term_reason.is_some() {
                             row_disp = RowDisposition::DroppedNA {
-                                col: term.clone(),
+                                col: term_info.term.clone(),
                                 reason: term_reason,
                             };
                         }
@@ -156,11 +306,23 @@ impl Blueprint {
             if row_disp == RowDisposition::Included {
                 y_vals.push(any_value_as_f64(&resp_av));
 
-                // Row of X: [1.0, term_1, term_2, ...]
+                // Row of X: [1.0, term_1_cols..., term_2_cols..., ...]
                 x_rows.push(1.0);
-                for col in &term_cols {
+                for (term_info, col) in term_infos.iter().zip(&term_cols) {
                     let av = col.get(i).expect("row index is always in bounds");
-                    x_rows.push(any_value_as_f64(&av));
+                    if !term_info.is_categorical {
+                        x_rows.push(any_value_as_f64(&av));
+                    } else {
+                        let s = match av {
+                            AnyValue::String(s) => s,
+                            AnyValue::StringOwned(ref s) => s.as_str(),
+                            _ => "",
+                        };
+                        let level_idx = term_info.levels.iter().position(|l| l == s).unwrap_or(0);
+                        for &val in &term_info.contrast_mat[level_idx] {
+                            x_rows.push(val);
+                        }
+                    }
                 }
             }
 
@@ -168,7 +330,7 @@ impl Blueprint {
         }
 
         let n = y_vals.len();
-        Ok((x_rows, y_vals, dispositions, n, p))
+        Ok((x_rows, y_vals, dispositions, n, p, baked_term_names, baked_term_levels))
     }
 }
 
@@ -231,7 +393,10 @@ impl FittedModel {
         frame: &DataFrame,
         na_reasons: &NaReasonTable,
     ) -> Result<Self, Diagnostic> {
-        let (x_data, y_data, dispositions, n, p) = blueprint.bake(frame, na_reasons)?;
+        let (x_data, y_data, dispositions, n, p, baked_term_names, baked_term_levels) = blueprint.bake(frame, na_reasons)?;
+        let mut blueprint = blueprint;
+        blueprint.term_names = baked_term_names;
+        blueprint.term_levels = baked_term_levels;
 
         if n <= p {
             return Err(Diagnostic::statistical_error(
@@ -345,7 +510,7 @@ impl FittedModel {
         // 7. Multicollinearity Check: Variance Inflation Factor (VIF)
         let mut vifs = Vec::new();
         for j in 1..p {
-            let term_name = &blueprint.terms[j - 1];
+            let term_name = &blueprint.term_names[j];
             // Compute variance of column j in X
             let mut col_sum = 0.0;
             for i in 0..n {
@@ -534,7 +699,7 @@ impl FittedModel {
     pub fn predict(&self, newdata: &Value) -> Result<Value, Diagnostic> {
         match newdata {
             Value::DataFrame { frame, na_reasons } => {
-                let (x_data, _, _, n, p) = self.blueprint.bake(frame, na_reasons)?;
+                let (x_data, _, _, n, p, _, _) = self.blueprint.bake(frame, na_reasons)?;
                 let mut predictions = Vec::with_capacity(n);
 
                 for i in 0..n {

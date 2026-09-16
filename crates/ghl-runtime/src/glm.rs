@@ -85,7 +85,10 @@ impl FittedGlm {
         frame: &DataFrame,
         na_reasons: &NaReasonTable,
     ) -> Result<Self, Diagnostic> {
-        let (x_data, y_data, dispositions, n, p) = blueprint.bake(frame, na_reasons)?;
+        let (x_data, y_data, dispositions, n, p, baked_term_names, baked_term_levels) = blueprint.bake(frame, na_reasons)?;
+        let mut blueprint = blueprint;
+        blueprint.term_names = baked_term_names;
+        blueprint.term_levels = baked_term_levels;
 
         if n <= p {
             return Err(Diagnostic::statistical_error(
@@ -391,7 +394,7 @@ impl FittedGlm {
     pub fn predict(&self, newdata: &Value) -> Result<Value, Diagnostic> {
         match newdata {
             Value::DataFrame { frame, na_reasons } => {
-                let (x_data, _, _, n, p) = self.blueprint.bake(frame, na_reasons)?;
+                let (x_data, _, _, n, p, _, _) = self.blueprint.bake(frame, na_reasons)?;
                 let mut predictions = Vec::with_capacity(n);
 
                 for i in 0..n {

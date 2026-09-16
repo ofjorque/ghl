@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::ContrastScheme;
 use crate::types::Type;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -492,6 +493,64 @@ impl TypeEnv {
             Type::Function {
                 params: vec![Type::Any],
                 ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "theme_minimal".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "theme_classic".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "theme_dark".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+
+        // Factor & Categorical primitives
+        env.insert(
+            "factor".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Factor {
+                    levels: Vec::new(),
+                    ordered: false,
+                    contrast: ContrastScheme::Treatment,
+                }),
+            },
+            false,
+        );
+        env.insert(
+            "ordered_factor".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Factor {
+                    levels: Vec::new(),
+                    ordered: true,
+                    contrast: ContrastScheme::Polynomial,
+                }),
+            },
+            false,
+        );
+        env.insert(
+            "levels".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Vector(Box::new(Type::String))),
             },
             false,
         );

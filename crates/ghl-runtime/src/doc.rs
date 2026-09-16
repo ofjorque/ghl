@@ -62,7 +62,7 @@ pub fn all_docs() -> &'static [FunctionDoc] {
     &DOCS
 }
 
-static DOCS: [FunctionDoc; 37] = [
+static DOCS: [FunctionDoc; 43] = [
     // 1. Descriptive Statistics
     FunctionDoc {
         name: "mean",
@@ -493,5 +493,73 @@ static DOCS: [FunctionDoc; 37] = [
         ],
         returns: "Unit ()",
         example: "plot(df, aes(\"x\", \"y\")) |> geom_point() |> show();",
+    },
+    FunctionDoc {
+        name: "theme_minimal",
+        signature: "theme_minimal([plot: Plot]) -> Plot",
+        formula: None,
+        summary: "Apply a clean, minimal plot aesthetic theme",
+        description: "Sets light background with subtle dashed gridlines and clean typography.",
+        parameters: &[("plot", "Plot pipeline object")],
+        returns: "Plot",
+        example: "plot(df, aes(\"x\", \"y\")) |> geom_point() |> theme_minimal();",
+    },
+    FunctionDoc {
+        name: "theme_classic",
+        signature: "theme_classic([plot: Plot]) -> Plot",
+        formula: None,
+        summary: "Apply a classic publication-ready plot aesthetic theme",
+        description: "Sets pure white background with solid axis lines and no gridlines.",
+        parameters: &[("plot", "Plot pipeline object")],
+        returns: "Plot",
+        example: "plot(df, aes(\"x\", \"y\")) |> geom_point() |> theme_classic();",
+    },
+    FunctionDoc {
+        name: "theme_dark",
+        signature: "theme_dark([plot: Plot]) -> Plot",
+        formula: None,
+        summary: "Apply a high-contrast dark mode plot aesthetic theme",
+        description: "Sets dark background with neon palette accents and subtle gridlines.",
+        parameters: &[("plot", "Plot pipeline object")],
+        returns: "Plot",
+        example: "plot(df, aes(\"x\", \"y\")) |> geom_point() |> theme_dark();",
+    },
+    FunctionDoc {
+        name: "factor",
+        signature: "factor(x: Vector[T], [levels: Vector[String]], [contrast: String]) -> Factor",
+        formula: None,
+        summary: "Construct a categorical factor vector with contrast coding",
+        description: "Encodes discrete levels with contrast schemes (treatment, sum, helmert, poly) for statistical modeling.",
+        parameters: &[
+            ("x", "Input vector"),
+            ("levels", "Optional explicit level ordering"),
+            ("contrast", "Contrast scheme: 'treatment', 'sum', 'helmert', or 'poly'"),
+        ],
+        returns: "Factor",
+        example: "let f = factor([\"ctrl\", \"trt1\", \"trt2\"]);",
+    },
+    FunctionDoc {
+        name: "ordered_factor",
+        signature: "ordered_factor(x: Vector[T], [levels: Vector[String]], [contrast: String]) -> Factor",
+        formula: None,
+        summary: "Construct an ordinal factor vector with polynomial contrasts",
+        description: "Encodes ranked discrete levels defaulting to orthogonal polynomial contrasts (linear, quadratic, etc.).",
+        parameters: &[
+            ("x", "Input vector"),
+            ("levels", "Optional explicit ordered levels"),
+            ("contrast", "Contrast scheme (defaults to 'poly')"),
+        ],
+        returns: "Factor (ordered)",
+        example: "let ord = ordered_factor([\"low\", \"med\", \"high\"]);",
+    },
+    FunctionDoc {
+        name: "levels",
+        signature: "levels(x: Factor) -> Vector[String]",
+        formula: None,
+        summary: "Extract the unique discrete levels of a factor",
+        description: "Returns a vector containing the unique levels in order.",
+        parameters: &[("x", "Factor vector")],
+        returns: "Vector[String]",
+        example: "levels(factor([\"a\", \"b\", \"a\"]));",
     },
 ];

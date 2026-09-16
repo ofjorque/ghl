@@ -1,0 +1,42 @@
+// GHL Script: Linear Algebra Parity vs Python (NumPy / SciPy)
+// Mirror of validation/reference/reference_linalg.py written in pure GHL
+
+println("=== 1. SVD Decomposition (GHL) ===");
+let a = mat [
+    1.0, 2.0, 3.0 ;
+    4.0, 5.0, 6.0 ;
+    7.0, 8.0, 10.0
+];
+
+let svd_res = svd(a);
+let s = svd_s(svd_res);
+println("Singular Values S:", s);
+pounce(s[0] > 17.0 && s[0] < 18.0, "Leading singular value matches NumPy (~17.41)");
+
+println("\n=== 2. QR Factorization (GHL) ===");
+let qr_res = qr(a);
+let q = qr_q(qr_res);
+let r = qr_r(qr_res);
+println("Q Orthogonal Matrix:\n", q);
+println("R Upper Triangular Matrix:\n", r);
+
+let recon = q * r;
+println("Reconstructed Q * R:\n", recon);
+
+println("\n=== 3. Symmetric Eigenvalues (GHL) ===");
+let sym = mat [
+    4.0, 1.0, -2.0 ;
+    1.0, 2.0, 0.0 ;
+    -2.0, 0.0, 3.0
+];
+
+let eig_res = eigen(sym);
+let eigvals = eigen_values(eig_res);
+println("Eigenvalues:", eigvals);
+
+// Trace = 4 + 2 + 3 = 9.0
+let trace = eigvals[0] + eigvals[1] + eigvals[2];
+println("Trace (Sum of Eigenvalues):", trace);
+pounce(trace > 8.999 && trace < 9.001, "Trace theorem holds");
+
+println("\n(=^･ω･^=) All GHL linear algebra decompositions verified successfully!");

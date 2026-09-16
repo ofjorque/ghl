@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
+use ghl_types::ContrastScheme;
 use polars_core::prelude::{IdxCa, IdxSize, PlSmallStr, PolarsError};
 use rand::{RngExt, SeedableRng};
 use rand::distr::Distribution;
@@ -116,6 +117,14 @@ impl RuntimeEnv {
         env.set("hist".into(), Value::NativeFn(native_hist));
         env.set("histogram".into(), Value::NativeFn(native_hist));
         env.set("boxplot".into(), Value::NativeFn(native_boxplot));
+        env.set("theme_minimal".into(), Value::NativeFn(native_theme_minimal));
+        env.set("theme_classic".into(), Value::NativeFn(native_theme_classic));
+        env.set("theme_dark".into(), Value::NativeFn(native_theme_dark));
+
+        // Factor & Categorical primitives
+        env.set("factor".into(), Value::NativeFn(native_factor));
+        env.set("ordered_factor".into(), Value::NativeFn(native_ordered_factor));
+        env.set("levels".into(), Value::NativeFn(native_levels));
 
         // Primitive File I/O
         env.set("read_file".into(), Value::NativeFn(native_read_file));
@@ -3169,6 +3178,127 @@ fn native_labs(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 
     Ok(Value::Plot(Box::new(p)))
+}
+
+fn native_theme_minimal(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut p = match args.first() {
+        Some(Value::Plot(plot)) => (**plot).clone(),
+        _ => PlotSpec::new(),
+    };
+    p = p.theme_minimal();
+    Ok(Value::Plot(Box::new(p)))
+}
+
+fn native_theme_classic(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut p = match args.first() {
+        Some(Value::Plot(plot)) => (**plot).clone(),
+        _ => PlotSpec::new(),
+    };
+    p = p.theme_classic();
+    Ok(Value::Plot(Box::new(p)))
+}
+
+fn native_theme_dark(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut p = match args.first() {
+        Some(Value::Plot(plot)) => (**plot).clone(),
+        _ => PlotSpec::new(),
+    };
+    p = p.theme_dark();
+    Ok(Value::Plot(Box::new(p)))
+}
+
+fn native_factor(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.is_empty() {
+        return Err(Diagnostic::compute_error("C0201", "`factor(x, [levels], [contrast])` requires at least 1 argument"));
+    }
+    let (items, given_levels) = match &args[0] {
+        Value::Vector(v) => (v.clone(), None),
+        Value::Factor { levels, indices, .. } => {
+            let str_items: Vec<Value> = indices.iter().map(|&i| Value::String(levels[i].clone())).collect();
+            (crate::vector_data::VectorData::from_values(str_items), Some(levels.clone()))
+        }
+        other => {
+            return Err(Diagnostic::compute_error("C0201", format!("`factor()` argument must be a Vector, found `{}`", other.type_name())));
+        }
+    };
+
+    let explicit_levels: Option<Vec<String>> = if let Some(l_arg) = args.get(1) {
+        match l_arg {
+            Value::Vector(v) => Some(v.iter().map(|val| match val {
+                Value::String(s) => s.clone(),
+                other => format!("{other}"),
+            }).collect()),
+            _ => None,
+        }
+    } else {
+        given_levels
+    };
+
+    let levels: Vec<String> = if let Some(expl) = explicit_levels {
+        expl
+    } else {
+        let mut set = std::collections::BTreeSet::new();
+        for v in items.iter() {
+            match v {
+                Value::String(s) => { set.insert(s.clone()); }
+                Value::NA(_) => {}
+                other => { set.insert(format!("{other}")); }
+            }
+        }
+        set.into_iter().collect()
+    };
+
+    let mut indices = Vec::with_capacity(items.len());
+    for v in items.iter() {
+        let s = match v {
+            Value::String(s) => s.clone(),
+            other => format!("{other}"),
+        };
+        let idx = levels.iter().position(|l| l == &s).unwrap_or(0);
+        indices.push(idx);
+    }
+
+    let contrast = if let Some(c_arg) = args.get(2).and_then(|v| v.as_str()) {
+        match c_arg.to_lowercase().as_str() {
+            "sum" => ContrastScheme::Sum,
+            "helmert" => ContrastScheme::Helmert,
+            "poly" | "polynomial" => ContrastScheme::Polynomial,
+            _ => ContrastScheme::Treatment,
+        }
+    } else {
+        ContrastScheme::Treatment
+    };
+
+    Ok(Value::Factor {
+        levels,
+        indices,
+        ordered: false,
+        contrast,
+    })
+}
+
+fn native_ordered_factor(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut factor_val = native_factor(args)?;
+    if let Value::Factor { ordered, contrast, .. } = &mut factor_val {
+        *ordered = true;
+        if *contrast == ContrastScheme::Treatment {
+            *contrast = ContrastScheme::Polynomial;
+        }
+    }
+    Ok(factor_val)
+}
+
+fn native_levels(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let target = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`levels(x)` requires a Factor argument")
+    })?;
+    match target {
+        Value::Factor { levels, .. } => {
+            let vals = levels.iter().map(|s| Value::String(s.clone())).collect();
+            Ok(Value::Vector(crate::vector_data::VectorData::from_values(vals)))
+        }
+        other => Err(Diagnostic::compute_error("C0201", format!("`levels()` expects a Factor, found `{}`", other.type_name()))),
+    }
 }
 
 fn native_show(args: Vec<Value>) -> Result<Value, Diagnostic> {
