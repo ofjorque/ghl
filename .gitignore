@@ -17,6 +17,7 @@ Thumbs.db
 *.profraw
 *.profdata
 lcov.info
+profile*.json.gz
 
 # Benchmarks artifacts
 benchmarks/.venv/
