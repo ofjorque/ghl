@@ -428,7 +428,7 @@ impl ReplSession {
         }
 
         // 3. Typecheck
-        let mut checker = ghl_types::TypeChecker::new("<repl>".to_string());
+        let mut checker = ghl_types::TypeChecker::new("<repl>".to_string(), code);
         checker.env = self.type_env.clone();
         for stmt in &program.statements {
             checker.check_stmt(stmt);

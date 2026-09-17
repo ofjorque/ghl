@@ -387,7 +387,7 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
             }
         };
 
-        if let Err(diags) = ghl_types::check(&program, &display_name) {
+        if let Err(diags) = ghl_types::check(&program, &display_name, &content) {
             println!("  test {} ... {} (type errors: {})", display_name, caps.red("FAILED"), diags.len());
             failed += 1;
             continue;

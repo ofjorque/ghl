@@ -60,7 +60,7 @@ impl Backend {
             }
             Ok(program) => {
                 let filename = uri.path();
-                if let Err(type_diagnostics) = ghl_types::check(&program, filename) {
+                if let Err(type_diagnostics) = ghl_types::check(&program, filename, text) {
                     for d in type_diagnostics {
                         let range = if let Some(span) = &d.span {
                             let ((sl, sc), (el, ec)) = index.span_to_range(span);

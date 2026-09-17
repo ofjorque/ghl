@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use ghl_syntax::ast::*;
+use ghl_syntax::source::SourceIndex;
 use ghl_diagnostics::Diagnostic;
 use crate::types::{Type, Dim};
 use crate::env::TypeEnv;
@@ -12,18 +13,41 @@ fn callee_name(expr: &Expr) -> Option<&str> {
     }
 }
 
+/// Attaches a real, human-readable `file:line:column` (derived from a byte
+/// `Span` via a `SourceIndex`) to a diagnostic, while also keeping the exact
+/// byte `Span` on it (via `with_span`) for consumers like the LSP that want
+/// byte precision rather than a rendered line/column.
+trait DiagnosticLocateExt {
+    fn locate(self, index: &SourceIndex, file: &str, span: &Span) -> Self;
+}
+
+impl DiagnosticLocateExt for Diagnostic {
+    fn locate(self, index: &SourceIndex, file: &str, span: &Span) -> Self {
+        let (line, col) = index.offset_to_position(span.start);
+        self.with_location(file, line as usize + 1, col as usize + 1)
+            .with_span(span.clone())
+    }
+}
+
 pub struct TypeChecker {
     pub env: TypeEnv,
     pub diagnostics: Vec<Diagnostic>,
     source_file: String,
+    source_index: SourceIndex,
 }
 
 impl TypeChecker {
-    pub fn new(source_file: String) -> Self {
+    /// `source` is the exact text that `program` was parsed from - it's needed
+    /// to translate AST byte spans into real line/column numbers for
+    /// diagnostics (previously, diagnostics displayed raw byte offsets
+    /// mislabeled as line:column, e.g. reporting an error on a 3-line file at
+    /// "32:46").
+    pub fn new(source_file: String, source: &str) -> Self {
         Self {
             env: TypeEnv::with_prelude(),
             diagnostics: Vec::new(),
             source_file,
+            source_index: SourceIndex::new(source),
         }
     }
 
@@ -60,7 +84,7 @@ impl TypeChecker {
                                     name, declared_ty, init_ty
                                 ),
                             )
-                            .with_location(&self.source_file, stmt.span.start, stmt.span.end)
+                            .locate(&self.source_index, &self.source_file, &stmt.span)
                             .with_help(format!(
                                 "Ensure the initialization expression matches the declared type `{}`.",
                                 declared_ty
@@ -122,7 +146,7 @@ impl TypeChecker {
                                 name, expected_ret, body_ty
                             ),
                         )
-                        .with_location(&self.source_file, stmt.span.start, stmt.span.end)
+                        .locate(&self.source_index, &self.source_file, &stmt.span)
                         .with_help("Adjust the function body or declared return type so they agree."),
                     );
                 }
@@ -169,7 +193,7 @@ impl TypeChecker {
                             "C0101",
                             format!("Cannot implement for undefined struct `{}`", decl.target_type),
                         )
-                        .with_location(&self.source_file, stmt.span.start, stmt.span.end),
+                        .locate(&self.source_index, &self.source_file, &stmt.span),
                     );
                 }
 
@@ -180,7 +204,7 @@ impl TypeChecker {
                                 "C0101",
                                 format!("Undefined trait `{}`", trait_name),
                             )
-                            .with_location(&self.source_file, stmt.span.start, stmt.span.end),
+                            .locate(&self.source_index, &self.source_file, &stmt.span),
                         );
                     }
                 }
@@ -258,7 +282,7 @@ impl TypeChecker {
                                         name, decl.target_type, expected_ret, body_ty
                                     ),
                                 )
-                                .with_location(&self.source_file, span.start, span.end),
+                                .locate(&self.source_index, &self.source_file, &span),
                             );
                         }
                     }
@@ -284,7 +308,7 @@ impl TypeChecker {
                                 "C0101",
                                 format!("Cannot assign to undefined variable `{}`", name),
                             )
-                            .with_location(&self.source_file, stmt.span.start, stmt.span.end)
+                            .locate(&self.source_index, &self.source_file, &stmt.span)
                             .with_help("Declare it first with `let mut`."),
                         );
                     }
@@ -294,7 +318,7 @@ impl TypeChecker {
                                 "C0104",
                                 format!("Cannot assign to `{}`: not declared as `mut`", name),
                             )
-                            .with_location(&self.source_file, stmt.span.start, stmt.span.end)
+                            .locate(&self.source_index, &self.source_file, &stmt.span)
                             .with_help(format!("Declare it as `let mut {} = ...;` to allow reassignment.", name)),
                         );
                     }
@@ -309,7 +333,7 @@ impl TypeChecker {
                                         name, declared_ty, value_ty
                                     ),
                                 )
-                                .with_location(&self.source_file, stmt.span.start, stmt.span.end),
+                                .locate(&self.source_index, &self.source_file, &stmt.span),
                             );
                         }
                     }
@@ -322,7 +346,7 @@ impl TypeChecker {
                             "C0105",
                             format!("Cannot find module `{}`", use_stmt.path.join("::")),
                         )
-                        .with_location(&self.source_file, stmt.span.start, stmt.span.end)
+                        .locate(&self.source_index, &self.source_file, &stmt.span)
                         .with_help("Verify the module name and path in the standard library."),
                     );
                     return;
@@ -340,7 +364,7 @@ impl TypeChecker {
                                     "C0105",
                                     format!("Module `{}` cannot be glob imported", use_stmt.path.join("::")),
                                 )
-                                .with_location(&self.source_file, stmt.span.start, stmt.span.end),
+                                .locate(&self.source_index, &self.source_file, &stmt.span),
                             );
                         }
                     }
@@ -361,7 +385,7 @@ impl TypeChecker {
                                             use_stmt.path.join("::")
                                         ),
                                     )
-                                    .with_location(&self.source_file, stmt.span.start, stmt.span.end)
+                                    .locate(&self.source_index, &self.source_file, &stmt.span)
                                     .with_help("Check spelling or see available items in the standard library documentation."),
                                 );
                             }
@@ -398,7 +422,7 @@ impl TypeChecker {
                             "C0101",
                             format!("Undefined variable or function `{}`", name),
                         )
-                        .with_location(&self.source_file, expr.span.start, expr.span.end)
+                        .locate(&self.source_index, &self.source_file, &expr.span)
                         .with_help("Check spelling or declare the variable before use."),
                     );
                     Type::Any
@@ -428,7 +452,7 @@ impl TypeChecker {
                                     unified_elem, item_ty
                                 ),
                             )
-                            .with_location(&self.source_file, item.span.start, item.span.end)
+                            .locate(&self.source_index, &self.source_file, &item.span)
                             .with_help("GHL vectors are strictly homogeneous and do not coerce silently like R or Python."),
                         );
                     }
@@ -456,7 +480,7 @@ impl TypeChecker {
                                     "S0412",
                                     format!("Matrix elements must be numeric, found `{}`", cell_ty),
                                 )
-                                .with_location(&self.source_file, cell.span.start, cell.span.end)
+                                .locate(&self.source_index, &self.source_file, &cell.span)
                                 .with_help("Ensure all cells in `mat [...]` evaluate to numbers."),
                             );
                         }
@@ -481,7 +505,7 @@ impl TypeChecker {
                                     "C0102",
                                     format!("Arithmetic operation `{:?}` cannot be applied to strings (`{}` and `{}`)", op, t_lhs, t_rhs),
                                 )
-                                .with_location(&self.source_file, expr.span.start, expr.span.end)
+                                .locate(&self.source_index, &self.source_file, &expr.span)
                                 .with_help("No silent type coercion: convert explicitly if needed."),
                             );
                             return Type::Any;
@@ -497,7 +521,7 @@ impl TypeChecker {
                                     "C0102",
                                     format!("Cannot add `{}` and `{}`: no implicit type coercion in GHL", t_lhs, t_rhs),
                                 )
-                                .with_location(&self.source_file, expr.span.start, expr.span.end)
+                                .locate(&self.source_index, &self.source_file, &expr.span)
                                 .with_help("Explicitly convert with `.to_string()` or `.parse::<f64>()`."),
                             );
                             return Type::Any;
@@ -521,7 +545,7 @@ impl TypeChecker {
                                                     r1, c1, r2, c2, k1, k2
                                                 ),
                                             )
-                                            .with_location(&self.source_file, expr.span.start, expr.span.end)
+                                            .locate(&self.source_index, &self.source_file, &expr.span)
                                             .with_help("To multiply matrices A * B, the number of columns in A must equal the number of rows in B."),
                                         );
                                         return Type::Any;
@@ -578,7 +602,7 @@ impl TypeChecker {
                                     "S0412",
                                     format!("Left-hand side of matrix solve `\\` must be a Matrix, found `{}`", t_lhs),
                                 )
-                                .with_location(&self.source_file, lhs.span.start, lhs.span.end)
+                                .locate(&self.source_index, &self.source_file, &lhs.span)
                                 .with_help("Matrix solve `A \\ b` computes x solving A*x = b."),
                             );
                         }
@@ -592,7 +616,7 @@ impl TypeChecker {
                                             "C0102",
                                             format!("Matrix dimension mismatch in solve `\\`: A is ({}x{}), B is ({}x{}) — row dimensions {} and {} must match", r1, c1, r2, c2, k1, k2),
                                         )
-                                        .with_location(&self.source_file, expr.span.start, expr.span.end),
+                                        .locate(&self.source_index, &self.source_file, &expr.span),
                                     );
                                     return Type::Any;
                                 }
@@ -612,7 +636,7 @@ impl TypeChecker {
                                         "C0102",
                                         format!("Matrix dimension mismatch in element-wise operation: ({}x{}) vs ({}x{})", r1, c1, r2, c2),
                                     )
-                                    .with_location(&self.source_file, expr.span.start, expr.span.end)
+                                    .locate(&self.source_index, &self.source_file, &expr.span)
                                     .with_help("Element-wise matrix operations require identical dimensions."),
                                 );
                                 return Type::Any;
@@ -643,7 +667,7 @@ impl TypeChecker {
                                     "SW0201",
                                     "Direct comparison with `NA` detected. Under Kleene logic, `x == NA` evaluates to `NA`, not boolean true/false.",
                                 )
-                                .with_location(&self.source_file, expr.span.start, expr.span.end)
+                                .locate(&self.source_index, &self.source_file, &expr.span)
                                 .with_help("Use `is_na(x)` or pattern matching with `match` instead."),
                             );
                         }
@@ -724,7 +748,7 @@ impl TypeChecker {
                             "C0102",
                             format!("`if` condition must evaluate to `bool`, found `{}`", cond_ty),
                         )
-                        .with_location(&self.source_file, cond.span.start, cond.span.end),
+                        .locate(&self.source_index, &self.source_file, &cond.span),
                     );
                 }
 
@@ -742,7 +766,7 @@ impl TypeChecker {
                                     then_ty, else_ty
                                 ),
                             )
-                            .with_location(&self.source_file, expr.span.start, expr.span.end)
+                            .locate(&self.source_index, &self.source_file, &expr.span)
                             .with_help("Both branches of an `if` expression must return the same type."),
                         );
                         Type::Any
@@ -760,7 +784,7 @@ impl TypeChecker {
                             "C0102",
                             format!("`while` condition must evaluate to `bool`, found `{}`", cond_ty),
                         )
-                        .with_location(&self.source_file, cond.span.start, cond.span.end),
+                        .locate(&self.source_index, &self.source_file, &cond.span),
                     );
                 }
                 self.check_expr(body);
@@ -775,7 +799,7 @@ impl TypeChecker {
                             "C0103",
                             format!("`for` range start must be `i64`, found `{}`", start_ty),
                         )
-                        .with_location(&self.source_file, start.span.start, start.span.end),
+                        .locate(&self.source_index, &self.source_file, &start.span),
                     );
                 }
                 let end_ty = self.check_expr(end);
@@ -785,7 +809,7 @@ impl TypeChecker {
                             "C0103",
                             format!("`for` range end must be `i64`, found `{}`", end_ty),
                         )
-                        .with_location(&self.source_file, end.span.start, end.span.end),
+                        .locate(&self.source_index, &self.source_file, &end.span),
                     );
                 }
                 self.check_expr(body);
@@ -809,7 +833,7 @@ impl TypeChecker {
                                     unified_result, body_ty
                                 ),
                             )
-                            .with_location(&self.source_file, arm.span.start, arm.span.end)
+                            .locate(&self.source_index, &self.source_file, &arm.span)
                             .with_help("All arms in a `match` expression must yield compatible types."),
                         );
                     }
@@ -854,7 +878,7 @@ impl TypeChecker {
                                 "C0101",
                                 format!("Struct `{}` is not defined", name),
                             )
-                            .with_location(&self.source_file, expr.span.start, expr.span.end),
+                            .locate(&self.source_index, &self.source_file, &expr.span),
                         );
                         return Type::Any;
                     }
@@ -873,7 +897,7 @@ impl TypeChecker {
                                         f_name, name, expected_ty, f_ty
                                     ),
                                 )
-                                .with_location(&self.source_file, f_expr.span.start, f_expr.span.end),
+                                .locate(&self.source_index, &self.source_file, &f_expr.span),
                             );
                         }
                     } else {
@@ -882,7 +906,7 @@ impl TypeChecker {
                                 "C0102",
                                 format!("Unknown field `{}` for struct `{}`", f_name, name),
                             )
-                            .with_location(&self.source_file, f_expr.span.start, f_expr.span.end),
+                            .locate(&self.source_index, &self.source_file, &f_expr.span),
                         );
                     }
                     actual_fields.push((f_name.clone(), f_ty));
@@ -906,7 +930,7 @@ impl TypeChecker {
                                     "C0101",
                                     format!("Field `{}` not found in record", field),
                                 )
-                                .with_location(&self.source_file, expr.span.start, expr.span.end),
+                                .locate(&self.source_index, &self.source_file, &expr.span),
                             );
                             Type::Any
                         }
@@ -1003,7 +1027,7 @@ impl TypeChecker {
                             "C0103",
                             format!("Range start must be `i64`, found `{}`", start_ty),
                         )
-                        .with_location(&self.source_file, start.span.start, start.span.end),
+                        .locate(&self.source_index, &self.source_file, &start.span),
                     );
                 }
                 if end_ty != Type::I64 && end_ty != Type::Any {
@@ -1012,7 +1036,7 @@ impl TypeChecker {
                             "C0103",
                             format!("Range end must be `i64`, found `{}`", end_ty),
                         )
-                        .with_location(&self.source_file, end.span.start, end.span.end),
+                        .locate(&self.source_index, &self.source_file, &end.span),
                     );
                 }
                 Type::Custom("Range".into())
@@ -1035,7 +1059,7 @@ impl TypeChecker {
                                 "C0101",
                                 format!("Undefined path `{}`", full_name),
                             )
-                            .with_location(&self.source_file, expr.span.start, expr.span.end)
+                            .locate(&self.source_index, &self.source_file, &expr.span)
                             .with_help("Verify the module and function name, or import it with `use`."),
                         );
                         Type::Any
@@ -1059,7 +1083,7 @@ impl TypeChecker {
                                 arg_types.len()
                             ),
                         )
-                        .with_location(&self.source_file, span.start, span.end),
+                        .locate(&self.source_index, &self.source_file, &span),
                     );
                 }
                 *ret
@@ -1071,7 +1095,7 @@ impl TypeChecker {
                         "C0102",
                         format!("Type `{}` is not callable as a function", other),
                     )
-                    .with_location(&self.source_file, span.start, span.end),
+                    .locate(&self.source_index, &self.source_file, &span),
                 );
                 Type::Any
             }

@@ -64,11 +64,16 @@ pub struct OrderedFactor {
 }
 
 /// Helper function to check a program AST.
+///
+/// `source` must be the exact text `program` was parsed from - the checker
+/// uses it to translate AST byte spans into real line/column numbers for
+/// diagnostics.
 pub fn check(
     program: &ghl_syntax::ast::Program,
     filename: &str,
+    source: &str,
 ) -> Result<TypeEnv, Vec<ghl_diagnostics::Diagnostic>> {
-    let mut checker = TypeChecker::new(filename.to_string());
+    let mut checker = TypeChecker::new(filename.to_string(), source);
     checker.check_program(program).map(|_| checker.env)
 }
 
@@ -104,7 +109,7 @@ mod tests {
             let summary = df |> filter(col("age") > 18);
         "#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_ok(), "Type checking should pass for valid pipeline");
     }
 
@@ -124,7 +129,7 @@ mod tests {
             let sorted = df |> arrange(desc(x), species);
         "#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_ok(), "Bare column verbs should type-check cleanly: {:?}", res.err());
     }
 
@@ -133,7 +138,7 @@ mod tests {
         // Anti-R: No silent string coercion in arithmetic
         let code = r#"let bad = "hello" + 42.0;"#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_err(), "Cannot add string and float");
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0102"));
@@ -144,7 +149,7 @@ mod tests {
         // Anti-R: [1, "foo"] must not silently become ["1", "foo"]
         let code = r#"let bad = [1, "foo"];"#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_err(), "Heterogeneous vector must be rejected");
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0103"));
@@ -159,7 +164,7 @@ mod tests {
             x = 2;
         "#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_err(), "Assigning to a non-mut binding must be rejected");
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0104"));
@@ -169,7 +174,7 @@ mod tests {
     fn test_typecheck_reject_assign_to_undeclared() {
         let code = r#"x = 1;"#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_err(), "Assigning to an undeclared variable must be rejected");
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0101"));
@@ -182,7 +187,7 @@ mod tests {
             x = 2;
         "#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_ok(), "Assigning to a mut binding of the same type must be allowed");
     }
 
@@ -194,7 +199,7 @@ mod tests {
             };
         "#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_err(), "A non-bool while condition must be rejected");
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0102"));
@@ -205,7 +210,7 @@ mod tests {
         // Anti-Python: NA does not degrade Vector[I64] to Vector[F64]
         let code = r#"let v: Vector[i64] = [1, 2, NA, NA:SensorDropout, 5];"#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_ok(), "Vector with NA should keep integer type");
     }
 
@@ -217,7 +222,7 @@ mod tests {
             let x = A \ b;
         "#;
         let program = parse(code).expect("syntax ok");
-        let env = check(&program, "test.gh").expect("type check ok");
+        let env = check(&program, "test.gh", code).expect("type check ok");
         let x_sym = env.lookup("x").expect("x must exist");
         assert_eq!(x_sym.ty, Type::Vector(Box::new(Type::F64)));
     }
@@ -232,7 +237,7 @@ mod tests {
             };
         "#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_err(), "Incompatible if/else branches must error");
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0102"));
@@ -250,7 +255,7 @@ mod tests {
             let const_pi = std::math::pi;
         "#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_ok(), "Type checking should pass for use and qualified paths: {:?}", res.err());
         let env = res.unwrap();
         assert!(env.lookup("read_parquet").is_some());
@@ -264,7 +269,7 @@ mod tests {
     fn test_typecheck_reject_invalid_module() {
         let code = r#"use std::fake_mod::something;"#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_err());
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0105"));
@@ -274,7 +279,7 @@ mod tests {
     fn test_typecheck_reject_invalid_module_item() {
         let code = r#"use std::math::nonexistent_fn;"#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_err());
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0106"));
@@ -288,7 +293,7 @@ mod tests {
             let rep = rec.replicates;
         "#;
         let program = parse(code).expect("syntax ok");
-        let env = check(&program, "test.gh").expect("type check ok");
+        let env = check(&program, "test.gh", code).expect("type check ok");
 
         let s_id_sym = env.lookup("s_id").expect("s_id must exist");
         assert_eq!(s_id_sym.ty, Type::String);
@@ -308,7 +313,7 @@ mod tests {
             let m_sub = m[0..1, :];
         "#;
         let program = parse(code).expect("syntax ok");
-        let env = check(&program, "test.gh").expect("type check ok");
+        let env = check(&program, "test.gh", code).expect("type check ok");
 
         assert_eq!(env.lookup("elem").unwrap().ty, Type::F64);
         assert_eq!(env.lookup("sub_v").unwrap().ty, Type::Vector(Box::new(Type::F64)));
@@ -324,7 +329,7 @@ mod tests {
             let C = A * B; // 2x2
         "#;
         let program = parse(code).expect("syntax ok");
-        let env = check(&program, "test.gh").expect("type check ok");
+        let env = check(&program, "test.gh", code).expect("type check ok");
         assert_eq!(env.lookup("C").unwrap().ty, Type::matrix(Type::F64, 2, 2));
     }
 
@@ -336,7 +341,7 @@ mod tests {
             let C = A * B;
         "#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_err(), "Matrix dimension mismatch (2x3 * 2x2) must be rejected at compile time");
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0102"));
@@ -348,14 +353,14 @@ mod tests {
             let A: Matrix[f64, 2, 2] = mat [ 1.0, 2.0 ; 3.0, 4.0 ];
         "#;
         let program = parse(code).expect("syntax ok");
-        let env = check(&program, "test.gh").expect("type check ok");
+        let env = check(&program, "test.gh", code).expect("type check ok");
         assert_eq!(env.lookup("A").unwrap().ty, Type::matrix(Type::F64, 2, 2));
 
         let bad_code = r#"
             let A: Matrix[f64, 3, 3] = mat [ 1.0, 2.0 ; 3.0, 4.0 ];
         "#;
         let bad_program = parse(bad_code).expect("syntax ok");
-        let res = check(&bad_program, "test.gh");
+        let res = check(&bad_program, "test.gh", bad_code);
         assert!(res.is_err(), "Annotation dimension mismatch must be rejected");
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0102"));
@@ -386,7 +391,7 @@ mod tests {
             let val = dist.log_pdf(0.5);
         "#;
         let program = parse(code).expect("syntax ok");
-        let env = check(&program, "test.gh").expect("typecheck ok");
+        let env = check(&program, "test.gh", code).expect("typecheck ok");
         assert_eq!(env.lookup("val").unwrap().ty, Type::F64);
     }
 
@@ -401,7 +406,7 @@ mod tests {
             let p = Point { x: 1.0, z: 2.0 };
         "#;
         let program = parse(code).expect("syntax ok");
-        let res = check(&program, "test.gh");
+        let res = check(&program, "test.gh", code);
         assert!(res.is_err());
     }
 }

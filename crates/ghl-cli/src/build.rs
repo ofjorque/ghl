@@ -121,7 +121,7 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
     let output_path = out_opt.unwrap_or_else(|| format!("{}{}{}", prefix, stem, default_ext));
 
     // 3. Semantic & type safety check
-    if let Err(diags) = ghl_types::check(&program, &file) {
+    if let Err(diags) = ghl_types::check(&program, &file, &content) {
         for diag in diags {
             eprintln!("{}", diag.render_with_caps(caps));
         }

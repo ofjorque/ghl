@@ -68,7 +68,7 @@ fn test_fuzz_truncated_valid_programs() {
         let truncated = &full_program[..len];
         let res = std::panic::catch_unwind(|| {
             if let Ok(prog) = parse(truncated) {
-                let _ = check(&prog, "fuzz.gh");
+                let _ = check(&prog, "fuzz.gh", truncated);
             }
         });
         assert!(res.is_ok(), "Parser / typechecker panicked on truncation at byte {}", len);
@@ -138,7 +138,7 @@ fn test_fuzz_malformed_formulas_and_literals() {
     for input in &inputs {
         let res = std::panic::catch_unwind(|| {
             if let Ok(prog) = parse(input) {
-                let _ = check(&prog, "fuzz.gh");
+                let _ = check(&prog, "fuzz.gh", input);
             }
         });
         assert!(res.is_ok(), "Compiler must handle malformed syntax cleanly without panic: {:?}", input);
@@ -167,7 +167,7 @@ fn test_fuzz_pseudorandom_byte_mutations() {
         let input = String::from_utf8_lossy(&mutated);
         let res = std::panic::catch_unwind(|| {
             if let Ok(prog) = parse(&input) {
-                let _ = check(&prog, "fuzz.gh");
+                let _ = check(&prog, "fuzz.gh", &input);
             }
         });
         assert!(res.is_ok(), "Fuzzer panic on random mutation: {:?}", input);

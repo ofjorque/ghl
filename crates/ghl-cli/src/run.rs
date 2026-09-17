@@ -91,7 +91,7 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
     };
 
     // 2. Semantic and type checking
-    if let Err(diags) = ghl_types::check(&program, &filename) {
+    if let Err(diags) = ghl_types::check(&program, &filename, &content) {
         for diag in diags {
             eprintln!("{}", diag.render_with_caps(caps));
         }

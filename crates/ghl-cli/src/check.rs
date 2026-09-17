@@ -16,7 +16,7 @@ pub fn cmd_check(args: &[String], caps: &RenderCaps) {
             match ghl_syntax::parse_spanned(&content) {
                 Ok(program) => {
                     let parse_stat = format!("Parsed {} top-level statements", program.statements.len());
-                    match ghl_types::check(&program, file) {
+                    match ghl_types::check(&program, file, &content) {
                         Ok(_) => {
                             let mut panel = CockpitPanel::new("GHL Verification Deck");
                             panel.with_badge(caps.green(if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ PASS" } else { "[PASS]" }));
