@@ -66,6 +66,16 @@ pub struct FiveNumberSummary {
     pub outliers: Vec<f64>,
 }
 
+/// Equal-width binning of `PlotSpec::x_data`, shared by both histogram
+/// renderers (see `PlotSpec::histogram_bins`).
+struct HistogramBins {
+    min_x: f64,
+    max_x: f64,
+    bin_width: f64,
+    counts: Vec<u32>,
+    max_count: u32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GeomKind {
     Point { glyph: Option<char> },
@@ -254,6 +264,57 @@ impl PlotSpec {
         })
     }
 
+    /// Number of histogram bins requested via the `Histogram` layer, or 8 if none is present.
+    fn requested_bins(&self) -> usize {
+        self.layers.iter().find_map(|l| match l.kind {
+            GeomKind::Histogram { bins } => Some(bins),
+            _ => None,
+        }).unwrap_or(8)
+    }
+
+    /// Bin `self.x_data` into `bins_count` equal-width buckets, shared by both
+    /// the PNG/SVG and terminal histogram renderers so they always agree.
+    fn histogram_bins(&self, bins_count: usize) -> Option<HistogramBins> {
+        if self.x_data.is_empty() {
+            return None;
+        }
+
+        let min_x = self.x_data.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_x = self.x_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let span = if (max_x - min_x).abs() < 1e-9 { 1.0 } else { max_x - min_x };
+        let bin_width = span / bins_count as f64;
+
+        let mut counts = vec![0u32; bins_count];
+        for &x in &self.x_data {
+            let idx = (((x - min_x) / span) * bins_count as f64).floor() as usize;
+            let idx = idx.min(bins_count - 1);
+            counts[idx] += 1;
+        }
+        let max_count = *counts.iter().max().unwrap_or(&1);
+
+        Some(HistogramBins { min_x, max_x, bin_width, counts, max_count })
+    }
+
+    /// Category → frequency counts for a bar chart: uses `self.categories` if
+    /// present, otherwise falls back to `self.x_data` formatted as strings.
+    /// Shared by both bar chart renderers so they always agree on which data
+    /// they're counting.
+    fn bar_counts(&self) -> Option<std::collections::BTreeMap<String, usize>> {
+        let cats: Vec<String> = if !self.categories.is_empty() {
+            self.categories.clone()
+        } else if !self.x_data.is_empty() {
+            self.x_data.iter().map(|x| format!("{x}")).collect()
+        } else {
+            return None;
+        };
+
+        let mut counts_map: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        for cat in &cats {
+            *counts_map.entry(cat.clone()).or_insert(0) += 1;
+        }
+        Some(counts_map)
+    }
+
     /// Exports the plot to a publication-ready raster (PNG) or vector (SVG) image file via plotters.
     pub fn save_file(&self, path: &str) -> Result<(), String> {
         self.save_file_with_size(path, 800, 600)
@@ -383,29 +444,10 @@ impl PlotSpec {
     }
 
     fn draw_plotters_histogram<DB: DrawingBackend>(&self, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
-        let n = self.x_data.len();
-        if n == 0 {
-            return Err("Cannot plot empty histogram data".to_string());
-        }
-
-        let bins_count = self.layers.iter().find_map(|l| match l.kind {
-            GeomKind::Histogram { bins } => Some(bins),
-            _ => None,
-        }).unwrap_or(8).clamp(4, 30);
-
-        let min_x = self.x_data.iter().copied().fold(f64::INFINITY, f64::min);
-        let max_x = self.x_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        let span = if (max_x - min_x).abs() < 1e-9 { 1.0 } else { max_x - min_x };
-        let bin_width = span / bins_count as f64;
-
-        let mut counts = vec![0u32; bins_count];
-        for &x in &self.x_data {
-            let idx = (((x - min_x) / span) * bins_count as f64).floor() as usize;
-            let idx = idx.min(bins_count - 1);
-            counts[idx] += 1;
-        }
-
-        let max_count = *counts.iter().max().unwrap_or(&1);
+        let bins_count = self.requested_bins().clamp(4, 30);
+        let HistogramBins { min_x, max_x, bin_width, counts, max_count } = self
+            .histogram_bins(bins_count)
+            .ok_or_else(|| "Cannot plot empty histogram data".to_string())?;
 
         let title = self.labels.title.as_deref().unwrap_or("Histogram");
         let x_label = self.labels.x_label.as_deref().unwrap_or("Value");
@@ -536,18 +578,7 @@ impl PlotSpec {
     }
 
     fn draw_plotters_bar<DB: DrawingBackend>(&self, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
-        let cats: Vec<String> = if !self.categories.is_empty() {
-            self.categories.clone()
-        } else if !self.x_data.is_empty() {
-            self.x_data.iter().map(|x| format!("{x}")).collect()
-        } else {
-            return Err("No categories to plot in bar chart".to_string());
-        };
-
-        let mut counts_map: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-        for cat in &cats {
-            *counts_map.entry(cat.clone()).or_insert(0) += 1;
-        }
+        let counts_map = self.bar_counts().ok_or_else(|| "No categories to plot in bar chart".to_string())?;
 
         let n_cats = counts_map.len();
         let max_count = *counts_map.values().max().unwrap_or(&1);
@@ -604,11 +635,7 @@ impl PlotSpec {
         let is_bar = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Bar));
 
         if is_hist {
-            let bins = self.layers.iter().find_map(|l| match l.kind {
-                GeomKind::Histogram { bins } => Some(bins),
-                _ => None,
-            }).unwrap_or(8);
-            self.render_histogram(bins, caps)
+            self.render_histogram(self.requested_bins(), caps)
         } else if is_box {
             self.render_boxplot(caps)
         } else if is_bar {
@@ -779,25 +806,11 @@ impl PlotSpec {
         };
 
         let card_width = 72.min(caps.width);
-        let n = self.x_data.len();
-        if n == 0 {
-            return "Empty data for histogram".to_string();
-        }
-
         let bins_count = num_bins.clamp(4, 16);
-        let min_x = self.x_data.iter().copied().fold(f64::INFINITY, f64::min);
-        let max_x = self.x_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        let span = if (max_x - min_x).abs() < 1e-9 { 1.0 } else { max_x - min_x };
-        let bin_width = span / bins_count as f64;
-
-        let mut counts = vec![0usize; bins_count];
-        for &x in &self.x_data {
-            let idx = (((x - min_x) / span) * bins_count as f64).floor() as usize;
-            let idx = idx.min(bins_count - 1);
-            counts[idx] += 1;
-        }
-
-        let max_count = *counts.iter().max().unwrap_or(&1).max(&1);
+        let Some(HistogramBins { min_x, max_x, bin_width, counts, max_count }) = self.histogram_bins(bins_count) else {
+            return "Empty data for histogram".to_string();
+        };
+        let n = self.x_data.len();
         let hist_height = 8usize;
 
         // Unicode 8-level blocks: ' ', ' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'
@@ -860,7 +873,7 @@ impl PlotSpec {
         // Range labels
         let min_s = format!("{:<6.1}", min_x);
         let max_s = format!("{:>6.1}", max_x);
-        let mid_s = format!("{:^6.1}", min_x + span / 2.0);
+        let mid_s = format!("{:^6.1}", min_x + (bin_width * bins_count as f64) / 2.0);
         let span_pad = (bins_count * 4).saturating_sub(18);
         let range_labels = format!("        {min_s}{mid_s}{}{max_s}", " ".repeat(span_pad));
         let pad_r = " ".repeat(card_width.saturating_sub(visual_width(&range_labels) + 2));
@@ -987,15 +1000,9 @@ impl PlotSpec {
         };
 
         let card_width = 72.min(caps.width);
-        if self.categories.is_empty() {
+        let Some(counts_map) = self.bar_counts() else {
             return "No categories to display in bar chart".to_string();
-        }
-
-        // Count category occurrences
-        let mut counts_map: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-        for cat in &self.categories {
-            *counts_map.entry(cat.clone()).or_insert(0) += 1;
-        }
+        };
 
         let max_cat_len = counts_map.keys().map(|k| visual_width(k)).max().unwrap_or(8).min(16);
         let max_count = *counts_map.values().max().unwrap_or(&1).max(&1);
@@ -1022,7 +1029,8 @@ impl PlotSpec {
         let div = format!("{sep_l}{}{sep_r}", hz.to_string().repeat(card_width - 2));
         out.push_str(&caps.dim(&format!("{div}\n")));
 
-        let tele = format!("Total Categories: {} | Total Observations: {}", counts_map.len(), self.categories.len());
+        let total_observations: usize = counts_map.values().sum();
+        let tele = format!("Total Categories: {} | Total Observations: {}", counts_map.len(), total_observations);
         let pad_t = " ".repeat(card_width.saturating_sub(visual_width(&tele) + 4));
         out.push_str(&format!("{vt} {}{pad_t} {vt}\n", caps.dim(&tele)));
 
@@ -1091,6 +1099,25 @@ mod tests {
         let rendered = plot.render(&caps);
         assert!(rendered.contains("Test Bar"));
         assert!(rendered.contains("Total Categories: 3"));
+    }
+
+    /// Regression test: the terminal bar chart used to only ever read
+    /// `categories`, while the PNG/SVG bar chart already fell back to
+    /// `x_data` formatted as strings when `categories` was empty. Both now
+    /// share `PlotSpec::bar_counts`, so this must succeed instead of
+    /// returning "No categories to display in bar chart".
+    #[test]
+    fn test_bar_chart_render_falls_back_to_x_data() {
+        let caps = RenderCaps::rich_terminal(72);
+        let plot = PlotSpec::new()
+            .with_title("Numeric Bar")
+            .with_x_data(vec![1.0, 2.0, 1.0, 3.0, 1.0])
+            .add_layer(GeomLayer::bar());
+
+        let rendered = plot.render(&caps);
+        assert!(rendered.contains("Numeric Bar"));
+        assert!(rendered.contains("Total Categories: 3"));
+        assert!(rendered.contains("Total Observations: 5"));
     }
 
     #[test]
