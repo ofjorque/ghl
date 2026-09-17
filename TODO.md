@@ -26,4 +26,10 @@ Backlog activo detallado en [`docs/roadmap/08_TODO_MODELOS_AVANZADOS_Y_SPRING_PA
   - [ ] Módulos de supuestos estadísticos (`expect_vif_max`, `expect_homoscedasticity`, `expect_min_sample_size`).
   - [ ] Hashing criptográfico **SHA-256** del contrato y emisión de Certificado de Cumplimiento Cockpit Deck.
   - [ ] Suite de pruebas unitarias ejecutadas con `ghl test`.
+- [ ] **Parte D: Identidad Felina Dual y Dinámica de Personalidades (Gojo & Haru):**
+  - [ ] Corregir historia oficial en `AGENT.md` y RFCs (ambos son gatos reales: Haru blanco/naranja y Gojo gris dominante; 0 perros).
+  - [ ] Actualizar registro de Kaomojis en `ghl-diagnostics::registry`: sustituir `(U・ᴥ・U)` por Haru `(=^･ω･^=) ✧` / `(ฅ^•ﻌ•^ฅ)` para éxitos y bienvenida.
+  - [ ] Asignar a Gojo kaomojis de gato gris estricto y zarpazos `(=😾=) 🐾`, `(=ಠ_ಠ=)`, `(ノ°□°)ノ 🐾` para errores de sintaxis, tipos y matrices singulares.
+  - [ ] Propagar la dinámica en badges y paneles de `ghl-runtime` y `ghl-cli`.
+
 

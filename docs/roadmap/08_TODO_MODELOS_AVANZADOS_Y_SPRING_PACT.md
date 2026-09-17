@@ -60,6 +60,28 @@ Diseño e implementación de la primera librería de la comunidad escrita comple
 - [ ] **Sello Criptográfico y Certificado de Cumplimiento (`certificate.gh`):**
   - [ ] Generación de hash determinista **SHA-256** del contrato pactado.
   - [ ] Emisión de recibo formal de cumplimiento (`AuditReceipt`) con resumen de reglas aprobadas/falladas.
-  - [ ] Renderizado en terminal mediante panel visual **Cockpit Deck** con felicitación de Haru (`(U・ᴥ・U)`).
+  - [ ] Renderizado en terminal mediante panel visual **Cockpit Deck** con felicitación de Haru (`(ฅ^•ﻌ•^ฅ) ✧`).
 - [ ] **Suite de Pruebas y Validación:**
   - [ ] Pruebas unitarias de la librería ejecutadas directamente con `ghl test`.
+
+---
+
+## Parte D: Identidad Felina Dual y Dinámica de Personalidades (Gojo & Haru)
+
+Actualización canónica de la UX y narrativa de GHL para reflejar fielmente a los dos gatos reales del creador:
+
+- [ ] **Alineación Conceptual y Documental (`AGENT.md` y RFCs):**
+  - [ ] Erradicar cualquier referencia canina (`(U・ᴥ・U)` o *"lealtad canina"*) en la documentación y código.
+  - [ ] Definir los perfiles oficiales de los dos gatos:
+    - **Haru (Gato Blanco y Naranja 🐱🧡🤍):** Tierno, amable, juguetón, curioso y sociable. Gobierna los éxitos (`PASS`, `CONVERGED`), bienvenida y despedida en el REPL, documentación amigable y sellos de aprobación de `spring_pact`.
+    - **Gojo (Gato Gris 😼🩶):** Fuerte, dominante, rudo, exigente y territorial (a veces da zarpazos si algo está mal). Gobierna el rigor implacable, errores de compilación y sintaxis (`[Compute Error]`), matrices singulares no invertibles (`[Statistical Error]`), advertencias de multicolinealidad y rechazos de contratos violados.
+- [ ] **Actualización del Registro Semántico (`ghl-diagnostics::registry`):**
+  - [ ] Reemplazar `(U・ᴥ・U) ✧` en `ExecSuccess` por el Kaomoji felino de Haru `(=^･ω･^=) ✧` o `(ฅ^•ﻌ•^ฅ)`.
+  - [ ] Asignar Kaomojis de Gojo con actitud estricta y zarpazos para errores de sintaxis y computación: `(=😾=) 🐾`, `(=ಠ_ಠ=)`, `(ノ°□°)ノ 🐾`.
+  - [ ] Asignar Kaomojis de Gojo analítico/dominante para singularidades y errores estadísticos: `ฅ(ﾐΦ ﻌ Φﾐ)ฅ`, `(・`ω´・) 🐾`.
+- [ ] **Propagación en Badges y Mensajes del Runtime y CLI:**
+  - [ ] Actualizar paneles de convergencia en NEKO (`neko.rs`, `glm.rs`, `gmm.rs`): `(=^･ω･^=) ✧ CONVERGED`.
+  - [ ] Actualizar REPL (`repl.rs`): Saludo y despedida de Haru con patita felina `(ฅ^•ﻌ•^ฅ)`.
+  - [ ] Actualizar subcomandos de `ghl-cli` (`package.rs`, `main.rs`, `fmt`, `check`, `build`): Badges `[PASS]`, `[LOCKED]`, `[CREATED]` con Haru.
+  - [ ] Incorporar los zarpazos de Gojo en diagnósticos de fallo de matrices y errores sintácticos.
+
