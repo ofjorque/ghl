@@ -24,11 +24,21 @@ Este documento establece las directrices no negociables, estándares técnicos y
      - **`[Statistical Error]` (`[Sxxxx]`):** Matrices singulares no invertibles, matrices de covarianza que no son semidefinidas positivas, problemas de identificabilidad o multicolinealidad severa, divergencias en cadenas MCMC, violaciones de soporte en distribuciones (ej. evaluar log-densidad fuera del dominio), fallos de convergencia de optimizadores.
      - **`[Statistical Warning]` (`[SWxxxx]`):** Valores inflados de varianza (VIF alto), tamaño de muestra subóptimo para aproximaciones asintóticas ($N < 30$), pérdida de precisión numérica por cancelación catastrófica en punto flotante.
 
-4. **UX con Kaomojis y Empatía por el Usuario:**
-   - Los mensajes de diagnóstico deben incorporar Kaomojis expresivos y referencias felinas/caninas para desdramatizar los errores, guiando al usuario con calidez:
-     - Compute Errors: Expresiones de sorpresa o tropiezo (`(ノ°□°)ノ`, `(╯°□°)╯︵ ┻━┻`, `(｡•́︿•̀｡)`).
-     - Statistical Errors: Ojos atentos felinos o analíticos (`ฅ(ﾐΦ ﻌ Φﾐ)ฅ`, `(・`ω´・)`, `(=^･ω･^=)`).
-     - Success / Hints: La lealtad canina y agilidad de Haru (`(U・ᴥ・U) Haru fetched the results!`).
+4. **UX Feline Kaomojis (Gojo & Haru) — Principio "Show, Don't Tell":**
+   - Nombrado en honor a dos gatos reales: **Gojo** (gato gris, fuerte, dominante, riguroso y rudo) y **Haru** (gato blanco y naranja, tierno, amable, juguetón y sociable).
+   - **Regla de oro de redacción:** Nunca incluir narraciones explícitas o caricaturescas como *"Gojo te dio un zarpazo"* o *"Haru trajo los resultados"*. El Kaomoji simplemente **aparece como un glifo sutil y elegante** al lado del diagnóstico, prompt o badge; el desarrollador sabrá interpretarlo de inmediato sin sobreactuación.
+   - **Catálogo Canónico de Kaomojis y Roles:**
+     - **Gojo (Gris / Rigor / Errores de Cómputo y Sintaxis):**
+       - Banner y firma elegante: `𝑴𝒆𝒐𝒘. ฅ(•- •マ`
+       - Errores de sintaxis / compilación (`[Cxxxx]`): `/ᐠ ¬`‸´¬ マ`
+       - Singularidad y fallos matemáticos (`[Sxxxx]`): `≽(◉˕ ◉ ≼マ`
+       - Compilación nativa AOT completada: `≽(• ̀⩊ •́マ≼`
+     - **Haru (Naranja y Blanco / Amabilidad / Éxitos y Tips):**
+       - REPL prompt y bienvenida: `ฅ(•⩊ •マ`
+       - Éxito, convergencia y certificados (`spring_pact`): `/ᐠ˵- ⩊ -˵マ ✧` ó `/ᐠ ◞ ᆺ ◟マ`
+       - Sugerencias amables y documentación (`?<fn>`): `/ᐠ - ˕ •マ`
+     - **Fallo Fatal / Pánico Irrecuperable:** `/ᐠ ╥ ˕ ╥マ`
+
 
 5. **Resolución de los Dos Lenguajes sin Tracing GC:**
    - El código escrito por el usuario en GHL se compila a código nativo de nivel de sistemas (LLVM / Cranelift).

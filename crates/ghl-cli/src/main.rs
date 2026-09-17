@@ -4,7 +4,7 @@ use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps, SemanticCode};
 
 fn print_banner(caps: &RenderCaps) {
     let mut panel = CockpitPanel::new("GHL Cockpit Deck");
-    panel.with_badge("v0.1.0");
+    panel.with_badge(if caps.unicode_enabled { "𝑴𝒆𝒐𝒘. ฅ(•- •マ v0.1.0" } else { "v0.1.0" });
 
     let caps_str = if caps.unicode_enabled && caps.color_enabled {
         "[UTF8, ANSI]"
@@ -22,6 +22,7 @@ fn print_banner(caps: &RenderCaps) {
 
     println!("{}", panel.render(caps));
 }
+
 
 fn print_help(caps: &RenderCaps) {
     print_banner(caps);
@@ -363,10 +364,11 @@ fn real_main() {
                             match ghl_types::check(&program, file) {
                                 Ok(_) => {
                                     let mut panel = CockpitPanel::new("GHL Verification Deck");
-                                    panel.with_badge(caps.green(if caps.unicode_enabled { "(U・ᴥ・U) PASS" } else { "[PASS]" }));
+                                    panel.with_badge(caps.green(if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ PASS" } else { "[PASS]" }));
                                     panel.add_kv("Target File", file);
-                                    panel.add_kv("Syntax", format!("(=^･ω･^=) Gojo verified syntax ({parse_stat})"));
-                                    panel.add_kv("Type Safety", "(U・ᴥ・U) Haru verified zero semantic/type errors");
+                                    panel.add_kv("Syntax", format!("✔ Syntax verified ({parse_stat})"));
+                                    panel.add_kv("Type Safety", "✔ Zero semantic and type errors");
+
 
                                     if let Ok(hir_module) = ghl_ir::lower_ast(&program) {
                                         if !hir_module.functions.is_empty() {
@@ -721,7 +723,7 @@ if (file.exists(file.path(getwd(), lib_path))) {{
                         let _ = std::fs::write(&r_bridge_path, r_content);
 
                         let mut panel = CockpitPanel::new("GHL FFI Shared Library (RFC 06 §3)");
-                        panel.with_badge(caps.green(if caps.unicode_enabled { "(U・ᴥ・U) CDYLIB SUCCESS" } else { "[CDYLIB SUCCESS]" }));
+                        panel.with_badge(caps.green(if caps.unicode_enabled { "≽(• ̀⩊ •́マ≼ CDYLIB SUCCESS" } else { "[CDYLIB SUCCESS]" }));
                         panel.add_kv("Target File", &file);
                         panel.add_kv("Output Library", &output_path);
                         panel.add_kv("Mode", if release { "Release (opt-level=3, LTO)" } else { "Debug / Standard" });
@@ -734,7 +736,8 @@ if (file.exists(file.path(getwd(), lib_path))) {{
                         println!("{}", panel.render(&caps));
                     } else {
                         let mut panel = CockpitPanel::new("GHL AOT Native Binary");
-                        panel.with_badge(caps.green(if caps.unicode_enabled { "(U・ᴥ・U) AOT SUCCESS" } else { "[AOT SUCCESS]" }));
+                        panel.with_badge(caps.green(if caps.unicode_enabled { "≽(• ̀⩊ •́マ≼ AOT SUCCESS" } else { "[AOT SUCCESS]" }));
+
                         panel.add_kv("Target File", &file);
                         panel.add_kv("Output Binary", &output_path);
                         panel.add_kv("Mode", if release { "Release (opt-level=3, LTO)" } else { "Debug / Standard" });
@@ -889,7 +892,7 @@ fn cmd_fmt(args: &[String], caps: &RenderCaps) {
         println!("{}", panel.render(caps));
         std::process::exit(1);
     } else {
-        panel.with_badge(caps.green(if caps.unicode_enabled { "(U・ᴥ・U) ALL CLEAN" } else { "[ALL CLEAN]" }));
+        panel.with_badge(caps.green(if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ ALL CLEAN" } else { "[ALL CLEAN]" }));
         panel.add_kv("Files Scanned", files_scanned.to_string());
         panel.add_kv("Total Lines", total_lines.to_string());
         panel.add_kv("Duration", format!("{:.2} ms", elapsed.as_secs_f64() * 1000.0));

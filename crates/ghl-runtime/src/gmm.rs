@@ -262,8 +262,9 @@ impl FittedGmm {
         let mut panel = CockpitPanel::new("NEKO GMM: Gaussian Mixture Model");
         let badge = if self.converged {
             if caps.unicode_enabled {
-                format!("(U・ᴥ・U) EM CONVERGED in {} iterations", self.iterations)
+                format!("/ᐠ˵- ⩊ -˵マ ✧ EM CONVERGED in {} iterations", self.iterations)
             } else {
+
                 format!("[CONVERGED in {} iterations]", self.iterations)
             }
         } else {

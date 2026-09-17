@@ -37,64 +37,64 @@ impl SemanticCode {
     pub fn entry(&self) -> SymbolEntry {
         match self {
             Self::ComputeError => SymbolEntry {
-                unicode: "(ノ°□°)ノ",
+                unicode: "/ᐠ ¬`‸´¬ マ",
                 ascii: "[COMP-ERR]",
                 badge: "COMPUTE ERROR",
             },
             Self::ComputeSyntax => SymbolEntry {
-                unicode: "(ノಠ益ಠ)ノ彡┻━┻",
+                unicode: "/ᐠ ¬`‸´¬ マ",
                 ascii: "[SYNTAX-ERR]",
                 badge: "SYNTAX ERROR",
             },
             Self::ComputeType => SymbolEntry {
-                unicode: "(⊙_☉)",
+                unicode: "/ᐠ ¬`‸´¬ マ",
                 ascii: "[TYPE-ERR]",
                 badge: "TYPE MISMATCH",
             },
             Self::ComputeRuntime => SymbolEntry {
-                unicode: "(ノಠ_ಠ)ノ",
+                unicode: "/ᐠ ¬`‸´¬ マ",
                 ascii: "[RTIME-ERR]",
                 badge: "RUNTIME ERROR",
             },
 
             Self::StatError => SymbolEntry {
-                unicode: "ฅ(ﾐΦ ﻌ Φﾐ)ฅ",
+                unicode: "≽(◉˕ ◉ ≼マ",
                 ascii: "[STAT-ERR]",
                 badge: "STATISTICAL ERROR",
             },
             Self::StatWarning => SymbolEntry {
-                unicode: "(ФωФ)",
+                unicode: "/ᐠ - ˕ •マ",
                 ascii: "[STAT-WARN]",
                 badge: "STATISTICAL WARNING",
             },
             Self::StatSingular => SymbolEntry {
-                unicode: "[| | 0] ฅ(ﾐΦ ﻌ Φﾐ)ฅ",
+                unicode: "[| | 0] ≽(◉˕ ◉ ≼マ",
                 ascii: "[SINGULAR]",
                 badge: "SINGULAR MATRIX",
             },
             Self::StatCollinear => SymbolEntry {
-                unicode: "( ;¬_¬) VIF>10",
+                unicode: "≽(◉˕ ◉ ≼マ VIF>10",
                 ascii: "[VIF>10]",
                 badge: "MULTICOLLINEARITY",
             },
             Self::StatDropout => SymbolEntry {
-                unicode: "(=ｘェｘ=) NA",
+                unicode: "/ᐠ ◞ ᆺ ◟マ NA",
                 ascii: "[NA-DROP]",
                 badge: "DATA DROPOUT",
             },
             Self::StatSampleSize => SymbolEntry {
-                unicode: "(ФωФ) N<5",
+                unicode: "≽(◉˕ ◉ ≼マ N<5",
                 ascii: "[WARN-N]",
                 badge: "SMALL SAMPLE",
             },
 
             Self::ExecSuccess => SymbolEntry {
-                unicode: "(U・ᴥ・U) ✧",
+                unicode: "/ᐠ˵- ⩊ -˵マ ✧",
                 ascii: "[SUCCESS]",
                 badge: "SUCCESS",
             },
             Self::ExecInfo => SymbolEntry {
-                unicode: "(=^･ω･^=)",
+                unicode: "ฅ(•⩊ •マ",
                 ascii: "[INFO]",
                 badge: "NOTE",
             },
@@ -121,10 +121,9 @@ impl SemanticCode {
         }
     }
 
-    /// Format a styled badge tag, e.g. `[COMPUTE ERROR]` in red.
+    /// Retrieve the formatted badge with appropriate color styling.
     pub fn badge(&self, caps: &RenderCaps) -> String {
-        let entry = self.entry();
-        let text = format!("[{}]", entry.badge);
+        let text = format!("[{}]", self.entry().badge);
         match self {
             Self::ComputeError | Self::ComputeSyntax | Self::ComputeType | Self::ComputeRuntime => {
                 caps.red(&caps.bold(&text))
@@ -158,11 +157,10 @@ mod tests {
         let rich = RenderCaps::rich_terminal(80);
         let plain = RenderCaps::ascii_plain(80);
 
-        assert_eq!(SemanticCode::StatError.glyph(&rich), "ฅ(ﾐΦ ﻌ Φﾐ)ฅ");
+        assert_eq!(SemanticCode::StatError.glyph(&rich), "≽(◉˕ ◉ ≼マ");
         assert_eq!(SemanticCode::StatError.glyph(&plain), "[STAT-ERR]");
 
-        assert_eq!(SemanticCode::ExecSuccess.glyph(&rich), "(U・ᴥ・U) ✧");
+        assert_eq!(SemanticCode::ExecSuccess.glyph(&rich), "/ᐠ˵- ⩊ -˵マ ✧");
         assert_eq!(SemanticCode::ExecSuccess.glyph(&plain), "[SUCCESS]");
     }
 }
-

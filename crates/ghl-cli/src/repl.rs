@@ -29,13 +29,14 @@ impl Highlighter for GhlPromptHelper {
         prompt: &'p str,
         _default: bool,
     ) -> std::borrow::Cow<'b, str> {
-        if prompt.contains("(=^･ω･^=)") {
-            std::borrow::Cow::Owned(format!("ghl{}> ", self.caps.cyan("(=^･ω･^=)")))
+        if prompt.contains("ฅ(•⩊ •マ") || prompt.contains("(=^･ω･^=)") {
+            std::borrow::Cow::Owned(format!("ghl{}> ", self.caps.haru("ฅ(•⩊ •マ")))
         } else if prompt.contains("...") {
             std::borrow::Cow::Owned(format!("   {} ", self.caps.dim("...")))
         } else {
             std::borrow::Cow::Borrowed(prompt)
         }
+
     }
 }
 
@@ -80,7 +81,7 @@ impl ReplSession {
 
         loop {
             let prompt = if multi_line_accum.is_empty() {
-                "ghl(=^･ω･^=)> "
+                if self.caps.unicode_enabled { "ghlฅ(•⩊ •マ> " } else { "ghl> " }
             } else {
                 "   ... "
             };
@@ -101,11 +102,16 @@ impl ReplSession {
                 }
             } else {
                 let styled_prompt = if multi_line_accum.is_empty() {
-                    format!("ghl{}> ", self.caps.cyan("(=^･ω･^=)"))
+                    if self.caps.unicode_enabled {
+                        format!("ghl{}> ", self.caps.haru("ฅ(•⩊ •マ"))
+                    } else {
+                        "ghl> ".to_string()
+                    }
                 } else {
                     format!("   {} ", self.caps.dim("..."))
                 };
                 print!("{}", styled_prompt);
+
                 io::stdout().flush().unwrap_or(());
                 let mut buf = String::new();
                 match io::stdin().read_line(&mut buf) {
@@ -187,11 +193,14 @@ impl ReplSession {
     }
 
     fn print_goodbye(&self) {
+        let cat = if self.caps.unicode_enabled { "ฅ(•⩊ •マ" } else { "[GHL]" };
         println!(
-            "\n{} Haru says goodbye! (U・ᴥ・U) See you soon.\n",
-            self.caps.green("✔")
+            "\n{} {}\n",
+            self.caps.haru(cat),
+            self.caps.dim("See you soon!")
         );
     }
+
 
     fn handle_command(&mut self, cmd: &str) -> bool {
         match cmd {

@@ -417,10 +417,11 @@ impl FittedGlm {
     pub fn render_cockpit(&self, caps: &RenderCaps) -> String {
         let mut panel = CockpitPanel::new("NEKO GLM Fit (Logistic)");
         let badge = if caps.unicode_enabled {
-            format!("(U・ᴥ・U) IRLS CONVERGED in {} iterations", self.iterations)
+            format!("/ᐠ˵- ⩊ -˵マ ✧ IRLS CONVERGED in {} iterations", self.iterations)
         } else {
             format!("[CONVERGED in {} iterations]", self.iterations)
         };
+
         panel.with_badge(&badge);
 
         panel.add_kv("Formula", format!("{} ~ {}", self.blueprint.response, self.blueprint.terms.join(" + ")));

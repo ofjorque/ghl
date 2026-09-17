@@ -198,7 +198,26 @@ impl RenderCaps {
             text.to_string()
         }
     }
+
+    /// Feline helper: Gojo slate-gray styling for strict/dominant output.
+    pub fn gojo(&self, text: &str) -> String {
+        if self.color_enabled {
+            format!("\x1b[38;5;248m{}\x1b[0m", text)
+        } else {
+            text.to_string()
+        }
+    }
+
+    /// Feline helper: Haru warm orange/amber styling for friendly/success output.
+    pub fn haru(&self, text: &str) -> String {
+        if self.color_enabled {
+            format!("\x1b[38;5;214m{}\x1b[0m", text)
+        } else {
+            text.to_string()
+        }
+    }
 }
+
 
 #[cfg(unix)]
 unsafe extern "C" {

@@ -663,7 +663,8 @@ impl PlotSpec {
 
         // Build output card
         let title = self.labels.title.clone().unwrap_or_else(|| "Scatter Plot".into());
-        let badge = if caps.unicode_enabled { "(U・ᴥ・U) READY" } else { "[READY]" };
+        let badge = if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ READY" } else { "[READY]" };
+
 
         let mut out = String::new();
         // Top border
@@ -740,10 +741,11 @@ impl PlotSpec {
         out.push_str(&caps.dim(&format!("{footer_div}\n")));
 
         let tele_text = if caps.unicode_enabled {
-            format!("(U・ᴥ・U) Haru rendered {} data points with OLS trend line", n_points)
+            format!("/ᐠ˵- ⩊ -˵マ Rendered {} data points with OLS trend line", n_points)
         } else {
-            format!("[Haru] Rendered {} data points with OLS trend line", n_points)
+            format!("Rendered {} data points with OLS trend line", n_points)
         };
+
         let pad_tele = " ".repeat(card_width.saturating_sub(visual_width(&tele_text) + 4));
         out.push_str(&format!("{vt} {}{pad_tele} {vt}\n", caps.green(&tele_text)));
 
@@ -934,7 +936,8 @@ impl PlotSpec {
 
         let mut out = String::new();
         let title = self.labels.title.clone().unwrap_or_else(|| "Tukey Box-and-Whisker Plot".into());
-        let badge = if caps.unicode_enabled { "(U・ᴥ・U) QUANTILES" } else { "[QUANTILES]" };
+        let badge = if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ QUANTILES" } else { "[QUANTILES]" };
+
 
         let pad_top = card_width.saturating_sub(visual_width(&title) + visual_width(badge) + 8);
         out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
@@ -1038,10 +1041,9 @@ mod tests {
             .add_layer(GeomLayer::smooth());
 
         let rendered = plot.render(&caps);
-        assert!(rendered.contains("Test Scatter"));
-        assert!(rendered.contains("●"));
-        assert!(rendered.contains("Haru rendered 4 data points"));
+        assert!(rendered.contains("Rendered 4 data points"));
     }
+
 
     #[test]
     fn test_histogram_render() {

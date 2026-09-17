@@ -103,8 +103,9 @@ let res = a + b;
     })?;
 
     let mut panel = CockpitPanel::new("GHL Package Generator (RFC 06 §4)");
-    panel.with_badge(caps.green(if caps.unicode_enabled { "(U・ᴥ・U) CREATED" } else { "[CREATED]" }));
+    panel.with_badge(caps.green(if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ CREATED" } else { "[CREATED]" }));
     panel.add_kv("Package Name", project_name);
+
     panel.add_kv("Manifest", manifest_path.display().to_string());
     panel.add_kv("Entry Point", main_path.display().to_string());
     panel.add_kv("Test Suite", test_path.display().to_string());
@@ -310,8 +311,9 @@ pub fn cmd_fetch(manifest_path: &Path, caps: &RenderCaps) -> Result<Vec<LockedPa
     }
 
     let mut panel = CockpitPanel::new("GHL Lockfile Resolution (RFC 06 §4)");
-    panel.with_badge(caps.green(if caps.unicode_enabled { "(U・ᴥ・U) LOCKED" } else { "[LOCKED]" }));
+    panel.with_badge(caps.green(if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ LOCKED" } else { "[LOCKED]" }));
     panel.add_kv("Manifest", manifest_path.display().to_string());
+
     panel.add_kv("Lockfile", lock_path.display().to_string());
     panel.add_kv("Dependencies Resolved", locked_packages.len().to_string());
 
@@ -554,9 +556,10 @@ pub fn cmd_doc(
     }
     panel.add_divider();
     panel.add_line(format!(
-        "{} Haru generated the documentation deck! (U・ᴥ・U)",
+        "{} Documentation deck generated! /ᐠ˵- ⩊ -˵マ ✧",
         caps.green("✔")
     ));
+
 
     println!("{}\n", panel.render(caps));
     Ok(())

@@ -722,8 +722,9 @@ impl FittedModel {
     /// Renders the model fit as a structured Cockpit Deck terminal card.
     pub fn render_cockpit(&self, caps: &RenderCaps) -> String {
         let mut panel = CockpitPanel::new("NEKO Model Fit");
-        let badge = if caps.unicode_enabled { "(U・ᴥ・U) CONVERGED" } else { "[CONVERGED]" };
+        let badge = if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ CONVERGED" } else { "[CONVERGED]" };
         panel.with_badge(badge);
+
 
         panel.add_kv("Formula", format!("{} ~ {}", self.blueprint.response, self.blueprint.terms.join(" + ")));
 
@@ -782,8 +783,10 @@ impl FittedModel {
             }
         } else {
             panel.add_divider();
-            panel.add_line(format!("{} Haru verified all assumptions. No severe multicollinearity.", caps.green("(U・ᴥ・U)")));
+            let glyph = if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧" } else { "✔" };
+            panel.add_line(format!("{} All assumptions verified. No severe multicollinearity.", caps.green(glyph)));
         }
+
 
         panel.render(caps)
     }
