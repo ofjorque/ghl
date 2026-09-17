@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps};
+use ghl_diagnostics::{CockpitPanel, CockpitTable, Diagnostic, RenderCaps, TableAlignment, TableColumn};
 use ghl_runtime::{Interpreter, Value};
 use ghl_types::TypeEnv;
 use rustyline::completion::Completer;
@@ -9,6 +9,34 @@ use rustyline::hint::Hinter;
 use rustyline::history::DefaultHistory;
 use rustyline::validate::Validator;
 use rustyline::{Editor, Helper};
+
+/// Canonical spellings of every REPL command, used to suggest a close match
+/// when the user mistypes one (see `levenshtein_distance`).
+const KNOWN_COMMANDS: &[&str] = &[
+    ":quit", ":q", ":exit", ":help", ":h", ":vars", ":var", ":v", ":rm", ":clear-vars", ":doc",
+    ":clear", ":c", ":reset", ":r",
+];
+
+/// Classic Wagner-Fischer edit distance between two strings, by Unicode scalar value.
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (n, m) = (a.len(), b.len());
+
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr = vec![0usize; m + 1];
+
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[m]
+}
 
 #[derive(Clone)]
 struct GhlPromptHelper {
@@ -24,6 +52,9 @@ impl Hinter for GhlPromptHelper {
 }
 impl Validator for GhlPromptHelper {}
 impl Highlighter for GhlPromptHelper {
+    // Safe to emit raw ANSI here: rustyline's cursor-position math (`calculate_position`)
+    // always operates on `prompt.raw()`, never on this styled output, and its rendering
+    // path (`wrap_at_eol`, both Unix and Windows) treats CSI escape sequences as zero-width.
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
         &'s self,
         prompt: &'p str,
@@ -219,39 +250,46 @@ impl ReplSession {
                 false
             }
             ":vars" | ":var" | ":v" => {
-
-                let mut panel = CockpitPanel::new("Active Variables");
                 if self.user_vars.is_empty() {
+                    let mut panel = CockpitPanel::new("Active Variables");
                     panel.add_line(self.caps.dim("(No user variables defined yet. Use `let x = ...`)"));
-                } else {
-                    for var in &self.user_vars {
-                        if let Some(val) = self.interpreter.env.get(var) {
-                            let ty_str = self
-                                .type_env
-                                .lookup(var)
-                                .map(|info| info.ty.to_string())
-                                .unwrap_or_else(|| val.type_name().to_string());
-                            let val_preview = match &val {
-                                Value::DataFrame { frame, .. } => {
-                                    format!("DataFrame ({} rows x {} cols)", frame.height(), frame.width())
+                    println!("{}\n", panel.render(&self.caps));
+                    return false;
+                }
+
+                let mut table = CockpitTable::new().with_title("Active Variables");
+                table.set_show_row_numbers(false);
+                table.set_max_display_rows(self.user_vars.len().max(10));
+                table.add_column(TableColumn::new("Name").with_alignment(TableAlignment::Left));
+                table.add_column(TableColumn::new("Type").with_alignment(TableAlignment::Left));
+                table.add_column(TableColumn::new("Value").with_alignment(TableAlignment::Left));
+                for var in &self.user_vars {
+                    if let Some(val) = self.interpreter.env.get(var) {
+                        let ty_str = self
+                            .type_env
+                            .lookup(var)
+                            .map(|info| info.ty.to_string())
+                            .unwrap_or_else(|| val.type_name().to_string());
+                        let val_preview = match &val {
+                            Value::DataFrame { frame, .. } => {
+                                format!("DataFrame ({} rows x {} cols)", frame.height(), frame.width())
+                            }
+                            Value::Matrix { rows, cols, .. } => {
+                                format!("Matrix ({} x {})", rows, cols)
+                            }
+                            other => {
+                                let s = format!("{other}");
+                                if s.chars().count() > 30 {
+                                    format!("{}…", s.chars().take(28).collect::<String>())
+                                } else {
+                                    s
                                 }
-                                Value::Matrix { rows, cols, .. } => {
-                                    format!("Matrix ({} x {})", rows, cols)
-                                }
-                                other => {
-                                    let s = format!("{other}");
-                                    if s.len() > 30 {
-                                        format!("{}…", &s[..28])
-                                    } else {
-                                        s
-                                    }
-                                }
-                            };
-                            panel.add_kv(format!("{var} [{ty_str}]"), val_preview);
-                        }
+                            }
+                        };
+                        table.add_row(vec![var.clone(), ty_str, val_preview]);
                     }
                 }
-                println!("{}\n", panel.render(&self.caps));
+                println!("{}\n", table.render(&self.caps));
                 false
             }
             ":clear" | ":c" => {
@@ -305,11 +343,23 @@ impl ReplSession {
                 false
             }
             other => {
+                let typed = other.split_whitespace().next().unwrap_or(other);
+                let suggestion = KNOWN_COMMANDS
+                    .iter()
+                    .map(|&cmd| (cmd, levenshtein_distance(typed, cmd)))
+                    .filter(|&(_, dist)| dist <= 2)
+                    .min_by_key(|&(_, dist)| dist)
+                    .map(|(cmd, _)| cmd);
+
+                let help = match suggestion {
+                    Some(cmd) => format!("Did you mean `{cmd}`? Type `:help` to see available commands."),
+                    None => "Type `:help` to see available commands.".to_string(),
+                };
                 let diag = Diagnostic::compute_error(
                     "C0005",
                     format!("Unknown REPL command `{other}`"),
                 )
-                .with_help("Type `:help` to see available commands.");
+                .with_help(help);
                 eprintln!("{}\n", diag.render_with_caps(&self.caps));
                 false
             }
@@ -543,6 +593,33 @@ mod tests {
         session.eval_input("rm(\"y\");");
         assert!(session.user_vars.is_empty());
         assert!(session.interpreter.env.get("y").is_none());
+    }
+
+    #[test]
+    fn test_levenshtein_distance() {
+        assert_eq!(levenshtein_distance(":clear", ":clear"), 0);
+        assert_eq!(levenshtein_distance(":clera", ":clear"), 2);
+        assert_eq!(levenshtein_distance(":rm", ":rm"), 0);
+        assert_eq!(levenshtein_distance("", "abc"), 3);
+    }
+
+    #[test]
+    fn test_unknown_command_suggestion() {
+        let caps = RenderCaps::ascii_plain(80);
+        let mut session = ReplSession::new(caps);
+        assert!(!session.handle_command(":clera"));
+        assert!(!session.handle_command(":totallybogus"));
+    }
+
+    #[test]
+    fn test_vars_table_utf8_safe_truncation() {
+        let caps = RenderCaps::ascii_plain(80);
+        let mut session = ReplSession::new(caps);
+        // A string value with multibyte UTF-8 chars placed right around the
+        // truncation boundary used to panic on a raw byte-index slice.
+        let long_value = "á".repeat(40);
+        session.eval_input(&format!("let x = \"{long_value}\";"));
+        assert!(!session.handle_command(":vars"));
     }
 
     #[test]
