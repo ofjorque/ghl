@@ -8,6 +8,7 @@ pub mod matrix;
 pub mod env;
 pub mod eval;
 pub mod neko;
+pub mod plot_stats;
 pub mod glm;
 pub mod gmm;
 pub mod io;

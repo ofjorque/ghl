@@ -40,13 +40,39 @@ impl AestheticMap {
     }
 }
 
+/// A simple linear regression fit (slope + intercept), computed by the
+/// caller — e.g. `ghl-runtime`'s statistics engine — and handed to a
+/// `Smooth` layer. This crate only renders a trend line; it never fits one,
+/// so the same fit always reaches both the terminal and PNG/SVG renderers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinearFit {
+    pub slope: f64,
+    pub intercept: f64,
+}
+
+/// A Tukey five-number summary (with 1.5×IQR fences and detected outliers),
+/// computed by the caller and handed to a `Boxplot` layer, for the same
+/// reason as [`LinearFit`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct FiveNumberSummary {
+    pub min: f64,
+    pub q1: f64,
+    pub median: f64,
+    pub q3: f64,
+    pub max: f64,
+    pub mean: f64,
+    pub lower_fence: f64,
+    pub upper_fence: f64,
+    pub outliers: Vec<f64>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GeomKind {
     Point { glyph: Option<char> },
     Line,
-    Smooth,
+    Smooth { fit: Option<LinearFit> },
     Histogram { bins: usize },
-    Boxplot,
+    Boxplot { stats: Option<FiveNumberSummary> },
     Bar,
 }
 
@@ -68,9 +94,18 @@ impl GeomLayer {
         }
     }
 
+    /// A `geom_smooth()` layer with no fit yet; nothing is drawn until a fit
+    /// is supplied via [`GeomLayer::smooth_with_fit`].
     pub fn smooth() -> Self {
         Self {
-            kind: GeomKind::Smooth,
+            kind: GeomKind::Smooth { fit: None },
+        }
+    }
+
+    /// A `geom_smooth()` layer carrying a fit already computed by the caller.
+    pub fn smooth_with_fit(fit: LinearFit) -> Self {
+        Self {
+            kind: GeomKind::Smooth { fit: Some(fit) },
         }
     }
 
@@ -80,9 +115,20 @@ impl GeomLayer {
         }
     }
 
+    /// A `geom_boxplot()` layer with no statistics yet; rendering will report
+    /// insufficient data until statistics are supplied via
+    /// [`GeomLayer::boxplot_with_stats`].
     pub fn boxplot() -> Self {
         Self {
-            kind: GeomKind::Boxplot,
+            kind: GeomKind::Boxplot { stats: None },
+        }
+    }
+
+    /// A `geom_boxplot()` layer carrying a five-number summary already
+    /// computed by the caller.
+    pub fn boxplot_with_stats(stats: FiveNumberSummary) -> Self {
+        Self {
+            kind: GeomKind::Boxplot { stats: Some(stats) },
         }
     }
 
@@ -192,6 +238,22 @@ impl PlotSpec {
         self
     }
 
+    /// Look up the fit carried by this spec's `Smooth` layer, if any.
+    fn smooth_fit(&self) -> Option<LinearFit> {
+        self.layers.iter().find_map(|l| match &l.kind {
+            GeomKind::Smooth { fit } => *fit,
+            _ => None,
+        })
+    }
+
+    /// Look up the statistics carried by this spec's `Boxplot` layer, if any.
+    fn boxplot_stats(&self) -> Option<FiveNumberSummary> {
+        self.layers.iter().find_map(|l| match &l.kind {
+            GeomKind::Boxplot { stats } => stats.clone(),
+            _ => None,
+        })
+    }
+
     /// Exports the plot to a publication-ready raster (PNG) or vector (SVG) image file via plotters.
     pub fn save_file(&self, path: &str) -> Result<(), String> {
         self.save_file_with_size(path, 800, 600)
@@ -244,7 +306,7 @@ impl PlotSpec {
         root.fill(&bg_color).map_err(|e| format!("{e}"))?;
 
         let is_hist = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Histogram { .. }));
-        let is_box = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Boxplot));
+        let is_box = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Boxplot { .. }));
         let is_bar = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Bar));
 
         if is_hist {
@@ -306,30 +368,15 @@ impl PlotSpec {
             }))
             .map_err(|e| format!("Points draw error: {e}"))?;
 
-        // Draw OLS smooth line if requested
-        let has_smooth = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Smooth));
-        if has_smooth && n_points >= 2 {
-            let mean_x = self.x_data.iter().sum::<f64>() / n_points as f64;
-            let mean_y = self.y_data.iter().sum::<f64>() / n_points as f64;
-            let mut num = 0.0;
-            let mut den = 0.0;
-            for i in 0..n_points {
-                let dx = self.x_data[i] - mean_x;
-                num += dx * (self.y_data[i] - mean_y);
-                den += dx * dx;
-            }
-            if den.abs() > 1e-9 {
-                let slope = num / den;
-                let intercept = mean_y - slope * mean_x;
-
-                let line_pts = vec![
-                    (min_x, intercept + slope * min_x),
-                    (max_x, intercept + slope * max_x),
-                ];
-                chart
-                    .draw_series(LineSeries::new(line_pts, &RGBColor(224, 100, 50)).point_size(2))
-                    .map_err(|e| format!("Line draw error: {e}"))?;
-            }
+        // Draw the precomputed OLS smooth line, if the `Smooth` layer carries one
+        if let Some(fit) = self.smooth_fit() {
+            let line_pts = vec![
+                (min_x, fit.intercept + fit.slope * min_x),
+                (max_x, fit.intercept + fit.slope * max_x),
+            ];
+            chart
+                .draw_series(LineSeries::new(line_pts, &RGBColor(224, 100, 50)).point_size(2))
+                .map_err(|e| format!("Line draw error: {e}"))?;
         }
 
         Ok(())
@@ -393,24 +440,8 @@ impl PlotSpec {
     }
 
     fn draw_plotters_boxplot<DB: DrawingBackend>(&self, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
-        let n = self.x_data.len();
-        if n < 4 {
-            return Err("At least 4 observations required for boxplot".to_string());
-        }
-
-        let mut sorted = self.x_data.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-        let min_v = sorted[0];
-        let max_v = sorted[n - 1];
-        let q1 = sorted[n / 4];
-        let median = sorted[n / 2];
-        let q3 = sorted[(3 * n) / 4];
-        let iqr = q3 - q1;
-        let lower_fence = (q1 - 1.5 * iqr).max(min_v);
-        let upper_fence = (q3 + 1.5 * iqr).min(max_v);
-
-        let outliers: Vec<f64> = sorted.iter().copied().filter(|&x| x < lower_fence || x > upper_fence).collect();
+        let FiveNumberSummary { min: min_v, q1, median, q3, max: max_v, lower_fence, upper_fence, outliers, .. } =
+            self.boxplot_stats().ok_or_else(|| "At least 4 observations required for boxplot".to_string())?;
 
         let pad_y = if (max_v - min_v).abs() < 1e-6 { 1.0 } else { (max_v - min_v) * 0.1 };
         let y_range = (min_v - pad_y)..(max_v + pad_y);
@@ -569,7 +600,7 @@ impl PlotSpec {
     pub fn render(&self, caps: &RenderCaps) -> String {
         // Determine primary plot type from layers
         let is_hist = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Histogram { .. }));
-        let is_box = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Boxplot));
+        let is_box = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Boxplot { .. }));
         let is_bar = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Bar));
 
         if is_hist {
@@ -619,30 +650,15 @@ impl PlotSpec {
         // Grid canvas
         let mut grid = vec![vec![' '; plot_w]; plot_h];
 
-        // Linear regression fit if geom_smooth is present
-        let has_smooth = self.layers.iter().any(|l| matches!(l.kind, GeomKind::Smooth));
-        if has_smooth && n_points >= 2 {
-            let mean_x = self.x_data.iter().sum::<f64>() / n_points as f64;
-            let mean_y = self.y_data.iter().sum::<f64>() / n_points as f64;
-            let mut num = 0.0;
-            let mut den = 0.0;
-            for i in 0..n_points {
-                let dx = self.x_data[i] - mean_x;
-                num += dx * (self.y_data[i] - mean_y);
-                den += dx * dx;
-            }
-            if den.abs() > 1e-9 {
-                let slope = num / den;
-                let intercept = mean_y - slope * mean_x;
-
-                for c in 0..plot_w {
-                    let cur_x = min_x + (c as f64 / (plot_w - 1) as f64) * span_x;
-                    let cur_y = intercept + slope * cur_x;
-                    let norm_y = ((cur_y - min_y) / span_y).clamp(0.0, 1.0);
-                    let row = ((1.0 - norm_y) * (plot_h - 1) as f64).round() as usize;
-                    if row < plot_h {
-                        grid[row][c] = if caps.unicode_enabled { '·' } else { '.' };
-                    }
+        // Draw the precomputed OLS smooth line, if the `Smooth` layer carries one
+        if let Some(fit) = self.smooth_fit() {
+            for c in 0..plot_w {
+                let cur_x = min_x + (c as f64 / (plot_w - 1) as f64) * span_x;
+                let cur_y = fit.intercept + fit.slope * cur_x;
+                let norm_y = ((cur_y - min_y) / span_y).clamp(0.0, 1.0);
+                let row = ((1.0 - norm_y) * (plot_h - 1) as f64).round() as usize;
+                if row < plot_h {
+                    grid[row][c] = if caps.unicode_enabled { '·' } else { '.' };
                 }
             }
         }
@@ -869,24 +885,12 @@ impl PlotSpec {
         };
 
         let card_width = 72.min(caps.width);
-        let n = self.x_data.len();
-        if n < 4 {
+        let Some(FiveNumberSummary { min: min_v, q1, median, q3, max: max_v, mean, lower_fence, upper_fence, outliers }) =
+            self.boxplot_stats()
+        else {
             return "At least 4 observations required for boxplot".to_string();
-        }
-
-        let mut sorted = self.x_data.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-        let min_v = sorted[0];
-        let max_v = sorted[n - 1];
-        let q1 = sorted[n / 4];
-        let median = sorted[n / 2];
-        let q3 = sorted[(3 * n) / 4];
+        };
         let iqr = q3 - q1;
-        let lower_fence = (q1 - 1.5 * iqr).max(min_v);
-        let upper_fence = (q3 + 1.5 * iqr).min(max_v);
-
-        let outliers: Vec<f64> = sorted.iter().copied().filter(|&x| x < lower_fence || x > upper_fence).collect();
 
         // 1D horizontal bar mapping
         let bar_width = card_width.saturating_sub(20).max(24);
@@ -960,7 +964,7 @@ impl PlotSpec {
         out.push_str(&caps.dim(&format!("{div}\n")));
 
         let s1 = format!("Min: {:.2} | Q1: {:.2} | Median: {:.2} | Mean: {:.2}",
-            min_v, q1, median, self.x_data.iter().sum::<f64>() / n as f64
+            min_v, q1, median, mean
         );
         let pad_s1 = " ".repeat(card_width.saturating_sub(visual_width(&s1) + 4));
         out.push_str(&format!("{vt} {}{pad_s1} {vt}\n", caps.bold(&s1)));
@@ -1038,7 +1042,7 @@ mod tests {
             .with_title("Test Scatter")
             .with_xy_data(vec![1.0, 2.0, 3.0, 4.0], vec![10.0, 20.0, 30.0, 40.0])
             .add_layer(GeomLayer::point())
-            .add_layer(GeomLayer::smooth());
+            .add_layer(GeomLayer::smooth_with_fit(LinearFit { slope: 10.0, intercept: 0.0 }));
 
         let rendered = plot.render(&caps);
         assert!(rendered.contains("Rendered 4 data points"));
@@ -1061,10 +1065,14 @@ mod tests {
     #[test]
     fn test_boxplot_render() {
         let caps = RenderCaps::rich_terminal(72);
+        let stats = FiveNumberSummary {
+            min: 10.0, q1: 20.0, median: 30.0, q3: 40.0, max: 100.0, mean: 34.375,
+            lower_fence: 10.0, upper_fence: 70.0, outliers: vec![100.0],
+        };
         let plot = PlotSpec::new()
             .with_title("Test Boxplot")
             .with_x_data(vec![10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 100.0])
-            .add_layer(GeomLayer::boxplot());
+            .add_layer(GeomLayer::boxplot_with_stats(stats));
 
         let rendered = plot.render(&caps);
         assert!(rendered.contains("Test Boxplot"));

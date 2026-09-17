@@ -3151,7 +3151,11 @@ fn native_geom_smooth(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Some(Value::Plot(plot)) => (**plot).clone(),
         _ => PlotSpec::new(),
     };
-    p = p.add_layer(GeomLayer::smooth());
+    let layer = match crate::plot_stats::simple_linear_fit(&p.x_data, &p.y_data) {
+        Some(fit) => GeomLayer::smooth_with_fit(fit),
+        None => GeomLayer::smooth(),
+    };
+    p = p.add_layer(layer);
     Ok(Value::Plot(Box::new(p)))
 }
 
@@ -3170,7 +3174,17 @@ fn native_geom_boxplot(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Some(Value::Plot(plot)) => (**plot).clone(),
         _ => PlotSpec::new(),
     };
-    p = p.add_layer(GeomLayer::boxplot());
+    let layer = match crate::plot_stats::five_number_summary(&p.x_data) {
+        Some(stats) => GeomLayer::boxplot_with_stats(stats),
+        None if p.x_data.is_empty() => GeomLayer::boxplot(),
+        None => {
+            return Err(Diagnostic::statistical_error(
+                "S0302",
+                format!("`geom_boxplot()` requires at least 4 observations, found {}", p.x_data.len()),
+            ));
+        }
+    };
+    p = p.add_layer(layer);
     Ok(Value::Plot(Box::new(p)))
 }
 
