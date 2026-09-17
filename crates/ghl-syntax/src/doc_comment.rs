@@ -413,7 +413,10 @@ pub fn extract_doc_comments(source: &str, program: &Program) -> Vec<ItemDoc> {
             } => {
                 let mut sig = String::new();
                 if *export_ffi {
-                    sig.push_str("export ");
+                    // Mirror `fmt.rs`'s canonical rendering: `#[export_ffi]` is the
+                    // only concrete syntax for this flag, so the signature shown in
+                    // hover/docs should look like real, parseable GHL source.
+                    sig.push_str("#[export_ffi]\n");
                 }
                 sig.push_str(&format!("fn {}(", name));
                 for (i, p) in params.iter().enumerate() {
@@ -787,6 +790,22 @@ struct Point {
         assert_eq!(struct_doc.name, "Point");
         assert_eq!(struct_doc.kind, ItemKind::Struct);
         assert!(!struct_doc.has_doc); // No doc comment provided
+    }
+
+    /// Regression test: the rendered signature for an `#[export_ffi]`
+    /// function must show the real, parseable attribute syntax - it used to
+    /// print a bare "export " prefix that isn't valid GHL and doesn't even
+    /// mention FFI, disagreeing with both the actual source and `fmt.rs`'s
+    /// canonical rendering of the same flag.
+    #[test]
+    fn test_extract_doc_comments_export_ffi_signature() {
+        let code = "#[export_ffi]\nfn calc(a: int, b: int) -> int {\n    a + b\n}";
+        let prog = parse(code).expect("syntax valid");
+        let docs = extract_doc_comments(code, &prog);
+
+        let fn_doc = docs.iter().find(|d| d.name == "calc").expect("calc must be documented");
+        assert!(fn_doc.signature.contains("#[export_ffi]"));
+        assert!(fn_doc.signature.contains("fn calc(a: int, b: int) -> int"));
     }
 
     #[test]

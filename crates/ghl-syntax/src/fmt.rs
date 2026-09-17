@@ -112,7 +112,13 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
         }
         StmtKind::Fn { name, params, ret_ty, body, export_ffi } => {
             if *export_ffi {
-                out.push_str("export ffi ");
+                // `export_ffi` has no keyword-sequence syntax of its own - the only
+                // grammar the parser accepts for it is the `#[export_ffi]` attribute
+                // (or `extern "C"`, which this crate can't distinguish from the flag
+                // alone). Emitting anything else here produces text the parser can't
+                // read back, silently destroying the function on the next format.
+                out.push_str("#[export_ffi]\n");
+                indent(out, level);
             }
             out.push_str("fn ");
             out.push_str(name);
@@ -599,5 +605,36 @@ mod tests {
         let formatted = format_source(code).expect("format ok");
         assert!(formatted.contains("dataframe {"));
         assert!(formatted.contains("    x: [1, 2],"));
+    }
+
+    /// Regression test: `fmt` must emit a form of `export_ffi` that the parser
+    /// can actually read back (`#[export_ffi]`), not a bare "export ffi"
+    /// keyword sequence the grammar has no rule for - which used to silently
+    /// destroy the function on the very next format+parse cycle.
+    #[test]
+    fn test_format_export_ffi_round_trips() {
+        let code = "#[export_ffi]\nfn calc(a: int, b: int) -> int { a + b }";
+        let formatted = format_source(code).expect("format ok");
+        assert!(formatted.contains("#[export_ffi]"));
+
+        let reparsed = crate::parser::parse(&formatted).expect("formatted output must still parse");
+        match &reparsed.statements[0].kind {
+            StmtKind::Fn { name, export_ffi, .. } => {
+                assert_eq!(name, "calc");
+                assert!(*export_ffi, "export_ffi flag must survive the round trip");
+            }
+            other => panic!("expected StmtKind::Fn, got {other:?}"),
+        }
+    }
+
+    /// Formatting an already-canonical `#[export_ffi]` function must be a
+    /// no-op (idempotent) - the specific property that would have caught the
+    /// bug above before it shipped.
+    #[test]
+    fn test_format_export_ffi_is_idempotent() {
+        let code = "#[export_ffi]\nfn calc(a: int, b: int) -> int { a + b }";
+        let once = format_source(code).expect("format ok");
+        let twice = format_source(&once).expect("re-format ok");
+        assert_eq!(once, twice);
     }
 }
