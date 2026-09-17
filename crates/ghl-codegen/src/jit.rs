@@ -7,55 +7,13 @@ use cranelift_module::{Linkage, Module};
 use ghl_diagnostics::Diagnostic;
 use ghl_ir::HirModule;
 use crate::compiler::FunctionCompiler;
+use crate::host;
 
 pub struct JitEngine {
     pub module: JITModule,
     pub ctx: codegen::Context,
     pub fn_builder_ctx: FunctionBuilderContext,
     pub compiled_ptrs: HashMap<String, *const u8>,
-}
-
-extern "C" fn ghl_host_clock_now() -> f64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0)
-}
-
-extern "C" fn ghl_host_sqrt(x: f64) -> f64 {
-    x.sqrt()
-}
-
-extern "C" fn ghl_host_sin(x: f64) -> f64 {
-    x.sin()
-}
-
-extern "C" fn ghl_host_cos(x: f64) -> f64 {
-    x.cos()
-}
-
-extern "C" fn ghl_host_exp(x: f64) -> f64 {
-    x.exp()
-}
-
-extern "C" fn ghl_host_ln(x: f64) -> f64 {
-    x.ln()
-}
-
-extern "C" fn ghl_host_pow(x: f64, y: f64) -> f64 {
-    x.powf(y)
-}
-
-extern "C" fn ghl_host_abs(x: f64) -> f64 {
-    x.abs()
-}
-
-extern "C" fn ghl_host_floor(x: f64) -> f64 {
-    x.floor()
-}
-
-extern "C" fn ghl_host_ceil(x: f64) -> f64 {
-    x.ceil()
 }
 
 impl Default for JitEngine {
@@ -84,16 +42,7 @@ impl JitEngine {
         })?;
 
         let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
-        builder.symbol("clock_now", ghl_host_clock_now as *const u8);
-        builder.symbol("sqrt", ghl_host_sqrt as *const u8);
-        builder.symbol("sin", ghl_host_sin as *const u8);
-        builder.symbol("cos", ghl_host_cos as *const u8);
-        builder.symbol("exp", ghl_host_exp as *const u8);
-        builder.symbol("ln", ghl_host_ln as *const u8);
-        builder.symbol("pow", ghl_host_pow as *const u8);
-        builder.symbol("abs", ghl_host_abs as *const u8);
-        builder.symbol("floor", ghl_host_floor as *const u8);
-        builder.symbol("ceil", ghl_host_ceil as *const u8);
+        host::register_jit_symbols(&mut builder);
 
         let module = JITModule::new(builder);
         let ctx = module.make_context();
@@ -112,30 +61,8 @@ impl JitEngine {
         let mut func_ids = HashMap::new();
         let mut signatures = HashMap::new();
 
-        // Register host math functions in module
-        let host_math_unary = ["sqrt", "sin", "cos", "exp", "ln", "abs", "floor", "ceil"];
-        for name in host_math_unary {
-            let mut sig = self.module.make_signature();
-            sig.params.push(AbiParam::new(types::F64));
-            sig.returns.push(AbiParam::new(types::F64));
-            if let Ok(id) = self.module.declare_function(name, Linkage::Import, &sig) {
-                func_ids.insert(name.to_string(), id);
-            }
-        }
-
-        let mut pow_sig = self.module.make_signature();
-        pow_sig.params.push(AbiParam::new(types::F64));
-        pow_sig.params.push(AbiParam::new(types::F64));
-        pow_sig.returns.push(AbiParam::new(types::F64));
-        if let Ok(id) = self.module.declare_function("pow", Linkage::Import, &pow_sig) {
-            func_ids.insert("pow".to_string(), id);
-        }
-
-        let mut clock_sig = self.module.make_signature();
-        clock_sig.returns.push(AbiParam::new(types::F64));
-        if let Ok(id) = self.module.declare_function("clock_now", Linkage::Import, &clock_sig) {
-            func_ids.insert("clock_now".to_string(), id);
-        }
+        // Register host math functions in module (shared table: see `host.rs`)
+        host::declare_host_imports(&mut self.module, &mut func_ids)?;
 
         // 1. First pass: declare all function signatures in the module
         for (name, func) in &hir.functions {

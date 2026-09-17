@@ -2,6 +2,7 @@
 
 pub mod aot;
 pub mod compiler;
+pub mod host;
 pub mod jit;
 
 pub use aot::AotEngine;

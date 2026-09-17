@@ -10,6 +10,7 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use ghl_diagnostics::Diagnostic;
 use ghl_ir::HirModule;
 use crate::compiler::FunctionCompiler;
+use crate::host;
 
 pub struct AotEngine {
     pub module: ObjectModule,
@@ -51,6 +52,9 @@ impl AotEngine {
     pub fn compile_module(mut self, hir: &HirModule) -> Result<Vec<u8>, Diagnostic> {
         let mut func_ids = HashMap::new();
         let mut signatures = HashMap::new();
+
+        // Register host math functions in module (shared table: see `host.rs`)
+        host::declare_host_imports(&mut self.module, &mut func_ids)?;
 
         // 1. First pass: declare all function signatures with exported linkage
         for (name, func) in &hir.functions {

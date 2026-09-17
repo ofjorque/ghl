@@ -161,8 +161,15 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
     };
 
     // 6. Generate runner driver
+    //
+    // `AotEngine` declares every entry in `ghl_codegen::host::HOST_FUNCTIONS` as a
+    // C-ABI import regardless of whether the script calls it, so the runner must
+    // always define native stand-ins for them or the link step fails on unresolved
+    // symbols. The stub text is generated from that same table (see host.rs), so
+    // adding a host function there is the only edit needed for both backends.
+    let host_stub = ghl_codegen::host::runner_source_stub();
     let runner_source = if is_shared {
-        format!("#![no_main]\n#![allow(non_snake_case)]\n")
+        format!("#![no_main]\n#![allow(non_snake_case)]\n{host_stub}")
     } else {
         let has_ghl_main = hir_module.functions.contains_key("__ghl_main");
         let has_main = hir_module.functions.contains_key("main");
@@ -194,7 +201,7 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
         format!(r#"
 #![allow(non_snake_case)]
 {extern_decls}
-
+{host_stub}
 fn main() {{
     {main_body}
 }}
@@ -389,13 +396,15 @@ mod tests {
         let exe_path = temp_dir.join(format!("{stem}.exe"));
 
         std::fs::write(&obj_path, &obj_bytes).expect("write obj");
-        let runner_src = r#"
-            extern "C" { fn __ghl_main() -> i64; }
-            fn main() {
-                let res = unsafe { __ghl_main() };
-                println!("{}", res);
-            }
-        "#;
+        let host_stub = ghl_codegen::host::runner_source_stub();
+        let runner_src = format!(r#"
+            extern "C" {{ fn __ghl_main() -> i64; }}
+            {host_stub}
+            fn main() {{
+                let res = unsafe {{ __ghl_main() }};
+                println!("{{}}", res);
+            }}
+        "#);
         std::fs::write(&runner_path, runner_src).expect("write runner");
 
         let mut cmd = std::process::Command::new("rustc");
@@ -413,6 +422,65 @@ mod tests {
         assert!(run_out.status.success());
         let stdout = String::from_utf8_lossy(&run_out.stdout);
         assert_eq!(stdout.trim(), "42");
+
+        // Clean up
+        let _ = std::fs::remove_file(obj_path);
+        let _ = std::fs::remove_file(runner_path);
+        let _ = std::fs::remove_file(exe_path);
+    }
+
+    /// Regression test for the JIT/AOT host-math split: `AotEngine` declares every
+    /// entry in `ghl_codegen::host::HOST_FUNCTIONS` as a C-ABI import (used or not),
+    /// so both (a) a script that actually calls one (`sqrt`) must link and execute
+    /// correctly via the generated `runner_source_stub`, and (b) that stub must not
+    /// require the script to use every host function to link successfully.
+    #[test]
+    fn test_aot_build_with_host_math_function() {
+        let code = r#"
+            fn calc_hypot(a: f64, b: f64) -> f64 {
+                sqrt(a * a + b * b)
+            }
+        "#;
+        let program = ghl_syntax::parse(code).expect("syntax ok");
+        let hir_module = ghl_ir::lower_ast(&program).expect("hir ok");
+
+        let temp_dir = std::env::temp_dir();
+        let pid = std::process::id();
+        let stem = format!("test_aot_hostmath_{pid}");
+        let aot = ghl_codegen::AotEngine::new(&stem).expect("aot init ok");
+        let obj_bytes = aot.compile_module(&hir_module).expect("aot compile ok");
+
+        let obj_path = temp_dir.join(format!("{stem}.obj"));
+        let runner_path = temp_dir.join(format!("{stem}_runner.rs"));
+        let exe_path = temp_dir.join(format!("{stem}.exe"));
+
+        std::fs::write(&obj_path, &obj_bytes).expect("write obj");
+        let host_stub = ghl_codegen::host::runner_source_stub();
+        let runner_src = format!(r#"
+            extern "C" {{ fn calc_hypot(a: f64, b: f64) -> f64; }}
+            {host_stub}
+            fn main() {{
+                let res = unsafe {{ calc_hypot(3.0, 4.0) }};
+                println!("{{}}", res);
+            }}
+        "#);
+        std::fs::write(&runner_path, runner_src).expect("write runner");
+
+        let mut cmd = std::process::Command::new("rustc");
+        cmd.arg("-C").arg("opt-level=3");
+        cmd.arg(format!("-Clink-arg={}", obj_path.display()));
+        cmd.arg(&runner_path);
+        cmd.arg("-o").arg(&exe_path);
+
+        let status = cmd.status().expect("rustc run");
+        assert!(status.success(), "rustc compilation with host math stub must succeed");
+
+        let run_out = std::process::Command::new(&exe_path)
+            .output()
+            .expect("execute standalone binary");
+        assert!(run_out.status.success());
+        let stdout = String::from_utf8_lossy(&run_out.stdout);
+        assert_eq!(stdout.trim(), "5", "sqrt(3^2 + 4^2) must equal 5.0 via AOT-linked host stub");
 
         // Clean up
         let _ = std::fs::remove_file(obj_path);
@@ -444,7 +512,8 @@ mod tests {
         let so_path = temp_dir.join(format!("{prefix}{stem}.{so_ext}"));
 
         std::fs::write(&obj_path, &obj_bytes).expect("write obj");
-        let runner_src = "#![no_main]\n#![allow(non_snake_case)]\n";
+        let host_stub = ghl_codegen::host::runner_source_stub();
+        let runner_src = format!("#![no_main]\n#![allow(non_snake_case)]\n{host_stub}");
         std::fs::write(&runner_path, runner_src).expect("write runner");
 
         let mut cmd = std::process::Command::new("rustc");
