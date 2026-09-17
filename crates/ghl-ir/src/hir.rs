@@ -4,6 +4,7 @@
 //! ready for JIT compilation via Cranelift or AOT codegen.
 
 use std::collections::HashMap;
+use ghl_diagnostics::Diagnostic;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HirType {
@@ -142,6 +143,12 @@ pub struct HirFunction {
 pub struct HirModule {
     pub name: String,
     pub functions: HashMap<String, HirFunction>,
+    /// Named functions whose body could not be lowered for scalar JIT/AOT
+    /// (e.g. they use types or expressions outside the supported subset),
+    /// paired with why. `ghl run` silently falls back to the interpreter for
+    /// these; `ghl build` treats a non-empty list as a hard error naming
+    /// each function, since an AOT binary can't silently drop a function.
+    pub skipped: Vec<(String, Diagnostic)>,
 }
 
 impl HirModule {
@@ -149,6 +156,7 @@ impl HirModule {
         Self {
             name: name.into(),
             functions: HashMap::new(),
+            skipped: Vec::new(),
         }
     }
 

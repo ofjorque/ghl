@@ -134,6 +134,20 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
         }
     };
 
+    if !hir_module.skipped.is_empty() {
+        let mut msg = format!(
+            "Cannot compile {} function(s) ahead-of-time:\n",
+            hir_module.skipped.len()
+        );
+        for (name, diag) in &hir_module.skipped {
+            msg.push_str(&format!("  - `{name}`: {}\n", diag.message));
+        }
+        let err = Diagnostic::compute_error("C0505", msg.trim_end().to_string())
+            .with_help("Rewrite these functions using only scalar int/float/bool operations, or remove them before running `ghl build` (they still work under `ghl run`, which falls back to the interpreter per function).");
+        eprintln!("{}", err.render_with_caps(caps));
+        std::process::exit(1);
+    }
+
     if hir_module.functions.is_empty() {
         let err = Diagnostic::compute_error(
             "C0500",

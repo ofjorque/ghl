@@ -90,16 +90,25 @@ impl LoweringContext {
                 }
 
                 let return_ty = Self::lower_type_annotation(ret_ty);
-                let hir_body = self.lower_expr(body)?;
+                let lowered_body = self.lower_expr(body);
                 self.pop_scope();
 
-                let hir_fn = HirFunction {
-                    name: name.clone(),
-                    params: hir_params,
-                    return_ty,
-                    body: hir_body,
-                };
-                module.add_function(hir_fn);
+                match lowered_body {
+                    Ok(hir_body) => {
+                        module.add_function(HirFunction {
+                            name: name.clone(),
+                            params: hir_params,
+                            return_ty,
+                            body: hir_body,
+                        });
+                    }
+                    Err(diag) => {
+                        // Isolate the failure to this one function rather than aborting
+                        // lowering for the whole program: everything else here is still
+                        // eligible for JIT/AOT (see `HirModule::skipped`).
+                        module.skipped.push((name.clone(), diag));
+                    }
+                }
             }
         }
 
@@ -418,6 +427,30 @@ mod tests {
         let main_fn = &module.functions["__ghl_main"];
         assert_eq!(main_fn.params.len(), 0);
         assert_eq!(main_fn.return_ty, HirType::I64);
+    }
+
+    /// One function using an expression outside the scalar JIT subset (here, a
+    /// string literal) must not prevent an unrelated, fully scalar function in
+    /// the same file from lowering — only the offending function is excluded
+    /// (and reported via `HirModule::skipped`), not the whole module.
+    #[test]
+    fn test_lower_isolates_failure_to_one_function() {
+        let code = r#"
+            fn add_nums(a: int, b: int) -> int {
+                a + b
+            }
+
+            fn greet() -> str {
+                "hello"
+            }
+        "#;
+        let program = ghl_syntax::parse(code).expect("syntax ok");
+        let module = lower_ast(&program).expect("lowering ok");
+
+        assert!(module.functions.contains_key("add_nums"), "unaffected function must still lower");
+        assert!(!module.functions.contains_key("greet"), "incompatible function must not be in the module");
+        assert_eq!(module.skipped.len(), 1);
+        assert_eq!(module.skipped[0].0, "greet");
     }
 }
 
