@@ -1600,6 +1600,69 @@ mod tests {
         }
     }
 
+    /// Regression test: `predict()` used to map a categorical value never seen
+    /// while fitting to level 0 (the baseline category) via `unwrap_or(0)`,
+    /// silently returning a confidently wrong prediction instead of flagging
+    /// the row. It must now come back as NA with a reason, not a fabricated
+    /// number.
+    #[test]
+    fn test_predict_unseen_categorical_level_is_na_not_baseline() {
+        let code = r#"
+            let train = dataframe {
+                region: ["A", "B", "A", "B", "A", "B"],
+                y: [10.0, 20.0, 11.0, 21.0, 9.0, 19.0]
+            };
+            let model = ols(y ~ region, train);
+
+            let newdata = dataframe { region: ["B", "C"], y: [0.0, 0.0] };
+            let preds = predict(model, newdata);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let preds = interp.env.get("preds").expect("preds exists");
+        if let Value::Vector(preds) = preds {
+            assert_eq!(preds.len(), 2, "output must have one entry per input row");
+            let known = preds[0].as_f64().expect("known level `B` must predict a real number");
+            assert!((known - 20.0).abs() < 1e-6, "region=B must predict ~20.0, got {known}");
+            assert!(preds[1].is_na(), "region=C (never seen while fitting) must be NA, not a fabricated prediction");
+        } else {
+            panic!("Expected Vector for predict");
+        }
+    }
+
+    /// Regression test: `predict()` used to silently drop rows with missing
+    /// predictor data from its output instead of keeping the vector aligned
+    /// with the input - a 3-row `newdata` with 1 NA row used to come back as
+    /// a 2-element vector with no indication which input row was missing.
+    #[test]
+    fn test_predict_preserves_row_alignment_with_na_input() {
+        let code = r#"
+            let train = dataframe {
+                x: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                y: [2.0, 4.0, 6.0, 8.0, 10.0, 12.0]
+            };
+            let model = ols(y ~ x, train);
+
+            let newdata = dataframe { x: [1.0, NA, 3.0], y: [0.0, 0.0, 0.0] };
+            let preds = predict(model, newdata);
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let mut interp = Interpreter::new();
+        interp.eval_program(&program).expect("evaluation ok");
+
+        let preds = interp.env.get("preds").expect("preds exists");
+        if let Value::Vector(preds) = preds {
+            assert_eq!(preds.len(), 3, "output must stay aligned with the 3 input rows");
+            assert!((preds[0].as_f64().unwrap() - 2.0).abs() < 1e-6);
+            assert!(preds[1].is_na(), "the row with missing `x` must be NA, not silently omitted");
+            assert!((preds[2].as_f64().unwrap() - 6.0).abs() < 1e-6);
+        } else {
+            panic!("Expected Vector for predict");
+        }
+    }
+
     #[test]
     fn test_fit_ols_with_integer_predictor_column() {
         // `Blueprint::bake`'s fast path (post NEKO data-representation fix) checks

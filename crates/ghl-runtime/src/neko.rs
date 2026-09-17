@@ -300,6 +300,28 @@ impl Blueprint {
                             };
                         }
                     }
+                } else if term_info.is_categorical && row_disp == RowDisposition::Included {
+                    // A value outside the known levels is only possible when baking
+                    // against frozen, prediction-time levels (`self.term_levels`):
+                    // during fitting, levels are discovered from this exact data, so
+                    // every value matches by construction. Treat it like a missing
+                    // value rather than silently mapping it to level 0 (the baseline
+                    // category) - a real out-of-vocabulary category is not the same
+                    // observation as the reference level, and predicting as if it
+                    // were is a wrong answer with no indication anything was off.
+                    let s = match &av {
+                        AnyValue::String(s) => Some(*s),
+                        AnyValue::StringOwned(s) => Some(s.as_str()),
+                        _ => None,
+                    };
+                    if let Some(s) = s {
+                        if !term_info.levels.iter().any(|l| l == s) {
+                            row_disp = RowDisposition::DroppedNA {
+                                col: term_info.term.clone(),
+                                reason: Some(format!("Unseen category `{}` for predictor `{}`", s, term_info.term)),
+                            };
+                        }
+                    }
                 }
             }
 
@@ -318,7 +340,8 @@ impl Blueprint {
                             AnyValue::StringOwned(ref s) => s.as_str(),
                             _ => "",
                         };
-                        let level_idx = term_info.levels.iter().position(|l| l == s).unwrap_or(0);
+                        let level_idx = term_info.levels.iter().position(|l| l == s)
+                            .expect("unseen categories are routed to RowDisposition::DroppedNA above and excluded from this branch");
                         for &val in &term_info.contrast_mat[level_idx] {
                             x_rows.push(val);
                         }
@@ -696,18 +719,34 @@ impl FittedModel {
     }
 
     /// Predicts values for a new DataFrame using the frozen Blueprint.
+    ///
+    /// The returned vector always has one entry per row of `newdata`, in the
+    /// same order: a row `bake()` couldn't use (missing data, or a
+    /// categorical value never seen while fitting) becomes `NA` with the same
+    /// reason `bake()` recorded for it, rather than being silently dropped
+    /// from the output - which used to desynchronize the result from the
+    /// input whenever any row was excluded.
     pub fn predict(&self, newdata: &Value) -> Result<Value, Diagnostic> {
         match newdata {
             Value::DataFrame { frame, na_reasons } => {
-                let (x_data, _, _, n, p, _, _) = self.blueprint.bake(frame, na_reasons)?;
-                let mut predictions = Vec::with_capacity(n);
+                let (x_data, _, dispositions, _, p, _, _) = self.blueprint.bake(frame, na_reasons)?;
+                let mut predictions = Vec::with_capacity(dispositions.len());
+                let mut included_idx = 0;
 
-                for i in 0..n {
-                    let mut y_hat = 0.0;
-                    for j in 0..p {
-                        y_hat += x_data[i * p + j] * self.coefficients[j];
+                for disp in &dispositions {
+                    match disp {
+                        RowDisposition::Included => {
+                            let mut y_hat = 0.0;
+                            for j in 0..p {
+                                y_hat += x_data[included_idx * p + j] * self.coefficients[j];
+                            }
+                            predictions.push(Value::F64(y_hat));
+                            included_idx += 1;
+                        }
+                        RowDisposition::DroppedNA { reason, .. } => {
+                            predictions.push(Value::NA(reason.clone()));
+                        }
                     }
-                    predictions.push(Value::F64(y_hat));
                 }
 
                 Ok(Value::Vector(VectorData::from_values(predictions)))
