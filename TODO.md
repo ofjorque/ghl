@@ -9,6 +9,21 @@ Este documento es el índice activo del trabajo pendiente de GHL. Se mantiene de
 
 ---
 
-## En Trabajo Activo
+## En Trabajo Activo: Roadmap 08 — Modelos Econométricos Avanzados, SEM y Librería `spring_pact`
 
-*(Actualmente no hay tareas pendientes en curso. Todos los 7 roadmaps de ecosistema, validación con datos reales y documentación han sido completados al 100% y archivados).*
+Backlog activo detallado en [`docs/roadmap/08_TODO_MODELOS_AVANZADOS_Y_SPRING_PACT.md`](docs/roadmap/08_TODO_MODELOS_AVANZADOS_Y_SPRING_PACT.md):
+
+- [ ] **Parte A: Ecuaciones Estructurales (SEM / CFA):**
+  - [ ] Operadores `=~` (medición latente) y `~~` (covarianza/varianza residual) en `ghl-syntax`.
+  - [ ] Estimador `sem(spec, df)` en `ghl-runtime::neko` basado en optimización Wishart ML e índices de ajuste ($\chi^2$, CFI, TLI, RMSEA).
+- [ ] **Parte B: Estimadores Econométricos Clave:**
+  - [ ] Efectos Fijos de Alta Dimensión (`feols(y ~ x | id + time, df)`) con algoritmo de centrado por medias (*Within-transformation*).
+  - [ ] Variables Instrumentales (`iv_regress(y ~ x_exog + x_endog | x_exog + z_instr, df)`) con 2SLS, F-stat y test de Wu-Hausman.
+  - [ ] Regresión Regularizada (`lasso`, `ridge`, `elastic_net`) con descenso por coordenadas (`glmnet` style).
+- [ ] **Parte C: `spring_pact` — Primera Librería Oficial 100% GHL ([RFC 14](docs/design/14-statistical-contracts-and-expectation-protocols.md)):**
+  - [ ] Estructura de paquete con `ghl new spring_pact` y `ghl.toml`.
+  - [ ] Módulos de reglas de datos (`expect_filter`, `expect_na_max`, `expect_outlier_rule`).
+  - [ ] Módulos de supuestos estadísticos (`expect_vif_max`, `expect_homoscedasticity`, `expect_min_sample_size`).
+  - [ ] Hashing criptográfico **SHA-256** del contrato y emisión de Certificado de Cumplimiento Cockpit Deck.
+  - [ ] Suite de pruebas unitarias ejecutadas con `ghl test`.
+
