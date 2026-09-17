@@ -26,10 +26,23 @@ Backlog activo detallado en [`docs/roadmap/08_TODO_MODELOS_AVANZADOS_Y_SPRING_PA
   - [ ] Módulos de supuestos estadísticos (`expect_vif_max`, `expect_homoscedasticity`, `expect_min_sample_size`).
   - [ ] Hashing criptográfico **SHA-256** del contrato y emisión de Certificado de Cumplimiento Cockpit Deck.
   - [ ] Suite de pruebas unitarias ejecutadas con `ghl test`.
-- [ ] **Parte D: Identidad Felina Dual y Dinámica de Personalidades (Gojo & Haru):**
-  - [ ] Corregir historia oficial en `AGENT.md` y RFCs (ambos son gatos reales: Haru blanco/naranja y Gojo gris dominante; 0 perros).
-  - [ ] Actualizar registro de Kaomojis en `ghl-diagnostics::registry`: sustituir `(U・ᴥ・U)` por Haru `(=^･ω･^=) ✧` / `(ฅ^•ﻌ•^ฅ)` para éxitos y bienvenida.
-  - [ ] Asignar a Gojo kaomojis de gato gris estricto y zarpazos `(=😾=) 🐾`, `(=ಠ_ಠ=)`, `(ノ°□°)ノ 🐾` para errores de sintaxis, tipos y matrices singulares.
-  - [ ] Propagar la dinámica en badges y paneles de `ghl-runtime` y `ghl-cli`.
+- [x] **Parte D: Identidad Felina Dual y Dinámica de Personalidades (Gojo & Haru):**
+  - [x] Corregir historia oficial en `AGENT.md` y RFCs (ambos son gatos reales del creador: Haru blanco/naranja y Gojo gris dominante; cero perros).
+  - [x] Catálogo canónico de Kaomojis en `ghl-diagnostics::registry` y colores de terminal (`caps.haru` naranja cálido, `caps.gojo` gris pizarra).
+  - [x] Reemplazo universal de `(U・ᴥ・U)` y tabla rota en runtime, REPL, CLI y diagnósticos por Haru y Gojo.
+  - [x] Regla de oro *"Show, don't tell"*: jamás narrar acciones en texto ("Gojo te dio un zarpazo:"), dejar que el glifo se exprese por sí solo.
+
+---
+
+## Observaciones de UX / REPL e Interfaz Visual (Sesión en Vivo)
+
+Puntos detectados durante el uso interactivo del REPL para pulir:
+
+- [x] **Espaciado del Prompt REPL:** Separar `ghl` del kaomoji (`ghl ฅ(•⩊ •マ> ` en vez de `ghlฅ(•⩊ •マ> `) para mejorar la legibilidad del cursor.
+- [x] **Comando `:var` como alias:** El REPL ahora acepta tanto `:vars`, `:var` como `:v` de manera indistinta para listar variables activas.
+- [ ] **Alineación tabular en `:vars`:** Cuando existan múltiples variables en sesión, alinear nombres, tipos (`[i64]`, `[f64]`, `[DataFrame]`) y valores en columnas con ancho consistente o `CockpitTable`.
+- [ ] **Prompt con color ANSI en Rustyline:** Evaluar soporte de secuencias ANSI invisibles (`\001...\002`) en Rustyline para colorear el kaomoji de Haru en naranja cálido en Windows Terminal sin romper el cálculo de longitud de línea al editar historial.
+- [ ] **Sugerencias de comandos desconocidos:** En error `C0005` ante `:rm` o comando con typo (ej. `:clera`), ofrecer sugerencia Levenshtein del comando REPL más cercano (ej. `¿Quisiste decir :clear?`).
+
 
 

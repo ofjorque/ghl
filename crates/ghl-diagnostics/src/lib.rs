@@ -1,10 +1,10 @@
 //! Diagnostic reporting engine for GHL (Generalized Hypothesis Language).
 //!
 //! Provides the dual error classification and Cockpit Deck telemetry integration:
-//! - `[Compute Error Cxxxx]` with expressive computer-glitch Kaomojis (e.g. `(ノ°□°)ノ`)
-//! - `[Statistical Error Sxxxx]` with observant feline Kaomojis (e.g. `ฅ(ﾐΦ ﻌ Φﾐ)ฅ`)
-//! - `[Statistical Warning SWxxxx]` with cautionary feline Kaomojis (e.g. `(ФωФ)`)
-//! - Success / Hints with faithful canine Haru Kaomojis (e.g. `(U・ᴥ・U)`)
+//! - `[Compute Error Cxxxx]` with expressive feline Kaomojis (e.g. `/ᐠ ¬`‸´¬ マ`)
+//! - `[Statistical Error Sxxxx]` with analytical feline Kaomojis (e.g. `≽(◉˕ ◉ ≼マ`)
+//! - `[Statistical Warning SWxxxx]` with observant feline Kaomojis (e.g. `/ᐠ ·•᷄ ˕ •᷅マ`)
+//! - Success / Hints with feline Kaomojis (e.g. `/ᐠ˵- ⩊ -˵マ ✧`, `ฅ(•⩊ •マ`)
 //!
 //! Fully integrates with Cockpit Deck v0.5.0:
 //! - `RenderCaps` capability detection and degradation matrix (ANSI, Unicode, Width, NO_COLOR)
@@ -38,13 +38,14 @@ pub enum DiagnosticSeverity {
 impl DiagnosticSeverity {
     pub fn kaomoji(&self) -> &'static str {
         match self {
-            Self::ComputeError => "(ノ°□°)ノ",
-            Self::StatisticalError => "ฅ(ﾐΦ ﻌ Φﾐ)ฅ",
-            Self::StatisticalWarning => "(ФωФ)",
-            Self::Info => "(=^･ω･^=)",
-            Self::Success => "(U・ᴥ・U)",
+            Self::ComputeError => "/ᐠ ¬`‸´¬ マ",
+            Self::StatisticalError => "≽(◉˕ ◉ ≼マ",
+            Self::StatisticalWarning => "/ᐠ ·•᷄ ˕ •᷅マ",
+            Self::Info => "ฅ(•⩊ •マ",
+            Self::Success => "/ᐠ˵- ⩊ -˵マ ✧",
         }
     }
+
 
     pub fn ascii_fallback(&self) -> &'static str {
         match self {
@@ -200,7 +201,7 @@ mod tests {
             .with_help("Consider Ridge regularization or dropping collinear predictors.");
 
         let rendered = diag.render_with_caps(&RenderCaps::rich_terminal(80));
-        assert!(rendered.contains("ฅ(ﾐΦ ﻌ Φﾐ)ฅ"));
+        assert!(rendered.contains("≽(◉˕ ◉ ≼マ"));
         assert!(rendered.contains("[Statistical Error S0301]"));
         assert!(rendered.contains("model.gh:42:10"));
     }
@@ -212,9 +213,10 @@ mod tests {
             .with_help("Explicitly convert to expected type.");
 
         let rendered = diag.render_with_caps(&RenderCaps::rich_terminal(80));
-        assert!(rendered.contains("(ノ°□°)ノ"));
+        assert!(rendered.contains("/ᐠ ¬`‸´¬ マ"));
         assert!(rendered.contains("[Compute Error C0102]"));
     }
+
 
     #[test]
     fn test_ascii_degradation_render() {

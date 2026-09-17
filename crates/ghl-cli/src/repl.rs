@@ -81,7 +81,7 @@ impl ReplSession {
 
         loop {
             let prompt = if multi_line_accum.is_empty() {
-                if self.caps.unicode_enabled { "ghlฅ(•⩊ •マ> " } else { "ghl> " }
+                if self.caps.unicode_enabled { "ghl ฅ(•⩊ •マ> " } else { "ghl> " }
             } else {
                 "   ... "
             };
@@ -103,7 +103,7 @@ impl ReplSession {
             } else {
                 let styled_prompt = if multi_line_accum.is_empty() {
                     if self.caps.unicode_enabled {
-                        format!("ghl{}> ", self.caps.haru("ฅ(•⩊ •マ"))
+                        format!("ghl {}> ", self.caps.haru("ฅ(•⩊ •マ"))
                     } else {
                         "ghl> ".to_string()
                     }
@@ -181,7 +181,7 @@ impl ReplSession {
 
     fn print_welcome(&self) {
         let mut panel = CockpitPanel::new("GHL Interactive Shell (REPL)");
-        panel.with_badge("READY");
+        panel.with_badge(if self.caps.unicode_enabled { "ฅ(•⩊ •マ READY" } else { "READY" });
         panel.add_line("Gojo & Haru High-Performance Statistical System");
         panel.add_line(format!(
             "Type {} for session commands, {} for docs, or {} to exit.",
@@ -208,7 +208,7 @@ impl ReplSession {
             ":help" | ":h" => {
                 let mut panel = CockpitPanel::new("REPL Commands");
                 panel.add_kv(":help, :h", "Show this help table");
-                panel.add_kv(":vars, :v", "List active user-defined variables and types");
+                panel.add_kv(":vars, :var, :v", "List active user-defined variables and types");
                 panel.add_kv(":rm <vars>", "Remove one or more variables from session (or :rm *)");
                 panel.add_kv(":clear-vars", "Clear all user-defined variables");
                 panel.add_kv(":doc <fn>, ?<fn>", "View documentation & formula for a function");
@@ -218,7 +218,8 @@ impl ReplSession {
                 println!("{}\n", panel.render(&self.caps));
                 false
             }
-            ":vars" | ":v" => {
+            ":vars" | ":var" | ":v" => {
+
                 let mut panel = CockpitPanel::new("Active Variables");
                 if self.user_vars.is_empty() {
                     panel.add_line(self.caps.dim("(No user variables defined yet. Use `let x = ...`)"));
