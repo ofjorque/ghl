@@ -1,6 +1,7 @@
 //! `ghl check` — validate syntax, types, and Cranelift HIR lowering without executing.
 
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps};
+use ghl_syntax::SourceIndex;
 
 pub fn cmd_check(args: &[String], caps: &RenderCaps) {
     if args.len() < 3 {
@@ -12,7 +13,7 @@ pub fn cmd_check(args: &[String], caps: &RenderCaps) {
     let file = &args[2];
     match std::fs::read_to_string(file) {
         Ok(content) => {
-            match ghl_syntax::parse(&content) {
+            match ghl_syntax::parse_spanned(&content) {
                 Ok(program) => {
                     let parse_stat = format!("Parsed {} top-level statements", program.statements.len());
                     match ghl_types::check(&program, file) {
@@ -40,9 +41,11 @@ pub fn cmd_check(args: &[String], caps: &RenderCaps) {
                     }
                 }
                 Err(errors) => {
-                    for err_msg in errors {
-                        let err = Diagnostic::compute_error("C0100", err_msg)
-                            .with_location(file, 1, 1);
+                    let index = SourceIndex::new(&content);
+                    for syntax_err in errors {
+                        let (line, col) = index.offset_to_position(syntax_err.span.start);
+                        let err = Diagnostic::compute_error("C0100", syntax_err.message)
+                            .with_location(file, line as usize + 1, col as usize + 1);
                         eprintln!("{}", err.render_with_caps(caps));
                     }
                     std::process::exit(1);

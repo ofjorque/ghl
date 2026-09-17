@@ -4,6 +4,7 @@
 
 use std::time::Instant;
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps};
+use ghl_syntax::SourceIndex;
 
 pub fn cmd_build(args: &[String], caps: &RenderCaps) {
     let mut file_opt: Option<String> = None;
@@ -64,12 +65,14 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
     };
 
     // 1. Parsing
-    let program = match ghl_syntax::parse(&content) {
+    let program = match ghl_syntax::parse_spanned(&content) {
         Ok(p) => p,
         Err(errors) => {
-            for err_msg in errors {
-                let err = Diagnostic::compute_error("C0100", err_msg)
-                    .with_location(&file, 1, 1);
+            let index = SourceIndex::new(&content);
+            for syntax_err in errors {
+                let (line, col) = index.offset_to_position(syntax_err.span.start);
+                let err = Diagnostic::compute_error("C0100", syntax_err.message)
+                    .with_location(&file, line as usize + 1, col as usize + 1);
                 eprintln!("{}", err.render_with_caps(caps));
             }
             std::process::exit(1);

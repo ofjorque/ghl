@@ -252,7 +252,13 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 )
             });
 
-        // Block statement parser (statements terminated by ;)
+        // Block statement parser. `let`/`return`/assignment are unambiguously
+        // bounded by their own grammar (they start with a keyword, or `ident =`,
+        // and `expr` naturally stops where they end), so their trailing `;` is
+        // optional here, same as at the top level. A bare expression statement's
+        // `;` stays mandatory: it's the only thing here that could otherwise be
+        // confused with the block's own trailing value (`{ stmt*; expr? }`) - see
+        // the comment on `block` below.
         let block_stmt = {
             let let_stmt = just(Token::Let)
                 .ignore_then(just(Token::Mut).or_not())
@@ -263,7 +269,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 .then(just(Token::Colon).ignore_then(type_parser()).or_not())
                 .then_ignore(just(Token::Eq))
                 .then(expr.clone())
-                .then_ignore(just(Token::Semicolon))
+                .then_ignore(just(Token::Semicolon).or_not())
                 .map_with_span(|(((is_mut, name), ty), init), span| {
                     Stmt::new(
                         StmtKind::Let {
@@ -278,7 +284,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
 
             let return_stmt = just(Token::Return)
                 .ignore_then(expr.clone().or_not())
-                .then_ignore(just(Token::Semicolon))
+                .then_ignore(just(Token::Semicolon).or_not())
                 .map_with_span(|e, span| Stmt::new(StmtKind::Return(e), span));
 
             // `name = value;` -- reassignment, distinct from `let name = value;`. Must
@@ -288,7 +294,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             let assign_stmt = select! { Token::Ident(name) => name }
                 .then_ignore(just(Token::Eq))
                 .then(expr.clone())
-                .then_ignore(just(Token::Semicolon))
+                .then_ignore(just(Token::Semicolon).or_not())
                 .map_with_span(|(name, value), span| Stmt::new(StmtKind::Assign { name, value }, span));
 
             let expr_stmt = expr
@@ -1017,7 +1023,23 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
 }
 
 pub fn program_parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
+    // On a malformed statement, discard tokens up to (and including) the next
+    // `;` and substitute a placeholder statement for the skipped span, instead
+    // of aborting the whole program after the first error. This lets
+    // `parse_spanned` report every broken statement in one pass. Note this
+    // deliberately does NOT retry `stmt_parser()` on the skipped tokens
+    // (`skip_then_retry_until` would): `stmt_parser()`'s bare-expression
+    // fallback is permissive enough to successfully match a stray fragment of
+    // the very statement that just failed (e.g. the `x` left over from a
+    // broken `let x = ;`), which produced two misleading, wrongly-placed
+    // errors for one bad statement instead of cleanly moving on to the next.
+    // The placeholder is never observed by real callers: `parse`/`parse_spanned`
+    // return `Err` whenever any error was recorded, regardless of how much of
+    // the program still parsed.
     stmt_parser()
+        .recover_with(skip_until([Token::Semicolon], |span: std::ops::Range<usize>| {
+            Stmt::new(StmtKind::Expr(Expr::new(ExprKind::Placeholder, span.clone())), span)
+        }).consume_end())
         .repeated()
         .then_ignore(end())
         .map(|statements| Program { statements })
@@ -1042,13 +1064,21 @@ pub fn parse_spanned(source: &str) -> Result<Program, Vec<crate::source::SyntaxE
     let end_span = source.len()..source.len();
     let stream = chumsky::Stream::from_iter(end_span, tokens.into_iter());
 
-    program_parser()
-        .parse(stream)
-        .map_err(|errs| {
-            errs.into_iter()
-                .map(|e| crate::source::SyntaxError::new(format!("{}", e), e.span()))
-                .collect()
-        })
+    // `parse_recovery` (rather than `parse`) drives `program_parser`'s
+    // per-statement recovery: it keeps parsing past a malformed statement and
+    // returns every error collected along the way instead of only the first.
+    let (program, errs) = program_parser().parse_recovery(stream);
+
+    if errs.is_empty() {
+        if let Some(program) = program {
+            return Ok(program);
+        }
+    }
+
+    Err(errs
+        .into_iter()
+        .map(|e| crate::source::SyntaxError::new(format!("{}", e), e.span()))
+        .collect())
 }
 
 pub fn parse(source: &str) -> Result<Program, Vec<String>> {
@@ -1708,5 +1738,73 @@ mod tests {
         assert!(errs[0].span.start <= code.len());
         assert!(errs[0].span.end <= code.len());
     }
+
+    /// Regression test: a file with several independently broken statements
+    /// must report an error for EACH one, not just the first - the parser
+    /// used to abort after the first bad statement (no error recovery at all).
+    #[test]
+    fn test_parse_recovers_multiple_independent_errors() {
+        let code = "let x = ;\nlet y = ;\nlet z = 5;\n";
+        let errs = parse_spanned(code).expect_err("should have syntax errors");
+        assert_eq!(errs.len(), 2, "must report both broken statements, not just the first");
+
+        // Each error must point at its own statement's `;`, not be misattributed
+        // to some other position (a risk with naive recovery strategies).
+        let first_semicolon = code.find(';').unwrap();
+        let second_semicolon = code[first_semicolon + 1..].find(';').unwrap() + first_semicolon + 1;
+        assert_eq!(errs[0].span.start, first_semicolon);
+        assert_eq!(errs[1].span.start, second_semicolon);
+    }
+
+    /// Regression test: a valid statement sitting between two broken ones must
+    /// still be recovered correctly (not swallowed or misreported) - proving
+    /// recovery skips exactly the bad statement and nothing more.
+    #[test]
+    fn test_parse_recovery_preserves_valid_statements_around_bad_one() {
+        let code = "let a = 1;\nlet bad = ;\nlet b = 2;\n";
+        let errs = parse_spanned(code).expect_err("should have exactly one syntax error");
+        assert_eq!(errs.len(), 1, "only the malformed statement should produce an error");
+
+        let bad_semicolon = code.rfind("= ;").unwrap() + 2;
+        assert_eq!(errs[0].span.start, bad_semicolon);
+    }
+
+    /// `let`/`return`/assignment inside a block never compete with the block's
+    /// own trailing expression (none of them are expression forms `expr` can
+    /// match), so their `;` can safely be optional there, same as top level.
+    #[test]
+    fn test_block_let_and_return_semicolons_are_optional() {
+        let code = "fn f(a: int, b: int) -> int {\n    let x = a + 1\n    let y = b + 1\n    x + y\n}";
+        let program = parse(code).expect("optional `;` on let inside a block must parse");
+        let StmtKind::Fn { body, .. } = &program.statements[0].kind else { panic!("expected fn") };
+        let ExprKind::Block { stmts, expr, .. } = &body.kind else { panic!("expected block body") };
+
+        assert_eq!(stmts.len(), 2, "both `let`s must be recognized as separate statements");
+        assert!(matches!(stmts[0].kind, StmtKind::Let { ref name, .. } if name == "x"));
+        assert!(matches!(stmts[1].kind, StmtKind::Let { ref name, .. } if name == "y"));
+        assert!(expr.is_some(), "`x + y` must still be captured as the block's trailing value");
+    }
+
+    /// Regression guard for the one case that must NOT become semicolon-optional:
+    /// a bare expression statement's `;` is the only signal that distinguishes it
+    /// from the block's trailing value. Without it, `{ a + b }`'s value would be
+    /// swallowed as a statement instead of becoming the function's implicit
+    /// return - silently breaking every one-line function body in the language.
+    #[test]
+    fn test_block_trailing_expression_is_still_the_return_value() {
+        let code = "fn add(a: int, b: int) -> int {\n    a + b\n}";
+        let program = parse(code).expect("syntax ok");
+        let StmtKind::Fn { body, .. } = &program.statements[0].kind else { panic!("expected fn") };
+        let ExprKind::Block { stmts, expr, .. } = &body.kind else { panic!("expected block body") };
+
+        assert!(stmts.is_empty(), "`a + b` must not be swallowed as a semicolon-less statement");
+        assert!(
+            matches!(expr.as_deref().map(|e| &e.kind), Some(ExprKind::Binary { .. })),
+            "`a + b` must be the block's trailing value"
+        );
+    }
 }
+
+
+
 

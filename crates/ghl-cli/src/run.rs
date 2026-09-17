@@ -2,6 +2,7 @@
 
 use std::time::Instant;
 use ghl_diagnostics::{Diagnostic, RenderCaps, SemanticCode};
+use ghl_syntax::SourceIndex;
 
 pub fn cmd_run(args: &[String], caps: &RenderCaps) {
     if args.len() < 3 {
@@ -75,12 +76,14 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
     let step_mark = SemanticCode::PipelineStep.glyph(caps);
 
     // 1. Parsing phase
-    let program = match ghl_syntax::parse(&content) {
+    let program = match ghl_syntax::parse_spanned(&content) {
         Ok(prog) => prog,
         Err(errors) => {
-            for err_msg in errors {
-                let err = Diagnostic::compute_error("C0100", err_msg)
-                    .with_location(&filename, 1, 1);
+            let index = SourceIndex::new(&content);
+            for syntax_err in errors {
+                let (line, col) = index.offset_to_position(syntax_err.span.start);
+                let err = Diagnostic::compute_error("C0100", syntax_err.message)
+                    .with_location(&filename, line as usize + 1, col as usize + 1);
                 eprintln!("{}", err.render_with_caps(caps));
             }
             std::process::exit(1);
