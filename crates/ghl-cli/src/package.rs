@@ -408,14 +408,17 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
 
     println!();
     if failed == 0 {
-        let summary = format!("test result: ok. {passed} passed; 0 failed; finished");
+        let glyph = if caps.unicode_enabled { "ദ്ദി(ᓀ‸ᓂマ ੭ " } else { "" };
+        let summary = format!("{glyph}test result: ok. {passed} passed; 0 failed; finished");
         println!("{}", caps.green(&summary));
         Ok(())
     } else {
-        let summary = format!("test result: FAILED. {passed} passed; {failed} failed");
+        let glyph = if caps.unicode_enabled { "/ᐠ ¬`‸´¬ マ " } else { "" };
+        let summary = format!("{glyph}test result: FAILED. {passed} passed; {failed} failed");
         println!("{}", caps.red(&summary));
         Err(Diagnostic::compute_error("C0609", "One or more tests failed"))
     }
+
 }
 
 /// Discovers source files, extracts documentation comments, and generates HTML/Markdown documentation.

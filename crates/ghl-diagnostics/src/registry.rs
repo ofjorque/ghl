@@ -25,6 +25,16 @@ pub enum SemanticCode {
     ExecInfo,
     ExecRunning,
     PipelineStep,
+
+    // Rich Feline Expressions (Gojo & Haru)
+    ApprovalGojo,
+    ApprovalHaru,
+    DocQuery,
+    ExecIdle,
+    PlotSuccess,
+    GojoBanner,
+    HaruWave,
+    NyaLoaf,
 }
 
 pub struct SymbolEntry {
@@ -63,7 +73,7 @@ impl SemanticCode {
                 badge: "STATISTICAL ERROR",
             },
             Self::StatWarning => SymbolEntry {
-                unicode: "/ᐠ - ˕ •マ",
+                unicode: "/ᐠ ·•᷄ ˕ •᷅マ",
                 ascii: "[STAT-WARN]",
                 badge: "STATISTICAL WARNING",
             },
@@ -108,6 +118,47 @@ impl SemanticCode {
                 ascii: "OK",
                 badge: "STEP",
             },
+
+            Self::ApprovalGojo => SymbolEntry {
+                unicode: "ദ്ദി(ᓀ‸ᓂマ ੭",
+                ascii: "[OK]",
+                badge: "APPROVED",
+            },
+            Self::ApprovalHaru => SymbolEntry {
+                unicode: "ദ്ദി/ᐠ - ⩊ -マ",
+                ascii: "[OK]",
+                badge: "PASSED",
+            },
+            Self::DocQuery => SymbolEntry {
+                unicode: "/ᐠ • ˕ •マ ?",
+                ascii: "[?]",
+                badge: "HELP",
+            },
+            Self::ExecIdle => SymbolEntry {
+                unicode: "ㅤ/ᐠ - ˕ -マᶻ 𝗓 𐰁",
+                ascii: "[IDLE]",
+                badge: "IDLE",
+            },
+            Self::PlotSuccess => SymbolEntry {
+                unicode: "/ ˵> ˕ <˵マ",
+                ascii: "[PLOT]",
+                badge: "RENDERED",
+            },
+            Self::GojoBanner => SymbolEntry {
+                unicode: "𝑴𝒆𝒐𝒘. ฅ(•- •マ",
+                ascii: "[GHL]",
+                badge: "SYSTEM",
+            },
+            Self::HaruWave => SymbolEntry {
+                unicode: "ฅ(^⩊ •マ",
+                ascii: "[TIP]",
+                badge: "TIP",
+            },
+            Self::NyaLoaf => SymbolEntry {
+                unicode: "/ᐠ_ ꞈ _ᐟ\\ɴʏᴀ~",
+                ascii: "[NYA]",
+                badge: "NYA",
+            },
         }
     }
 
@@ -136,6 +187,11 @@ impl SemanticCode {
             Self::ExecSuccess | Self::PipelineStep => caps.green(&caps.bold(&text)),
             Self::ExecInfo => caps.cyan(&text),
             Self::ExecRunning => caps.magenta(&caps.bold(&text)),
+            Self::ApprovalGojo => caps.gojo(&caps.bold(&text)),
+            Self::ApprovalHaru | Self::PlotSuccess | Self::HaruWave => caps.haru(&caps.bold(&text)),
+            Self::DocQuery => caps.cyan(&caps.bold(&text)),
+            Self::ExecIdle | Self::NyaLoaf => caps.dim(&text),
+            Self::GojoBanner => caps.gojo(&caps.bold(&text)),
         }
     }
 }
@@ -162,5 +218,10 @@ mod tests {
 
         assert_eq!(SemanticCode::ExecSuccess.glyph(&rich), "/ᐠ˵- ⩊ -˵マ ✧");
         assert_eq!(SemanticCode::ExecSuccess.glyph(&plain), "[SUCCESS]");
+
+        assert_eq!(SemanticCode::ApprovalGojo.glyph(&rich), "ദ്ദി(ᓀ‸ᓂマ ੭");
+        assert_eq!(SemanticCode::ApprovalHaru.glyph(&rich), "ദ്ദി/ᐠ - ⩊ -マ");
+        assert_eq!(SemanticCode::DocQuery.glyph(&rich), "/ᐠ • ˕ •マ ?");
+        assert_eq!(SemanticCode::PlotSuccess.glyph(&rich), "/ ˵> ˕ <˵マ");
     }
 }

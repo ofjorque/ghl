@@ -289,8 +289,10 @@ impl ReplSession {
                     self.user_vars.retain(|v| v != var);
                     removed.push(*var);
                 }
-                println!("(=^･ω･^=) Removed variable(s): {}\n", removed.join(", "));
+                let glyph = if self.caps.unicode_enabled { "ฅ(•⩊ •マ" } else { "[OK]" };
+                println!("{} Removed variable(s): {}\n", self.caps.haru(glyph), removed.join(", "));
                 false
+
             }
             cmd if cmd.starts_with(":doc") => {
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
@@ -319,9 +321,10 @@ impl ReplSession {
             self.interpreter.env.remove(var);
             self.type_env.remove(var);
         }
-        self.user_vars.clear();
-        println!("(=^･ω･^=) Cleared {count} user variable(s).\n");
+        let glyph = if self.caps.unicode_enabled { "ฅ(•⩊ •マ" } else { "[OK]" };
+        println!("{} Cleared {count} user variable(s).\n", self.caps.haru(glyph));
     }
+
 
     fn show_doc(&self, name: &str) {
         if let Some(doc) = ghl_runtime::lookup_doc(name) {
@@ -366,8 +369,9 @@ impl ReplSession {
 
     fn list_docs(&self) {
         let mut panel = CockpitPanel::new("Standard Library Functions");
-        panel.with_badge("DOCS");
+        panel.with_badge(if self.caps.unicode_enabled { "/ᐠ • ˕ •マ ? DOCS" } else { "DOCS" });
         panel.add_line("Use `?<name>` or `:doc <name>` to view signatures and mathematical formulas.");
+
         panel.add_divider();
         for doc in ghl_runtime::doc::all_docs() {
             panel.add_kv(format!("{}()", doc.name), doc.summary);

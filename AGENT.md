@@ -32,12 +32,21 @@ Este documento establece las directrices no negociables, estándares técnicos y
        - Banner y firma elegante: `𝑴𝒆𝒐𝒘. ฅ(•- •マ`
        - Errores de sintaxis / compilación (`[Cxxxx]`): `/ᐠ ¬`‸´¬ マ`
        - Singularidad y fallos matemáticos (`[Sxxxx]`): `≽(◉˕ ◉ ≼マ`
+       - Visto bueno severo de Gojo (Tests aprobados): `ദ്ദി(ᓀ‸ᓂマ ੭`
        - Compilación nativa AOT completada: `≽(• ̀⩊ •́マ≼`
      - **Haru (Naranja y Blanco / Amabilidad / Éxitos y Tips):**
        - REPL prompt y bienvenida: `ฅ(•⩊ •マ`
+       - Aprobación amable de Haru (spring_pact / fmt): `ദ്ദി/ᐠ - ⩊ -マ`
+       - Consulta de documentación / Ayuda (`?<fn>`): `/ᐠ • ˕ •マ ?`
        - Éxito, convergencia y certificados (`spring_pact`): `/ᐠ˵- ⩊ -˵マ ✧` ó `/ᐠ ◞ ᆺ ◟マ`
-       - Sugerencias amables y documentación (`?<fn>`): `/ᐠ - ˕ •マ`
-     - **Fallo Fatal / Pánico Irrecuperable:** `/ᐠ ╥ ˕ ╥マ`
+       - Gráficos y visualizaciones exitosas: `/ ˵> ˕ <˵マ`
+       - Sugerencias amables y tips de optimización: `ฅ(^⩊ •マ`
+     - **Advertencias y Casos Especiales:**
+       - Advertencias estadísticas (`[SWxxxx]` / VIF > 10): `/ᐠ ·•᷄ ˕ •᷅マ`
+       - Reposo / Hilos idle / Sleep: `ㅤ/ᐠ - ˕ -マᶻ 𝗓 𐰁`
+       - Despedida / Cierre elegante: `/ᐠ_ ꞈ _ᐟ\ɴʏᴀ~`
+       - Fallo Fatal / Pánico Irrecuperable: `/ᐠ ╥ ˕ ╥マ`
+
 
 
 5. **Resolución de los Dos Lenguajes sin Tracing GC:**
