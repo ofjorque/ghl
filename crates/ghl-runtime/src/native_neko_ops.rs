@@ -4,6 +4,7 @@
 //! referenced unqualified from `RuntimeEnv::with_prelude()` via glob imports.
 
 use ghl_diagnostics::Diagnostic;
+use ghl_syntax::ast::FormulaOp;
 use crate::value::Value;
 use crate::vector_data::VectorData;
 
@@ -20,7 +21,13 @@ pub(crate) fn native_fit_ols(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 
     let (response, terms) = match &args[0] {
-        Value::Formula { response, terms } => (response.clone(), terms.clone()),
+        Value::Formula { op: FormulaOp::Regression, response, terms } => (response.clone(), terms.clone()),
+        Value::Formula { op, .. } => {
+            return Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("First argument of `fit()` must be a regression formula (`~`), found `{op}`"),
+            ));
+        }
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
@@ -57,7 +64,13 @@ pub(crate) fn native_fit_logistic(args: Vec<Value>) -> Result<Value, Diagnostic>
     }
 
     let (response, terms) = match &args[0] {
-        Value::Formula { response, terms } => (response.clone(), terms.clone()),
+        Value::Formula { op: FormulaOp::Regression, response, terms } => (response.clone(), terms.clone()),
+        Value::Formula { op, .. } => {
+            return Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("First argument of `fit_logistic()` must be a regression formula (`~`), found `{op}`"),
+            ));
+        }
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",

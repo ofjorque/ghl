@@ -547,7 +547,7 @@ impl Interpreter {
                 Ok(Value::Unit)
             }
 
-            ExprKind::Formula { response, terms } => {
+            ExprKind::Formula { op, response, terms } => {
                 let resp_str = match &response.kind {
                     ExprKind::Ident(s) => s.clone(),
                     _ => format!("{:?}", response.kind),
@@ -557,9 +557,18 @@ impl Interpreter {
                     extract_formula_term(t, &mut term_strs);
                 }
                 Ok(Value::Formula {
+                    op: *op,
                     response: resp_str,
                     terms: term_strs,
                 })
+            }
+
+            ExprKind::SemSpec { equations } => {
+                let mut values = Vec::with_capacity(equations.len());
+                for eq in equations {
+                    values.push(self.eval_expr(eq)?);
+                }
+                Ok(Value::SemSpec(values))
             }
 
             ExprKind::Lambda { params, body } => {

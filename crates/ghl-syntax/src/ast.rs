@@ -124,8 +124,16 @@ pub enum ExprKind {
         expr: Option<Box<Expr>>,
     },
     Formula {
+        op: FormulaOp,
         response: Box<Expr>,
         terms: Vec<Expr>,
+    },
+    /// `sem_spec { f1 =~ x1 + x2; f1 ~~ f2; f2 ~ f1; }` — a SEM/CFA model specification:
+    /// an ordered list of `Formula` equations (measurement, covariance, and/or
+    /// regression), each mandatorily `;`-terminated since there's no last-expression
+    /// return-value convention here (unlike a regular `{ ... }` block).
+    SemSpec {
+        equations: Vec<Expr>,
     },
     If {
         cond: Box<Expr>,
@@ -184,6 +192,30 @@ pub enum ExprKind {
         end: Box<Expr>,
         inclusive: bool,
     },
+}
+
+/// The three tilde-family formula operators. `Regression` (`~`) is the original
+/// modeling formula used by `ols`/`fit_logistic`; `Measurement` (`=~`) and
+/// `Covariance` (`~~`) are lavaan-style SEM/CFA operators, only meaningful inside
+/// a `sem_spec { ... }` block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormulaOp {
+    /// `~` — response modeled by predictors, e.g. `y ~ x1 + x2`.
+    Regression,
+    /// `=~` — latent variable measured by indicators, e.g. `f1 =~ x1 + x2`.
+    Measurement,
+    /// `~~` — covariance or residual variance, e.g. `x1 ~~ x2`.
+    Covariance,
+}
+
+impl std::fmt::Display for FormulaOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FormulaOp::Regression => write!(f, "~"),
+            FormulaOp::Measurement => write!(f, "=~"),
+            FormulaOp::Covariance => write!(f, "~~"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -410,8 +442,8 @@ impl std::fmt::Display for ExprKind {
                 }
                 write!(f, "}}")
             }
-            ExprKind::Formula { response, terms } => {
-                write!(f, "{response} ~ ")?;
+            ExprKind::Formula { op, response, terms } => {
+                write!(f, "{response} {op} ")?;
                 for (i, t) in terms.iter().enumerate() {
                     if i > 0 {
                         write!(f, " + ")?;
@@ -419,6 +451,13 @@ impl std::fmt::Display for ExprKind {
                     write!(f, "{t}")?;
                 }
                 Ok(())
+            }
+            ExprKind::SemSpec { equations } => {
+                writeln!(f, "sem_spec {{")?;
+                for eq in equations {
+                    writeln!(f, "    {eq};")?;
+                }
+                write!(f, "}}")
             }
             ExprKind::If { cond, then_branch, else_branch } => {
                 write!(f, "if {cond} {then_branch}")?;

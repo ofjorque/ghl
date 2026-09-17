@@ -3,7 +3,7 @@ use ghl_diagnostics::{
     CockpitTable, RenderCaps, TableAlignment, TableColumn, Diagnostic,
     AestheticMap, GeomLayer, PlotSpec,
 };
-use ghl_syntax::ast::{Expr, BinaryOp};
+use ghl_syntax::ast::{Expr, BinaryOp, FormulaOp};
 use ghl_types::ContrastScheme;
 use crate::env::RuntimeEnv;
 use crate::neko::FittedModel;
@@ -170,9 +170,13 @@ pub enum Value {
         contrast: ContrastScheme,
     },
     Formula {
+        op: FormulaOp,
         response: String,
         terms: Vec<String>,
     },
+    /// `sem_spec { ... }` result: an ordered list of `Formula` equations
+    /// (measurement `=~`, covariance `~~`, and/or regression `~`).
+    SemSpec(Vec<Value>),
     /// Fitted statistical model under NEKO framework
     ModelFit(Box<FittedModel>),
     /// Fitted GLM (logistic regression via IRLS, TODO.md Fase 6 Caso 3.2) -- a separate
@@ -317,6 +321,7 @@ impl Value {
             Value::NamedArg(..) => "NamedArg",
             Value::Factor { .. } => "Factor",
             Value::Formula { .. } => "Formula",
+            Value::SemSpec(_) => "SemSpec",
             Value::ModelFit(_) => "ModelFit",
             Value::GlmFit(_) => "GlmFit",
             Value::GmmFit(_) => "GmmFit",
@@ -370,9 +375,10 @@ impl PartialEq for Value {
                 Value::Factor { levels: l2, indices: i2, ordered: o2, contrast: k2 },
             ) => l1 == l2 && i1 == i2 && o1 == o2 && k1 == k2,
             (
-                Value::Formula { response: r1, terms: t1 },
-                Value::Formula { response: r2, terms: t2 },
-            ) => r1 == r2 && t1 == t2,
+                Value::Formula { op: op1, response: r1, terms: t1 },
+                Value::Formula { op: op2, response: r2, terms: t2 },
+            ) => op1 == op2 && r1 == r2 && t1 == t2,
+            (Value::SemSpec(a), Value::SemSpec(b)) => a == b,
             (Value::ModelFit(m1), Value::ModelFit(m2)) => m1 == m2,
             (Value::GlmFit(m1), Value::GlmFit(m2)) => m1 == m2,
             (Value::GmmFit(m1), Value::GmmFit(m2)) => m1 == m2,
@@ -645,8 +651,12 @@ impl Value {
                     contrast
                 )
             }
-            Value::Formula { response, terms } => {
-                format!("{} ~ {}", response, terms.join(" + "))
+            Value::Formula { op, response, terms } => {
+                format!("{} {} {}", response, op, terms.join(" + "))
+            }
+            Value::SemSpec(equations) => {
+                let rendered: Vec<String> = equations.iter().map(|e| e.render_styled(caps)).collect();
+                format!("sem_spec {{ {} }}", rendered.join("; "))
             }
             Value::ModelFit(m) => m.render_cockpit(caps),
             Value::GlmFit(m) => m.render_cockpit(caps),

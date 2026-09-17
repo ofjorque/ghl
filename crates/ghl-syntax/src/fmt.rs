@@ -347,9 +347,11 @@ fn format_expr(out: &mut String, expr: &Expr, level: usize) {
             indent(out, level);
             out.push('}');
         }
-        ExprKind::Formula { response, terms } => {
+        ExprKind::Formula { op, response, terms } => {
             format_expr(out, response, level);
-            out.push_str(" ~ ");
+            out.push(' ');
+            out.push_str(&op.to_string());
+            out.push(' ');
             if terms.is_empty() {
                 out.push('1');
             } else {
@@ -360,6 +362,16 @@ fn format_expr(out: &mut String, expr: &Expr, level: usize) {
                     format_expr(out, term, level);
                 }
             }
+        }
+        ExprKind::SemSpec { equations } => {
+            out.push_str("sem_spec {\n");
+            for eq in equations {
+                indent(out, level + 1);
+                format_expr(out, eq, level + 1);
+                out.push_str(";\n");
+            }
+            indent(out, level);
+            out.push('}');
         }
         ExprKind::If { cond, then_branch, else_branch } => {
             out.push_str("if ");

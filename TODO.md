@@ -14,7 +14,7 @@ Este documento es el índice activo del trabajo pendiente de GHL. Se mantiene de
 Backlog activo detallado en [`docs/roadmap/08_TODO_MODELOS_AVANZADOS_Y_SPRING_PACT.md`](docs/roadmap/08_TODO_MODELOS_AVANZADOS_Y_SPRING_PACT.md):
 
 - [ ] **Parte A: Ecuaciones Estructurales (SEM / CFA):**
-  - [ ] Operadores `=~` (medición latente) y `~~` (covarianza/varianza residual) en `ghl-syntax`.
+  - [x] Operadores `=~` (medición latente) y `~~` (covarianza/varianza residual) en `ghl-syntax`, más el bloque `sem_spec { eq1; eq2; ... }` (`;` obligatorio por ecuación) para agrupar varias en una sola especificación.
   - [ ] Estimador `sem(spec, df)` en `ghl-runtime::neko` basado en optimización Wishart ML e índices de ajuste ($\chi^2$, CFI, TLI, RMSEA).
 - [ ] **Parte B: Estimadores Econométricos Clave:**
   - [ ] Efectos Fijos de Alta Dimensión (`feols(y ~ x | id + time, df)`) con algoritmo de centrado por medias (*Within-transformation*).
@@ -26,6 +26,16 @@ Backlog activo detallado en [`docs/roadmap/08_TODO_MODELOS_AVANZADOS_Y_SPRING_PA
   - [ ] Módulos de supuestos estadísticos (`expect_vif_max`, `expect_homoscedasticity`, `expect_min_sample_size`).
   - [ ] Hashing criptográfico **SHA-256** del contrato y emisión de Certificado de Cumplimiento Cockpit Deck.
   - [ ] Suite de pruebas unitarias ejecutadas con `ghl test`.
+- [ ] **Parte E: Backlog Extendido de Estimadores Estadísticos y Econométricos** (ya cubiertos: OLS, regresión logística/GLM, GMM de clustering, y Parte A/B de arriba — SEM, `feols`, `iv_regress`, `lasso`/`ridge`/`elastic_net`):
+  - [ ] **Series de Tiempo:** `arima(y, order)`/`sarima` (Box-Jenkins), `var(vars, lags)` (Vector Autoregression), `garch`/`arch` (volatilidad condicional), filtro de Kalman / modelos de espacio de estados.
+  - [ ] **Panel Avanzado:** Efectos Aleatorios (`feols` con GLS) y test de Hausman (RE vs FE), GMM dinámico de panel (Arellano-Bond / Blundell-Bond, `xtabond`-style).
+  - [ ] **Elección Discreta y Conteo:** Logit/Probit ordinal, Logit multinomial, Regresión de Poisson y Binomial Negativa (datos de conteo).
+  - [ ] **Robustez y Cuantiles:** Regresión Cuantílica (`rq(y ~ x, df, tau)`), errores estándar robustos por clúster (verificar si el sandwich HC ya cubre esto o falta la variante clúster), M-estimadores.
+  - [ ] **Inferencia Causal Moderna:** Diferencias-en-Diferencias (incl. diseños escalonados tipo Callaway-Sant'Anna), Regresión Discontinua (RDD), Emparejamiento por Puntaje de Propensión (PSM), Control Sintético.
+  - [ ] **Supervivencia:** Estimador Kaplan-Meier, Regresión de Cox (riesgos proporcionales).
+  - [ ] **Reducción de Dimensionalidad:** PCA, Análisis Factorial Exploratorio (EFA) — complementa el CFA de la Parte A.
+  - [ ] **Multinivel/Mixtos:** Modelos jerárquicos con intercepto/pendiente aleatorios (estilo `lme4`).
+  - [ ] **No Lineal General:** Mínimos Cuadrados No Lineales (`nls`), splines/GAM.
 - [x] **Parte D: Identidad Felina Dual y Dinámica de Personalidades (Gojo & Haru):**
   - [x] Corregir historia oficial en `AGENT.md` y RFCs (ambos son gatos reales del creador: Haru blanco/naranja y Gojo gris dominante; cero perros).
   - [x] Catálogo canónico de Kaomojis en `ghl-diagnostics::registry` y colores de terminal (`caps.haru` naranja cálido, `caps.gojo` gris pizarra).

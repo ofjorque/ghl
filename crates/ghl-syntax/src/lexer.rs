@@ -86,6 +86,8 @@ pub enum Token {
     Mat,
     #[token("col")]
     Col,
+    #[token("sem_spec")]
+    SemSpec,
 
     // Boolean & Missing Values
     #[token("true")]
@@ -126,6 +128,12 @@ pub enum Token {
     Pipe,
     #[token("~")]
     Tilde,
+    /// `=~` — SEM latent measurement operator (lavaan-style), e.g. `f1 =~ x1 + x2`.
+    #[token("=~")]
+    MeasuredBy,
+    /// `~~` — SEM covariance/residual-variance operator, e.g. `x1 ~~ x2`.
+    #[token("~~")]
+    TildeTilde,
     #[token("_", priority = 3)]
     Underscore,
 

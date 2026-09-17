@@ -844,6 +844,28 @@ impl TypeChecker {
 
             ExprKind::Formula { .. } => Type::Formula,
 
+            ExprKind::SemSpec { equations } => {
+                for eq in equations {
+                    let eq_ty = self.check_expr(eq);
+                    if !matches!(eq.kind, ExprKind::Formula { .. }) {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0615",
+                                format!(
+                                    "`sem_spec` equations must use `~`, `=~`, or `~~`, found `{}`",
+                                    eq_ty
+                                ),
+                            )
+                            .locate(&self.source_index, &self.source_file, &eq.span)
+                            .with_help(
+                                "Each line inside `sem_spec { ... }` must be a formula equation, e.g. `f1 =~ x1 + x2;`.",
+                            ),
+                        );
+                    }
+                }
+                Type::SemSpec
+            }
+
             ExprKind::Lambda { params, body } => {
                 self.env.push_scope();
                 for p in params {

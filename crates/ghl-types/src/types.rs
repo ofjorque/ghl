@@ -64,6 +64,9 @@ pub enum Type {
     },
     /// Statistical modeling formula (response ~ predictors).
     Formula,
+    /// SEM/CFA model specification: an ordered list of `Formula` equations
+    /// (`~`, `=~`, `~~`) declared inside `sem_spec { ... }`.
+    SemSpec,
     /// Fitted statistical model (NEKO framework).
     ModelFit,
     /// Grammar of Graphics statistical plot.
@@ -248,6 +251,7 @@ impl Type {
                     contrast: ContrastScheme::Treatment,
                 },
                 "Formula" | "formula" => Type::Formula,
+                "SemSpec" | "semspec" => Type::SemSpec,
                 "ModelFit" | "modelfit" => Type::ModelFit,
                 "Plot" | "plot" => Type::Plot,
                 "()" | "unit" | "void" => Type::Unit,
@@ -332,6 +336,7 @@ impl fmt::Display for Type {
                 }
             }
             Type::Formula => write!(f, "Formula"),
+            Type::SemSpec => write!(f, "SemSpec"),
             Type::ModelFit => write!(f, "ModelFit"),
             Type::Plot => write!(f, "Plot"),
             Type::Function { params, ret } => {

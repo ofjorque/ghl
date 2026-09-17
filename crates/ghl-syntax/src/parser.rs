@@ -191,6 +191,18 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             )
             .map_with_span(|cols, span| Expr::new(ExprKind::DataFrameLit(cols), span));
 
+        // SEM/CFA specification literal: sem_spec { f1 =~ x1 + x2; f1 ~~ f2; f2 ~ f1; }
+        // Each equation is mandatorily `;`-terminated: unlike a regular `{ ... }`
+        // block, there's no last-expression return-value convention to protect here.
+        let sem_spec_literal = just(Token::SemSpec)
+            .ignore_then(
+                expr.clone()
+                    .then_ignore(just(Token::Semicolon))
+                    .repeated()
+                    .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+            )
+            .map_with_span(|equations, span| Expr::new(ExprKind::SemSpec { equations }, span));
+
         // Record literal: { field_1: expr, field_2: expr, ... } (RFC 01 §3.4)
         let record_entry = select! {
             Token::Ident(name) => name,
@@ -437,6 +449,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .or(vector_literal)
             .or(dataframe_literal)
             .or(matrix_literal)
+            .or(sem_spec_literal)
             .or(lambda)
             .or(record_literal)
             .or(block)
@@ -730,14 +743,20 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             })
             .boxed();
 
-        // Modeling formula operator: ~
+        // Modeling formula operators: ~ (regression), =~ (SEM measurement), ~~ (SEM covariance)
+        let formula_op = just(Token::Tilde)
+            .to(FormulaOp::Regression)
+            .or(just(Token::MeasuredBy).to(FormulaOp::Measurement))
+            .or(just(Token::TildeTilde).to(FormulaOp::Covariance));
+
         let formula = pipe
             .clone()
-            .then(just(Token::Tilde).ignore_then(pipe).repeated())
-            .foldl(|lhs, rhs| {
+            .then(formula_op.then(pipe).repeated())
+            .foldl(|lhs, (op, rhs)| {
                 let span = lhs.span.start..rhs.span.end;
                 Expr::new(
                     ExprKind::Formula {
+                        op,
                         response: Box::new(lhs),
                         terms: vec![rhs],
                     },
@@ -1142,6 +1161,89 @@ mod tests {
         let code = "let spec = y ~ x1 + x2;";
         let program = parse(code).expect("Should parse formula");
         assert_eq!(program.statements.len(), 1);
+        match &program.statements[0].kind {
+            StmtKind::Let { init, .. } => match &init.kind {
+                ExprKind::Formula { op, .. } => assert_eq!(*op, FormulaOp::Regression),
+                other => panic!("Expected Formula, got {other:?}"),
+            },
+            other => panic!("Expected let statement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sem_operators() {
+        let measurement = parse("let f = f1 =~ x1 + x2 + x3;").expect("Should parse =~");
+        match &measurement.statements[0].kind {
+            StmtKind::Let { init, .. } => match &init.kind {
+                ExprKind::Formula { op, response, terms } => {
+                    // `x1 + x2 + x3` parses as a single `+`-chain expression here;
+                    // it's `ghl-runtime`'s `extract_formula_term` that flattens it
+                    // into individual predictor names at evaluation time.
+                    assert_eq!(*op, FormulaOp::Measurement);
+                    assert!(matches!(&response.kind, ExprKind::Ident(s) if s == "f1"));
+                    assert_eq!(terms.len(), 1);
+                    let rendered = terms[0].to_string();
+                    assert!(rendered.contains("x1") && rendered.contains("x2") && rendered.contains("x3"));
+                }
+                other => panic!("Expected Formula, got {other:?}"),
+            },
+            other => panic!("Expected let statement, got {other:?}"),
+        }
+
+        let covariance = parse("let c = x1 ~~ x2;").expect("Should parse ~~");
+        match &covariance.statements[0].kind {
+            StmtKind::Let { init, .. } => match &init.kind {
+                ExprKind::Formula { op, .. } => assert_eq!(*op, FormulaOp::Covariance),
+                other => panic!("Expected Formula, got {other:?}"),
+            },
+            other => panic!("Expected let statement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sem_spec_block() {
+        let code = r#"
+            let spec = sem_spec {
+                f1 =~ x1 + x2 + x3;
+                f2 =~ y1 + y2 + y3;
+                f1 ~~ f2;
+                f2 ~ f1;
+            };
+        "#;
+        let program = parse(code).expect("Should parse sem_spec block");
+        match &program.statements[0].kind {
+            StmtKind::Let { init, .. } => match &init.kind {
+                ExprKind::SemSpec { equations } => {
+                    assert_eq!(equations.len(), 4);
+                    let ops: Vec<FormulaOp> = equations
+                        .iter()
+                        .map(|e| match &e.kind {
+                            ExprKind::Formula { op, .. } => *op,
+                            other => panic!("Expected Formula equation, got {other:?}"),
+                        })
+                        .collect();
+                    assert_eq!(
+                        ops,
+                        vec![
+                            FormulaOp::Measurement,
+                            FormulaOp::Measurement,
+                            FormulaOp::Covariance,
+                            FormulaOp::Regression,
+                        ]
+                    );
+                }
+                other => panic!("Expected SemSpec, got {other:?}"),
+            },
+            other => panic!("Expected let statement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sem_spec_requires_semicolons() {
+        // No trailing `;` after the single equation -- must fail, unlike a regular
+        // block where the last expression can omit it as the return value.
+        let code = "let spec = sem_spec { f1 =~ x1 + x2 };";
+        assert!(parse(code).is_err());
     }
 
     #[test]

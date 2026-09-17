@@ -114,6 +114,36 @@ mod tests {
     }
 
     #[test]
+    fn test_typecheck_sem_spec_valid() {
+        let code = r#"
+            let spec = sem_spec {
+                f1 =~ x1 + x2 + x3;
+                f2 =~ y1 + y2 + y3;
+                f1 ~~ f2;
+                f2 ~ f1;
+            };
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh", code);
+        assert!(res.is_ok(), "A sem_spec of formula-only equations should type-check: {:?}", res.err());
+    }
+
+    #[test]
+    fn test_typecheck_reject_sem_spec_non_formula_equation() {
+        let code = r#"
+            let spec = sem_spec {
+                f1 =~ x1 + x2;
+                42;
+            };
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh", code);
+        assert!(res.is_err(), "A non-formula equation inside sem_spec must be rejected");
+        let diags = res.unwrap_err();
+        assert!(diags.iter().any(|d| d.code == "C0615"));
+    }
+
+    #[test]
     fn test_typecheck_bare_column_verbs() {
         // Bare column names (no quotes, no `col()`) inside filter/group_by/summarize/arrange
         // must type-check without "undefined variable" diagnostics — the checker's `col_ctx`
