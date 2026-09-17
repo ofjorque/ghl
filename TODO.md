@@ -40,9 +40,9 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
 
 - [x] **Espaciado del Prompt REPL:** Separar `ghl` del kaomoji (`ghl ฅ(•⩊ •マ> ` en vez de `ghlฅ(•⩊ •マ> `) para mejorar la legibilidad del cursor.
 - [x] **Comando `:var` como alias:** El REPL ahora acepta tanto `:vars`, `:var` como `:v` de manera indistinta para listar variables activas.
-- [ ] **Alineación tabular en `:vars`:** Cuando existan múltiples variables en sesión, alinear nombres, tipos (`[i64]`, `[f64]`, `[DataFrame]`) y valores en columnas con ancho consistente o `CockpitTable`.
+- [x] **Alineación tabular en `:vars`:** Reemplazado `CockpitPanel` por `CockpitTable` en `repl.rs` — nombres, tipos y valores ahora se alinean en columnas de ancho consistente por fila. De paso se corrigió un panic latente: el preview del valor truncaba por índice de byte crudo (`&s[..28]`), lo cual podía partir un carácter UTF-8 multibyte.
 - [x] **Prompt con color ANSI en Rustyline:** Verificado contra el código fuente de `rustyline` 18.0.1 — `calculate_position` (matemática del cursor) siempre usa `prompt.raw()`, nunca el prompt estilizado, y `wrap_at_eol` (renderizado real, Unix y Windows) trata las secuencias CSI como ancho cero. El coloreado del kaomoji de Haru en `GhlPromptHelper::highlight_prompt` (`repl.rs`) ya es seguro tal cual está; no rompe el historial ni el cálculo de longitud de línea.
-- [ ] **Sugerencias de comandos desconocidos:** En error `C0005` ante `:rm` o comando con typo (ej. `:clera`), ofrecer sugerencia Levenshtein del comando REPL más cercano (ej. `¿Quisiste decir :clear?`).
+- [x] **Sugerencias de comandos desconocidos:** El error `C0005` ahora calcula distancia de Levenshtein (implementación propia, sin dependencia externa) contra la lista de comandos REPL conocidos y sugiere el más cercano cuando la distancia es ≤2 (ej. `:clera` → "Did you mean `:clear`?").
 
 
 
