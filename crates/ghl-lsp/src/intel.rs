@@ -76,21 +76,15 @@ pub fn format_function_doc(doc: &FunctionDoc) -> String {
 }
 
 /// Provide hover tooltip for an identifier at the given position.
+///
+/// User-defined symbols are checked before standard library documentation,
+/// so a user's own `fn mean(...)` (or any other name shadowing a builtin)
+/// shows its own signature/doc instead of the builtin's — matching how
+/// `compute_definition` already resolves such names to the user's code.
 pub fn compute_hover(text: &str, line: usize, col: usize, program: Option<&Program>) -> Option<Hover> {
     let ident = ident_at_position(text, line, col)?;
 
-    // 1. Standard library documentation
-    if let Some(doc) = lookup_doc(&ident) {
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: format_function_doc(doc),
-            }),
-            range: None,
-        });
-    }
-
-    // 2. User-defined symbols in the AST
+    // 1. User-defined symbols in the AST
     if let Some(prog) = program {
         let user_docs = ghl_syntax::extract_doc_comments(text, prog);
         if let Some(user_doc) = user_docs.iter().find(|d| d.name == ident) {
@@ -124,6 +118,17 @@ pub fn compute_hover(text: &str, line: usize, col: usize, program: Option<&Progr
         }
     }
 
+    // 2. Standard library documentation
+    if let Some(doc) = lookup_doc(&ident) {
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format_function_doc(doc),
+            }),
+            range: None,
+        });
+    }
+
     None
 }
 
@@ -135,6 +140,11 @@ const KEYWORDS: &[&str] = &[
 ];
 
 /// Collect all completions (built-ins, keywords, local symbols, dataframe columns).
+///
+/// User-defined symbols are pushed before standard library items, and the
+/// final dedup keeps the first entry for each label — so a user's own
+/// definition wins the completion entry when its name shadows a builtin,
+/// consistent with [`compute_hover`]'s precedence.
 pub fn compute_completions(program: Option<&Program>) -> Vec<CompletionItem> {
     let mut items = Vec::new();
 
@@ -148,22 +158,7 @@ pub fn compute_completions(program: Option<&Program>) -> Vec<CompletionItem> {
         });
     }
 
-    // 2. Built-in functions with signatures and doc summaries
-    for doc in all_docs() {
-        items.push(CompletionItem {
-            label: doc.name.to_string(),
-            kind: Some(CompletionItemKind::FUNCTION),
-            detail: Some(doc.signature.to_string()),
-            documentation: Some(Documentation::MarkupContent(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: format!("**{}**\n\n{}", doc.summary, doc.description),
-            })),
-            insert_text: Some(doc.name.to_string()),
-            ..Default::default()
-        });
-    }
-
-    // 3. User-defined symbols and DataFrame columns in AST
+    // 2. User-defined symbols and DataFrame columns in AST
     if let Some(prog) = program {
         for stmt in &prog.statements {
             match &stmt.kind {
@@ -222,6 +217,21 @@ pub fn compute_completions(program: Option<&Program>) -> Vec<CompletionItem> {
                 _ => {}
             }
         }
+    }
+
+    // 3. Built-in functions with signatures and doc summaries
+    for doc in all_docs() {
+        items.push(CompletionItem {
+            label: doc.name.to_string(),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some(doc.signature.to_string()),
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!("**{}**\n\n{}", doc.summary, doc.description),
+            })),
+            insert_text: Some(doc.name.to_string()),
+            ..Default::default()
+        });
     }
 
     // Deduplicate by label
@@ -349,6 +359,25 @@ mod tests {
         }
     }
 
+    /// Regression test: hovering an identifier that shadows a standard
+    /// library name (here, `mean`) must show the user's own function, not
+    /// the builtin's — otherwise hover disagrees with what `goto_definition`
+    /// resolves the same identifier to.
+    #[test]
+    fn test_hover_user_defined_function_shadows_stdlib() {
+        let text = "fn mean(x: f64) -> f64 { x }\nlet r = mean(3.0);";
+        let program = parse(text).expect("syntax ok");
+        let hover = compute_hover(text, 1, 9, Some(&program)).expect("hover for shadowed mean");
+        if let HoverContents::Markup(content) = hover.contents {
+            assert!(content.value.contains("fn mean(x: f64) -> f64"), "must show the user's own signature");
+            assert!(content.value.contains("User-defined function"));
+            assert!(!content.value.contains("Vector[T]"), "must not show the stdlib mean's signature");
+            assert!(!content.value.contains("Kleene"), "must not show the stdlib mean's description");
+        } else {
+            panic!("expected markdown content");
+        }
+    }
+
     #[test]
     fn test_completions_include_builtins_and_keywords() {
         let completions = compute_completions(None);
@@ -358,6 +387,21 @@ mod tests {
         assert!(labels.contains(&"mean"));
         assert!(labels.contains(&"ols"));
         assert!(labels.contains(&"filter"));
+    }
+
+    /// Regression test: when a user's function shadows a stdlib name, the
+    /// completion item for that label must reflect the user's own function
+    /// (not the builtin's), consistent with `compute_hover`'s precedence.
+    #[test]
+    fn test_completions_user_function_shadows_stdlib() {
+        let text = "fn mean(x: f64) -> f64 { x }";
+        let program = parse(text).expect("syntax ok");
+        let completions = compute_completions(Some(&program));
+
+        let mean_items: Vec<&CompletionItem> = completions.iter().filter(|c| c.label == "mean").collect();
+        assert_eq!(mean_items.len(), 1, "must not list `mean` twice");
+        assert_eq!(mean_items[0].kind, Some(CompletionItemKind::FUNCTION));
+        assert_eq!(mean_items[0].detail.as_deref(), Some("mean(...) -> f64"), "must reflect the user's own signature");
     }
 
     #[test]
