@@ -1,13 +1,16 @@
-//! Canonical Standard Library Module Registry for GHL Runtime.
+//! Standard Library Module Registry for GHL Runtime.
 //!
-//! Organizes built-in functions, statistical models, and constants into clean,
-//! isolated namespaces under `std::*`:
-//! - `std::dataframe` (I/O, wrangling verbs, joins, NA semantics)
-//! - `std::linalg` (faer-backed dense linear algebra, matrix operations, decompositions)
-//! - `std::stats` (summary stats, plus `distributions`, `rng`, `models`)
-//! - `std::math` (scalar + vector mathematical functions, constants pi/e)
-//! - `std::io` (file I/O and printing)
-//! - `std::plot` (Grammar of Graphics statistical plotting)
+//! The canonical list of which items live in which `std::*` module is
+//! `ghl_types::modules` (also used by the type checker) - this crate derives
+//! its own module resolution from it instead of hand-maintaining a second
+//! copy. The two used to be independent, hand-written lists and had already
+//! drifted: `std::stats::rng` declared different items on each side, and
+//! several `std::stats` items (`quantile`, `iqr`, `skewness`, `kurtosis`,
+//! `cov`, `cor`, and the old `rng` trio) type-checked fine but had no
+//! `native_*` implementation at all, so `ghl check` passed and `ghl run`
+//! crashed with "Cannot find item". Once a name is confirmed to belong to a
+//! module here, it's resolved to its actual implementation by looking it up
+//! in the prelude environment by name.
 
 use std::sync::LazyLock;
 use crate::env::RuntimeEnv;
@@ -15,139 +18,22 @@ use crate::value::Value;
 
 static PRELUDE_ENV: LazyLock<RuntimeEnv> = LazyLock::new(RuntimeEnv::with_prelude);
 
-/// Returns the item names belonging to a standard library module path.
-pub fn get_module_item_names(path: &[String]) -> Option<Vec<&'static str>> {
-    let p: Vec<&str> = path.iter().map(|s| s.as_str()).collect();
-    match p.as_slice() {
-        ["std", "dataframe"] => Some(vec![
-            "read_csv", "read_parquet", "write_csv", "write_parquet", "parse_csv",
-            "col", "filter", "select", "mutate", "arrange", "rename", "drop",
-            "distinct", "head", "tail", "slice", "nrow", "ncol", "colnames",
-            "group_by", "summarize", "ungroup", "first", "last", "n_distinct",
-            "count", "coalesce", "desc", "pull", "slice_min", "slice_max",
-            "sample_n", "sample_frac", "inner_join", "left_join",
-            "fill_na", "fill_na_all", "pivot_wider", "pivot_longer", "impute", "filter_na_reason",
-            "glimpse", "na_reason", "na_reasons", "is_na",
-            "lazy", "collect", "explain", "scan_csv", "scan_parquet",
-        ]),
-
-        ["std", "linalg"] => Some(vec![
-            "dot", "transpose", "t", "identity", "eye", "diag", "zeros",
-            "len", "get", "set", "get_row", "set_row", "get_col",
-            "qr", "qr_q", "qr_r", "cholesky", "svd", "svd_u", "svd_s", "svd_v",
-            "eigen", "eigen_values", "eigen_vectors",
-        ]),
-
-        ["std", "stats", "distributions"] => Some(vec![
-            "normal_pdf", "normal_cdf", "random_normal", "random_gamma",
-            "gamma_pdf", "gamma_cdf", "random_uniform",
-        ]),
-
-        ["std", "stats", "rng"] => Some(vec![
-            "random_uniform", "random_normal", "random_gamma",
-        ]),
-
-        ["std", "stats", "models"] => Some(vec![
-            "fit", "ols", "fit_logistic", "fit_gmm", "gmm",
-            "summary", "tidy", "glance", "augment", "predict",
-            "residuals", "coef", "vcov",
-        ]),
-
-        ["std", "stats"] => {
-            let mut items = vec![
-                "mean", "median", "var", "std_dev", "min", "max",
-                "bootstrap_mean",
-            ];
-            if let Some(dist) = get_module_item_names(&["std".into(), "stats".into(), "distributions".into()]) {
-                items.extend(dist);
-            }
-            if let Some(models) = get_module_item_names(&["std".into(), "stats".into(), "models".into()]) {
-                items.extend(models);
-            }
-            Some(items)
-        }
-
-        ["std", "math"] => Some(vec![
-            "log", "log2", "log10", "exp", "sqrt", "abs", "floor", "ceil",
-            "sin", "cos", "round", "pow", "clamp", "log_sum_exp", "pi", "e",
-        ]),
-
-        ["std", "io"] => Some(vec![
-            "print", "println", "read_file", "read_lines", "write_file",
-            "append_file", "file_exists", "read_csv", "write_csv",
-            "read_parquet", "write_parquet", "scan_csv", "scan_parquet",
-        ]),
-
-        ["std", "plot"] => Some(vec![
-            "plot", "aes", "geom_point", "geom_line", "geom_smooth",
-            "geom_histogram", "geom_boxplot", "geom_bar", "labs",
-            "show", "save", "scatter", "hist", "histogram", "boxplot",
-        ]),
-
-        ["arena"] | ["std", "arena"] => Some(vec![
-            "scope", "alloc_vector", "alloc_matrix", "reset", "allocated_bytes",
-        ]),
-
-        ["autodiff"] | ["std", "autodiff"] => Some(vec![
-            "grad", "diff", "value_and_grad", "jacobian",
-        ]),
-
-        ["http"] | ["std", "http"] => Some(vec![
-            "serve", "response", "get", "post",
-        ]),
-
-        ["net"] | ["std", "net"] => Some(vec![
-            "tcp_connect",
-        ]),
-
-        ["concurrency"] | ["std", "concurrency"] => Some(vec![
-            "par_iter",
-        ]),
-
-        ["gpu"] | ["std", "gpu"] => Some(vec![
-            "Device", "GpuMatrix", "GpuVector", "PhiloxRng", "gemm", "reduce_sum",
-        ]),
-
-        _ => None,
-    }
+/// Returns the item names belonging to a standard library module path, per
+/// `ghl_types::modules`'s canonical registry.
+pub fn get_module_item_names(path: &[String]) -> Option<Vec<String>> {
+    ghl_types::modules::get_module_items(path).map(|items| items.into_iter().map(|(name, _ty)| name).collect())
 }
 
 /// Checks if a module path is recognized in the standard library.
 pub fn is_valid_module_path(path: &[String]) -> bool {
-    let p: Vec<&str> = path.iter().map(|s| s.as_str()).collect();
-    matches!(
-        p.as_slice(),
-        ["std"]
-            | ["std", "dataframe"]
-            | ["std", "linalg"]
-            | ["std", "stats"]
-            | ["std", "stats", "distributions"]
-            | ["std", "stats", "rng"]
-            | ["std", "stats", "models"]
-            | ["std", "math"]
-            | ["std", "io"]
-            | ["std", "plot"]
-            | ["std", "arena"]
-            | ["arena"]
-            | ["std", "autodiff"]
-            | ["autodiff"]
-            | ["std", "http"]
-            | ["http"]
-            | ["std", "net"]
-            | ["net"]
-            | ["std", "concurrency"]
-            | ["concurrency"]
-            | ["std", "gpu"]
-            | ["gpu"]
-    )
+    ghl_types::modules::is_valid_module_path(path)
 }
 
 /// Checks if an item is present in a module path.
 pub fn is_item_in_module(mod_path: &[String], item_name: &str) -> bool {
-    if let Some(names) = get_module_item_names(mod_path) {
-        names.contains(&item_name)
-    } else {
-        false
+    match get_module_item_names(mod_path) {
+        Some(names) => names.iter().any(|n| n == item_name),
+        None => false,
     }
 }
 
@@ -180,9 +66,61 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Value)>> {
     let mut items = Vec::with_capacity(names.len());
     for name in names {
         let full_name = format!("{}::{}", path.join("::"), name);
-        if let Some(val) = PRELUDE_ENV.get(&full_name).or_else(|| PRELUDE_ENV.get(name)) {
-            items.push((name.to_string(), val));
+        if let Some(val) = PRELUDE_ENV.get(&full_name).or_else(|| PRELUDE_ENV.get(&name)) {
+            items.push((name, val));
         }
     }
     Some(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression guard for the exact bug this unification fixes: every name
+    /// `ghl_types::modules` declares importable from a `std::*` module must
+    /// actually resolve to a runtime value here. If this fails, someone added
+    /// a name to the type checker's registry without implementing (or without
+    /// registering into the prelude) the matching native function - it would
+    /// type-check and then crash at runtime with "Cannot find item".
+    #[test]
+    fn test_every_declared_module_item_has_a_runtime_value() {
+        let module_paths: &[&[&str]] = &[
+            &["std", "dataframe"],
+            &["std", "linalg"],
+            &["std", "stats"],
+            &["std", "stats", "distributions"],
+            &["std", "stats", "rng"],
+            &["std", "stats", "models"],
+            &["std", "math"],
+            &["std", "io"],
+            &["std", "plot"],
+            &["std", "arena"],
+            &["std", "autodiff"],
+            &["std", "http"],
+            &["std", "net"],
+            &["std", "concurrency"],
+            &["std", "gpu"],
+        ];
+
+        let mut missing = Vec::new();
+        for path in module_paths {
+            let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+            let Some(names) = get_module_item_names(&path) else {
+                continue;
+            };
+            for name in names {
+                let mut full_path = path.clone();
+                full_path.push(name.clone());
+                if lookup_module_item(&full_path).is_none() {
+                    missing.push(format!("{}::{}", path.join("::"), name));
+                }
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "these std::* items are declared but have no runtime implementation: {missing:?}"
+        );
+    }
 }

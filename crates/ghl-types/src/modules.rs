@@ -120,11 +120,11 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("random_uniform".into(), any_fn_multi(3)),
         ]),
 
-        ["std", "stats", "rng"] => Some(vec![
-            ("set_seed".into(), any_fn()),
-            ("split_rng".into(), any_fn()),
-            ("get_seed".into(), any_fn()),
-        ]),
+        // Alias of `distributions` for the RNG-only subset of `std::stats` -
+        // kept in sync with it by construction rather than hand-duplicated,
+        // since the two used to list different (and largely unimplemented)
+        // items.
+        ["std", "stats", "rng"] => get_module_items(&["std".into(), "stats".into(), "distributions".into()]),
 
         ["std", "stats", "models"] => Some(vec![
             ("fit".into(), any_fn_multi(2)),
@@ -143,6 +143,12 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
         ]),
 
         ["std", "stats"] => {
+            // Only names with an actual `native_*` implementation belong here:
+            // this list (and every other module's) is the single source of
+            // truth for both the type checker and the runtime (see
+            // `ghl_runtime::modules`), so a name declared without an
+            // implementation type-checks fine and then crashes at runtime -
+            // exactly the bug this registry unification was meant to prevent.
             let mut items = vec![
                 ("mean".into(), Type::Function { params: vec![Type::Vector(Box::new(Type::Any))], ret: Box::new(Type::F64) }),
                 ("median".into(), Type::Function { params: vec![Type::Vector(Box::new(Type::Any))], ret: Box::new(Type::F64) }),
@@ -150,12 +156,6 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
                 ("std_dev".into(), Type::Function { params: vec![Type::Vector(Box::new(Type::Any))], ret: Box::new(Type::F64) }),
                 ("min".into(), any_fn()),
                 ("max".into(), any_fn()),
-                ("quantile".into(), any_fn_multi(2)),
-                ("iqr".into(), any_fn()),
-                ("skewness".into(), any_fn()),
-                ("kurtosis".into(), any_fn()),
-                ("cov".into(), any_fn_multi(2)),
-                ("cor".into(), any_fn_multi(2)),
                 ("bootstrap_mean".into(), any_fn_multi(3)),
             ];
             if let Some(dist) = get_module_items(&["std".into(), "stats".into(), "distributions".into()]) {
@@ -255,10 +255,11 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("par_iter".into(), any_fn()),
         ]),
 
+        // `GpuMatrix`/`GpuVector` are intentionally not listed: they're never
+        // constructed by calling a bare name, only produced by calling
+        // `.to_gpu(device)` on an existing Matrix/Vector.
         ["gpu"] | ["std", "gpu"] => Some(vec![
             ("Device".into(), any_fn()),
-            ("GpuMatrix".into(), any_fn()),
-            ("GpuVector".into(), any_fn()),
             ("PhiloxRng".into(), any_fn()),
             ("gemm".into(), any_fn_multi(2)),
             ("reduce_sum".into(), any_fn()),
