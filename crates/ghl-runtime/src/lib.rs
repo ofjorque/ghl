@@ -6,6 +6,22 @@
 pub mod value;
 pub mod matrix;
 pub mod env;
+// `env`'s native function implementations, split out for maintainability -
+// `RuntimeEnv::with_prelude()` in env.rs still refers to every `native_*` name
+// unqualified, resolved via glob imports (env.rs and each of these modules
+// import each other, which is why this file list has to precede `env`'s own
+// re-exports being usable - Rust resolves this fine since it's all one crate).
+pub mod native_core;
+pub mod native_dataframe_agg;
+pub mod native_dataframe_ext;
+pub mod native_io_ops;
+pub mod native_linalg;
+pub mod native_math;
+pub mod native_neko_ops;
+pub mod native_plot;
+pub mod native_string_ops;
+pub mod native_vector_ops;
+pub mod native_arena_ops;
 pub mod eval;
 pub mod neko;
 pub mod plot_stats;
