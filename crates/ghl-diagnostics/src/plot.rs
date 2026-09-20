@@ -818,7 +818,7 @@ impl PlotSpec {
 
         let mut out = String::new();
         let title = self.labels.title.clone().unwrap_or_else(|| "Frequency Distribution (Histogram)".into());
-        let badge = if caps.unicode_enabled { "(=^･ω･^=) NEKO" } else { "[NEKO]" };
+        let badge = if caps.unicode_enabled { "ฅ(•⩊ •マ NEKO" } else { "[NEKO]" };
 
         let pad_top = card_width.saturating_sub(visual_width(&title) + visual_width(badge) + 8);
         out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
@@ -1010,7 +1010,7 @@ impl PlotSpec {
 
         let mut out = String::new();
         let title = self.labels.title.clone().unwrap_or_else(|| "Category Frequencies (Bar Chart)".into());
-        let badge = if caps.unicode_enabled { "(=^･ω･^=) STATS" } else { "[STATS]" };
+        let badge = if caps.unicode_enabled { "ฅ(•⩊ •マ STATS" } else { "[STATS]" };
 
         let pad_top = card_width.saturating_sub(visual_width(&title) + visual_width(badge) + 8);
         out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));

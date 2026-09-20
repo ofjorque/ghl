@@ -53,7 +53,7 @@ pub(crate) fn native_help(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
     }
 
-    println!("(=^･ω･^=) GHL Help System:");
+    println!("{} GHL Help System:", caps.haru("ฅ(•⩊ •マ"));
     println!("Type `help(\"mean\")` or `?mean` to see signature and mathematical formula.");
     println!("Common functions: mean, sum, var, std_dev, median, ols, fit_logistic, fit_gmm,");
     println!("                  summary, predict, residuals, dot, cholesky, qr, svd, eigen,");

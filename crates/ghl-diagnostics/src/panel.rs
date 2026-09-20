@@ -54,7 +54,7 @@ impl CockpitPanel {
     /// Construct a structured operation telemetry card for high-volume tabular verbs.
     pub fn operation_telemetry(op_name: &str, row_count: usize, elapsed_secs: f64, details: Option<&str>) -> Self {
         let mut panel = Self::new(format!("Cockpit Telemetry: {op_name}"));
-        panel.with_badge("(U・ᴥ・U) PROCESSED");
+        panel.with_badge("ฅ(•⩊ •マ PROCESSED");
         let throughput = if elapsed_secs > 0.0 {
             (row_count as f64 / elapsed_secs) as u64
         } else {

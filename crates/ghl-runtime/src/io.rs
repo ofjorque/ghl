@@ -554,7 +554,7 @@ pub fn write_parquet_file(df: &Value, path: &str) -> Result<(), Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "write_parquet")?;
     if !na_reasons.is_empty() {
         eprintln!(
-            "(U・ᴥ・U) `write_parquet()`: this DataFrame has NA reasons recorded (na_reasons()); \
+            "/ᐠ ◞ ᆺ ◟マ NA `write_parquet()`: this DataFrame has NA reasons recorded (na_reasons()); \
              Parquet has no slot for them, so they will not round-trip through this file."
         );
     }

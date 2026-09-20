@@ -706,7 +706,7 @@ pub fn generate_project_docs_html(title: &str, items: &[ItemDoc]) -> String {
 </head>
 <body>
   <nav class="sidebar">
-    <h2>(U・ᴥ・U) Haru Docs</h2>
+    <h2>ฅ(•⩊ •マ Haru Docs</h2>
     <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">GHL Documentation Deck</p>
     <ul>
 {sidebar_items}    </ul>

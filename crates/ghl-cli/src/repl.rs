@@ -60,7 +60,7 @@ impl Highlighter for GhlPromptHelper {
         prompt: &'p str,
         _default: bool,
     ) -> std::borrow::Cow<'b, str> {
-        if prompt.contains("ฅ(•⩊ •マ") || prompt.contains("(=^･ω･^=)") {
+        if prompt.contains("ฅ(•⩊ •マ") {
             std::borrow::Cow::Owned(format!("ghl{}> ", self.caps.haru("ฅ(•⩊ •マ")))
         } else if prompt.contains("...") {
             std::borrow::Cow::Owned(format!("   {} ", self.caps.dim("...")))
@@ -303,7 +303,8 @@ impl ReplSession {
                 self.type_env = TypeEnv::with_prelude();
                 self.user_vars.clear();
                 self.user_docs.clear();
-                println!("(=^･ω･^=) Session environment successfully reset.\n");
+                let glyph = if self.caps.unicode_enabled { "ฅ(•⩊ •マ" } else { "[OK]" };
+                println!("{} Session environment successfully reset.\n", self.caps.haru(glyph));
                 false
             }
             ":clear-vars" => {

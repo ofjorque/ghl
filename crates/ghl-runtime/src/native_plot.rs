@@ -331,7 +331,7 @@ pub(crate) fn native_show(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     .unwrap_or(0);
                 let plot_path = std::path::Path::new(&plots_dir).join(format!("ghl_plot_{}_{}.svg", std::process::id(), timestamp));
                 if let Err(e) = p.save_file(&plot_path.to_string_lossy()) {
-                    eprintln!("(=^･ω･^=) [Plots Pane] Warning: failed to save SVG plot: {e}");
+                    eprintln!("{} [Plots Pane] Warning: failed to save SVG plot: {e}", caps.gojo("/ᐠ ¬`‸´¬ マ"));
                 }
             }
         }
@@ -379,10 +379,10 @@ pub(crate) fn native_view(args: Vec<Value>) -> Result<Value, Diagnostic> {
     };
 
     if opened {
-        println!("(=^･ω･^=) [Data Explorer] Opened {} ({} rows, {} cols) in Positron Data Explorer", filename, nrow, ncol);
+        println!("ฅ(•⩊ •マ [Data Explorer] Opened {} ({} rows, {} cols) in Positron Data Explorer", filename, nrow, ncol);
     } else {
-        println!("(=^･ω･^=) [Data Explorer] Exported {} ({} rows, {} cols) to:\n   {}", filename, nrow, ncol, path_str);
-        println!("   (U・ᴥ・U) Haru ready! Open this Parquet file in Positron Data Explorer");
+        println!("ฅ(•⩊ •マ [Data Explorer] Exported {} ({} rows, {} cols) to:\n   {}", filename, nrow, ncol, path_str);
+        println!("   ฅ(•⩊ •マ Haru ready! Open this Parquet file in Positron Data Explorer");
     }
 
     Ok(Value::String(path_str))
@@ -420,7 +420,7 @@ pub(crate) fn native_save(args: Vec<Value>) -> Result<Value, Diagnostic> {
             p.save_file(path_val).map_err(|e| {
                 Diagnostic::compute_error("C0312", format!("Failed to export plot to `{path_val}`: {e}"))
             })?;
-            println!("(U・ᴥ・U) Haru successfully exported plot to `{}`", path_val);
+            println!("ฅ(•⩊ •マ Haru successfully exported plot to `{}`", path_val);
             Ok(Value::Unit)
         }
         other => Err(Diagnostic::compute_error(

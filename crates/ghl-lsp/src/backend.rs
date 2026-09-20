@@ -175,7 +175,7 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "GHL Language Server initialized (=^･ω･^=)")
+            .log_message(MessageType::INFO, "GHL Language Server initialized ฅ(•⩊ •マ")
             .await;
     }
 

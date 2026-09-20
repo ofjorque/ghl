@@ -105,7 +105,7 @@ pub fn cmd_fmt(args: &[String], caps: &RenderCaps) {
     let elapsed = start.elapsed();
     let mut panel = CockpitPanel::new("GHL Formatter (RFC 12)");
     if check_only && !unformatted_files.is_empty() {
-        panel.with_badge(caps.yellow(if caps.unicode_enabled { "(・`ω´・) DIFF DETECTED" } else { "[DIFF DETECTED]" }));
+        panel.with_badge(caps.yellow(if caps.unicode_enabled { "/ᐠ ¬`‸´¬ マ DIFF DETECTED" } else { "[DIFF DETECTED]" }));
         panel.add_kv("Files Scanned", files_scanned.to_string());
         panel.add_kv("Total Lines", total_lines.to_string());
         panel.add_kv("Duration", format!("{:.2} ms", elapsed.as_secs_f64() * 1000.0));

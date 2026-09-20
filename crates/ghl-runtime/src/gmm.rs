@@ -305,7 +305,7 @@ impl FittedGmm {
 
         panel.add_divider();
         if caps.unicode_enabled {
-            panel.add_line("(=^･ω･^=) Haru clustered all observations successfully!");
+            panel.add_line(caps.haru("ฅ(•⩊ •マ Haru clustered all observations successfully!"));
         } else {
             panel.add_line("[GMM clustering completed]");
         }

@@ -46,7 +46,7 @@ impl RuntimeEnv {
         // Native function: purr (diagnostic trace)
         env.set("purr".into(), Value::NativeFn(|args| {
             let msg = args.first().map(|v| format!("{}", v)).unwrap_or_default();
-            println!("(=^･ω･^=) [purr] {}", msg);
+            println!("ฅ(•⩊ •マ [purr] {}", msg);
             Ok(Value::Unit)
         }));
 
@@ -55,7 +55,7 @@ impl RuntimeEnv {
             let cond = args.first().and_then(|v| v.as_bool()).unwrap_or(false);
             let msg = args.get(1).map(|v| format!("{}", v)).unwrap_or_else(|| "Assertion failed".into());
             if !cond {
-                Err(Diagnostic::compute_error("C0999", format!("(・`ω´・) [pounce failed] {}", msg)))
+                Err(Diagnostic::compute_error("C0999", format!("[pounce failed] {}", msg)))
             } else {
                 Ok(Value::Unit)
             }
