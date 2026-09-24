@@ -38,6 +38,8 @@ pub mod net;
 pub mod concurrency;
 pub mod gpu;
 pub mod doc;
+pub mod optim;
+pub mod sem;
 
 pub use value::{Value, JitFunction};
 pub use env::RuntimeEnv;

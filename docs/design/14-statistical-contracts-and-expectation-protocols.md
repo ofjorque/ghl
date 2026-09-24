@@ -68,12 +68,12 @@ En la práctica analítica, regulatoria y científica moderna (consultorías, en
 
 ## 4. Ejemplo de Código en GHL
 
-```lang
+```ghl
 use std::dataframe::*;
 use std::stats::*;
 use spring_pact::*;
 
-// 1. El auditor o cliente define el contrato acordado
+// 1. Auditor or client defines the agreed contract
 let contract = spring_pact::new("Auditoría Salarial 2026")
     |> expect_filter(col("age") >= 18)
     |> expect_na_max("salary", 0.03)
@@ -82,26 +82,26 @@ let contract = spring_pact::new("Auditoría Salarial 2026")
     |> expect_min_sample_size(1000)
     |> expect_vcov_kind("HC3");
 
-// Hash inmutable del protocolo pactado
+// Immutable contract protocol digest
 let contract_hash = contract.digest();
 println("Protocol Hash: {}", contract_hash);
 
-// 2. El analista ingesta los datos y aplica las restricciones del pacto
+// 2. Analyst ingests data and enforces contract rules
 let raw_data = read_csv("data/empresa_nomina.csv");
 let clean_data = raw_data |> spring_pact::enforce_data_rules(contract);
 
-// 3. Estimación del modelo econométrico
+// 3. Econometric model estimation
 let fit = ols(salary ~ education + experience + gender, clean_data);
 
-// 4. Verificación integral y emisión del certificado
+// 4. Comprehensive verification and certificate issuance
 let receipt = contract |> verify(fit);
 
 if (receipt.is_compliant()) {
-    println("(U・ᴥ・U) Haru verified the spring_pact protocol!");
+    println("/ᐠ˵- ⩊ -˵マ ✧ spring_pact protocol verified!");
     receipt.render_cockpit();
     receipt.save_certificate("audit_receipt.json");
 } else {
-    println("(=^･ω･^=) Contrato no cumplido. Violaciones detectadas:");
+    println("≽(◉˕ ◉ ≼マ Contract violated. Detected discrepancies:");
     receipt.print_violations();
 };
 ```
@@ -125,6 +125,6 @@ El recibo genera un panel formateado con la estética de **Cockpit Deck**:
 │ • Effective Sample Size (N)         >= 1000           N = 12,450   PASS   │
 │ • Standard Error Covariance Matrix  HC3 Robust        HC3 Applied  PASS   │
 ├───────────────────────────────────────────────────────────────────────────┤
-│ (U・ᴥ・U) Haru certified that all statistical pact expectations were met!   │
+│ /ᐠ˵- ⩊ -˵マ ✧ All statistical pact expectations certified and verified!    │
 └───────────────────────────────────────────────────────────────────────────┘
 ```

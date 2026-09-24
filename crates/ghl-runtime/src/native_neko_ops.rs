@@ -122,7 +122,7 @@ pub(crate) fn native_fit_gmm(args: Vec<Value>) -> Result<Value, Diagnostic> {
     Ok(Value::GmmFit(Box::new(model)))
 }
 
-pub(crate) fn native_summary(args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_summary(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`summary()` requires a ModelFit or printable object")
     })?;
@@ -140,6 +140,46 @@ pub(crate) fn native_summary(args: Vec<Value>) -> Result<Value, Diagnostic> {
             println!("{}", m);
             Ok(Value::Unit)
         }
+        Value::Struct { name, fields } => {
+            if name == "SemResult" {
+                println!("/ᐠ˵- ⩊ -˵マ ✧ CONVERGED (Wishart Maximum Likelihood)");
+                println!("===============================================================");
+                println!("Structural Equation Model (SEM / CFA) - Global Fit Indices");
+                println!("---------------------------------------------------------------");
+                if let (Some(n), Some(f_min), Some(chisq), Some(df), Some(p_val)) = (
+                    fields.get("n_obs"),
+                    fields.get("f_min"),
+                    fields.get("chisq"),
+                    fields.get("df"),
+                    fields.get("p_value"),
+                ) {
+                    println!("Number of observations : {}", n);
+                    println!("Minimum function value : {}", f_min);
+                    println!("Model Chi-Square       : {} (df = {}, p-value = {})", chisq, df, p_val);
+                }
+                if let (Some(b_chisq), Some(b_df)) = (fields.get("baseline_chisq"), fields.get("baseline_df")) {
+                    println!("Baseline Chi-Square    : {} (df = {})", b_chisq, b_df);
+                }
+                if let Some(cfi) = fields.get("cfi") { println!("CFI (Comparative Fit)  : {}", cfi); }
+                if let Some(tli) = fields.get("tli") { println!("TLI (Tucker-Lewis)     : {}", tli); }
+                if let Some(rmsea) = fields.get("rmsea") { println!("RMSEA                  : {}", rmsea); }
+                if let Some(srmr) = fields.get("srmr") { println!("SRMR                   : {}", srmr); }
+                println!("---------------------------------------------------------------");
+                println!("Parameter Estimates:");
+                if let Some(params) = fields.get("parameters") {
+                    println!("{}", params);
+                }
+                println!("===============================================================");
+                return Ok(Value::Unit);
+            }
+            let method_key = format!("{}::summary", name);
+            if let Some(fn_val) = interp.env.get(&method_key) {
+                interp.call_value(fn_val, vec![model_val.clone()])
+            } else {
+                println!("{}", model_val);
+                Ok(Value::Unit)
+            }
+        }
         other => {
             println!("{}", other);
             Ok(Value::Unit)
@@ -147,34 +187,67 @@ pub(crate) fn native_summary(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 }
 
-pub(crate) fn native_tidy(args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_tidy(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`tidy()` requires a ModelFit")
+        Diagnostic::compute_error("C0201", "`tidy()` requires a ModelFit or Struct")
     })?;
 
     match model_val {
         Value::ModelFit(m) => Ok(m.tidy()),
         Value::GlmFit(m) => Ok(m.tidy()),
         Value::GmmFit(m) => Ok(m.tidy()),
+        Value::Struct { name, fields } => {
+            if name == "SemResult" {
+                if let Some(params) = fields.get("parameters") {
+                    return Ok(params.clone());
+                }
+            }
+            let method_key = format!("{}::tidy", name);
+            let fn_val = interp.env.get(&method_key).ok_or_else(|| {
+                Diagnostic::statistical_error("S0200", format!("Method `tidy()` is not implemented for struct `{}`", name))
+            })?;
+            interp.call_value(fn_val, vec![model_val.clone()])
+        }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`tidy()` requires a ModelFit, found `{}`", other.type_name()),
+            format!("`tidy()` requires a ModelFit or Struct, found `{}`", other.type_name()),
         )),
     }
 }
 
-pub(crate) fn native_glance(args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_glance(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`glance()` requires a ModelFit")
+        Diagnostic::compute_error("C0201", "`glance()` requires a ModelFit or Struct")
     })?;
 
     match model_val {
         Value::ModelFit(m) => Ok(m.glance()),
         Value::GlmFit(m) => Ok(m.glance()),
         Value::GmmFit(m) => Ok(m.glance()),
+        Value::Struct { name, fields } => {
+            if name == "SemResult" {
+                let columns: Vec<(String, Vec<Value>)> = vec![
+                    ("chisq".to_string(), vec![fields.get("chisq").cloned().unwrap_or(Value::F64(0.0))]),
+                    ("df".to_string(), vec![fields.get("df").cloned().unwrap_or(Value::I64(0))]),
+                    ("p_value".to_string(), vec![fields.get("p_value").cloned().unwrap_or(Value::F64(0.0))]),
+                    ("cfi".to_string(), vec![fields.get("cfi").cloned().unwrap_or(Value::F64(1.0))]),
+                    ("tli".to_string(), vec![fields.get("tli").cloned().unwrap_or(Value::F64(1.0))]),
+                    ("rmsea".to_string(), vec![fields.get("rmsea").cloned().unwrap_or(Value::F64(0.0))]),
+                    ("srmr".to_string(), vec![fields.get("srmr").cloned().unwrap_or(Value::F64(0.0))]),
+                    ("n_obs".to_string(), vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))]),
+                ];
+                let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
+                return Ok(Value::DataFrame { frame, na_reasons });
+            }
+            let method_key = format!("{}::glance", name);
+            let fn_val = interp.env.get(&method_key).ok_or_else(|| {
+                Diagnostic::statistical_error("S0200", format!("Method `glance()` is not implemented for struct `{}`", name))
+            })?;
+            interp.call_value(fn_val, vec![model_val.clone()])
+        }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`glance()` requires a ModelFit, found `{}`", other.type_name()),
+            format!("`glance()` requires a ModelFit or Struct, found `{}`", other.type_name()),
         )),
     }
 }
@@ -276,9 +349,9 @@ pub(crate) fn vcov_kind_from_arg(args: &[Value]) -> crate::neko::VcovKind {
     }
 }
 
-pub(crate) fn native_vcov(args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_vcov(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`vcov()` requires a ModelFit")
+        Diagnostic::compute_error("C0201", "`vcov()` requires a ModelFit or Struct")
     })?;
 
     match model_val {
@@ -294,9 +367,21 @@ pub(crate) fn native_vcov(args: Vec<Value>) -> Result<Value, Diagnostic> {
             let vcov_data = m.compute_vcov(kind)?;
             Ok(Value::Matrix { rows: p, cols: p, data: std::sync::Arc::new(vcov_data) })
         }
+        Value::Struct { name, fields } => {
+            if name == "SemResult" {
+                if let Some(implied_cov) = fields.get("implied_cov") {
+                    return Ok(implied_cov.clone());
+                }
+            }
+            let method_key = format!("{}::vcov", name);
+            let fn_val = interp.env.get(&method_key).ok_or_else(|| {
+                Diagnostic::statistical_error("S0200", format!("Method `vcov()` is not implemented for struct `{}`", name))
+            })?;
+            interp.call_value(fn_val, vec![model_val.clone()])
+        }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`vcov()` requires a ModelFit, found `{}`", other.type_name()),
+            format!("`vcov()` requires a ModelFit or Struct, found `{}`", other.type_name()),
         )),
     }
 }

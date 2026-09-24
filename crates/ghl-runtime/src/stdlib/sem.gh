@@ -1,0 +1,110 @@
+// Structural Equation Modeling (SEM / CFA) Standard Library Module (RFC 15 & Roadmap 08).
+// Implemented in pure GHL Layer 1, orchestrating Rust Kernel Layer 0 heavy numerics.
+
+struct SemResult {
+    chisq: f64,
+    df: i64,
+    p_value: f64,
+    cfi: f64,
+    tli: f64,
+    rmsea: f64,
+    srmr: f64,
+    n_obs: i64,
+    f_min: f64,
+    baseline_chisq: f64,
+    baseline_df: i64,
+    parameters: DataFrame,
+    sample_cov: Matrix,
+    implied_cov: Matrix
+}
+
+impl SemResult {
+    fn summary(&self) {
+        println("/ᐠ˵- ⩊ -˵マ ✧ CONVERGED (Wishart Maximum Likelihood)");
+        println("===============================================================");
+        println("Structural Equation Model (SEM / CFA) - Global Fit Indices");
+        println("---------------------------------------------------------------");
+        println("Number of observations :", self.n_obs);
+        println("Minimum function value :", self.f_min);
+        println("Model Chi-Square       :", self.chisq, "(df =", self.df, ", p-value =", self.p_value, ")");
+        println("Baseline Chi-Square    :", self.baseline_chisq, "(df =", self.baseline_df, ")");
+        println("CFI (Comparative Fit)  :", self.cfi);
+        println("TLI (Tucker-Lewis)     :", self.tli);
+        println("RMSEA                  :", self.rmsea);
+        println("SRMR                   :", self.srmr);
+        println("---------------------------------------------------------------");
+        println("Parameter Estimates:");
+        println(self.parameters);
+        println("===============================================================");
+    }
+
+    fn tidy(&self) -> DataFrame {
+        self.parameters
+    }
+
+    fn glance(&self) -> DataFrame {
+        dataframe {
+            chisq: [self.chisq],
+            df: [self.df],
+            p_value: [self.p_value],
+            cfi: [self.cfi],
+            tli: [self.tli],
+            rmsea: [self.rmsea],
+            srmr: [self.srmr],
+            n_obs: [self.n_obs]
+        }
+    }
+
+    fn vcov(&self) -> Matrix {
+        self.implied_cov
+    }
+}
+
+fn sem(spec, df) {
+    let raw = __sem_fit_core(spec, df);
+
+    let chisq = raw.chisq;
+    let df_val = raw.df;
+    let n_obs = raw.n_obs;
+    let f_min = raw.f_min;
+    let b_chisq = raw.baseline_chisq;
+    let b_df = raw.baseline_df;
+    let p_val = raw.p_value;
+
+    // Global Fit Indices calculation in GHL Capa 1:
+    // CFI: 1 - max(chisq - df, 0) / max(b_chisq - b_df, chisq - df, 0)
+    let d_model = if (chisq - df_val) > 0.0 { chisq - df_val } else { 0.0 };
+    let d_null = if (b_chisq - b_df) > 0.0 { b_chisq - b_df } else { 0.0 };
+    let cfi_raw = if d_null > 0.0 { 1.0 - (d_model / d_null) } else { 1.0 };
+    let cfi = if cfi_raw > 1.0 { 1.0 } else if cfi_raw < 0.0 { 0.0 } else { cfi_raw };
+
+    // TLI / NNFI: ((b_chisq / b_df) - (chisq / df)) / ((b_chisq / b_df) - 1)
+    let null_ratio = if b_df > 0 { b_chisq / b_df } else { 1.0 };
+    let model_ratio = if df_val > 0 { chisq / df_val } else { 1.0 };
+    let tli_denom = null_ratio - 1.0;
+    let tli = if tli_denom != 0.0 { (null_ratio - model_ratio) / tli_denom } else { 1.0 };
+
+    // RMSEA: sqrt(max(0, (chisq - df) / ((n_obs - 1) * df)))
+    let rmsea_num = if (chisq - df_val) > 0.0 { chisq - df_val } else { 0.0 };
+    let rmsea_denom = (n_obs - 1) * df_val;
+    let rmsea_val = if rmsea_denom > 0 { sqrt(rmsea_num / rmsea_denom) } else { 0.0 };
+
+    let srmr_val = raw.srmr;
+
+    SemResult {
+        chisq: chisq,
+        df: df_val,
+        p_value: p_val,
+        cfi: cfi,
+        tli: tli,
+        rmsea: rmsea_val,
+        srmr: srmr_val,
+        n_obs: n_obs,
+        f_min: f_min,
+        baseline_chisq: b_chisq,
+        baseline_df: b_df,
+        parameters: raw.parameters,
+        sample_cov: raw.sample_cov,
+        implied_cov: raw.implied_cov
+    }
+}

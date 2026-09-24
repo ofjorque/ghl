@@ -99,14 +99,18 @@ impl RuntimeEnv {
         env.set("fit_logistic".into(), Value::NativeFn(native_fit_logistic));
         env.set("fit_gmm".into(), Value::NativeFn(native_fit_gmm));
         env.set("gmm".into(), Value::NativeFn(native_fit_gmm));
-        env.set("summary".into(), Value::NativeFn(native_summary));
-        env.set("tidy".into(), Value::NativeFn(native_tidy));
-        env.set("glance".into(), Value::NativeFn(native_glance));
+        env.set("summary".into(), Value::NativeFnCtx(native_summary));
+        env.set("tidy".into(), Value::NativeFnCtx(native_tidy));
+        env.set("glance".into(), Value::NativeFnCtx(native_glance));
         env.set("augment".into(), Value::NativeFn(native_augment));
         env.set("predict".into(), Value::NativeFn(native_predict));
         env.set("residuals".into(), Value::NativeFn(native_residuals));
         env.set("coef".into(), Value::NativeFn(native_coef));
-        env.set("vcov".into(), Value::NativeFn(native_vcov));
+        env.set("vcov".into(), Value::NativeFnCtx(native_vcov));
+        env.set("optim".into(), Value::NativeFnCtx(crate::optim::native_optim));
+        env.set("sample_cov".into(), Value::NativeFn(crate::sem::native_sample_cov));
+        env.set("__sem_fit_core".into(), Value::NativeFn(crate::sem::native_sem_fit_core));
+        env.set("sem".into(), Value::NativeFn(crate::sem::native_sem));
 
         // Grammar of Graphics (RFC 09) Verbs
         env.set("plot".into(), Value::NativeFn(native_plot));
@@ -373,6 +377,7 @@ impl RuntimeEnv {
         env.set("rm".into(),                        Value::NativeFnCtx(native_rm));
         env.set("help".into(),                      Value::NativeFn(native_help));
         env.set("doc".into(),                       Value::NativeFn(native_help));
+
 
         env
     }

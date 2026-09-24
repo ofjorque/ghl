@@ -3,6 +3,11 @@
 
 > *"Un buen modelo estadístico debe ser como un gato: ágil, flexible, elegante, silencioso en cómputo y, ante cualquier perturbación numérica, caer siempre de pie."*
 
+- **Versión**: 0.2.0 (Actualizado)
+- **Estado**: Aprobado / Implementado (Generalizado en [RFC 15](15-kernel-primitives-and-self-hosted-standard-library.md))
+- **Área**: Modelado Estadístico / Inferencia / Arquitectura NEKO
+- **Tributo**: Nombrado NEKO (*Native Estimation & Kernel Outcomes*), un guiño felino japonés (Neko = 猫 = Gato).
+
 ---
 
 ## 1. Visión y Motivación
@@ -18,7 +23,7 @@ Los ecosistemas estadísticos convencionales arrastran vicios arquitectónicos h
 
 ## 2. Desacoplamiento Canónico en Tres Momentos
 
-NEKO divide formalmente la vida de un modelo en tres entidades ortogonales:
+NEKO divide formalmente la vida de un modelo en tres entidades ortogonales (generalizado en [RFC 15](15-kernel-primitives-and-self-hosted-standard-library.md) para permitir solvers tanto nativos en Rust como auto-alojados en GHL):
 
 ```mermaid
 graph LR
@@ -35,7 +40,9 @@ graph LR
 
 ## 3. El Sistema de Capacidades (Contracts)
 
-En NEKO, un modelo no pertenece a una taxonomía rígida de clases; declara **capacidades comprobables**. Cada capacidad es un contrato con obligaciones que el modelo cumple y garantías que el investigador recibe:
+En NEKO, un modelo no pertenece a una taxonomía rígida de clases; declara **capacidades comprobables**. Cada capacidad es un contrato con obligaciones que el modelo cumple y garantías que el investigador recibe.
+
+Como formaliza [RFC 15](15-kernel-primitives-and-self-hosted-standard-library.md), estas capacidades son satisfechas tanto por los modelos nativos de Rust (`Value::ModelFit`, `Value::GlmFit`, `Value::GmmFit`) como por tipos estructurados definidos en código GHL puro (`Value::Struct`) mediante bloques `impl`:
 
 | Capacidad | Obligación del Modelo | Garantía para el Usuario / DSL |
 | :--- | :--- | :--- |
@@ -76,23 +83,23 @@ NEKO desacopla la estimación de coeficientes de la fuente de incertidumbre. La 
 
 ## 6. Verbos Canónicos de Proyección Semántica
 
-```rust
-// 1. Ajuste de hipótesis
+```ghl
+// 1. Hypothesis model fitting
 let model = fit(response ~ sensor + id, df);
 
-// 2. Reporte diagnóstico formal en consola
+// 2. Formal diagnostic console report
 summary(model);
 
-// 3. Proyección columnar a DataFrame
+// 3. Columnar projection to DataFrame
 let estimates_df = tidy(model);
 
-// 4. Métricas de bondad de ajuste (R2, F, AIC, BIC)
+// 4. Goodness-of-fit metrics (R2, F, AIC, BIC)
 let fit_metrics = glance(model);
 
-// 5. Enriquecimiento de observaciones con trazabilidad de NAs
+// 5. Observation enrichment with NA traceability
 let evaluated_df = augment(model, df);
 
-// 6. Predicción e inferencia
+// 6. Prediction and inference
 let y_pred = predict(model, test_df);
 let resids = residuals(model);
 let vcov_mat = vcov(model, "HC3");
@@ -102,9 +109,10 @@ let vcov_mat = vcov(model, "HC3");
 
 ## 7. Taxonomía de Errores y Diagnósticos Empáticos
 
-NEKO adopta los códigos estandarizados de GHL:
-* **`[Statistical Error S0101]`**: Matriz singular / colinealidad perfecta ($X^T X$ sin rango completo).
-* **`[Statistical Error S0201]`**: Grados de libertad insuficientes ($N \le p$).
-* **`[Statistical Warning SW0005]`**: Muestra pequeña ($N < 5$), advirtiendo que los errores asintóticos pueden estar subestimados.
-* **`[Statistical Warning SW0301]`**: Multicolinealidad severa ($VIF > 10.0$), señalando qué predictores tienen inflación de varianza.
+NEKO adopta los códigos estandarizados de GHL y el catálogo canónico de Kaomojis felinos (respetando el principio *"Show, Don't Tell"* de [AGENT.md](../../AGENT.md)):
+
+* **`[Statistical Error S0101]`** `≽(◉˕ ◉ ≼マ`: Matriz singular / colinealidad perfecta ($X^T X$ sin rango completo).
+* **`[Statistical Error S0201]`** `≽(◉˕ ◉ ≼マ`: Grados de libertad insuficientes ($N \le p$).
+* **`[Statistical Warning SW0005]`** `/ᐠ ·•᷄ ˕ •᷅マ`: Muestra pequeña ($N < 5$), advirtiendo que los errores asintóticos pueden estar subestimados.
+* **`[Statistical Warning SW0301]`** `/ᐠ ·•᷄ ˕ •᷅マ`: Multicolinealidad severa ($VIF > 10.0$), señalando qué predictores tienen inflación de varianza.
 

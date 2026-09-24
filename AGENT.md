@@ -105,3 +105,5 @@ Al implementar o modificar código en el compilador o runtime de GHL, el agente 
 - `11-neko-statistical-modeling-framework.md`: Arquitectura de modelado estadístico NEKO (desacoplamiento en 3 momentos, Blueprint, capacidades, RowDisposition y covarianzas robustas).
 - `12-cockpit-deck-telemetry-and-diagnostics.md`: Sistema unificado de telemetría y diagnóstico visual Cockpit Deck v0.5.0 (RenderCaps, SymbolRegistry, CockpitPanel y Sparklines).
 - `13-cranelift-jit-native-compilation.md`: Motor de compilación JIT nativa con Cranelift 0.135 (lowering HIR, SSA, control de flujo nativo y ejecución instantánea sub-milisegundo).
+- `14-statistical-contracts-and-expectation-protocols.md`: Protocolos de expectativas y contratos estadísticos (`spring_pact` 100% GHL, hashing SHA-256 y certificación Cockpit Deck).
+- `15-kernel-primitives-and-self-hosted-standard-library.md`: Kernel de primitivas nativas (Capa 0) y librería estándar auto-alojada en GHL (Capa 1), desacoplamiento de estimadores y extensión de capacidades.

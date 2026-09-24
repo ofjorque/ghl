@@ -140,6 +140,9 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("residuals".into(), any_fn()),
             ("coef".into(), any_fn()),
             ("vcov".into(), any_fn()),
+            ("sem".into(), any_fn_multi(2)),
+            ("optim".into(), any_fn_multi(2)),
+            ("sample_cov".into(), any_fn_multi(2)),
         ]),
 
         ["std", "stats"] => {
