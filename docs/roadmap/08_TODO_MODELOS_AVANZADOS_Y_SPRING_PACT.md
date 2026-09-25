@@ -25,14 +25,14 @@ Cierre de la brecha analítica para constructos latentes y modelos de ecuaciones
 
 Implementación desacoplada entre matemática de bajo nivel y estimadores de usuario, aprovechando la expresividad del DSL de fórmulas de GHL:
 
-- [ ] **Sintaxis de Fórmulas Multiparte (`|` en `ghl-syntax`):**
-  - [ ] Reconocimiento y estructuración de fórmulas divididas por tuberías (`FormulaParts`: `lhs ~ rhs | part2 | part3`).
-  - [ ] Evaluación y desglosado en `ghl-runtime` para asociar predictores principales, factores absorbidos e instrumentos.
-- [ ] **Efectos Fijos de Alta Dimensión (Panel Data — `feols` con `|`):**
-  - [ ] **Kernel Rust (Capa 0 - Matemática Pesada):** Algoritmo de centrado por medias (*Within-transformation* / proyección Frisch-Waugh-Lovell de alta dimensión absorbiendo `entity + time`).
-  - [ ] **Estimador GHL (Capa 1 - Lógica y Capacidades):** Función `feols(y ~ x | entity + time, df)` en `.gh`, cálculo de errores estándar (clásicos, robustos y clusterizados por grupo), y `struct FeolsResult` con `tidy`, `summary`, `glance`.
-- [ ] **Variables Instrumentales (IV / 2SLS — `iv_regress` con `|`):**
-  - [ ] **Estimador GHL (Capa 1 - 100% GHL Puro):** Función `iv_regress(y ~ x_exog + x_endog | x_exog + z_instr, df)` en `.gh` componiendo dos etapas de OLS sobre `model_matrix`, diagnóstico de instrumentos débiles ($F > 10$), test de endogeneidad de Wu-Hausman, test de sobreidentificación de Sargan y `struct IvResult`.
+- [x] **Sintaxis de Fórmulas Multiparte (`|` en `ghl-syntax`):**
+  - [x] Reconocimiento y estructuración de fórmulas divididas por tuberías (`FormulaParts`: `lhs ~ rhs | part2 | part3`).
+  - [x] Evaluación y desglosado en `ghl-runtime` para asociar predictores principales, factores absorbidos e instrumentos.
+- [x] **Efectos Fijos de Alta Dimensión (Panel Data — `feols` con `|`):**
+  - [x] **Kernel Rust (Capa 0 - Matemática Pesada):** Algoritmo de centrado por medias (*Within-transformation* / proyección Frisch-Waugh-Lovell de alta dimensión absorbiendo `entity + time`).
+  - [x] **Estimador GHL (Capa 1 - Lógica y Capacidades):** Función `feols(y ~ x | entity + time, df)` en `.gh`, cálculo de errores estándar (clásicos, robustos y clusterizados por grupo), y `struct FeolsResult` con `tidy`, `summary`, `glance`.
+- [x] **Variables Instrumentales (IV / 2SLS — `iv_regress` con `|`):**
+  - [x] **Estimador GHL (Capa 1 - GHL & Kernel Rust):** Primitiva `model_matrix(formula, df)`, función `iv_regress(y ~ x_exog + x_endog | x_exog + z_instr, df)` con descomposición automática de variables exógenas, endógenas e instrumentos excluidos, verificación de condición de orden ($L \ge K$), dos etapas de proyección (2SLS con faer), cálculo de residuos estructurales sobre $X$ real, errores estándar clásicos y robustos (HC1), diagnóstico de instrumentos débiles ($F > 10$), test de endogeneidad de Wu-Hausman, test de sobreidentificación de Sargan y `struct IvResult` con `impl` de `summary()`, `tidy()`, `glance()`, `vcov()`, `coef()` y `residuals()`.
 - [ ] **Regresión Regularizada Penalizada (Lasso, Ridge, ElasticNet):**
   - [ ] **Kernel Rust (Capa 0 - Matemática Pesada):** Algoritmo de descenso por coordenadas (*Coordinate Descent* estilo `glmnet`) para penalizaciones $L_1$ y $L_2$.
   - [ ] **Estimador GHL (Capa 1 - Lógica y Capacidades):** Funciones `lasso`, `ridge`, búsqueda óptima de $\lambda$ mediante validación cruzada $K$-fold (`cv_glmnet`) y `struct RegularizedResult` con `tidy`/`glance`.

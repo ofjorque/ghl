@@ -127,6 +127,7 @@ pub enum ExprKind {
         op: FormulaOp,
         response: Box<Expr>,
         terms: Vec<Expr>,
+        parts: Vec<Expr>,
     },
     /// `sem_spec { f1 =~ x1 + x2; f1 ~~ f2; f2 ~ f1; }` — a SEM/CFA model specification:
     /// an ordered list of `Formula` equations (measurement, covariance, and/or
@@ -442,13 +443,22 @@ impl std::fmt::Display for ExprKind {
                 }
                 write!(f, "}}")
             }
-            ExprKind::Formula { op, response, terms } => {
+            ExprKind::Formula { op, response, terms, parts } => {
                 write!(f, "{response} {op} ")?;
-                for (i, t) in terms.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " + ")?;
+                if parts.is_empty() {
+                    for (i, t) in terms.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, " + ")?;
+                        }
+                        write!(f, "{t}")?;
                     }
-                    write!(f, "{t}")?;
+                } else {
+                    for (i, part) in parts.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, " | ")?;
+                        }
+                        write!(f, "{part}")?;
+                    }
                 }
                 Ok(())
             }

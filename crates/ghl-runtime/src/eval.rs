@@ -289,6 +289,45 @@ impl Interpreter {
                             }
                         }
                     }
+                    Value::Formula { ref response, ref terms, ref parts, .. } => {
+                        match field.as_str() {
+                            "response" => Ok(Value::String(response.clone())),
+                            "terms" => Ok(Value::Vector(crate::vector_data::VectorData::from_values(
+                                terms.iter().map(|s| Value::String(s.clone())).collect(),
+                            ))),
+                            "parts" => Ok(Value::Vector(crate::vector_data::VectorData::from_values(
+                                parts
+                                    .iter()
+                                    .map(|p| {
+                                        Value::Vector(crate::vector_data::VectorData::from_values(
+                                            p.iter().map(|s| Value::String(s.clone())).collect(),
+                                        ))
+                                    })
+                                    .collect(),
+                            ))),
+                            "absorbed" => Ok(Value::Vector(crate::vector_data::VectorData::from_values(
+                                parts
+                                    .get(1)
+                                    .map(|p| p.iter().map(|s| Value::String(s.clone())).collect())
+                                    .unwrap_or_default(),
+                            ))),
+                            "instruments" => Ok(Value::Vector(crate::vector_data::VectorData::from_values(
+                                parts
+                                    .get(2)
+                                    .map(|p| p.iter().map(|s| Value::String(s.clone())).collect())
+                                    .unwrap_or_default(),
+                            ))),
+                            "parts_count" => Ok(Value::I64(parts.len() as i64)),
+                            "has_fixed_effects" => Ok(Value::Bool(parts.len() >= 2)),
+                            "has_instruments" => Ok(Value::Bool(parts.len() >= 3)),
+                            _ => Err(Diagnostic::compute_error(
+                                "C0102",
+                                format!(
+                                    "Field `{field}` not found on Formula (available: response, terms, parts, absorbed, instruments, parts_count, has_fixed_effects, has_instruments)"
+                                ),
+                            )),
+                        }
+                    }
                     _ => Err(Diagnostic::compute_error("C0202", format!("Cannot access field `{field}` on non-record/non-struct value"))),
                 }
             }
@@ -547,19 +586,29 @@ impl Interpreter {
                 Ok(Value::Unit)
             }
 
-            ExprKind::Formula { op, response, terms } => {
+            ExprKind::Formula { op, response, terms, parts } => {
                 let resp_str = match &response.kind {
                     ExprKind::Ident(s) => s.clone(),
-                    _ => format!("{:?}", response.kind),
+                    _ => format!("{response}"),
                 };
                 let mut term_strs = Vec::new();
                 for t in terms {
                     extract_formula_term(t, &mut term_strs);
                 }
+                let mut parts_strs = Vec::new();
+                for p in parts {
+                    let mut p_terms = Vec::new();
+                    extract_formula_term(p, &mut p_terms);
+                    parts_strs.push(p_terms);
+                }
+                if parts_strs.is_empty() && !term_strs.is_empty() {
+                    parts_strs.push(term_strs.clone());
+                }
                 Ok(Value::Formula {
                     op: *op,
                     response: resp_str,
                     terms: term_strs,
+                    parts: parts_strs,
                 })
             }
 
@@ -1715,6 +1764,8 @@ fn match_pattern(pattern: &Pattern, target: &Value, env: &mut RuntimeEnv) -> boo
 fn extract_formula_term(expr: &Expr, acc: &mut Vec<String>) {
     match &expr.kind {
         ExprKind::Ident(s) => acc.push(s.clone()),
+        ExprKind::Lit(ghl_syntax::ast::Literal::Int(n)) => acc.push(n.to_string()),
+        ExprKind::Lit(ghl_syntax::ast::Literal::Float(s)) => acc.push(s.to_string()),
         ExprKind::Binary { op: BinaryOp::Add, lhs, rhs } => {
             extract_formula_term(lhs, acc);
             extract_formula_term(rhs, acc);
@@ -1726,7 +1777,7 @@ fn extract_formula_term(expr: &Expr, acc: &mut Vec<String>) {
             extract_formula_term(rhs, &mut right);
             acc.push(format!("{}:{}", left.join(":"), right.join(":")));
         }
-        _ => acc.push(format!("{:?}", expr.kind)),
+        _ => acc.push(format!("{expr}")),
     }
 }
 

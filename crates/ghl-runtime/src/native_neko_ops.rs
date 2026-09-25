@@ -21,7 +21,7 @@ pub(crate) fn native_fit_ols(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 
     let (response, terms) = match &args[0] {
-        Value::Formula { op: FormulaOp::Regression, response, terms } => (response.clone(), terms.clone()),
+        Value::Formula { op: FormulaOp::Regression, response, terms, .. } => (response.clone(), terms.clone()),
         Value::Formula { op, .. } => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
@@ -64,7 +64,7 @@ pub(crate) fn native_fit_logistic(args: Vec<Value>) -> Result<Value, Diagnostic>
     }
 
     let (response, terms) = match &args[0] {
-        Value::Formula { op: FormulaOp::Regression, response, terms } => (response.clone(), terms.clone()),
+        Value::Formula { op: FormulaOp::Regression, response, terms, .. } => (response.clone(), terms.clone()),
         Value::Formula { op, .. } => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
@@ -172,6 +172,89 @@ pub(crate) fn native_summary(interp: &mut crate::eval::Interpreter, args: Vec<Va
                 println!("===============================================================");
                 return Ok(Value::Unit);
             }
+            if name == "FeolsResult" {
+                println!("/ᐠ˵- ⩊ -˵マ ✧ CONVERGED (High-Dimensional Fixed Effects OLS - feols)");
+                println!("===============================================================");
+                println!("Model: High-Dimensional Fixed Effects OLS (feols)");
+                println!("---------------------------------------------------------------");
+                if let Some(resp) = fields.get("response") {
+                    println!("Dependent Variable : {}", resp);
+                }
+                if let Some(n) = fields.get("n_obs") {
+                    println!("Observations       : {}", n);
+                }
+                if let (Some(abs), Some(df_fe)) = (fields.get("absorbed"), fields.get("df_fe")) {
+                    println!("Absorbed FEs       : {} (df = {})", abs, df_fe);
+                }
+                if let Some(df_resid) = fields.get("df_resid") {
+                    println!("Residual DF        : {}", df_resid);
+                }
+                if let Some(vcov_t) = fields.get("vcov_type") {
+                    println!("VCOV Estimation    : {}", vcov_t);
+                }
+                if let (Some(r2), Some(r2_w)) = (fields.get("r2"), fields.get("r2_within")) {
+                    println!("R-Squared          : {} (Within: {})", r2, r2_w);
+                }
+                println!("---------------------------------------------------------------");
+                println!("Parameter Estimates:");
+                if let Some(params) = fields.get("parameters") {
+                    println!("{}", params);
+                }
+                println!("===============================================================");
+                return Ok(Value::Unit);
+            }
+            if name == "IvResult" {
+                println!("/ᐠ˵- ⩊ -˵マ ✧ CONVERGED (Two-Stage Least Squares - 2SLS / iv_regress)");
+                println!("===============================================================");
+                println!("Model: Two-Stage Least Squares (IV / 2SLS)");
+                println!("---------------------------------------------------------------");
+                if let Some(resp) = fields.get("response") {
+                    println!("Dependent Variable : {}", resp);
+                }
+                if let Some(n) = fields.get("n_obs") {
+                    println!("Observations       : {}", n);
+                }
+                if let Some(df_resid) = fields.get("df_resid") {
+                    println!("Residual DF        : {}", df_resid);
+                }
+                if let Some(endog) = fields.get("endogenous") {
+                    println!("Endogenous Vars    : {}", endog);
+                }
+                if let Some(instr) = fields.get("instruments") {
+                    println!("Instruments        : {}", instr);
+                }
+                if let Some(vcov_t) = fields.get("vcov_type") {
+                    println!("VCOV Estimation    : {}", vcov_t);
+                }
+                if let Some(r2) = fields.get("r2") {
+                    println!("R-Squared          : {}", r2);
+                }
+                println!("---------------------------------------------------------------");
+                println!("Diagnostic Tests:");
+                if let Some(f_stat) = fields.get("first_stage_f") {
+                    let weak_flag = if let Some(Value::Bool(true)) = fields.get("weak_instruments") {
+                        "[WARNING: F < 10, weak instruments]"
+                    } else {
+                        "[PASS: F >= 10]"
+                    };
+                    println!("  Weak Instruments (1st stage F) : {} {}", f_stat, weak_flag);
+                }
+                if let (Some(w_stat), Some(w_p)) = (fields.get("wu_hausman_stat"), fields.get("wu_hausman_p")) {
+                    println!("  Wu-Hausman Endogeneity Test    : F = {}, p-value = {}", w_stat, w_p);
+                }
+                if let (Some(s_stat), Some(s_df), Some(s_p)) = (fields.get("sargan_stat"), fields.get("sargan_df"), fields.get("sargan_p")) {
+                    if !s_stat.is_na() {
+                        println!("  Sargan Overidentification Test : stat = {} (df = {}), p-value = {}", s_stat, s_df, s_p);
+                    }
+                }
+                println!("---------------------------------------------------------------");
+                println!("Parameter Estimates:");
+                if let Some(params) = fields.get("parameters") {
+                    println!("{}", params);
+                }
+                println!("===============================================================");
+                return Ok(Value::Unit);
+            }
             let method_key = format!("{}::summary", name);
             if let Some(fn_val) = interp.env.get(&method_key) {
                 interp.call_value(fn_val, vec![model_val.clone()])
@@ -197,7 +280,7 @@ pub(crate) fn native_tidy(interp: &mut crate::eval::Interpreter, args: Vec<Value
         Value::GlmFit(m) => Ok(m.tidy()),
         Value::GmmFit(m) => Ok(m.tidy()),
         Value::Struct { name, fields } => {
-            if name == "SemResult" {
+            if name == "SemResult" || name == "FeolsResult" || name == "IvResult" {
                 if let Some(params) = fields.get("parameters") {
                     return Ok(params.clone());
                 }
@@ -235,6 +318,31 @@ pub(crate) fn native_glance(interp: &mut crate::eval::Interpreter, args: Vec<Val
                     ("rmsea".to_string(), vec![fields.get("rmsea").cloned().unwrap_or(Value::F64(0.0))]),
                     ("srmr".to_string(), vec![fields.get("srmr").cloned().unwrap_or(Value::F64(0.0))]),
                     ("n_obs".to_string(), vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))]),
+                ];
+                let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
+                return Ok(Value::DataFrame { frame, na_reasons });
+            }
+            if name == "FeolsResult" {
+                let columns: Vec<(String, Vec<Value>)> = vec![
+                    ("r2".to_string(), vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))]),
+                    ("r2_within".to_string(), vec![fields.get("r2_within").cloned().unwrap_or(Value::F64(0.0))]),
+                    ("n_obs".to_string(), vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))]),
+                    ("df_fe".to_string(), vec![fields.get("df_fe").cloned().unwrap_or(Value::I64(0))]),
+                    ("df_resid".to_string(), vec![fields.get("df_resid").cloned().unwrap_or(Value::I64(0))]),
+                    ("vcov_type".to_string(), vec![fields.get("vcov_type").cloned().unwrap_or(Value::String("cluster".into()))]),
+                ];
+                let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
+                return Ok(Value::DataFrame { frame, na_reasons });
+            }
+            if name == "IvResult" {
+                let columns: Vec<(String, Vec<Value>)> = vec![
+                    ("r2".to_string(), vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))]),
+                    ("n_obs".to_string(), vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))]),
+                    ("df_resid".to_string(), vec![fields.get("df_resid").cloned().unwrap_or(Value::I64(0))]),
+                    ("first_stage_f".to_string(), vec![fields.get("first_stage_f").cloned().unwrap_or(Value::NA(None))]),
+                    ("wu_hausman_p".to_string(), vec![fields.get("wu_hausman_p").cloned().unwrap_or(Value::F64(1.0))]),
+                    ("sargan_p".to_string(), vec![fields.get("sargan_p").cloned().unwrap_or(Value::NA(None))]),
+                    ("vcov_type".to_string(), vec![fields.get("vcov_type").cloned().unwrap_or(Value::String("classical".into()))]),
                 ];
                 let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
                 return Ok(Value::DataFrame { frame, na_reasons });
@@ -302,6 +410,17 @@ pub(crate) fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Value::GlmFit(m) => {
             Ok(Value::Vector(VectorData::from_f64(m.residuals.clone())))
         }
+        Value::Struct { name, fields } => {
+            if name == "FeolsResult" || name == "IvResult" {
+                if let Some(res) = fields.get("residuals") {
+                    return Ok(res.clone());
+                }
+            }
+            Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("`residuals()` is not supported for struct `{}`", name),
+            ))
+        }
         other => Err(Diagnostic::statistical_error(
             "S0200",
             format!("`residuals()` requires a ModelFit, found `{}`", other.type_name()),
@@ -327,6 +446,17 @@ pub(crate) fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 cols: m.dim,
                 data: std::sync::Arc::new(m.means.clone()),
             })
+        }
+        Value::Struct { name, fields } => {
+            if name == "FeolsResult" || name == "IvResult" {
+                if let Some(c) = fields.get("coefficients") {
+                    return Ok(c.clone());
+                }
+            }
+            Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("`coef()` is not supported for struct `{}`", name),
+            ))
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
@@ -373,6 +503,11 @@ pub(crate) fn native_vcov(interp: &mut crate::eval::Interpreter, args: Vec<Value
                     return Ok(implied_cov.clone());
                 }
             }
+            if name == "FeolsResult" || name == "IvResult" {
+                if let Some(vc) = fields.get("vcov") {
+                    return Ok(vc.clone());
+                }
+            }
             let method_key = format!("{}::vcov", name);
             let fn_val = interp.env.get(&method_key).ok_or_else(|| {
                 Diagnostic::statistical_error("S0200", format!("Method `vcov()` is not implemented for struct `{}`", name))
@@ -384,4 +519,128 @@ pub(crate) fn native_vcov(interp: &mut crate::eval::Interpreter, args: Vec<Value
             format!("`vcov()` requires a ModelFit or Struct, found `{}`", other.type_name()),
         )),
     }
+}
+
+/// `formula_parts(f)` -- extracts decomposed parts from a Formula into a `FormulaParts` struct.
+pub(crate) fn native_formula_parts(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.is_empty() {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`formula_parts()` requires a Formula argument: `formula_parts(f)`",
+        ));
+    }
+
+    match &args[0] {
+        Value::Formula { response, terms, parts, .. } => {
+            let mut fields = std::collections::BTreeMap::new();
+            fields.insert("response".to_string(), Value::String(response.clone()));
+            fields.insert(
+                "terms".to_string(),
+                Value::Vector(VectorData::from_values(
+                    terms.iter().map(|s| Value::String(s.clone())).collect(),
+                )),
+            );
+            fields.insert(
+                "parts".to_string(),
+                Value::Vector(VectorData::from_values(
+                    parts
+                        .iter()
+                        .map(|p| {
+                            Value::Vector(VectorData::from_values(
+                                p.iter().map(|s| Value::String(s.clone())).collect(),
+                            ))
+                        })
+                        .collect(),
+                )),
+            );
+            fields.insert(
+                "absorbed".to_string(),
+                Value::Vector(VectorData::from_values(
+                    parts
+                        .get(1)
+                        .map(|p| p.iter().map(|s| Value::String(s.clone())).collect())
+                        .unwrap_or_default(),
+                )),
+            );
+            fields.insert(
+                "instruments".to_string(),
+                Value::Vector(VectorData::from_values(
+                    parts
+                        .get(2)
+                        .map(|p| p.iter().map(|s| Value::String(s.clone())).collect())
+                        .unwrap_or_default(),
+                )),
+            );
+            fields.insert("parts_count".to_string(), Value::I64(parts.len() as i64));
+            fields.insert("has_fixed_effects".to_string(), Value::Bool(parts.len() >= 2));
+            fields.insert("has_instruments".to_string(), Value::Bool(parts.len() >= 3));
+
+            Ok(Value::Struct {
+                name: "FormulaParts".to_string(),
+                fields: std::sync::Arc::new(fields),
+            })
+        }
+        other => Err(Diagnostic::statistical_error(
+            "S0200",
+            format!("`formula_parts()` expects a Formula, found `{}`", other.type_name()),
+        )),
+    }
+}
+
+/// `model_matrix(formula, df)` -- bakes a Formula and DataFrame into design matrix X and response y.
+/// Reutilizes `Blueprint::bake()` (Roadmap 08, Parte F).
+pub(crate) fn native_model_matrix(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`model_matrix()` requires Formula and DataFrame arguments: `model_matrix(formula, df)`",
+        ));
+    }
+
+    let (response, terms) = match &args[0] {
+        Value::Formula { response, terms, .. } => (response.clone(), terms.clone()),
+        other => {
+            return Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("First argument of `model_matrix()` must be a Formula, found `{}`", other.type_name()),
+            ));
+        }
+    };
+
+    let (frame, na_reasons) = match &args[1] {
+        Value::DataFrame { frame, na_reasons } => (frame, na_reasons),
+        other => {
+            return Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("Second argument of `model_matrix()` must be a DataFrame, found `{}`", other.type_name()),
+            ));
+        }
+    };
+
+    let blueprint = crate::neko::Blueprint::new(response, terms);
+    let (x_data, y_data, _disp, n_obs, p_cols, baked_names, _levels) = blueprint.bake(frame, na_reasons)?;
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "x".to_string(),
+        Value::Matrix {
+            rows: n_obs,
+            cols: p_cols,
+            data: std::sync::Arc::new(x_data),
+        },
+    );
+    fields.insert(
+        "y".to_string(),
+        Value::Vector(VectorData::from_f64(y_data)),
+    );
+    fields.insert(
+        "terms".to_string(),
+        Value::Vector(VectorData::from_values(
+            baked_names.into_iter().map(Value::String).collect(),
+        )),
+    );
+    fields.insert("n_obs".to_string(), Value::I64(n_obs as i64));
+    fields.insert("p_cols".to_string(), Value::I64(p_cols as i64));
+
+    Ok(Value::Record(std::sync::Arc::new(fields)))
 }

@@ -1,0 +1,86 @@
+// Two-Stage Least Squares (2SLS / iv_regress) Standard Library Module (Roadmap 08, Paso B.3).
+// Implemented in pure GHL Layer 1, providing reference types and NEKO contracts.
+
+struct IvResult {
+    model: String,
+    response: String,
+    terms: Vector,
+    endogenous: Vector,
+    instruments: Vector,
+    coefficients: Vector,
+    std_errors: Vector,
+    t_stats: Vector,
+    p_values: Vector,
+    r2: f64,
+    n_obs: i64,
+    df_resid: i64,
+    vcov_type: String,
+    first_stage_f: f64,
+    weak_instruments: bool,
+    wu_hausman_stat: f64,
+    wu_hausman_p: f64,
+    sargan_stat: f64,
+    sargan_df: i64,
+    sargan_p: f64,
+    parameters: DataFrame,
+    residuals: Vector,
+    fitted: Vector,
+    vcov: Matrix
+}
+
+impl IvResult {
+    fn summary(&self) {
+        println("/ᐠ˵- ⩊ -˵マ ✧ CONVERGED (Two-Stage Least Squares - 2SLS / iv_regress)");
+        println("===============================================================");
+        println("Model: Two-Stage Least Squares (IV / 2SLS)");
+        println("---------------------------------------------------------------");
+        println("Dependent Variable :", self.response);
+        println("Observations       :", self.n_obs);
+        println("Residual DF        :", self.df_resid);
+        println("Endogenous Vars    :", self.endogenous);
+        println("Instruments        :", self.instruments);
+        println("VCOV Estimation    :", self.vcov_type);
+        println("R-Squared          :", self.r2);
+        println("---------------------------------------------------------------");
+        println("Diagnostic Tests:");
+        println("  Weak Instruments (1st stage F) :", self.first_stage_f);
+        println("  Wu-Hausman Endogeneity Test    : F =", self.wu_hausman_stat, ", p-value =", self.wu_hausman_p);
+        println("  Sargan Overidentification Test : stat =", self.sargan_stat, "(df =", self.sargan_df, "), p-value =", self.sargan_p);
+        println("---------------------------------------------------------------");
+        println("Parameter Estimates:");
+        println(self.parameters);
+        println("===============================================================");
+    }
+
+    fn tidy(&self) -> DataFrame {
+        self.parameters
+    }
+
+    fn glance(&self) -> DataFrame {
+        dataframe {
+            r2: [self.r2],
+            n_obs: [self.n_obs],
+            df_resid: [self.df_resid],
+            first_stage_f: [self.first_stage_f],
+            wu_hausman_p: [self.wu_hausman_p],
+            sargan_p: [self.sargan_p],
+            vcov_type: [self.vcov_type]
+        }
+    }
+
+    fn vcov(&self) -> Matrix {
+        self.vcov
+    }
+
+    fn coef(&self) -> Vector {
+        self.coefficients
+    }
+
+    fn residuals(&self) -> Vector {
+        self.residuals
+    }
+
+    fn fitted(&self) -> Vector {
+        self.fitted
+    }
+}

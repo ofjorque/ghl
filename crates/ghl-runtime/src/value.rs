@@ -173,6 +173,7 @@ pub enum Value {
         op: FormulaOp,
         response: String,
         terms: Vec<String>,
+        parts: Vec<Vec<String>>,
     },
     /// `sem_spec { ... }` result: an ordered list of `Formula` equations
     /// (measurement `=~`, covariance `~~`, and/or regression `~`).
@@ -252,6 +253,17 @@ impl Value {
             rows,
             cols,
             data: std::sync::Arc::new(data),
+        }
+    }
+
+    /// Decomposes a `Value::Formula` into structured `FormulaParts` (response, main terms,
+    /// absorbed fixed effects, instruments, and raw parts).
+    pub fn formula_parts(&self) -> Option<FormulaParts> {
+        match self {
+            Value::Formula { response, parts, .. } => {
+                Some(FormulaParts::new(response.clone(), parts.clone()))
+            }
+            _ => None,
         }
     }
 
@@ -375,9 +387,9 @@ impl PartialEq for Value {
                 Value::Factor { levels: l2, indices: i2, ordered: o2, contrast: k2 },
             ) => l1 == l2 && i1 == i2 && o1 == o2 && k1 == k2,
             (
-                Value::Formula { op: op1, response: r1, terms: t1 },
-                Value::Formula { op: op2, response: r2, terms: t2 },
-            ) => op1 == op2 && r1 == r2 && t1 == t2,
+                Value::Formula { op: op1, response: r1, terms: t1, parts: p1 },
+                Value::Formula { op: op2, response: r2, terms: t2, parts: p2 },
+            ) => op1 == op2 && r1 == r2 && t1 == t2 && p1 == p2,
             (Value::SemSpec(a), Value::SemSpec(b)) => a == b,
             (Value::ModelFit(m1), Value::ModelFit(m2)) => m1 == m2,
             (Value::GlmFit(m1), Value::GlmFit(m2)) => m1 == m2,
@@ -651,8 +663,13 @@ impl Value {
                     contrast
                 )
             }
-            Value::Formula { op, response, terms } => {
-                format!("{} {} {}", response, op, terms.join(" + "))
+            Value::Formula { op, response, terms, parts } => {
+                if parts.is_empty() {
+                    format!("{} {} {}", response, op, terms.join(" + "))
+                } else {
+                    let formatted_parts: Vec<String> = parts.iter().map(|p| p.join(" + ")).collect();
+                    format!("{} {} {}", response, op, formatted_parts.join(" | "))
+                }
             }
             Value::SemSpec(equations) => {
                 let rendered: Vec<String> = equations.iter().map(|e| e.render_styled(caps)).collect();
@@ -732,3 +749,67 @@ impl fmt::Display for Value {
         write!(f, "{}", self.render_styled(&caps))
     }
 }
+
+/// Decomposed parts of a formula (e.g. `lhs ~ rhs | part2 | part3`).
+///
+/// In econometrics:
+/// - 1 part: `y ~ x1 + x2` -> `terms` = `[x1, x2]`
+/// - 2 parts (Fixed effects or 2-stage IV):
+///   `y ~ x1 + x2 | entity + time` -> `terms` = `[x1, x2]`, `absorbed` = `[entity, time]`
+///   `y ~ x_exog + x_endog | x_exog + z_instr` -> `terms` = `[x_exog, x_endog]`, `instruments` / `absorbed` = `[x_exog, z_instr]`
+/// - 3 parts (Fixed effects + IV):
+///   `y ~ x1 + x2 | entity + time | z_instr` -> `terms` = `[x1, x2]`, `absorbed` = `[entity, time]`, `instruments` = `[z_instr]`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormulaParts {
+    pub response: String,
+    pub terms: Vec<String>,
+    pub absorbed: Vec<String>,
+    pub instruments: Vec<String>,
+    pub parts: Vec<Vec<String>>,
+}
+
+impl FormulaParts {
+    pub fn new(response: String, parts: Vec<Vec<String>>) -> Self {
+        let terms = parts.get(0).cloned().unwrap_or_default();
+        let absorbed = parts.get(1).cloned().unwrap_or_default();
+        let instruments = parts.get(2).cloned().unwrap_or_default();
+        Self {
+            response,
+            terms,
+            absorbed,
+            instruments,
+            parts,
+        }
+    }
+
+    pub fn parts_count(&self) -> usize {
+        self.parts.len()
+    }
+
+    pub fn has_fixed_effects(&self) -> bool {
+        self.parts.len() >= 2
+    }
+
+    pub fn has_instruments(&self) -> bool {
+        self.parts.len() >= 3
+    }
+
+    pub fn fixed_effects(&self) -> Option<&[String]> {
+        if self.parts.len() >= 2 {
+            Some(&self.absorbed)
+        } else {
+            None
+        }
+    }
+
+    pub fn instruments(&self) -> Option<&[String]> {
+        if self.parts.len() >= 3 {
+            Some(&self.instruments)
+        } else if self.parts.len() == 2 {
+            Some(&self.absorbed)
+        } else {
+            None
+        }
+    }
+}
+

@@ -20,7 +20,7 @@ fn test_measurement_and_covariance_operators_evaluate_to_formula() {
     interp.eval_program(&program).expect("evaluation ok");
 
     match interp.env.get("m").expect("m exists") {
-        Value::Formula { op, response, terms } => {
+        Value::Formula { op, response, terms, .. } => {
             assert_eq!(op, FormulaOp::Measurement);
             assert_eq!(response, "f1");
             assert_eq!(terms, vec!["x1".to_string(), "x2".to_string(), "x3".to_string()]);
@@ -29,7 +29,7 @@ fn test_measurement_and_covariance_operators_evaluate_to_formula() {
     }
 
     match interp.env.get("c").expect("c exists") {
-        Value::Formula { op, response, terms } => {
+        Value::Formula { op, response, terms, .. } => {
             assert_eq!(op, FormulaOp::Covariance);
             assert_eq!(response, "x1");
             assert_eq!(terms, vec!["x2".to_string()]);

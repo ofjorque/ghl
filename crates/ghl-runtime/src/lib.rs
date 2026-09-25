@@ -40,8 +40,12 @@ pub mod gpu;
 pub mod doc;
 pub mod optim;
 pub mod sem;
+pub mod feols;
+pub mod iv;
 
-pub use value::{Value, JitFunction};
+pub use value::{Value, JitFunction, FormulaParts};
+pub use feols::{fit_feols, FeolsVcovSpec};
+pub use iv::{fit_iv, IvVcovSpec};
 pub use env::RuntimeEnv;
 pub use eval::Interpreter;
 pub use neko::{Blueprint, FittedModel, RowDisposition, VcovKind};

@@ -749,16 +749,31 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .or(just(Token::MeasuredBy).to(FormulaOp::Measurement))
             .or(just(Token::TildeTilde).to(FormulaOp::Covariance));
 
+        // Multipart formula RHS: first part followed by optional subsequent parts separated by `|` (Token::VBar)
+        // e.g. `lhs ~ rhs | part2 | part3`
+        let formula_rhs = pipe
+            .clone()
+            .then(just(Token::VBar).ignore_then(pipe.clone()).repeated())
+            .map(|(first, rest)| {
+                let mut parts = Vec::with_capacity(1 + rest.len());
+                parts.push(first);
+                parts.extend(rest);
+                parts
+            });
+
         let formula = pipe
             .clone()
-            .then(formula_op.then(pipe).repeated())
-            .foldl(|lhs, (op, rhs)| {
-                let span = lhs.span.start..rhs.span.end;
+            .then(formula_op.then(formula_rhs).repeated())
+            .foldl(|lhs, (op, parts)| {
+                let end_span = parts.last().map(|p| p.span.end).unwrap_or(lhs.span.end);
+                let span = lhs.span.start..end_span;
+                let first = parts[0].clone();
                 Expr::new(
                     ExprKind::Formula {
                         op,
                         response: Box::new(lhs),
-                        terms: vec![rhs],
+                        terms: vec![first],
+                        parts,
                     },
                     span,
                 )
@@ -1175,7 +1190,7 @@ mod tests {
         let measurement = parse("let f = f1 =~ x1 + x2 + x3;").expect("Should parse =~");
         match &measurement.statements[0].kind {
             StmtKind::Let { init, .. } => match &init.kind {
-                ExprKind::Formula { op, response, terms } => {
+                ExprKind::Formula { op, response, terms, .. } => {
                     // `x1 + x2 + x3` parses as a single `+`-chain expression here;
                     // it's `ghl-runtime`'s `extract_formula_term` that flattens it
                     // into individual predictor names at evaluation time.
@@ -1236,6 +1251,51 @@ mod tests {
             },
             other => panic!("Expected let statement, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_parse_multipart_formulas() {
+        let single = parse("let f = y ~ x1 + x2;").expect("Should parse single part");
+        if let StmtKind::Let { init, .. } = &single.statements[0].kind {
+            if let ExprKind::Formula { op, response, terms, parts } = &init.kind {
+                assert_eq!(*op, FormulaOp::Regression);
+                assert!(matches!(&response.kind, ExprKind::Ident(s) if s == "y"));
+                assert_eq!(terms.len(), 1);
+                assert_eq!(parts.len(), 1);
+            } else {
+                panic!("Expected Formula, got {:?}", init.kind);
+            }
+        }
+
+        let two_parts = parse("let f = y ~ x1 + x2 | entity + time;").expect("Should parse 2 parts");
+        if let StmtKind::Let { init, .. } = &two_parts.statements[0].kind {
+            if let ExprKind::Formula { op, response, terms, parts } = &init.kind {
+                assert_eq!(*op, FormulaOp::Regression);
+                assert!(matches!(&response.kind, ExprKind::Ident(s) if s == "y"));
+                assert_eq!(terms.len(), 1);
+                assert_eq!(parts.len(), 2);
+            } else {
+                panic!("Expected Formula, got {:?}", init.kind);
+            }
+        }
+
+        let three_parts = parse("let f = y ~ x_exog + x_endog | entity + time | z_instr;").expect("Should parse 3 parts");
+        if let StmtKind::Let { init, .. } = &three_parts.statements[0].kind {
+            if let ExprKind::Formula { op, response, terms, parts } = &init.kind {
+                assert_eq!(*op, FormulaOp::Regression);
+                assert!(matches!(&response.kind, ExprKind::Ident(s) if s == "y"));
+                assert_eq!(terms.len(), 1);
+                assert_eq!(parts.len(), 3);
+            } else {
+                panic!("Expected Formula, got {:?}", init.kind);
+            }
+        }
+
+        // Test canonical formatting
+        let code = "let f = y ~ x1 + x2 | entity + time | z1 + z2;";
+        let parsed = parse(code).unwrap();
+        let formatted = crate::fmt::format_program(&parsed.statements);
+        assert_eq!(formatted.trim(), "let f = y ~ x1 + x2 | entity + time | z1 + z2;");
     }
 
     #[test]

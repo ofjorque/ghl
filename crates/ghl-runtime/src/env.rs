@@ -111,6 +111,11 @@ impl RuntimeEnv {
         env.set("sample_cov".into(), Value::NativeFn(crate::sem::native_sample_cov));
         env.set("__sem_fit_core".into(), Value::NativeFn(crate::sem::native_sem_fit_core));
         env.set("sem".into(), Value::NativeFn(crate::sem::native_sem));
+        env.set("formula_parts".into(), Value::NativeFn(native_formula_parts));
+        env.set("feols".into(), Value::NativeFn(crate::feols::native_feols));
+        env.set("iv_regress".into(), Value::NativeFn(crate::iv::native_iv_regress));
+        env.set("iv".into(), Value::NativeFn(crate::iv::native_iv_regress));
+        env.set("model_matrix".into(), Value::NativeFn(native_model_matrix));
 
         // Grammar of Graphics (RFC 09) Verbs
         env.set("plot".into(), Value::NativeFn(native_plot));

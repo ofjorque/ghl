@@ -347,19 +347,28 @@ fn format_expr(out: &mut String, expr: &Expr, level: usize) {
             indent(out, level);
             out.push('}');
         }
-        ExprKind::Formula { op, response, terms } => {
+        ExprKind::Formula { op, response, terms, parts } => {
             format_expr(out, response, level);
             out.push(' ');
             out.push_str(&op.to_string());
             out.push(' ');
-            if terms.is_empty() {
-                out.push('1');
-            } else {
-                for (idx, term) in terms.iter().enumerate() {
-                    if idx > 0 {
-                        out.push_str(" + ");
+            if parts.is_empty() {
+                if terms.is_empty() {
+                    out.push('1');
+                } else {
+                    for (idx, term) in terms.iter().enumerate() {
+                        if idx > 0 {
+                            out.push_str(" + ");
+                        }
+                        format_expr(out, term, level);
                     }
-                    format_expr(out, term, level);
+                }
+            } else {
+                for (idx, part) in parts.iter().enumerate() {
+                    if idx > 0 {
+                        out.push_str(" | ");
+                    }
+                    format_expr(out, part, level);
                 }
             }
         }

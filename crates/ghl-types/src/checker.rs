@@ -991,6 +991,17 @@ impl TypeChecker {
                             Type::Any
                         }
                     }
+                    Type::Formula => match field.as_str() {
+                        "response" => Type::String,
+                        "terms" => Type::Vector(Box::new(Type::String)),
+                        "parts" => Type::Vector(Box::new(Type::Vector(Box::new(Type::String)))),
+                        "absorbed" => Type::Vector(Box::new(Type::String)),
+                        "instruments" => Type::Vector(Box::new(Type::String)),
+                        "parts_count" => Type::I64,
+                        "has_fixed_effects" => Type::Bool,
+                        "has_instruments" => Type::Bool,
+                        _ => Type::Any,
+                    },
                     _ => Type::Any,
                 }
             }

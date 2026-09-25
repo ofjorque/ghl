@@ -195,7 +195,7 @@ impl ParsedSemModel {
                         }
                     }
                 }
-                Value::Formula { op: FormulaOp::Regression, response, terms } => {
+                Value::Formula { op: FormulaOp::Regression, response, terms, .. } => {
                     if !latent_set.contains(response) && !observed_set.contains(response) {
                         observed_set.push(response.clone());
                     }
@@ -205,7 +205,7 @@ impl ParsedSemModel {
                         }
                     }
                 }
-                Value::Formula { op: FormulaOp::Covariance, response, terms } => {
+                Value::Formula { op: FormulaOp::Covariance, response, terms, .. } => {
                     if !latent_set.contains(response) && !observed_set.contains(response) {
                         observed_set.push(response.clone());
                     }
@@ -251,7 +251,7 @@ impl ParsedSemModel {
         // 3. Process equations
         for eq in equations {
             match eq {
-                Value::Formula { op: FormulaOp::Measurement, response: latent, terms: indicators } => {
+                Value::Formula { op: FormulaOp::Measurement, response: latent, terms: indicators, .. } => {
                     let latent_idx = var_index(latent)?;
                     for (i, ind) in indicators.iter().enumerate() {
                         let ind_idx = var_index(ind)?;
@@ -283,7 +283,7 @@ impl ParsedSemModel {
                         }
                     }
                 }
-                Value::Formula { op: FormulaOp::Regression, response: lhs, terms: rhs_list } => {
+                Value::Formula { op: FormulaOp::Regression, response: lhs, terms: rhs_list, .. } => {
                     let lhs_idx = var_index(lhs)?;
                     for rhs in rhs_list {
                         let rhs_idx = var_index(rhs)?;
@@ -300,7 +300,7 @@ impl ParsedSemModel {
                         });
                     }
                 }
-                Value::Formula { op: FormulaOp::Covariance, response: v1, terms: v2_list } => {
+                Value::Formula { op: FormulaOp::Covariance, response: v1, terms: v2_list, .. } => {
                     let v1_idx = var_index(v1)?;
                     for v2 in v2_list {
                         let v2_idx = var_index(v2)?;

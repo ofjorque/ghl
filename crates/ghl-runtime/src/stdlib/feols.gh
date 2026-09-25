@@ -1,0 +1,73 @@
+// High-Dimensional Fixed Effects OLS (feols) Standard Library Module (Roadmap 08, Paso B.2).
+// Implemented in pure GHL Layer 1, providing reference types and NEKO contracts.
+
+struct FeolsResult {
+    model: String,
+    response: String,
+    terms: Vector,
+    absorbed: Vector,
+    coefficients: Vector,
+    std_errors: Vector,
+    t_stats: Vector,
+    p_values: Vector,
+    r2: f64,
+    r2_within: f64,
+    n_obs: i64,
+    df_fe: i64,
+    df_resid: i64,
+    vcov_type: String,
+    parameters: DataFrame,
+    residuals: Vector,
+    fitted: Vector,
+    vcov: Matrix
+}
+
+impl FeolsResult {
+    fn summary(&self) {
+        println("/ᐠ˵- ⩊ -˵マ ✧ CONVERGED (High-Dimensional Fixed Effects OLS - feols)");
+        println("===============================================================");
+        println("Model: High-Dimensional Fixed Effects OLS (feols)");
+        println("---------------------------------------------------------------");
+        println("Dependent Variable :", self.response);
+        println("Observations       :", self.n_obs);
+        println("Absorbed FEs       :", self.absorbed, "(df =", self.df_fe, ")");
+        println("Residual DF        :", self.df_resid);
+        println("VCOV Estimation    :", self.vcov_type);
+        println("R-Squared          :", self.r2, "(Within:", self.r2_within, ")");
+        println("---------------------------------------------------------------");
+        println("Parameter Estimates:");
+        println(self.parameters);
+        println("===============================================================");
+    }
+
+    fn tidy(&self) -> DataFrame {
+        self.parameters
+    }
+
+    fn glance(&self) -> DataFrame {
+        dataframe {
+            r2: [self.r2],
+            r2_within: [self.r2_within],
+            n_obs: [self.n_obs],
+            df_fe: [self.df_fe],
+            df_resid: [self.df_resid],
+            vcov_type: [self.vcov_type]
+        }
+    }
+
+    fn vcov(&self) -> Matrix {
+        self.vcov
+    }
+
+    fn coef(&self) -> Vector {
+        self.coefficients
+    }
+
+    fn residuals(&self) -> Vector {
+        self.residuals
+    }
+
+    fn fitted(&self) -> Vector {
+        self.fitted
+    }
+}
