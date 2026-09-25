@@ -1,0 +1,79 @@
+// Penalized Regularized Regression (Lasso, Ridge, ElasticNet) Standard Library Module (Roadmap 08, Paso B.4).
+// Implemented in pure GHL Layer 1, providing reference types and NEKO contracts.
+
+struct RegularizedResult {
+    model: String,
+    model_type: String,
+    response: String,
+    terms: Vector,
+    active_terms: Vector,
+    coefficients: Vector,
+    alpha: f64,
+    lambda: f64,
+    lambda_min: Value,
+    lambda_1se: Value,
+    r2: f64,
+    mse: f64,
+    n_obs: i64,
+    n_features: i64,
+    n_selected: i64,
+    converged: bool,
+    iterations: i64,
+    parameters: DataFrame,
+    cv_metrics: Value,
+    residuals: Vector,
+    fitted: Vector
+}
+
+impl RegularizedResult {
+    fn summary(&self) {
+        println("/ᐠ˵- ⩊ -˵マ ✧ CONVERGED (Penalized Regularized Regression -", self.model_type, ")");
+        println("===============================================================");
+        println("Model: Penalized Regularized Regression (", self.model_type, ")");
+        println("---------------------------------------------------------------");
+        println("Dependent Variable :", self.response);
+        println("Observations       :", self.n_obs);
+        println("Total Features     :", self.n_features);
+        println("Selected Features  :", self.n_selected, "(non-zero coefficients)");
+        println("Mixing Parameter α :", self.alpha);
+        println("Penalty Weight λ   :", self.lambda);
+        if !self.lambda_min.is_na() {
+            println("Cross-Validation   : Optimal λ_min =", self.lambda_min, ", λ_1se =", self.lambda_1se);
+        }
+        println("R-Squared          :", self.r2);
+        println("Mean Squared Error :", self.mse);
+        println("Iterations         :", self.iterations);
+        println("---------------------------------------------------------------");
+        println("Active Terms (Non-Zero Coefficients):");
+        println(self.active_terms);
+        println("---------------------------------------------------------------");
+        println("Parameter Estimates:");
+        println(self.parameters);
+        println("===============================================================");
+    }
+
+    fn tidy(&self) -> DataFrame {
+        self.parameters
+    }
+
+    fn glance(&self) -> DataFrame {
+        dataframe {
+            model_type: [self.model_type],
+            alpha:      [self.alpha],
+            lambda:     [self.lambda],
+            n_obs:      [self.n_obs],
+            n_features: [self.n_features],
+            n_selected: [self.n_selected],
+            r2:         [self.r2],
+            mse:        [self.mse]
+        }
+    }
+
+    fn coef(&self) -> Vector {
+        self.coefficients
+    }
+
+    fn residuals(&self) -> Vector {
+        self.residuals
+    }
+}

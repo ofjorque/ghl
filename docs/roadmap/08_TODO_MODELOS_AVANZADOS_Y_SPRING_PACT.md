@@ -33,9 +33,9 @@ Implementación desacoplada entre matemática de bajo nivel y estimadores de usu
   - [x] **Estimador GHL (Capa 1 - Lógica y Capacidades):** Función `feols(y ~ x | entity + time, df)` en `.gh`, cálculo de errores estándar (clásicos, robustos y clusterizados por grupo), y `struct FeolsResult` con `tidy`, `summary`, `glance`.
 - [x] **Variables Instrumentales (IV / 2SLS — `iv_regress` con `|`):**
   - [x] **Estimador GHL (Capa 1 - GHL & Kernel Rust):** Primitiva `model_matrix(formula, df)`, función `iv_regress(y ~ x_exog + x_endog | x_exog + z_instr, df)` con descomposición automática de variables exógenas, endógenas e instrumentos excluidos, verificación de condición de orden ($L \ge K$), dos etapas de proyección (2SLS con faer), cálculo de residuos estructurales sobre $X$ real, errores estándar clásicos y robustos (HC1), diagnóstico de instrumentos débiles ($F > 10$), test de endogeneidad de Wu-Hausman, test de sobreidentificación de Sargan y `struct IvResult` con `impl` de `summary()`, `tidy()`, `glance()`, `vcov()`, `coef()` y `residuals()`.
-- [ ] **Regresión Regularizada Penalizada (Lasso, Ridge, ElasticNet):**
-  - [ ] **Kernel Rust (Capa 0 - Matemática Pesada):** Algoritmo de descenso por coordenadas (*Coordinate Descent* estilo `glmnet`) para penalizaciones $L_1$ y $L_2$.
-  - [ ] **Estimador GHL (Capa 1 - Lógica y Capacidades):** Funciones `lasso`, `ridge`, búsqueda óptima de $\lambda$ mediante validación cruzada $K$-fold (`cv_glmnet`) y `struct RegularizedResult` con `tidy`/`glance`.
+- [x] **Regresión Regularizada Penalizada (Lasso, Ridge, ElasticNet):**
+  - [x] **Kernel Rust (Capa 0 - Matemática Pesada):** Algoritmo de descenso por coordenadas (*Coordinate Descent* estilo `glmnet`) para penalizaciones $L_1$ y $L_2$ con warm starts a lo largo del path de regularización.
+  - [x] **Estimador GHL (Capa 1 - Lógica y Capacidades):** Funciones `lasso`, `ridge`, `elastic_net`, búsqueda óptima de $\lambda$ mediante validación cruzada $K$-fold (`cv_glmnet`) reportando $\lambda_{\min}$ y regla de 1 error estándar $\lambda_{1\text{se}}$, y `struct RegularizedResult` con `impl` de `summary()`, `tidy()`, `glance()`, `coef()`, `residuals()` y `predict()`.
 
 ---
 

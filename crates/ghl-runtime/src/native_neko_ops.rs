@@ -255,6 +255,49 @@ pub(crate) fn native_summary(interp: &mut crate::eval::Interpreter, args: Vec<Va
                 println!("===============================================================");
                 return Ok(Value::Unit);
             }
+            if name == "RegularizedResult" {
+                let m_type = fields.get("model_type").map(|v| v.to_string()).unwrap_or_else(|| "Regularized".to_string());
+                println!("/ᐠ˵- ⩊ -˵マ ✧ CONVERGED (Penalized Regularized Regression - {})", m_type);
+                println!("===============================================================");
+                println!("Model: Penalized Regularized Regression ({})", m_type);
+                println!("---------------------------------------------------------------");
+                if let Some(resp) = fields.get("response") {
+                    println!("Dependent Variable : {}", resp);
+                }
+                if let Some(n) = fields.get("n_obs") {
+                    println!("Observations       : {}", n);
+                }
+                if let (Some(n_feat), Some(n_sel)) = (fields.get("n_features"), fields.get("n_selected")) {
+                    println!("Features Selected  : {} / {} active (non-zero)", n_sel, n_feat);
+                }
+                if let Some(alpha) = fields.get("alpha") {
+                    println!("Mixing Parameter α : {}", alpha);
+                }
+                if let Some(lam) = fields.get("lambda") {
+                    println!("Penalty Weight λ   : {}", lam);
+                }
+                if let (Some(l_min), Some(l_1se)) = (fields.get("lambda_min"), fields.get("lambda_1se")) {
+                    if !l_min.is_na() {
+                        println!("Cross-Validation   : Optimal λ_min = {}, λ_1se = {}", l_min, l_1se);
+                    }
+                }
+                if let Some(r2) = fields.get("r2") {
+                    println!("R-Squared          : {}", r2);
+                }
+                if let Some(mse) = fields.get("mse") {
+                    println!("Mean Squared Error : {}", mse);
+                }
+                if let Some(iters) = fields.get("iterations") {
+                    println!("Iterations         : {}", iters);
+                }
+                println!("---------------------------------------------------------------");
+                println!("Parameter Estimates:");
+                if let Some(params) = fields.get("parameters") {
+                    println!("{}", params);
+                }
+                println!("===============================================================");
+                return Ok(Value::Unit);
+            }
             let method_key = format!("{}::summary", name);
             if let Some(fn_val) = interp.env.get(&method_key) {
                 interp.call_value(fn_val, vec![model_val.clone()])
@@ -280,7 +323,7 @@ pub(crate) fn native_tidy(interp: &mut crate::eval::Interpreter, args: Vec<Value
         Value::GlmFit(m) => Ok(m.tidy()),
         Value::GmmFit(m) => Ok(m.tidy()),
         Value::Struct { name, fields } => {
-            if name == "SemResult" || name == "FeolsResult" || name == "IvResult" {
+            if name == "SemResult" || name == "FeolsResult" || name == "IvResult" || name == "RegularizedResult" {
                 if let Some(params) = fields.get("parameters") {
                     return Ok(params.clone());
                 }
@@ -347,6 +390,20 @@ pub(crate) fn native_glance(interp: &mut crate::eval::Interpreter, args: Vec<Val
                 let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
                 return Ok(Value::DataFrame { frame, na_reasons });
             }
+            if name == "RegularizedResult" {
+                let columns: Vec<(String, Vec<Value>)> = vec![
+                    ("model_type".to_string(), vec![fields.get("model_type").cloned().unwrap_or(Value::String("Lasso".into()))]),
+                    ("alpha".to_string(), vec![fields.get("alpha").cloned().unwrap_or(Value::F64(1.0))]),
+                    ("lambda".to_string(), vec![fields.get("lambda").cloned().unwrap_or(Value::F64(0.0))]),
+                    ("n_obs".to_string(), vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))]),
+                    ("n_features".to_string(), vec![fields.get("n_features").cloned().unwrap_or(Value::I64(0))]),
+                    ("n_selected".to_string(), vec![fields.get("n_selected").cloned().unwrap_or(Value::I64(0))]),
+                    ("r2".to_string(), vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))]),
+                    ("mse".to_string(), vec![fields.get("mse").cloned().unwrap_or(Value::F64(0.0))]),
+                ];
+                let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
+                return Ok(Value::DataFrame { frame, na_reasons });
+            }
             let method_key = format!("{}::glance", name);
             let fn_val = interp.env.get(&method_key).ok_or_else(|| {
                 Diagnostic::statistical_error("S0200", format!("Method `glance()` is not implemented for struct `{}`", name))
@@ -391,9 +448,18 @@ pub(crate) fn native_predict(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Value::ModelFit(m) => m.predict(&args[1]),
         Value::GlmFit(m) => m.predict(&args[1]),
         Value::GmmFit(m) => m.predict(&args[1]),
+        Value::Struct { name, fields } if name == "RegularizedResult" => {
+            match &args[1] {
+                Value::DataFrame { frame, .. } => crate::regularized::predict_regularized(fields, frame),
+                other => Err(Diagnostic::statistical_error(
+                    "S0200",
+                    format!("Second argument of `predict()` must be a DataFrame, found `{}`", other.type_name()),
+                )),
+            }
+        }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("First argument of `predict()` must be a ModelFit, found `{}`", other.type_name()),
+            format!("First argument of `predict()` must be a ModelFit or Model struct, found `{}`", other.type_name()),
         )),
     }
 }
@@ -411,7 +477,7 @@ pub(crate) fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
             Ok(Value::Vector(VectorData::from_f64(m.residuals.clone())))
         }
         Value::Struct { name, fields } => {
-            if name == "FeolsResult" || name == "IvResult" {
+            if name == "FeolsResult" || name == "IvResult" || name == "RegularizedResult" {
                 if let Some(res) = fields.get("residuals") {
                     return Ok(res.clone());
                 }
@@ -448,7 +514,7 @@ pub(crate) fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
             })
         }
         Value::Struct { name, fields } => {
-            if name == "FeolsResult" || name == "IvResult" {
+            if name == "FeolsResult" || name == "IvResult" || name == "RegularizedResult" {
                 if let Some(c) = fields.get("coefficients") {
                     return Ok(c.clone());
                 }

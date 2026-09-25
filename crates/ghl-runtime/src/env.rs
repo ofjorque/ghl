@@ -116,6 +116,10 @@ impl RuntimeEnv {
         env.set("iv_regress".into(), Value::NativeFn(crate::iv::native_iv_regress));
         env.set("iv".into(), Value::NativeFn(crate::iv::native_iv_regress));
         env.set("model_matrix".into(), Value::NativeFn(native_model_matrix));
+        env.set("lasso".into(), Value::NativeFn(crate::regularized::native_lasso));
+        env.set("ridge".into(), Value::NativeFn(crate::regularized::native_ridge));
+        env.set("elastic_net".into(), Value::NativeFn(crate::regularized::native_elastic_net));
+        env.set("cv_glmnet".into(), Value::NativeFn(crate::regularized::native_cv_glmnet));
 
         // Grammar of Graphics (RFC 09) Verbs
         env.set("plot".into(), Value::NativeFn(native_plot));
