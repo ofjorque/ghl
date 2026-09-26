@@ -107,18 +107,51 @@ impl RuntimeEnv {
                 Value::String(s) => s.clone(),
                 other => other.to_string(),
             };
-            if first_str.contains("{}") && args.len() > 1 {
+            if first_str.contains('{') && args.len() > 1 {
                 let mut res = String::new();
                 let mut arg_idx = 1;
-                let parts: Vec<&str> = first_str.split("{}").collect();
-                for (i, part) in parts.iter().enumerate() {
-                    res.push_str(part);
-                    if i + 1 < parts.len() && arg_idx < args.len() {
-                        match &args[arg_idx] {
-                            Value::String(s) => res.push_str(s),
-                            other => res.push_str(&other.to_string()),
+                let mut chars = first_str.chars().peekable();
+                while let Some(ch) = chars.next() {
+                    if ch == '{' {
+                        let mut spec = String::new();
+                        let mut closed = false;
+                        for inner in chars.by_ref() {
+                            if inner == '}' {
+                                closed = true;
+                                break;
+                            }
+                            spec.push(inner);
                         }
-                        arg_idx += 1;
+                        if closed && arg_idx < args.len() {
+                            let arg = &args[arg_idx];
+                            arg_idx += 1;
+                            if spec.starts_with(":.2") {
+                                match arg {
+                                    Value::F64(f) => res.push_str(&format!("{:.2}", f)),
+                                    Value::I64(i) => res.push_str(&format!("{:.2}", *i as f64)),
+                                    other => res.push_str(&other.to_string()),
+                                }
+                            } else if spec.starts_with(":.4") {
+                                match arg {
+                                    Value::F64(f) => res.push_str(&format!("{:.4}", f)),
+                                    Value::I64(i) => res.push_str(&format!("{:.4}", *i as f64)),
+                                    other => res.push_str(&other.to_string()),
+                                }
+                            } else {
+                                match arg {
+                                    Value::String(s) => res.push_str(s),
+                                    other => res.push_str(&other.to_string()),
+                                }
+                            }
+                        } else {
+                            res.push('{');
+                            res.push_str(&spec);
+                            if closed {
+                                res.push('}');
+                            }
+                        }
+                    } else {
+                        res.push(ch);
                     }
                 }
                 Ok(Value::String(res))

@@ -25,6 +25,9 @@ impl AotEngine {
         flag_builder
             .set("use_colocated_libcalls", "false")
             .map_err(|e| Diagnostic::compute_error("C0420", format!("Cranelift flag error: {e}")))?;
+        flag_builder
+            .set("is_pic", "true")
+            .map_err(|e| Diagnostic::compute_error("C0420", format!("Cranelift flag error: {e}")))?;
 
         let isa_builder = cranelift_native::builder().map_err(|e| {
             Diagnostic::compute_error("C0421", format!("Host ISA unsupported by Cranelift: {e}"))

@@ -1,44 +1,32 @@
-// GHL Script: Cross-Language Validation vs R
-// Mirror of validation/reference/reference_models.R written in pure GHL
-
 println("=== 1. OLS Reference Model (GHL) ===");
 let df_ols = dataframe {
     x1: [1.0, 2.5, 3.2, 4.8, 5.1, 6.7, 7.3, 8.9],
     x2: [2.1, 1.8, 3.4, 4.0, 5.5, 6.1, 7.0, 8.2],
-    y:  [2.55, 5.70, 6.50, 9.20, 9.15, 11.65, 12.70, 15.30]
+    y: [2.55, 5.7, 6.5, 9.2, 9.15, 11.65, 12.7, 15.3]
 };
-
 let fit_ols = ols(y ~ x1 + x2, df_ols);
 summary(fit_ols);
-
 let betas = coef(fit_ols);
 println("OLS Estimated Betas:", betas);
-
 println("\n=== 2. GLM Logistic Reference Model (GHL) ===");
 let df_logit = dataframe {
     x1: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
-    y:  [0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    y: [0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 };
-
 let fit_logit = fit_logistic(y ~ x1, df_logit);
 summary(fit_logit);
-
 let logit_betas = coef(fit_logit);
 println("Logistic Estimated Betas:", logit_betas);
-
 println("\n=== 3. Categorical Factor Contrast Model (GHL) ===");
 let df_grp = dataframe {
     grp: factor(["ctrl", "ctrl", "trt1", "trt1", "trt2", "trt2"]),
-    y:   [10.2, 9.8, 20.1, 19.9, 30.5, 29.5]
+    y: [10.2, 9.8, 20.1, 19.9, 30.5, 29.5]
 };
-
 let fit_grp = ols(y ~ grp, df_grp);
 summary(fit_grp);
-
 let grp_betas = coef(fit_grp);
 println("Factor Contrasts (Treatment):", grp_betas);
 pounce(grp_betas[0] > 9.9 && grp_betas[0] < 10.1, "Baseline ctrl intercept should be ~10.0");
 pounce(grp_betas[1] > 9.9 && grp_betas[1] < 10.1, "Treatment 1 effect should be ~10.0");
 pounce(grp_betas[2] > 19.9 && grp_betas[2] < 20.1, "Treatment 2 effect should be ~20.0");
-
 println("\n(=^･ω･^=) All GHL reference models verified successfully!");
