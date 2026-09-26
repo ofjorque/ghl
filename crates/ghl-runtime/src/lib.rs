@@ -44,6 +44,7 @@ pub mod sem;
 pub mod feols;
 pub mod iv;
 pub mod regularized;
+pub mod cockpit;
 
 pub use value::{Value, JitFunction, FormulaParts};
 pub use feols::{fit_feols, FeolsVcovSpec};

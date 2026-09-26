@@ -1,6 +1,6 @@
 use std::fmt;
 use ghl_diagnostics::{
-    CockpitTable, RenderCaps, TableAlignment, TableColumn, Diagnostic,
+    CockpitPanel, CockpitTable, RenderCaps, TableAlignment, TableColumn, Diagnostic,
     AestheticMap, GeomLayer, PlotSpec,
 };
 use ghl_syntax::ast::{Expr, BinaryOp, FormulaOp};
@@ -244,6 +244,8 @@ pub enum Value {
         end: i64,
         inclusive: bool,
     },
+    /// Terminal Cockpit Deck Card (RFC 14)
+    CockpitPanel(Box<CockpitPanel>),
 }
 
 impl Value {
@@ -351,6 +353,7 @@ impl Value {
             Value::Record(_) => "Record",
             Value::Struct { .. } => "Struct",
             Value::Range { .. } => "Range",
+            Value::CockpitPanel(_) => "CockpitPanel",
         }
     }
 }
@@ -440,6 +443,7 @@ impl PartialEq for Value {
                 Value::JitFn { name: n1, func: f1 },
                 Value::JitFn { name: n2, func: f2 },
             ) => n1 == n2 && std::sync::Arc::ptr_eq(&f1.0, &f2.0),
+            (Value::CockpitPanel(p1), Value::CockpitPanel(p2)) => p1 == p2,
             _ => false,
         }
     }
@@ -739,6 +743,7 @@ impl Value {
                     format!("{}..{}", start, end)
                 }
             }
+            Value::CockpitPanel(p) => p.render(caps),
         }
     }
 }

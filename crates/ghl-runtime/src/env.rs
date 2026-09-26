@@ -562,6 +562,19 @@ impl RuntimeEnv {
         env.set("help".into(),                      Value::NativeFn(native_help));
         env.set("doc".into(),                       Value::NativeFn(native_help));
 
+        // Cockpit Deck Native Primitives (RFC 14)
+        env.set("cockpit".into(),                   Value::NativeFn(crate::cockpit::native_cockpit));
+        env.set("cockpit_with_badge".into(),        Value::NativeFn(crate::cockpit::native_cockpit_with_badge));
+        env.set("cockpit_add_kv".into(),            Value::NativeFn(crate::cockpit::native_cockpit_add_kv));
+        env.set("cockpit_add_line".into(),          Value::NativeFn(crate::cockpit::native_cockpit_add_line));
+        env.set("cockpit_add_divider".into(),       Value::NativeFn(crate::cockpit::native_cockpit_add_divider));
+        env.set("render_cockpit".into(),            Value::NativeFn(crate::cockpit::native_render_cockpit));
+        env.set("show_cockpit".into(),              Value::NativeFn(crate::cockpit::native_render_cockpit));
+        env.set("cockpit_render".into(),            Value::NativeFn(crate::cockpit::native_render_cockpit));
+        env.set("format_cockpit".into(),            Value::NativeFn(crate::cockpit::native_format_cockpit));
+        env.set("cockpit_format".into(),            Value::NativeFn(crate::cockpit::native_format_cockpit));
+        env.set("sparkline".into(),                 Value::NativeFn(crate::cockpit::native_sparkline));
+        env.set("cockpit_sparkline".into(),         Value::NativeFn(crate::cockpit::native_sparkline));
 
         env
     }

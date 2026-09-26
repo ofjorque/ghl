@@ -27,17 +27,37 @@ fn audit_causal_pipeline(df: DataFrame, outcome_col: String, treat_col: String, 
     }
 }
 
+/// Builds the final causal audit summary panel.
+fn causal_audit_cockpit(audit: CausalAudit) {
+    let badge = if audit.is_fully_certified {
+        "/ᐠ˵- ⩊ -˵マ ✧ CAUSAL CERTIFIED"
+    } else {
+        "≽(◉˕ ◉ ≼マ CAUTION ADVISED"
+    };
+
+    let pt_status = if audit.parallel_trends.is_validated { "VALIDATED (p >= 0.05)" } else { "VIOLATION SUSPECTED" };
+    let es_status = if audit.event_study.pre_trends_pass { "PASSED (null holds)" } else { "NON-ZERO LEADS DETECTED" };
+
+    let p = cockpit("GHL Causal: Final Causal Inference Certification", badge)
+        |> cockpit_add_kv("Parallel Trends", pt_status)
+        |> cockpit_add_kv("Treatment Effect (ATT)", format("{:.4} (p = {:.4})", audit.did_result.att, audit.did_result.p_value))
+        |> cockpit_add_kv("Event Study Leads", es_status)
+        |> cockpit_add_divider();
+
+    if audit.is_fully_certified {
+        p |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ CAUSAL PIPELINE CERTIFIED: Robust causal identification confirmed!")
+    } else {
+        p |> cockpit_add_line("≽(◉˕ ◉ ≼マ CAUSAL AUDIT CAUTION: Review assumption warnings above before policy inference")
+    }
+}
+
 /// Renders the full causal audit report.
 fn render_causal_audit(audit: CausalAudit) {
     render_parallel_trends_cockpit(audit.parallel_trends);
     render_did_cockpit(audit.did_result);
     render_event_study_cockpit(audit.event_study);
 
-    println("┌─ [GHL Causal] Final Causal Inference Certification ──────────");
-    if audit.is_fully_certified {
-        println("│ /ᐠ˵- ⩊ -˵マ ✧ CAUSAL PIPELINE CERTIFIED: Robust causal identification confirmed!");
-    } else {
-        println("│ ≽(◉˕ ◉ ≼マ CAUSAL AUDIT CAUTION: Review assumption warnings above before policy inference");
-    }
-    println("└───────────────────────────────────────────────────────────────");
+    let summary = causal_audit_cockpit(audit);
+    show_cockpit(summary);
 }
+

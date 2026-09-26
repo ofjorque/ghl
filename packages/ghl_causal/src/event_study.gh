@@ -151,11 +151,18 @@ fn event_study(df: DataFrame, outcome_col: String, treat_col: String, time_col: 
     }
 }
 
-/// Renders visual Cockpit Deck panel for Dynamic Event Study.
-fn render_event_study_cockpit(res: EventStudyResult) {
-    println("┌─ [GHL Causal] Dynamic Event Study Trajectory ─────────────────");
-    println("│ Relative Period   Estimate    Std.Err     t-stat     p-val    Type");
-    println("├───────────────────────────────────────────────────────────────");
+/// Builds visual Cockpit Deck panel for Dynamic Event Study.
+fn event_study_cockpit(res: EventStudyResult) {
+    let badge = if res.pre_trends_pass {
+        "/ᐠ˵- ⩊ -˵マ ✧ PRE-TRENDS VALID"
+    } else {
+        "≽(◉˕ ◉ ≼マ LEADS ANOMALY"
+    };
+
+    let mut p = cockpit("GHL Causal: Dynamic Event Study Trajectory", badge)
+        |> cockpit_add_line("Relative Period   Estimate    Std.Err     t-stat     p-val    Type")
+        |> cockpit_add_divider();
+
     for pt in res.estimates {
         let p_type = if pt.period == -1 {
             "[BASELINE]"
@@ -164,13 +171,21 @@ fn render_event_study_cockpit(res: EventStudyResult) {
         } else {
             "[LAG (effect)]"
         };
-        println("│ t =", pt.period, "          ", format("{:.4}", pt.estimate), "    ", format("{:.4}", pt.std_error), "   ", format("{:.2}", pt.t_stat), "   ", format("{:.4}", pt.p_value), "  ", p_type);
+        let line = format("t = {:<6} {:>10.4} {:>10.4} {:>8.2} {:>8.4}  {}", pt.period, pt.estimate, pt.std_error, pt.t_stat, pt.p_value, p_type);
+        p = cockpit_add_line(p, line);
     }
-    println("├───────────────────────────────────────────────────────────────");
+
+    p = cockpit_add_divider(p);
     if res.pre_trends_pass {
-        println("│ /ᐠ˵- ⩊ -˵マ ✧ EVENT STUDY VALIDATED: Pre-treatment leads satisfy null (≈ 0)");
+        p |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ EVENT STUDY VALIDATED: Pre-treatment leads satisfy null (≈ 0)")
     } else {
-        println("│ ≽(◉˕ ◉ ≼マ EVENT STUDY WARNING: Pre-treatment anticipation or non-parallel leads detected");
+        p |> cockpit_add_line("≽(◉˕ ◉ ≼マ EVENT STUDY WARNING: Pre-treatment anticipation or non-parallel leads detected")
     }
-    println("└───────────────────────────────────────────────────────────────");
 }
+
+/// Renders visual Cockpit Deck panel for Dynamic Event Study to terminal.
+fn render_event_study_cockpit(res: EventStudyResult) {
+    let p = event_study_cockpit(res);
+    show_cockpit(p);
+}
+

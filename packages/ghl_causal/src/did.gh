@@ -146,24 +146,49 @@ fn did_2x2(df: DataFrame, outcome_col: String, treat_col: String, post_col: Stri
     }
 }
 
-/// Renders visual Cockpit Deck panel for 2x2 DiD causal estimates.
-fn render_did_cockpit(res: DidResult) {
-    println("┌─ [GHL Causal] Difference-in-Differences (2x2 DiD) ────────────");
-    println("│ Outcome Change Analysis:");
-    println("│ • Treated Group: pre =", format("{:.2}", res.mean_treated_pre), "-> post =", format("{:.2}", res.mean_treated_post), "(Δ =", format("{:.2}", res.mean_treated_post - res.mean_treated_pre), ")");
-    println("│ • Control Group: pre =", format("{:.2}", res.mean_control_pre), "-> post =", format("{:.2}", res.mean_control_post), "(Δ =", format("{:.2}", res.mean_control_post - res.mean_control_pre), ")");
-    println("│ • Counterfactual Expectation Y_1(0):", format("{:.2}", res.counterfactual));
-    println("├───────────────────────────────────────────────────────────────");
-    println("│ Estimate             Std.Err     t-stat     p-val   95% Conf. Int");
-    println("│ ATT =", format("{:.4}", res.att), "    ", format("{:.4}", res.std_error), "   ", format("{:.2}", res.t_stat), "   ", format("{:.4}", res.p_value), "  [", format("{:.2}", res.conf_low), ",", format("{:.2}", res.conf_high), "]");
-    println("├───────────────────────────────────────────────────────────────");
-    if res.is_significant {
-        println("│ /ᐠ˵- ⩊ -˵マ ✧ STATISTICALLY SIGNIFICANT CAUSAL EFFECT IDENTIFIED!");
+/// Builds visual Cockpit Deck panel for 2x2 DiD causal estimates.
+fn did_cockpit(res: DidResult) {
+    let badge = if res.is_significant {
+        "/ᐠ˵- ⩊ -˵マ ✧ SIGNIFICANT"
     } else {
-        println("│ ≽(◉˕ ◉ ≼マ INSUFFICIENT EVIDENCE TO REJECT NULL EFFECT (p >= 0.05)");
+        "≽(◉˕ ◉ ≼マ INSUFFICIENT EVIDENCE"
+    };
+
+    let delta_t = res.mean_treated_post - res.mean_treated_pre;
+    let delta_c = res.mean_control_post - res.mean_control_pre;
+
+    let p = cockpit("GHL Causal: Difference-in-Differences (2x2 DiD)", badge)
+        |> cockpit_add_kv("Outcome Model", "Canonical 2x2 DiD Estimator (ATT)")
+        |> cockpit_add_kv(
+            "Treated Group",
+            format("pre = {:.2} -> post = {:.2} (Δ = {:.2})", res.mean_treated_pre, res.mean_treated_post, delta_t)
+        )
+        |> cockpit_add_kv(
+            "Control Group",
+            format("pre = {:.2} -> post = {:.2} (Δ = {:.2})", res.mean_control_pre, res.mean_control_post, delta_c)
+        )
+        |> cockpit_add_kv("Counterfactual Y_1(0)", format("{:.2}", res.counterfactual))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("ATT Estimate", format("{:.4}", res.att))
+        |> cockpit_add_kv("Std. Error", format("{:.4}", res.std_error))
+        |> cockpit_add_kv("t-statistic", format("{:.2}", res.t_stat))
+        |> cockpit_add_kv("p-value", format("{:.4}", res.p_value))
+        |> cockpit_add_kv("95% Conf. Int", format("[{:.2}, {:.2}]", res.conf_low, res.conf_high))
+        |> cockpit_add_divider();
+
+    if res.is_significant {
+        p |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ STATISTICALLY SIGNIFICANT CAUSAL EFFECT IDENTIFIED!")
+    } else {
+        p |> cockpit_add_line("≽(◉˕ ◉ ≼マ INSUFFICIENT EVIDENCE TO REJECT NULL EFFECT (p >= 0.05)")
     }
-    println("└───────────────────────────────────────────────────────────────");
 }
+
+/// Renders visual Cockpit Deck panel for 2x2 DiD causal estimates to terminal.
+fn render_did_cockpit(res: DidResult) {
+    let p = did_cockpit(res);
+    show_cockpit(p);
+}
+
 
 /// Tidy extraction for DidResult.
 fn tidy_did(res: DidResult) -> DataFrame {

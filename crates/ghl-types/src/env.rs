@@ -1025,6 +1025,19 @@ impl TypeEnv {
             );
         }
 
+        // Cockpit Deck Subsystem (RFC 14)
+        for name in [
+            "cockpit", "cockpit_with_badge", "cockpit_add_kv", "cockpit_add_line",
+            "cockpit_add_divider", "render_cockpit", "show_cockpit", "cockpit_render",
+            "format_cockpit", "cockpit_format", "sparkline", "cockpit_sparkline",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
         env
     }
 

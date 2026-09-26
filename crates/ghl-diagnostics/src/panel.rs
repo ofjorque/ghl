@@ -5,14 +5,14 @@
 
 use crate::caps::RenderCaps;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PanelItem {
     Line(String),
     KeyValue { key: String, val: String },
     Divider,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CockpitPanel {
     pub title: String,
     pub badge: Option<String>,

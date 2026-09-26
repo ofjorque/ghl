@@ -183,25 +183,39 @@ fn verify_contract(contract: Contract, df: DataFrame) -> AuditReceipt {
     }
 }
 
-/// Renders the Cockpit Deck receipt panel in terminal with Haru's badge.
-fn render_cockpit(receipt: AuditReceipt) {
-    println("┌─ [GHL Cockpit Deck] spring_pact Compliance Certificate ───────");
-    println("│ Contract Name:", receipt.contract_name);
-    println("│ Contract Hash:", receipt.contract_hash);
-    println("│ Dataset Hash :", receipt.dataset_hash);
-    println("├───────────────────────────────────────────────────────────────");
-    println("│ Rule                         Expected          Observed       Status");
+/// Builds the Cockpit Deck receipt panel with Haru/Gojo badge.
+fn audit_cockpit(receipt: AuditReceipt) {
+    let badge = if receipt.is_compliant {
+        "/ᐠ˵- ⩊ -˵マ ✧ CERTIFIED"
+    } else {
+        "≽(◉˕ ◉ ≼マ VIOLATED"
+    };
+
+    let mut p = cockpit("spring_pact Compliance Certificate", badge)
+        |> cockpit_add_kv("Contract Name", receipt.contract_name)
+        |> cockpit_add_kv("Contract Hash", receipt.contract_hash)
+        |> cockpit_add_kv("Dataset Hash", receipt.dataset_hash)
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Rule                         Expected          Observed       Status");
 
     for ev in receipt.evaluations {
         let status_str = if ev.passed { "[PASS]" } else { "[FAIL]" };
-        println("│ •", ev.rule, " | exp:", ev.expected, " | obs:", ev.observed, " |", status_str);
+        let line = format("• {} | exp: {} | obs: {} | {}", ev.rule, ev.expected, ev.observed, status_str);
+        p = cockpit_add_line(p, line);
     }
 
-    println("├───────────────────────────────────────────────────────────────");
+    p = cockpit_add_divider(p);
     if receipt.is_compliant {
-        println("│ /ᐠ˵- ⩊ -˵マ ✧ All statistical pact expectations certified and verified!");
+        p = cockpit_add_line(p, "/ᐠ˵- ⩊ -˵マ ✧ All statistical pact expectations certified and verified!");
     } else {
-        println("│ ≽(◉˕ ◉ ≼マ CONTRACT VIOLATED: Discrepancies detected!");
+        p = cockpit_add_line(p, "≽(◉˕ ◉ ≼マ CONTRACT VIOLATED: Discrepancies detected!");
     }
-    println("└───────────────────────────────────────────────────────────────");
+    p
 }
+
+/// Renders the Cockpit Deck receipt panel in terminal with Haru's badge.
+fn render_cockpit(receipt: AuditReceipt) {
+    let p = audit_cockpit(receipt);
+    show_cockpit(p);
+}
+

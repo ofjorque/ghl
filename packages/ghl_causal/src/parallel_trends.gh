@@ -130,20 +130,34 @@ fn test_parallel_trends(df: DataFrame, outcome_col: String, treat_col: String, t
     }
 }
 
-/// Renders visual Cockpit Deck panel for parallel pre-trends diagnostic test.
-fn render_parallel_trends_cockpit(res: ParallelTrendsResult) {
-    println("┌─ [GHL Causal] Parallel Pre-Trends Diagnostic Test ────────────");
-    println("│ Pre-Intervention Trajectory Analysis:");
-    println("│ • Treated Slope (β_T):", format("{:.4}", res.slope_treated));
-    println("│ • Control Slope (β_C):", format("{:.4}", res.slope_control));
-    println("│ • Differential Slope (Δβ):", format("{:.4}", res.diff_slope));
-    println("├───────────────────────────────────────────────────────────────");
-    println("│ Test Statistic: t =", format("{:.2}", res.t_stat), "| p-value =", format("{:.4}", res.p_value));
-    println("├───────────────────────────────────────────────────────────────");
-    if res.is_validated {
-        println("│ /ᐠ˵- ⩊ -˵マ ✧ PARALLEL PRE-TRENDS ASSUMPTION SATISFIED (p >= 0.05)");
+/// Builds visual Cockpit Deck panel for parallel pre-trends diagnostic test.
+fn parallel_trends_cockpit(res: ParallelTrendsResult) {
+    let badge = if res.is_validated {
+        "/ᐠ˵- ⩊ -˵マ ✧ VALIDATED"
     } else {
-        println("│ ≽(◉˕ ◉ ≼マ PARALLEL TRENDS VIOLATION SUSPECTED: Slopes differ (p < 0.05)");
+        "≽(◉˕ ◉ ≼マ VIOLATION DETECTED"
+    };
+
+    let p = cockpit("GHL Causal: Parallel Pre-Trends Diagnostic Test", badge)
+        |> cockpit_add_kv("Treated Slope (β_T)", format("{:.4}", res.slope_treated))
+        |> cockpit_add_kv("Control Slope (β_C)", format("{:.4}", res.slope_control))
+        |> cockpit_add_kv("Differential Slope (Δβ)", format("{:.4}", res.diff_slope))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Std. Error", format("{:.4}", res.std_error))
+        |> cockpit_add_kv("Test Statistic", format("t = {:.2}", res.t_stat))
+        |> cockpit_add_kv("p-value", format("{:.4}", res.p_value))
+        |> cockpit_add_divider();
+
+    if res.is_validated {
+        p |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ PARALLEL PRE-TRENDS ASSUMPTION SATISFIED (p >= 0.05)")
+    } else {
+        p |> cockpit_add_line("≽(◉˕ ◉ ≼マ PARALLEL TRENDS VIOLATION SUSPECTED: Slopes differ (p < 0.05)")
     }
-    println("└───────────────────────────────────────────────────────────────");
 }
+
+/// Renders visual Cockpit Deck panel for parallel pre-trends diagnostic test to terminal.
+fn render_parallel_trends_cockpit(res: ParallelTrendsResult) {
+    let p = parallel_trends_cockpit(res);
+    show_cockpit(p);
+}
+

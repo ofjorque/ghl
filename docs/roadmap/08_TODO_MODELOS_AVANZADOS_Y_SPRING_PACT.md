@@ -75,6 +75,7 @@ Desbloqueo de primitivas base para que la librería estándar crezca en GHL puro
   - [x] Exponer `model_matrix(formula, df)` en `ghl-runtime` reutilizando `Blueprint::bake()`.
   - [x] Subsistema de distribuciones probabilísticas (`statrs` + `rand_xoshiro`) exponiendo la cuádruple interfaz canónica (`pdf`/`pmf`, `cdf`, `quantile`/`inv_cdf`, `sample` con seed) para continuas ($t$, $F$, $\chi^2$, Normal, Gamma, Beta, Uniforme, Exponencial) y discretas (Binomial, Poisson).
   - [x] Extender funciones globales de capacidades (`tidy`, `glance`, `summary`, `augment`, `vcov`) hacia `Value::Struct`.
+  - [x] Exponer primitivas nativas de Cockpit Deck (`cockpit`, `cockpit_with_badge`, `cockpit_add_kv`, `cockpit_add_line`, `cockpit_add_divider`, `show_cockpit`, `format_cockpit`, `sparkline`) y tipo `Value::CockpitPanel` para que paquetes (`spring_pact`, `ghl_causal`) rendericen paneles visuales de terminal sin strings hardcodeados.
 - [x] **Fase 2 — Piloto de Stdlib en GHL Puro (Capa 1):**
   - [x] Implementar `anova(formula, df)` y tests de hipótesis clásicos (`t_test`, `chisq_test`) 100% en código `.gh`.
 - [x] **Fase 3 — Optimizador Genérico en Capa 0 (`optim`):**
