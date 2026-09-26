@@ -56,6 +56,11 @@ for a in res_2pl.a_params {
         panic("2PL discrimination must be strictly positive");
     }
 }
+let c_vec = coef(res_2pl);
+if length(c_vec) != n_items {
+    panic("coef(res_2pl) must return item coefficients vector");
+}
+let df_coef = coef_irt(res_2pl);
 
 // 4. Test 3PL Model Calibration (with pseudo-guessing)
 println("Testing 3PL Model Calibration...");

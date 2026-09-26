@@ -138,12 +138,7 @@ fn score_persons_graded(
             for j in 0..n_items {
                 let a_j = a_params[j];
                 let y_ij = responses[(i * n_items) + j];
-                let mut k_val = 0;
-                for k in 0..n_categories {
-                    if (0.0 + k) == y_ij {
-                        k_val = k;
-                    }
-                }
+                let k_val = to_int(y_ij);
                 let p_cat = grm_category_prob(theta_q, a_j, thresholds, j, n_categories, k_val);
                 log_l = log_l + ln(p_cat);
             }

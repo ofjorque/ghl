@@ -261,6 +261,54 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "to_int".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::I64),
+            },
+            false,
+        );
+        env.insert(
+            "int".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::I64),
+            },
+            false,
+        );
+        env.insert(
+            "to_float".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::F64),
+            },
+            false,
+        );
+        env.insert(
+            "float".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::F64),
+            },
+            false,
+        );
+        env.insert(
+            "to_bool".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Bool),
+            },
+            false,
+        );
+        env.insert(
+            "bool".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Bool),
+            },
+            false,
+        );
+        env.insert(
             "format".into(),
             Type::Function {
                 params: vec![Type::Any],

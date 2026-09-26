@@ -299,6 +299,14 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 .then_ignore(just(Token::Semicolon).or_not())
                 .map_with_span(|e, span| Stmt::new(StmtKind::Return(e), span));
 
+            let break_stmt = just(Token::Break)
+                .then_ignore(just(Token::Semicolon).or_not())
+                .map_with_span(|_, span| Stmt::new(StmtKind::Break, span));
+
+            let continue_stmt = just(Token::Continue)
+                .then_ignore(just(Token::Semicolon).or_not())
+                .map_with_span(|_, span| Stmt::new(StmtKind::Continue, span));
+
             // `name = value;` -- reassignment, distinct from `let name = value;`. Must
             // be tried before `expr_stmt` below: a bare identifier also parses as a
             // valid (if pointless as a statement) expression, so without this ordering
@@ -335,7 +343,13 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
 
             let use_stmt = use_stmt_parser();
 
-            use_stmt.or(let_stmt).or(return_stmt).or(assign_stmt).or(expr_stmt)
+            use_stmt
+                .or(let_stmt)
+                .or(return_stmt)
+                .or(break_stmt)
+                .or(continue_stmt)
+                .or(assign_stmt)
+                .or(expr_stmt)
         };
 
         // Block: { stmt*; expr? }
@@ -918,6 +932,14 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         .then_ignore(just(Token::Semicolon).or_not())
         .map_with_span(|e, span| Stmt::new(StmtKind::Return(e), span));
 
+    let break_stmt = just(Token::Break)
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map_with_span(|_, span| Stmt::new(StmtKind::Break, span));
+
+    let continue_stmt = just(Token::Continue)
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map_with_span(|_, span| Stmt::new(StmtKind::Continue, span));
+
     // See the same rule in `expr_parser()`'s block-statement grammar for why this must
     // be tried before `expr_stmt`.
     let assign_stmt = select! { Token::Ident(name) => name }
@@ -1071,6 +1093,8 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         .or(fn_stmt)
         .or(let_stmt)
         .or(return_stmt)
+        .or(break_stmt)
+        .or(continue_stmt)
         .or(assign_stmt)
         .or(expr_stmt)
 }

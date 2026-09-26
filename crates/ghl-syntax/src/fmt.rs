@@ -244,6 +244,12 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             indent(out, level);
             out.push('}');
         }
+        StmtKind::Break => {
+            out.push_str("break;");
+        }
+        StmtKind::Continue => {
+            out.push_str("continue;");
+        }
     }
 }
 

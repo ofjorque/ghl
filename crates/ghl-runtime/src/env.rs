@@ -131,6 +131,48 @@ impl RuntimeEnv {
             }).unwrap_or_default();
             Ok(Value::String(val))
         }));
+        env.set("to_int".into(), Value::NativeFn(|args| {
+            let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`to_int()` requires 1 argument"))?;
+            match val {
+                Value::I64(i) => Ok(Value::I64(*i)),
+                Value::F64(f) => Ok(Value::I64(*f as i64)),
+                Value::String(s) => s.trim().parse::<i64>().map(Value::I64).map_err(|_| {
+                    Diagnostic::compute_error("C0202", format!("Cannot parse `{s}` as integer"))
+                }),
+                Value::Bool(b) => Ok(Value::I64(if *b { 1 } else { 0 })),
+                Value::NA(r) => Ok(Value::NA(r.clone())),
+                other => Err(Diagnostic::compute_error("C0202", format!("Cannot convert `{}` to integer", other.type_name()))),
+            }
+        }));
+        env.set("int".into(), env.get("to_int").unwrap().clone());
+
+        env.set("to_float".into(), Value::NativeFn(|args| {
+            let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`to_float()` requires 1 argument"))?;
+            match val {
+                Value::F64(f) => Ok(Value::F64(*f)),
+                Value::I64(i) => Ok(Value::F64(*i as f64)),
+                Value::String(s) => s.trim().parse::<f64>().map(Value::F64).map_err(|_| {
+                    Diagnostic::compute_error("C0202", format!("Cannot parse `{s}` as float"))
+                }),
+                Value::Bool(b) => Ok(Value::F64(if *b { 1.0 } else { 0.0 })),
+                Value::NA(r) => Ok(Value::NA(r.clone())),
+                other => Err(Diagnostic::compute_error("C0202", format!("Cannot convert `{}` to float", other.type_name()))),
+            }
+        }));
+        env.set("float".into(), env.get("to_float").unwrap().clone());
+
+        env.set("to_bool".into(), Value::NativeFn(|args| {
+            let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`to_bool()` requires 1 argument"))?;
+            match val {
+                Value::Bool(b) => Ok(Value::Bool(*b)),
+                Value::I64(i) => Ok(Value::Bool(*i != 0)),
+                Value::F64(f) => Ok(Value::Bool(*f != 0.0)),
+                Value::String(s) => Ok(Value::Bool(s == "true" || s == "1")),
+                Value::NA(r) => Ok(Value::NA(r.clone())),
+                other => Err(Diagnostic::compute_error("C0202", format!("Cannot convert `{}` to bool", other.type_name()))),
+            }
+        }));
+        env.set("bool".into(), env.get("to_bool").unwrap().clone());
         env.set("format".into(), Value::NativeFn(|args| {
             if args.is_empty() {
                 return Ok(Value::String(String::new()));

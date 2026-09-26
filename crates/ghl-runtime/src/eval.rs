@@ -24,6 +24,8 @@ pub struct Interpreter {
     /// between, it stays set and unconsumed so an outer, enclosing `Block` (a `return`
     /// nested inside an `if`/`match`) also observes it and short-circuits in turn.
     pub pending_return: Option<Value>,
+    pub loop_break: bool,
+    pub loop_continue: bool,
 }
 
 impl Interpreter {
@@ -31,6 +33,8 @@ impl Interpreter {
         Self {
             env: RuntimeEnv::with_prelude(),
             pending_return: None,
+            loop_break: false,
+            loop_continue: false,
         }
     }
 
@@ -38,6 +42,8 @@ impl Interpreter {
         Self {
             env,
             pending_return: None,
+            loop_break: false,
+            loop_continue: false,
         }
     }
 
@@ -123,6 +129,14 @@ impl Interpreter {
                 };
                 self.pending_return = Some(val.clone());
                 Ok(val)
+            }
+            StmtKind::Break => {
+                self.loop_break = true;
+                Ok(Value::Unit)
+            }
+            StmtKind::Continue => {
+                self.loop_continue = true;
+                Ok(Value::Unit)
             }
             StmtKind::Assign { name, value } => {
                 let val = self.eval_expr(value)?;
@@ -498,6 +512,10 @@ impl Interpreter {
                         self.env.pop_scope();
                         return Ok(val);
                     }
+                    if self.loop_break || self.loop_continue {
+                        self.env.pop_scope();
+                        return Ok(Value::Unit);
+                    }
                 }
                 let res = if let Some(e) = opt_expr {
                     self.eval_expr(e)?
@@ -535,6 +553,14 @@ impl Interpreter {
                         // iteration's block.
                         break;
                     }
+                    if self.loop_break {
+                        self.loop_break = false;
+                        break;
+                    }
+                    if self.loop_continue {
+                        self.loop_continue = false;
+                        continue;
+                    }
                 }
                 Ok(Value::Unit)
             }
@@ -550,6 +576,14 @@ impl Interpreter {
                         if self.pending_return.is_some() {
                             break;
                         }
+                        if self.loop_break {
+                            self.loop_break = false;
+                            break;
+                        }
+                        if self.loop_continue {
+                            self.loop_continue = false;
+                            continue;
+                        }
                     }
                     self.env.pop_scope();
                     Ok(Value::Unit)
@@ -560,6 +594,14 @@ impl Interpreter {
                         self.eval_expr(body)?;
                         if self.pending_return.is_some() {
                             break;
+                        }
+                        if self.loop_break {
+                            self.loop_break = false;
+                            break;
+                        }
+                        if self.loop_continue {
+                            self.loop_continue = false;
+                            continue;
                         }
                     }
                     self.env.pop_scope();

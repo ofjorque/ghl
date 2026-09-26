@@ -336,6 +336,8 @@ pub enum StmtKind {
     Impl(ImplDecl),
     Expr(Expr),
     Return(Option<Expr>),
+    Break,
+    Continue,
     /// `name = value;` -- reassigns an existing `let mut` binding in place
     /// (`RuntimeEnv::assign`), not a new declaration.
     Assign {

@@ -4,6 +4,7 @@
 struct GradedResponseResult {
     a_params: Vector,
     thresholds: Vector,
+    coefficients: Vector,
     n_categories: i64,
     n_items: i64,
     n_persons: i64,
@@ -119,12 +120,7 @@ fn fit_graded_response(
                 for j in 0..n_items {
                     let a_j = a_params[j];
                     let y_ij = responses[(i * n_items) + j];
-                    let mut k_val = 0;
-                    for k in 0..n_categories {
-                        if (0.0 + k) == y_ij {
-                            k_val = k;
-                        }
-                    }
+                    let k_val = to_int(y_ij);
                     let p_cat = grm_category_prob(theta_q, a_j, thresholds, j, n_categories, k_val);
                     log_l = log_l + ln(p_cat);
                 }
@@ -220,11 +216,23 @@ fn fit_graded_response(
     GradedResponseResult {
         a_params: a_params,
         thresholds: thresholds,
+        coefficients: thresholds,
         n_categories: n_categories,
         n_items: n_items,
         n_persons: n_persons,
         log_likelihood: final_loglik,
         iterations: iter_count,
         converged: converged
+    }
+}
+
+fn coef_graded_irt(result: GradedResponseResult) -> DataFrame {
+    let mut item_indices = [];
+    for j in 0..result.n_items {
+        item_indices = append(item_indices, 1 + j);
+    }
+    dataframe {
+        item: item_indices,
+        a: result.a_params
     }
 }

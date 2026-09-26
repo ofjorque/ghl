@@ -384,3 +384,79 @@ fn test_filter_rejects_unrecognized_predicate_instead_of_silently_passing_throug
     assert!(result.is_err(), "filter() with a nonsensical predicate must error, not no-op");
 }
 
+#[test]
+fn test_break_in_while_and_for_loops() {
+    let code = r#"
+        let mut count_while = 0;
+        while true {
+            count_while = count_while + 1;
+            if count_while == 5 {
+                break;
+            }
+        };
+
+        let mut sum_for = 0;
+        for i in 0..100 {
+            if i >= 10 {
+                break;
+            }
+            sum_for = sum_for + i;
+        }
+    "#;
+    let program = parse(code).expect("syntax ok");
+    let mut interp = Interpreter::new();
+    interp.eval_program(&program).expect("evaluation ok");
+    assert_eq!(interp.env.get("count_while"), Some(Value::I64(5)));
+    assert_eq!(interp.env.get("sum_for"), Some(Value::I64(45)));
+}
+
+#[test]
+fn test_continue_in_while_and_for_loops() {
+    let code = r#"
+        let mut sum_evens = 0;
+        for i in 0..10 {
+            if i % 2 != 0 {
+                continue;
+            }
+            sum_evens = sum_evens + i;
+        }
+
+        let mut w = 0;
+        let mut skipped_five = 0;
+        while w < 10 {
+            w = w + 1;
+            if w == 5 {
+                continue;
+            }
+            skipped_five = skipped_five + w;
+        };
+    "#;
+    let program = parse(code).expect("syntax ok");
+    let mut interp = Interpreter::new();
+    interp.eval_program(&program).expect("evaluation ok");
+    // 0 + 2 + 4 + 6 + 8 = 20
+    assert_eq!(interp.env.get("sum_evens"), Some(Value::I64(20)));
+    // (1..=10 sum = 55) - 5 = 50
+    assert_eq!(interp.env.get("skipped_five"), Some(Value::I64(50)));
+}
+
+#[test]
+fn test_type_conversion_helpers() {
+    let code = r#"
+        let x_int = to_int(42.8);
+        let x_float = to_float(100);
+        let x_bool = to_bool(1);
+        let str_int = "123".to_int();
+        let str_float = "3.1415".to_float();
+    "#;
+    let program = parse(code).expect("syntax ok");
+    let mut interp = Interpreter::new();
+    interp.eval_program(&program).expect("evaluation ok");
+    assert_eq!(interp.env.get("x_int"), Some(Value::I64(42)));
+    assert_eq!(interp.env.get("x_float"), Some(Value::F64(100.0)));
+    assert_eq!(interp.env.get("x_bool"), Some(Value::Bool(true)));
+    assert_eq!(interp.env.get("str_int"), Some(Value::I64(123)));
+    assert_eq!(interp.env.get("str_float"), Some(Value::F64(3.1415)));
+}
+
+

@@ -373,6 +373,8 @@ impl TypeChecker {
                 }
             }
 
+            StmtKind::Break | StmtKind::Continue => {}
+
             StmtKind::Assign { name, value } => {
                 let value_ty = self.check_expr(value);
                 match self.env.lookup(name) {
