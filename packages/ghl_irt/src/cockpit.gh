@@ -107,3 +107,88 @@ fn render_irt_graded_cockpit(
     let p = irt_graded_cockpit(res, scores);
     show_cockpit(p);
 }
+
+// =========================================================================
+// 3. Differential Item Functioning (DIF) Telemetry Deck
+// =========================================================================
+
+fn render_dif_cockpit(dif_res: DifAnalysisResult) {
+    let badge = if dif_res.n_flagged_severe == 0 && dif_res.n_flagged_moderate == 0 {
+        "/ᐠ˵- ⩊ -˵マ ✧ NO ITEM BIAS DETECTED"
+    } else {
+        if dif_res.n_flagged_severe > 0 {
+            "≽(◉˕ ◉ ≼マ SEVERE DIF BIAS DETECTED"
+        } else {
+            "≽(◉˕ ◉ ≼マ MODERATE DIF BIAS DETECTED"
+        }
+    };
+
+    let p = cockpit("GHL Psychometrics: Differential Item Functioning (DIF)", badge)
+        |> cockpit_add_kv("Methodology", "Mantel-Haenszel Contingency & ETS Delta Metric")
+        |> cockpit_add_kv("Reference Group Count", format("{}", dif_res.reference_count))
+        |> cockpit_add_kv("Focal Group Count", format("{}", dif_res.focal_count))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Class A Items (Negligible)", format("{}", length(dif_res.items) - (dif_res.n_flagged_moderate + dif_res.n_flagged_severe)))
+        |> cockpit_add_kv("Class B Items (Moderate)", format("{}", dif_res.n_flagged_moderate))
+        |> cockpit_add_kv("Class C Items (Severe)", format("{}", dif_res.n_flagged_severe))
+        |> cockpit_add_divider()
+        |> cockpit_add_line(if dif_res.n_flagged_severe == 0 {
+            "/ᐠ˵- ⩊ -˵マ ✧ Measurement invariance holds across demographic subgroups."
+        } else {
+            "≽(◉˕ ◉ ≼マ Flagged items violate demographic measurement invariance. Exclude from anchor sets."
+        });
+
+    show_cockpit(p);
+}
+
+// =========================================================================
+// 4. Person Fit Diagnostics Telemetry Deck
+// =========================================================================
+
+fn render_person_fit_cockpit(pfit: PersonFitResult) {
+    let badge = if pfit.n_aberrant == 0 {
+        "/ᐠ˵- ⩊ -˵マ ✧ CLEAN RESPONSE PATTERNS"
+    } else {
+        "≽(◉˕ ◉ ≼マ ABERRANT RESPONDENTS DETECTED"
+    };
+
+    let p = cockpit("GHL Psychometrics: Person Fit Diagnostics", badge)
+        |> cockpit_add_kv("Criterion", "Drasgow Standardized Log-Likelihood (Zh < -2.0)")
+        |> cockpit_add_kv("Mean Zh Index", format("{:.4}", pfit.mean_zh))
+        |> cockpit_add_kv("Aberrant Examinees Flagged", format("{}", pfit.n_aberrant))
+        |> cockpit_add_divider()
+        |> cockpit_add_line(if pfit.n_aberrant == 0 {
+            "/ᐠ˵- ⩊ -˵マ ✧ No aberrant test-taking behavior detected. Scores reflect valid trait continuum."
+        } else {
+            "≽(◉˕ ◉ ≼マ Flagged examinees display irregular answer patterns (random guessing or cheating)."
+        });
+
+    show_cockpit(p);
+}
+
+// =========================================================================
+// 5. Computerized Adaptive Testing (CAT) Telemetry Deck
+// =========================================================================
+
+fn render_cat_cockpit(session: CatSession) {
+    let badge = if session.is_terminated {
+        "/ᐠ˵- ⩊ -˵マ ✧ ADAPTIVE TEST CONVERGED"
+    } else {
+        "≽(◉˕ ◉ ≼マ SESSION IN PROGRESS"
+    };
+
+    let n_items_taken = length(session.items_administered);
+
+    let p = cockpit("GHL Psychometrics: Adaptive Testing Engine (CAT)", badge)
+        |> cockpit_add_kv("Selection Rule", "Maximum Fisher Information (MFI)")
+        |> cockpit_add_kv("Items Administered", format("{}", n_items_taken))
+        |> cockpit_add_kv("Final Trait Estimate (θ)", format("{:.4}", session.current_theta))
+        |> cockpit_add_kv("Measurement Error (SEM)", format("{:.4}", session.current_sem))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Theta Convergence Trajectory:")
+        |> cockpit_add_line(sparkline(session.theta_trajectory))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ Stopping threshold reached with minimal respondent burden.");
+
+    show_cockpit(p);
+}

@@ -81,3 +81,46 @@ fn audit_graded_response_irt(
 fn render_graded_response_irt_report(audit: GradedResponseAudit) {
     render_irt_graded_cockpit(audit.model, audit.scores);
 }
+
+// =========================================================================
+// Specialized Psychometric Audits: DIF, Person Fit, Adaptive Testing (CAT)
+// =========================================================================
+
+fn audit_dif_analysis(
+    responses: Vector,
+    group_membership: Vector,
+    n_persons: i64,
+    n_items: i64,
+    thetas: Vector
+) -> DifAnalysisResult {
+    let res = compute_mantel_haenszel_dif(responses, group_membership, n_persons, n_items, thetas);
+    render_dif_cockpit(res);
+    res
+}
+
+fn audit_person_fit_analysis(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    a_params: Vector,
+    b_params: Vector,
+    c_params: Vector,
+    thetas: Vector
+) -> PersonFitResult {
+    let res = compute_person_fit_zh(responses, n_persons, n_items, a_params, b_params, c_params, thetas);
+    render_person_fit_cockpit(res);
+    res
+}
+
+fn audit_cat_simulation(
+    a_bank: Vector,
+    b_bank: Vector,
+    c_bank: Vector,
+    true_theta: f64,
+    max_items: i64,
+    target_sem: f64
+) -> CatSession {
+    let session = simulate_cat(a_bank, b_bank, c_bank, true_theta, max_items, target_sem);
+    render_cat_cockpit(session);
+    session
+}

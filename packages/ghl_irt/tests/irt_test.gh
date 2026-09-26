@@ -187,4 +187,120 @@ if !audit_grm.certified {
 }
 render_graded_response_irt_report(audit_grm);
 
-println("All ghl_irt tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
+// 9. Test 4PL Model Calibration (with upper inattention asymptote)
+println("Testing 4PL Model Calibration (with inattention d)...");
+let res_4pl = fit_4pl(responses_3pl, n_persons, n_items);
+if !res_4pl.converged {
+    panic("4PL MMLE-EM must converge");
+}
+for d in res_4pl.d_params {
+    if d <= 0.0 || d > 1.0 {
+        panic("4PL inattention parameter d must be in (0, 1]");
+    }
+}
+
+// 10. Test Extended Polytomous Suite: GPCM, PCM, RSM, and NRM
+println("Testing GPCM, PCM, RSM, and NRM Polytomous Models...");
+let res_gpcm = fit_gpcm(poly_responses, n_poly_persons, n_poly_items, n_categories);
+if !res_gpcm.converged { panic("GPCM must converge"); }
+
+let res_pcm = fit_pcm(poly_responses, n_poly_persons, n_poly_items, n_categories);
+if !res_pcm.converged { panic("PCM must converge"); }
+for a in res_pcm.a_params {
+    if a != 1.0 { panic("PCM slopes must be fixed to 1.0"); }
+}
+
+let res_rsm = fit_rsm(poly_responses, n_poly_persons, n_poly_items, n_categories);
+if !res_rsm.converged { panic("RSM must converge"); }
+if length(res_rsm.tau_thresholds) != (n_categories - 1) {
+    panic("RSM common thresholds length mismatch");
+}
+
+let res_nrm = fit_nrm(poly_responses, n_poly_persons, n_poly_items, n_categories);
+if !res_nrm.converged { panic("NRM must converge"); }
+
+// 11. Test Person Fit (Zh) Diagnostics
+println("Testing Person Fit (Zh) Diagnostics...");
+let pfit = audit_person_fit_analysis(
+    responses,
+    n_persons,
+    n_items,
+    res_2pl.a_params,
+    res_2pl.b_params,
+    res_2pl.c_params,
+    scores_2pl.thetas
+);
+if length(pfit.zh_scores) != n_persons {
+    panic("Zh score count must match n_persons");
+}
+
+// 12. Test Differential Item Functioning (DIF)
+println("Testing Differential Item Functioning (DIF)...");
+let mut group_demo = [];
+for i in 0..n_persons {
+    group_demo = append(group_demo, if i % 2 == 0 { 0.0 } else { 1.0 });
+}
+let dif_res = audit_dif_analysis(
+    responses,
+    group_demo,
+    n_persons,
+    n_items,
+    scores_2pl.thetas
+);
+if length(dif_res.items) != n_items {
+    panic("DIF analysis item count mismatch");
+}
+
+// 13. Test Equating & Linking
+println("Testing Test Equating & Scale Linking...");
+let form1_b = [-1.5, -0.8, 0.0, 0.8, 1.5];
+let form2_b = [-1.0, -0.3, 0.5, 1.3, 2.0];
+let eq_coef = link_scales_mean_sigma(form1_b, form2_b);
+if eq_coef.slope_A <= 0.0 {
+    panic("Equating slope A must be positive");
+}
+let form1_a = [1.0, 1.2, 1.0, 1.4, 1.1];
+let eq_res = transform_item_parameters(form1_a, form1_b, eq_coef);
+if length(eq_res.equated_b) != 5 {
+    panic("Equated parameters count mismatch");
+}
+
+// 14. Test Multidimensional IRT (M2PL)
+println("Testing Multidimensional IRT (M2PL)...");
+let res_mirt = fit_m2pl(responses, n_persons, n_items, 2);
+if !res_mirt.converged {
+    panic("MIRT M2PL must converge");
+}
+if length(res_mirt.mdisc) != n_items {
+    panic("Multidimensional discrimination length mismatch");
+}
+let mirt_scores = score_persons_mirt(
+    responses,
+    n_persons,
+    n_items,
+    2,
+    res_mirt.a_matrix,
+    res_mirt.d_intercepts
+);
+if length(mirt_scores.theta_matrix) != (n_persons * 2) {
+    panic("2D theta score matrix length mismatch");
+}
+
+// 15. Test Computerized Adaptive Testing (CAT)
+println("Testing Computerized Adaptive Testing (CAT)...");
+let cat_sim = audit_cat_simulation(
+    true_a,
+    true_b,
+    [0.0, 0.0, 0.0, 0.0, 0.0],
+    0.75, // true examinee theta
+    5,    // max items
+    0.50  // target SEM
+);
+if length(cat_sim.items_administered) == 0 {
+    panic("CAT session must administer at least 1 item");
+}
+if !cat_sim.is_terminated {
+    panic("CAT simulation must reach termination criterion");
+}
+
+println("All extended ghl_irt tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");

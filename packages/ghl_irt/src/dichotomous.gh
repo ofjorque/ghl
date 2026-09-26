@@ -6,6 +6,7 @@ struct DichotomousIrtResult {
     a_params: Vector,
     b_params: Vector,
     c_params: Vector,
+    d_params: Vector,
     coefficients: Vector,
     log_likelihood: f64,
     iterations: f64,
@@ -14,11 +15,15 @@ struct DichotomousIrtResult {
     n_persons: i64
 }
 
-fn prob_3pl(theta: f64, a: f64, b: f64, c: f64) -> f64 {
+fn prob_4pl(theta: f64, a: f64, b: f64, c: f64, d: f64) -> f64 {
     let z = a * (theta - b);
     let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
     let p_logit = exp_z / (1.0 + exp_z);
-    c + ((1.0 - c) * p_logit)
+    c + ((d - c) * p_logit)
+}
+
+fn prob_3pl(theta: f64, a: f64, b: f64, c: f64) -> f64 {
+    prob_4pl(theta, a, b, c, 1.0)
 }
 
 fn fit_dichotomous_irt(
@@ -36,6 +41,7 @@ fn fit_dichotomous_irt(
     let mut a_params = [];
     let mut b_params = [];
     let mut c_params = [];
+    let mut d_params = [];
 
     for j in 0..n_items {
         let mut sum_correct = 0.0;
@@ -50,11 +56,13 @@ fn fit_dichotomous_irt(
         let init_b = 0.0 - logit_p;
 
         let init_a = 1.0;
-        let init_c = if model_type == "3PL" { 0.20 } else { 0.0 };
+        let init_c = if model_type == "3PL" || model_type == "4PL" { 0.20 } else { 0.0 };
+        let init_d = if model_type == "4PL" { 0.96 } else { 1.00 };
 
         a_params = append(a_params, init_a);
         b_params = append(b_params, init_b);
         c_params = append(c_params, init_c);
+        d_params = append(d_params, init_d);
     }
 
     let max_iter = 40;
@@ -221,6 +229,7 @@ fn fit_dichotomous_irt(
         a_params: a_params,
         b_params: b_params,
         c_params: c_params,
+        d_params: d_params,
         coefficients: b_params,
         log_likelihood: final_loglik,
         iterations: iter_count,
@@ -242,6 +251,10 @@ fn fit_3pl(responses: Vector, n_persons: i64, n_items: i64) -> DichotomousIrtRes
     fit_dichotomous_irt(responses, n_persons, n_items, "3PL")
 }
 
+fn fit_4pl(responses: Vector, n_persons: i64, n_items: i64) -> DichotomousIrtResult {
+    fit_dichotomous_irt(responses, n_persons, n_items, "4PL")
+}
+
 fn coef_irt(result: DichotomousIrtResult) -> DataFrame {
     let mut item_indices = [];
     for j in 0..result.n_items {
@@ -251,6 +264,7 @@ fn coef_irt(result: DichotomousIrtResult) -> DataFrame {
         item: item_indices,
         a: result.a_params,
         b: result.b_params,
-        c: result.c_params
+        c: result.c_params,
+        d: result.d_params
     }
 }

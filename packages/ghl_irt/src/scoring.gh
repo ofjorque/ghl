@@ -198,3 +198,81 @@ fn score_persons_graded(
         reliability: rel
     }
 }
+
+// =========================================================================
+// 3. Person Fit Diagnostics: Drasgow's Standardized Statistic (Zh, 1985)
+// =========================================================================
+
+struct PersonFitResult {
+    zh_scores: Vector,
+    aberrant_flags: Vector,
+    mean_zh: f64,
+    n_aberrant: i64
+}
+
+fn compute_person_fit_zh(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    a_params: Vector,
+    b_params: Vector,
+    c_params: Vector,
+    thetas: Vector
+) -> PersonFitResult {
+    let mut zh_scores = [];
+    let mut flags = [];
+    let mut n_flagged = 0;
+    let mut sum_zh = 0.0;
+
+    for i in 0..n_persons {
+        let th = thetas[i];
+        let mut l0 = 0.0;
+        let mut e_l0 = 0.0;
+        let mut var_l0 = 0.0;
+
+        for j in 0..n_items {
+            let a_j = a_params[j];
+            let b_j = b_params[j];
+            let c_j = c_params[j];
+            let p_j = prob_3pl(th, a_j, b_j, c_j);
+            let safe_p = if p_j < 0.0001 { 0.0001 } else { if p_j > 0.9999 { 0.9999 } else { p_j } };
+            let q_j = 1.0 - safe_p;
+
+            let y_ij = responses[(i * n_items) + j];
+            let ln_p = ln(safe_p);
+            let ln_q = ln(q_j);
+
+            let l_ij = (y_ij * ln_p) + ((1.0 - y_ij) * ln_q);
+            l0 = l0 + l_ij;
+
+            let e_ij = (safe_p * ln_p) + (q_j * ln_q);
+            e_l0 = e_l0 + e_ij;
+
+            let log_ratio = ln(safe_p / q_j);
+            var_l0 = var_l0 + (safe_p * q_j * log_ratio * log_ratio);
+        }
+
+        let zh = if var_l0 > 0.00001 {
+            (l0 - e_l0) / sqrt(var_l0)
+        } else {
+            0.0
+        };
+
+        zh_scores = append(zh_scores, zh);
+        sum_zh = sum_zh + zh;
+
+        let is_aberrant = zh < -2.0;
+        flags = append(flags, is_aberrant);
+        if is_aberrant {
+            n_flagged = n_flagged + 1;
+        }
+    }
+
+    let fn_p = 0.0 + n_persons;
+    PersonFitResult {
+        zh_scores: zh_scores,
+        aberrant_flags: flags,
+        mean_zh: sum_zh / fn_p,
+        n_aberrant: n_flagged
+    }
+}

@@ -1,0 +1,122 @@
+// packages/ghl_irt/src/equating.gh
+// Test Equating & Scale Linking: Linear Transformation via Mean-Sigma & Mean-Mean Methods
+
+struct EquatingCoefficients {
+    slope_A: f64,
+    intercept_B: f64,
+    method: String,
+    n_anchors: i64
+}
+
+struct EquatedScaleResult {
+    coefficients: EquatingCoefficients,
+    equated_a: Vector,
+    equated_b: Vector
+}
+
+fn compute_mean(vec: Vector) -> f64 {
+    let mut sum = 0.0;
+    for v in vec {
+        sum = sum + v;
+    }
+    let n = length(vec);
+    if n > 0 { sum / (0.0 + n) } else { 0.0 }
+}
+
+fn compute_variance(vec: Vector, mean_val: f64) -> f64 {
+    let mut sum_sq = 0.0;
+    for v in vec {
+        let diff = v - mean_val;
+        sum_sq = sum_sq + (diff * diff);
+    }
+    let n = length(vec);
+    if n > 1 { sum_sq / ((0.0 + n) - 1.0) } else { 0.0001 }
+}
+
+fn link_scales_mean_sigma(
+    anchor_b_form1: Vector,
+    anchor_b_form2: Vector
+) -> EquatingCoefficients {
+    let n = length(anchor_b_form1);
+    let mu_b1 = compute_mean(anchor_b_form1);
+    let mu_b2 = compute_mean(anchor_b_form2);
+
+    let var_b1 = compute_variance(anchor_b_form1, mu_b1);
+    let var_b2 = compute_variance(anchor_b_form2, mu_b2);
+
+    let sigma_b1 = sqrt(var_b1);
+    let sigma_b2 = sqrt(var_b2);
+
+    let slope_A = if sigma_b1 > 0.0001 { sigma_b2 / sigma_b1 } else { 1.0 };
+    let intercept_B = mu_b2 - (slope_A * mu_b1);
+
+    EquatingCoefficients {
+        slope_A: slope_A,
+        intercept_B: intercept_B,
+        method: "Mean-Sigma",
+        n_anchors: n
+    }
+}
+
+fn link_scales_mean_mean(
+    anchor_a_form1: Vector,
+    anchor_b_form1: Vector,
+    anchor_a_form2: Vector,
+    anchor_b_form2: Vector
+) -> EquatingCoefficients {
+    let n = length(anchor_b_form1);
+    let mu_a1 = compute_mean(anchor_a_form1);
+    let mu_a2 = compute_mean(anchor_a_form2);
+    let mu_b1 = compute_mean(anchor_b_form1);
+    let mu_b2 = compute_mean(anchor_b_form2);
+
+    let slope_A = if mu_a2 > 0.0001 { mu_a1 / mu_a2 } else { 1.0 };
+    let intercept_B = mu_b2 - (slope_A * mu_b1);
+
+    EquatingCoefficients {
+        slope_A: slope_A,
+        intercept_B: intercept_B,
+        method: "Mean-Mean",
+        n_anchors: n
+    }
+}
+
+fn transform_item_parameters(
+    a_params: Vector,
+    b_params: Vector,
+    eq_coef: EquatingCoefficients
+) -> EquatedScaleResult {
+    let A = eq_coef.slope_A;
+    let B = eq_coef.intercept_B;
+
+    let mut new_a = [];
+    let mut new_b = [];
+
+    for a in a_params {
+        new_a = append(new_a, if A > 0.0001 { a / A } else { a });
+    }
+
+    for b in b_params {
+        new_b = append(new_b, (A * b) + B);
+    }
+
+    EquatedScaleResult {
+        coefficients: eq_coef,
+        equated_a: new_a,
+        equated_b: new_b
+    }
+}
+
+fn transform_ability_scores(
+    thetas: Vector,
+    eq_coef: EquatingCoefficients
+) -> Vector {
+    let A = eq_coef.slope_A;
+    let B = eq_coef.intercept_B;
+
+    let mut new_thetas = [];
+    for th in thetas {
+        new_thetas = append(new_thetas, (A * th) + B);
+    }
+    new_thetas
+}

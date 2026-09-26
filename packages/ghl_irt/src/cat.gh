@@ -1,0 +1,168 @@
+// packages/ghl_irt/src/cat.gh
+// Computerized Adaptive Testing (CAT) Engine: Maximum Fisher Information (MFI) & Dynamic Theta Scoring
+
+struct CatSession {
+    current_theta: f64,
+    current_sem: f64,
+    items_administered: Vector, // Indices of items taken
+    responses_recorded: Vector, // 0.0 or 1.0
+    theta_trajectory: Vector,   // Sequence of theta estimates after each item
+    n_bank_items: i64,
+    is_terminated: bool
+}
+
+fn init_cat_session(n_bank_items: i64) -> CatSession {
+    CatSession {
+        current_theta: 0.0,
+        current_sem: 1.00,
+        items_administered: [],
+        responses_recorded: [],
+        theta_trajectory: [0.0],
+        n_bank_items: n_bank_items,
+        is_terminated: false
+    }
+}
+
+fn select_next_item_mfi(
+    session: CatSession,
+    a_bank: Vector,
+    b_bank: Vector,
+    c_bank: Vector
+) -> i64 {
+    let th = session.current_theta;
+    let mut best_item = -1;
+    let mut max_info = -1.0;
+
+    for j in 0..session.n_bank_items {
+        // Check if item j was already administered
+        let mut already_taken = false;
+        for adm in session.items_administered {
+            if adm == j {
+                already_taken = true;
+                break;
+            }
+        }
+
+        if !already_taken {
+            let a_j = a_bank[j];
+            let b_j = b_bank[j];
+            let c_j = c_bank[j];
+            let p_j = prob_3pl(th, a_j, b_j, c_j);
+            let safe_p = if p_j < 0.0001 { 0.0001 } else { if p_j > 0.9999 { 0.9999 } else { p_j } };
+
+            let w = (safe_p - c_j) / (1.0 - c_j);
+            let info = (a_j * a_j) * (w * w) * ((1.0 - safe_p) / safe_p);
+
+            if info > max_info {
+                max_info = info;
+                best_item = j;
+            }
+        }
+    }
+
+    best_item
+}
+
+fn update_cat_session(
+    session: CatSession,
+    item_idx: i64,
+    response: f64,
+    a_bank: Vector,
+    b_bank: Vector,
+    c_bank: Vector,
+    target_sem: f64,
+    max_items: i64
+) -> CatSession {
+    let mut new_adm = session.items_administered;
+    let mut new_resp = session.responses_recorded;
+    new_adm = append(new_adm, item_idx);
+    new_resp = append(new_resp, response);
+
+    // Dynamic scoring via Newton-Raphson update from current theta
+    let mut th = session.current_theta;
+    let mut total_info = 0.0;
+    let mut total_grad = 0.0;
+
+    let n_taken = length(new_adm);
+    for k in 0..n_taken {
+        let j = new_adm[k];
+        let y = new_resp[k];
+        let a_j = a_bank[j];
+        let b_j = b_bank[j];
+        let c_j = c_bank[j];
+        let p_j = prob_3pl(th, a_j, b_j, c_j);
+        let safe_p = if p_j < 0.0001 { 0.0001 } else { if p_j > 0.9999 { 0.9999 } else { p_j } };
+
+        let w = (safe_p - c_j) / (1.0 - c_j);
+        let dp_dth = a_j * w * (1.0 - safe_p);
+        let var = safe_p * (1.0 - safe_p);
+
+        total_grad = total_grad + ((y - safe_p) * (dp_dth / var));
+        total_info = total_info + ((dp_dth * dp_dth) / var);
+    }
+
+    // Bayesian shrinkage prior N(0, 1)
+    let prior_info = 1.0;
+    let post_info = total_info + prior_info;
+    let post_grad = total_grad - th; // d/dth [-0.5 * th^2] = -th
+
+    let step = post_grad / post_info;
+    let mut new_th = th + step;
+    if new_th < -3.5 { new_th = -3.5; }
+    if new_th > 3.5 { new_th = 3.5; }
+
+    let new_sem = 1.0 / sqrt(post_info);
+
+    let mut new_traj = session.theta_trajectory;
+    new_traj = append(new_traj, new_th);
+
+    let terminated = (new_sem <= target_sem) || (n_taken >= max_items);
+
+    CatSession {
+        current_theta: new_th,
+        current_sem: new_sem,
+        items_administered: new_adm,
+        responses_recorded: new_resp,
+        theta_trajectory: new_traj,
+        n_bank_items: session.n_bank_items,
+        is_terminated: terminated
+    }
+}
+
+fn simulate_cat(
+    a_bank: Vector,
+    b_bank: Vector,
+    c_bank: Vector,
+    true_theta: f64,
+    max_items: i64,
+    target_sem: f64
+) -> CatSession {
+    let n_items = length(a_bank);
+    let mut session = init_cat_session(n_items);
+
+    let mut step = 0;
+    while !session.is_terminated && step < max_items {
+        step = step + 1;
+        let next_item = select_next_item_mfi(session, a_bank, b_bank, c_bank);
+        if next_item < 0 {
+            break;
+        }
+
+        // Simulate examinee response based on true ability
+        let p_true = prob_3pl(true_theta, a_bank[next_item], b_bank[next_item], c_bank[next_item]);
+        let resp = if p_true > 0.50 { 1.0 } else { 0.0 };
+
+        session = update_cat_session(
+            session,
+            next_item,
+            resp,
+            a_bank,
+            b_bank,
+            c_bank,
+            target_sem,
+            max_items
+        );
+    }
+
+    session
+}
