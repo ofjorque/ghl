@@ -17,37 +17,37 @@ Backlog activo detallado en [`docs/roadmap/08_TODO_MODELOS_AVANZADOS_Y_SPRING_PA
 > - **Rust (Capa 0 — Matemática Pesada de Bajo Nivel):** En Rust vive **estrictamente** la computación numérica intensiva donde la vectorización SIMD, la estabilidad de punto flotante o los bucles masivos $O(N \times \text{iter})$ son críticos: descomposiciones matriciales con `faer` (QR, SVD, Cholesky, Eigen), cálculo numérico de gradientes (`autodiff`), solver de optimización genérico multivariado `optim` (Nelder-Mead / L-BFGS), descenso por coordenadas (`glmnet`), proyecciones de centrado por medias de alta dimensión (*Within-transformation*), distribuciones continuas/discretas (`statrs`), y el constructor rápido de matriz de diseño (`model_matrix`).
 > - **GHL (Capa 1 — Estimadores, Semántica y Experiencia de Usuario):** En código fuente `.gh` vive **todo el resto**: la firma pública de cada estimador (`sem`, `feols`, `iv_regress`, `lasso`, `anova`), la orquestación del análisis, las estructuras de resultados (`struct SemResult`, `struct FeolsResult`), la implementación de las capacidades (`impl ... { fn tidy, fn glance, fn summary, fn augment, fn vcov }`), la inferencia (p-valores, estadísticos $t$, intervalos de confianza), los diagnósticos y las librerías del ecosistema como `spring_pact`.
 
-- [ ] **Parte F: Primitivas de Matemática Pesada (Kernel Rust) y Habilitación de GHL ([RFC 15](docs/design/15-kernel-primitives-and-self-hosted-standard-library.md)):**
-  - [ ] **Kernel Rust (Capa 0):** Exponer `model_matrix(formula, df)` reutilizando `Blueprint::bake()` (retorna matriz $X$, vector $y$, nombres de términos y trazabilidad `RowDisposition`).
-  - [ ] **Kernel Rust (Capa 0):** Subsistema de distribuciones probabilísticas (`statrs` + `rand_xoshiro`) exponiendo la cuádruple interfaz canónica (`pdf`/`pmf`, `cdf`, `quantile`/`inv_cdf`, `sample` con seed reproducible) para familias continuas ($t$, $F$, $\chi^2$, Normal, Gamma, Beta, Uniforme, Exponencial) y discretas (Binomial, Poisson).
-  - [ ] **Kernel Rust (Capa 0):** Generalizar verbos de capacidades (`tidy`, `summary`, `glance`, `augment`, `vcov`) hacia `Value::Struct` para habilitar call-sites funcionales (`tidy(m)`).
-  - [ ] **Kernel Rust (Capa 0):** Implementar solver de optimización genérico `optim(fn, init, method)` (Nelder-Mead y L-BFGS sobre `autodiff.rs`).
-  - [ ] **Sintaxis de Fórmulas Multiparte (`|`):** Extender `ghl-syntax` para admitir particiones con `|` (`lhs ~ rhs | fe_or_parts | instruments`), permitiendo la sintaxis canónica de `feols` e `iv_regress`.
-  - [ ] **GHL Puro (Capa 1):** Implementar estimador piloto `anova(formula, df)` y tests de hipótesis clásicos (`t_test`, `chisq_test`) 100% en código `.gh` con `struct AnovaResult` y métodos `tidy()` y `glance()`.
-- [ ] **Parte A: Ecuaciones Estructurales (SEM / CFA):**
+- [x] **Parte F: Primitivas de Matemática Pesada (Kernel Rust) y Habilitación de GHL ([RFC 15](docs/design/15-kernel-primitives-and-self-hosted-standard-library.md)):**
+  - [x] **Kernel Rust (Capa 0):** Exponer `model_matrix(formula, df)` reutilizando `Blueprint::bake()` (retorna matriz $X$, vector $y$, nombres de términos y trazabilidad `RowDisposition`).
+  - [x] **Kernel Rust (Capa 0):** Subsistema de distribuciones probabilísticas (`statrs` + `rand_xoshiro`) exponiendo la cuádruple interfaz canónica (`pdf`/`pmf`, `cdf`, `quantile`/`inv_cdf`, `sample` con seed reproducible) para familias continuas ($t$, $F$, $\chi^2$, Normal, Gamma, Beta, Uniforme, Exponencial) y discretas (Binomial, Poisson).
+  - [x] **Kernel Rust (Capa 0):** Generalizar verbos de capacidades (`tidy`, `summary`, `glance`, `augment`, `vcov`) hacia `Value::Struct` para habilitar call-sites funcionales (`tidy(m)`).
+  - [x] **Kernel Rust (Capa 0):** Implementar solver de optimización genérico `optim(fn, init, method)` (Nelder-Mead y L-BFGS sobre `autodiff.rs`).
+  - [x] **Sintaxis de Fórmulas Multiparte (`|`):** Extender `ghl-syntax` para admitir particiones con `|` (`lhs ~ rhs | fe_or_parts | instruments`), permitiendo la sintaxis canónica de `feols` e `iv_regress`.
+  - [x] **GHL Puro (Capa 1):** Implementar estimador piloto `anova(formula, df)` y tests de hipótesis clásicos (`t_test`, `chisq_test`) 100% en código `.gh` con `struct AnovaResult` y métodos `tidy()` y `glance()`.
+- [x] **Parte A: Ecuaciones Estructurales (SEM / CFA):**
   - [x] **Sintaxis GHL:** Operadores `=~` (medición latente) y `~~` (covarianza/varianza residual) en `ghl-syntax`, más el bloque `sem_spec { eq1; eq2; ... }` en parser, AST y type-checker.
-  - [ ] **Kernel Rust (Capa 0 - Matemática Pesada):** Función de discrepancia de Máxima Verosimilitud de Wishart ($F_{ML}$) y cálculo de matriz de covarianza observada $S$.
-  - [ ] **Estimador GHL (Capa 1 - Lógica y Reporte):** Función `sem(spec, df)` en `.gh`, optimización vía `optim()`, extracción de índices de ajuste global ($\chi^2$, CFI, TLI, RMSEA) y `struct SemResult` con capacidades `summary()`, `tidy()`, `glance()`.
-- [ ] **Parte B: Estimadores Econométricos Clave con Sintaxis Representativa:**
-  - [ ] **Efectos Fijos de Alta Dimensión (`feols` — sintaxis con `|`):**
+  - [x] **Kernel Rust (Capa 0 - Matemática Pesada):** Función de discrepancia de Máxima Verosimilitud de Wishart ($F_{ML}$) y cálculo de matriz de covarianza observada $S$.
+  - [x] **Estimador GHL (Capa 1 - Lógica y Reporte):** Función `sem(spec, df)` en `.gh`, optimización vía `optim()`, extracción de índices de ajuste global ($\chi^2$, CFI, TLI, RMSEA) y `struct SemResult` con capacidades `summary()`, `tidy()`, `glance()`.
+- [x] **Parte B: Estimadores Econométricos Clave con Sintaxis Representativa:**
+  - [x] **Efectos Fijos de Alta Dimensión (`feols` — sintaxis con `|`):**
     - **Kernel Rust (Capa 0):** Operador de proyección y centrado por medias de alta dimensión (*Within-transformation* / Frisch-Waugh-Lovell absorbiendo `id + time`).
     - **Estimador GHL (Capa 1):** Función `feols(y ~ x | id + time, df)` en `.gh`, cálculo de errores estándar (robustos y por clúster), y `struct FeolsResult` con `tidy`, `summary`, `glance`.
-  - [ ] **Variables Instrumentales (`iv_regress` / 2SLS — sintaxis con `|`):**
+  - [x] **Variables Instrumentales (`iv_regress` / 2SLS — sintaxis con `|`):**
     - **Estimador GHL (Capa 1):** 100% en `.gh` componiendo dos etapas de OLS (`model_matrix` + álgebra lineal sobre `y ~ x | z`), test F de instrumentos débiles, test de Wu-Hausman y `struct IvResult` con capacidades completas.
-  - [ ] **Regresión Regularizada (`lasso`, `ridge`, `elastic_net`):**
+  - [x] **Regresión Regularizada (`lasso`, `ridge`, `elastic_net`):**
     - **Kernel Rust (Capa 0):** Solver de descenso por coordenadas (*Coordinate Descent* estilo `glmnet`) con penalizaciones $L_1$ y $L_2$.
     - **Estimador GHL (Capa 1):** Funciones `lasso`, `ridge`, búsqueda de $\lambda$ óptimo mediante validación cruzada $K$-fold (`cv_glmnet`) y `struct RegularizedResult` con `tidy`/`glance`.
-- [ ] **Parte C: `spring_pact` — Primera Librería Oficial 100% GHL ([RFC 14](docs/design/14-statistical-contracts-and-expectation-protocols.md)):**
+- [x] **Parte C: `spring_pact` — Primera Librería Oficial 100% GHL ([RFC 14](docs/design/14-statistical-contracts-and-expectation-protocols.md)):**
   - [x] **Tooling CLI en Rust:** Comandos `ghl new`, `ghl fetch`, `ghl test`, y resolución reproducible con `ghl.lock` (SHA-256) en `ghl-cli::package`.
-  - [ ] **Librería 100% GHL:** Creación del paquete `spring_pact` con `ghl new` y configuración de `ghl.toml`.
-  - [ ] **Módulos de Reglas en GHL:** Reglas de datos (`expect_filter`, `expect_na_max`, `expect_outlier_rule`) y supuestos de modelos (`expect_vif_max`, `expect_homoscedasticity`, `expect_min_sample_size`).
-  - [ ] **Certificación en GHL:** Hashing criptográfico **SHA-256** del contrato y emisión de Certificado de Cumplimiento Cockpit Deck.
-  - [ ] **Suite de Pruebas en GHL:** Pruebas unitarias de la librería ejecutadas con `ghl test`.
+  - [x] **Librería 100% GHL:** Creación del paquete `spring_pact` con `ghl new` y configuración de `ghl.toml`.
+  - [x] **Módulos de Reglas en GHL:** Reglas de datos (`expect_filter`, `expect_na_max`, `expect_outlier_rule`) y supuestos de modelos (`expect_vif_max`, `expect_homoscedasticity`, `expect_min_sample_size`).
+  - [x] **Certificación en GHL:** Hashing criptográfico **SHA-256** del contrato y emisión de Certificado de Cumplimiento Cockpit Deck.
+  - [x] **Suite de Pruebas en GHL:** Pruebas unitarias de la librería ejecutadas con `ghl test`.
 - [ ] **Parte E: Canon Representativo del Core (`std::stats` & `std::prob`) vs. Paquetes del Ecosistema:**
-  - [ ] **Subsistema de Probabilidad e Inferencia (`std::prob` en GHL Puro):**
+  - [x] **Subsistema de Probabilidad e Inferencia (`std::prob` en GHL Puro):**
     - Tipos canónicos de distribuciones como structs de primera clase (`Normal`, `StudentT`, `FisherF`, `ChiSq`, `Gamma`, `Beta`, `Binomial`, `Poisson`) exponiendo métodos `.pdf(x)`, `.cdf(q)`, `.quantile(p)` y `.sample(n, [seed])`.
     - Inferencia estadística en GHL puro: cálculo de p-valores (`p_value(stat, dist, alternative)`), intervalos de confianza (`conf_int(estimate, se, dist, level)`), y contrastes clásicos ($t$-Student, $F$-test, $\chi^2$, proporciones, correlación).
-  - [ ] **Canon Representativo del Core de GHL (`std::stats`):**
+  - [x] **Canon Representativo del Core de GHL (`std::stats`):**
     - Solo los estimadores fundamentales que ejercitan las capacidades nucleares del lenguaje:
       1. Regresión lineal y generalizada: `ols`, `logistic`, `poisson` (álgebra lineal `faer`, IRLS y `model_matrix`).
       2. Ecuaciones estructurales: `sem(spec, df)` (DSL sintáctico específico con `=~`, `~~`, `sem_spec` y optimizador $F_{ML}$).
