@@ -1,0 +1,546 @@
+// ============================================================================
+// GHL Standard Library: Probability & Statistical Inference (`std::prob`)
+// RFC 15 / Roadmap 08 Parte E: First-Class Probability Distributions
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// 1. Normal Distribution (Gaussian)
+// ----------------------------------------------------------------------------
+
+struct Normal {
+    mean: f64,
+    sd: f64
+}
+
+impl Normal {
+    fn pdf(&self, x: any) -> any {
+        return normal_pdf(x, self.mean, self.sd);
+    }
+
+    fn cdf(&self, q: any) -> any {
+        return normal_cdf(q, self.mean, self.sd);
+    }
+
+    fn quantile(&self, p: any) -> any {
+        return normal_quantile(p, self.mean, self.sd);
+    }
+
+    fn sample(&self, n: any) -> any {
+        return random_normal(n, self.mean, self.sd, NA);
+    }
+
+    fn sample_seed(&self, n: any, seed: any) -> any {
+        return random_normal(n, self.mean, self.sd, seed);
+    }
+}
+
+fn normal(mean: any, sd: any) -> Normal {
+    return Normal { mean: mean, sd: sd };
+}
+
+// ----------------------------------------------------------------------------
+// 2. Student's t-Distribution
+// ----------------------------------------------------------------------------
+
+struct StudentT {
+    df: f64
+}
+
+impl StudentT {
+    fn pdf(&self, x: any) -> any {
+        return student_t_pdf(x, self.df);
+    }
+
+    fn cdf(&self, q: any) -> any {
+        return student_t_cdf(q, self.df);
+    }
+
+    fn quantile(&self, p: any) -> any {
+        return student_t_quantile(p, self.df);
+    }
+
+    fn sample(&self, n: any) -> any {
+        return random_student_t(n, self.df, 0.0, 1.0, NA);
+    }
+
+    fn sample_seed(&self, n: any, seed: any) -> any {
+        return random_student_t(n, self.df, 0.0, 1.0, seed);
+    }
+}
+
+fn student_t(df: any) -> StudentT {
+    return StudentT { df: df };
+}
+
+// ----------------------------------------------------------------------------
+// 3. Fisher-Snedecor (F) Distribution
+// ----------------------------------------------------------------------------
+
+struct FisherF {
+    df1: f64,
+    df2: f64
+}
+
+impl FisherF {
+    fn pdf(&self, x: any) -> any {
+        return f_dist_pdf(x, self.df1, self.df2);
+    }
+
+    fn cdf(&self, q: any) -> any {
+        return f_dist_cdf(q, self.df1, self.df2);
+    }
+
+    fn quantile(&self, p: any) -> any {
+        return f_dist_quantile(p, self.df1, self.df2);
+    }
+
+    fn sample(&self, n: any) -> any {
+        return random_f_dist(n, self.df1, self.df2, NA);
+    }
+
+    fn sample_seed(&self, n: any, seed: any) -> any {
+        return random_f_dist(n, self.df1, self.df2, seed);
+    }
+}
+
+fn fisher_f(df1: any, df2: any) -> FisherF {
+    return FisherF { df1: df1, df2: df2 };
+}
+
+// ----------------------------------------------------------------------------
+// 4. Chi-Squared Distribution
+// ----------------------------------------------------------------------------
+
+struct ChiSq {
+    df: f64
+}
+
+impl ChiSq {
+    fn pdf(&self, x: any) -> any {
+        return chisq_pdf(x, self.df);
+    }
+
+    fn cdf(&self, q: any) -> any {
+        return chisq_cdf(q, self.df);
+    }
+
+    fn quantile(&self, p: any) -> any {
+        return chisq_quantile(p, self.df);
+    }
+
+    fn sample(&self, n: any) -> any {
+        return random_chisq(n, self.df, NA);
+    }
+
+    fn sample_seed(&self, n: any, seed: any) -> any {
+        return random_chisq(n, self.df, seed);
+    }
+}
+
+fn chisq(df: any) -> ChiSq {
+    return ChiSq { df: df };
+}
+
+// ----------------------------------------------------------------------------
+// 5. Gamma Distribution
+// ----------------------------------------------------------------------------
+
+struct Gamma {
+    shape: f64,
+    rate: f64
+}
+
+impl Gamma {
+    fn pdf(&self, x: any) -> any {
+        return gamma_pdf(x, self.shape, self.rate);
+    }
+
+    fn cdf(&self, q: any) -> any {
+        return gamma_cdf(q, self.shape, self.rate);
+    }
+
+    fn quantile(&self, p: any) -> any {
+        return gamma_quantile(p, self.shape, self.rate);
+    }
+
+    fn sample(&self, n: any) -> any {
+        return random_gamma(n, self.shape, 1.0 / self.rate, NA);
+    }
+
+    fn sample_seed(&self, n: any, seed: any) -> any {
+        return random_gamma(n, self.shape, 1.0 / self.rate, seed);
+    }
+}
+
+fn gamma_dist(shape: any, rate: any) -> Gamma {
+    return Gamma { shape: shape, rate: rate };
+}
+
+// ----------------------------------------------------------------------------
+// 6. Beta Distribution
+// ----------------------------------------------------------------------------
+
+struct Beta {
+    alpha: f64,
+    beta: f64
+}
+
+impl Beta {
+    fn pdf(&self, x: any) -> any {
+        return beta_pdf(x, self.alpha, self.beta);
+    }
+
+    fn cdf(&self, q: any) -> any {
+        return beta_cdf(q, self.alpha, self.beta);
+    }
+
+    fn quantile(&self, p: any) -> any {
+        return beta_quantile(p, self.alpha, self.beta);
+    }
+
+    fn sample(&self, n: any) -> any {
+        return random_beta(n, self.alpha, self.beta, NA);
+    }
+
+    fn sample_seed(&self, n: any, seed: any) -> any {
+        return random_beta(n, self.alpha, self.beta, seed);
+    }
+}
+
+fn beta_dist(alpha: any, beta: any) -> Beta {
+    return Beta { alpha: alpha, beta: beta };
+}
+
+// ----------------------------------------------------------------------------
+// 7. Uniform Distribution
+// ----------------------------------------------------------------------------
+
+struct Uniform {
+    min: f64,
+    max: f64
+}
+
+impl Uniform {
+    fn pdf(&self, x: any) -> any {
+        return uniform_pdf(x, self.min, self.max);
+    }
+
+    fn cdf(&self, q: any) -> any {
+        return uniform_cdf(q, self.min, self.max);
+    }
+
+    fn quantile(&self, p: any) -> any {
+        return uniform_quantile(p, self.min, self.max);
+    }
+
+    fn sample(&self, n: any) -> any {
+        return random_uniform(n, self.min, self.max, NA);
+    }
+
+    fn sample_seed(&self, n: any, seed: any) -> any {
+        return random_uniform(n, self.min, self.max, seed);
+    }
+}
+
+fn uniform(min: any, max: any) -> Uniform {
+    return Uniform { min: min, max: max };
+}
+
+// ----------------------------------------------------------------------------
+// 8. Exponential Distribution
+// ----------------------------------------------------------------------------
+
+struct Exponential {
+    rate: f64
+}
+
+impl Exponential {
+    fn pdf(&self, x: any) -> any {
+        return exp_pdf(x, self.rate);
+    }
+
+    fn cdf(&self, q: any) -> any {
+        return exp_cdf(q, self.rate);
+    }
+
+    fn quantile(&self, p: any) -> any {
+        return exp_quantile(p, self.rate);
+    }
+
+    fn sample(&self, n: any) -> any {
+        return random_exp(n, self.rate, NA);
+    }
+
+    fn sample_seed(&self, n: any, seed: any) -> any {
+        return random_exp(n, self.rate, seed);
+    }
+}
+
+fn exponential(rate: any) -> Exponential {
+    return Exponential { rate: rate };
+}
+
+// ----------------------------------------------------------------------------
+// 9. Binomial Distribution
+// ----------------------------------------------------------------------------
+
+struct Binomial {
+    size: f64,
+    prob: f64
+}
+
+impl Binomial {
+    fn pmf(&self, k: any) -> any {
+        return binomial_pmf(k, self.size, self.prob);
+    }
+
+    fn cdf(&self, k: any) -> any {
+        return binomial_cdf(k, self.size, self.prob);
+    }
+
+    fn quantile(&self, p: any) -> any {
+        return binomial_quantile(p, self.size, self.prob);
+    }
+
+    fn sample(&self, n: any) -> any {
+        return random_binomial(n, self.size, self.prob, NA);
+    }
+
+    fn sample_seed(&self, n: any, seed: any) -> any {
+        return random_binomial(n, self.size, self.prob, seed);
+    }
+}
+
+fn binomial(size: any, prob: any) -> Binomial {
+    return Binomial { size: size, prob: prob };
+}
+
+// ----------------------------------------------------------------------------
+// 10. Poisson Distribution
+// ----------------------------------------------------------------------------
+
+struct Poisson {
+    lambda: f64
+}
+
+impl Poisson {
+    fn pmf(&self, k: any) -> any {
+        return poisson_pmf(k, self.lambda);
+    }
+
+    fn cdf(&self, k: any) -> any {
+        return poisson_cdf(k, self.lambda);
+    }
+
+    fn quantile(&self, p: any) -> any {
+        return poisson_quantile(p, self.lambda);
+    }
+
+    fn sample(&self, n: any) -> any {
+        return random_poisson(n, self.lambda, NA);
+    }
+
+    fn sample_seed(&self, n: any, seed: any) -> any {
+        return random_poisson(n, self.lambda, seed);
+    }
+}
+
+fn poisson_dist(lambda: any) -> Poisson {
+    return Poisson { lambda: lambda };
+}
+
+// ============================================================================
+// Statistical Inference Helpers
+// ============================================================================
+
+struct ConfidenceInterval {
+    estimate: f64,
+    std_error: f64,
+    conf_low: f64,
+    conf_high: f64,
+    level: f64,
+    df_table: DataFrame
+}
+
+impl ConfidenceInterval {
+    fn tidy(&self) -> DataFrame {
+        return self.df_table;
+    }
+
+    fn glance(&self) -> DataFrame {
+        return self.df_table;
+    }
+}
+
+fn conf_int(estimate: any, se: any, dist: any, level: any) -> ConfidenceInterval {
+    let alpha = 1.0 - level;
+    let crit = dist.quantile(1.0 - alpha / 2.0);
+    let low = estimate - crit * se;
+    let high = estimate + crit * se;
+
+    let df_table = dataframe {
+        estimate: [estimate],
+        std_error: [se],
+        conf_low: [low],
+        conf_high: [high],
+        level: [level]
+    };
+
+    return ConfidenceInterval {
+        estimate: estimate,
+        std_error: se,
+        conf_low: low,
+        conf_high: high,
+        level: level,
+        df_table: df_table
+    };
+}
+
+fn p_value(stat: any, dist: any, alternative: any) -> f64 {
+    if alternative == "two_sided" || alternative == "two.sided" || alternative == "both" {
+        let tail = dist.cdf(stat);
+        if tail > 0.5 {
+            return 2.0 * (1.0 - tail);
+        } else {
+            return 2.0 * tail;
+        }
+    }
+    if alternative == "less" || alternative == "left" {
+        return dist.cdf(stat);
+    }
+    if alternative == "greater" || alternative == "right" {
+        return 1.0 - dist.cdf(stat);
+    }
+    // Default to two-sided if unrecognized
+    let tail = dist.cdf(stat);
+    if tail > 0.5 {
+        return 2.0 * (1.0 - tail);
+    } else {
+        return 2.0 * tail;
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Inferencia: z-Test (One Sample)
+// ----------------------------------------------------------------------------
+
+struct ZTestResult {
+    statistic: f64,
+    p_value: f64,
+    estimate: f64,
+    std_error: f64,
+    conf_low: f64,
+    conf_high: f64,
+    method: String,
+    df_table: DataFrame
+}
+
+impl ZTestResult {
+    fn tidy(&self) -> DataFrame {
+        return self.df_table;
+    }
+
+    fn glance(&self) -> DataFrame {
+        return self.df_table;
+    }
+}
+
+fn z_test_one_sample(x: any, mu: any, sigma: any) -> ZTestResult {
+    let n = length(x);
+    let m = mean(x);
+    let se = sigma / sqrt(n);
+    let stat = (m - mu) / se;
+    let norm = normal(0.0, 1.0);
+    let p_val = p_value(stat, norm, "two_sided");
+    let ci = conf_int(m, se, norm, 0.95);
+
+    let df_table = dataframe {
+        estimate: [m],
+        statistic: [stat],
+        p_value: [p_val],
+        std_error: [se],
+        conf_low: [ci.conf_low],
+        conf_high: [ci.conf_high]
+    };
+
+    return ZTestResult {
+        statistic: stat,
+        p_value: p_val,
+        estimate: m,
+        std_error: se,
+        conf_low: ci.conf_low,
+        conf_high: ci.conf_high,
+        method: "One-sample z-test",
+        df_table: df_table
+    };
+}
+
+// ----------------------------------------------------------------------------
+// Inferencia: Pearson Correlation Test (`cor_test`)
+// ----------------------------------------------------------------------------
+
+struct CorTestResult {
+    estimate: f64,
+    statistic: f64,
+    p_value: f64,
+    df: f64,
+    conf_low: f64,
+    conf_high: f64,
+    method: String,
+    df_table: DataFrame
+}
+
+impl CorTestResult {
+    fn tidy(&self) -> DataFrame {
+        return self.df_table;
+    }
+
+    fn glance(&self) -> DataFrame {
+        return self.df_table;
+    }
+}
+
+fn cor_test(x: any, y: any) -> CorTestResult {
+    let n = length(x);
+    let mx = mean(x);
+    let my = mean(y);
+    let dx = x - mx;
+    let dy = y - my;
+    let num = sum(dx * dy);
+    let den = sqrt(sum(dx * dx) * sum(dy * dy));
+    let r = num / den;
+    let df = n - 2.0;
+    let t_stat = r * sqrt(df) / sqrt(1.0 - r * r);
+    let t_dist = student_t(df);
+    let p_val = p_value(t_stat, t_dist, "two_sided");
+
+    // Fisher z-transformation for Pearson r confidence interval
+    let z = 0.5 * log((1.0 + r) / (1.0 - r));
+    let se_z = 1.0 / sqrt(n - 3.0);
+    let norm = normal(0.0, 1.0);
+    let crit = norm.quantile(0.975);
+    let z_low = z - crit * se_z;
+    let z_high = z + crit * se_z;
+    let r_low = (exp(2.0 * z_low) - 1.0) / (exp(2.0 * z_low) + 1.0);
+    let r_high = (exp(2.0 * z_high) - 1.0) / (exp(2.0 * z_high) + 1.0);
+
+    let df_table = dataframe {
+        estimate: [r],
+        statistic: [t_stat],
+        p_value: [p_val],
+        df: [df],
+        conf_low: [r_low],
+        conf_high: [r_high]
+    };
+
+    return CorTestResult {
+        estimate: r,
+        statistic: t_stat,
+        p_value: p_val,
+        df: df,
+        conf_low: r_low,
+        conf_high: r_high,
+        method: "Pearson product-moment correlation",
+        df_table: df_table
+    };
+}

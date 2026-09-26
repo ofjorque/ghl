@@ -92,6 +92,7 @@ mod tests {
             &["std", "stats", "distributions"],
             &["std", "stats", "rng"],
             &["std", "stats", "models"],
+            &["std", "prob"],
             &["std", "math"],
             &["std", "io"],
             &["std", "plot"],

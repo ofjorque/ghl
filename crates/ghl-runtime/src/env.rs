@@ -16,6 +16,7 @@ static BASE_PRELUDE_ENV: std::sync::LazyLock<RuntimeEnv> = std::sync::LazyLock::
         ("regularized.gh", include_str!("stdlib/regularized.gh")),
         ("sem.gh", include_str!("stdlib/sem.gh")),
         ("stats.gh", include_str!("stdlib/stats.gh")),
+        ("prob.gh", include_str!("stdlib/prob.gh")),
     ];
     for (name, src) in stdlib_files {
         match ghl_syntax::parse(src) {

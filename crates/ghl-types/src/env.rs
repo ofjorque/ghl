@@ -850,6 +850,9 @@ impl TypeEnv {
             "normal_quantile", "gamma_quantile",
             "feols", "iv_regress", "ridge", "lasso", "elastic_net",
             "sem", "optim", "sample_cov", "anova", "t_test", "t_test_one_sample", "chisq_test",
+            "normal", "student_t", "fisher_f", "chisq", "gamma_dist", "beta_dist",
+            "uniform", "exponential", "binomial", "poisson_dist",
+            "conf_int", "p_value", "z_test_one_sample", "cor_test",
         ] {
             env.insert(
                 name.into(),

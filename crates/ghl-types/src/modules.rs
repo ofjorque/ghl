@@ -223,6 +223,23 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             Some(items)
         }
 
+        ["std", "prob"] => Some(vec![
+            ("normal".into(), any_fn_multi(2)),
+            ("student_t".into(), any_fn()),
+            ("fisher_f".into(), any_fn_multi(2)),
+            ("chisq".into(), any_fn()),
+            ("gamma_dist".into(), any_fn_multi(2)),
+            ("beta_dist".into(), any_fn_multi(2)),
+            ("uniform".into(), any_fn_multi(2)),
+            ("exponential".into(), any_fn()),
+            ("binomial".into(), any_fn_multi(2)),
+            ("poisson_dist".into(), any_fn()),
+            ("conf_int".into(), any_fn_multi(4)),
+            ("p_value".into(), any_fn_multi(3)),
+            ("z_test_one_sample".into(), any_fn_multi(3)),
+            ("cor_test".into(), any_fn_multi(2)),
+        ]),
+
         ["std", "math"] => Some(vec![
             ("log".into(), any_fn()),
             ("log2".into(), any_fn()),
