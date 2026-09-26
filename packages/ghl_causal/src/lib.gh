@@ -1,0 +1,43 @@
+// ghl_causal :: Main Library Module (RFC 15 Parte E)
+// Advanced Causal Inference for GHL: Difference-in-Differences, Parallel Trends, and Event Studies.
+
+struct CausalAudit {
+    did_result: DidResult,
+    parallel_trends: ParallelTrendsResult,
+    event_study: EventStudyResult,
+    is_fully_certified: bool
+}
+
+/// Orchestrates an end-to-end causal audit:
+/// 1. Verifies parallel pre-trends assumption before intervention
+/// 2. Estimates canonical 2x2 DiD Treatment Effect (ATT)
+/// 3. Computes dynamic event study trajectory across relative periods
+fn audit_causal_pipeline(df: DataFrame, outcome_col: String, treat_col: String, post_col: String, time_col: String, cutoff_time: f64) -> CausalAudit {
+    let pt_res = test_parallel_trends(df, outcome_col, treat_col, time_col, cutoff_time);
+    let did_res = did_2x2(df, outcome_col, treat_col, post_col);
+    let es_res = event_study(df, outcome_col, treat_col, time_col, cutoff_time);
+
+    let certified = pt_res.is_validated && did_res.is_significant && es_res.pre_trends_pass;
+
+    CausalAudit {
+        did_result: did_res,
+        parallel_trends: pt_res,
+        event_study: es_res,
+        is_fully_certified: certified
+    }
+}
+
+/// Renders the full causal audit report.
+fn render_causal_audit(audit: CausalAudit) {
+    render_parallel_trends_cockpit(audit.parallel_trends);
+    render_did_cockpit(audit.did_result);
+    render_event_study_cockpit(audit.event_study);
+
+    println("┌─ [GHL Causal] Final Causal Inference Certification ──────────");
+    if audit.is_fully_certified {
+        println("│ /ᐠ˵- ⩊ -˵マ ✧ CAUSAL PIPELINE CERTIFIED: Robust causal identification confirmed!");
+    } else {
+        println("│ ≽(◉˕ ◉ ≼マ CAUSAL AUDIT CAUTION: Review assumption warnings above before policy inference");
+    }
+    println("└───────────────────────────────────────────────────────────────");
+}

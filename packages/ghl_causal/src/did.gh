@@ -1,0 +1,187 @@
+// ghl_causal :: Difference-in-Differences (2x2 DiD) Estimator
+// Pure GHL implementation of causal inference for observational and quasi-experimental data.
+
+struct DidResult {
+    att: f64,
+    std_error: f64,
+    t_stat: f64,
+    p_value: f64,
+    conf_low: f64,
+    conf_high: f64,
+    mean_treated_post: f64,
+    mean_treated_pre: f64,
+    mean_control_post: f64,
+    mean_control_pre: f64,
+    counterfactual: f64,
+    n_treated_post: f64,
+    n_treated_pre: f64,
+    n_control_post: f64,
+    n_control_pre: f64,
+    is_significant: bool
+}
+
+/// Canonical 2x2 Difference-in-Differences estimator.
+/// Calculates the Average Treatment Effect on the Treated (ATT)
+/// comparing outcome changes between treatment and control groups before and after intervention.
+fn did_2x2(df: DataFrame, outcome_col: String, treat_col: String, post_col: String) -> DidResult {
+    let y_vals = pull(df, outcome_col);
+    let t_vals = pull(df, treat_col);
+    let p_vals = pull(df, post_col);
+    let n = length(y_vals);
+
+    let mut sum_tp = 0.0;
+    let mut cnt_tp = 0.0;
+    let mut sum_t0 = 0.0;
+    let mut cnt_t0 = 0.0;
+    let mut sum_cp = 0.0;
+    let mut cnt_cp = 0.0;
+    let mut sum_c0 = 0.0;
+    let mut cnt_c0 = 0.0;
+
+    // Pass 1: compute cell means
+    for i in 0..n {
+        let y = y_vals[i];
+        let t = t_vals[i];
+        let p = p_vals[i];
+
+        if t > 0.5 {
+            if p > 0.5 {
+                sum_tp = sum_tp + y;
+                cnt_tp = cnt_tp + 1.0;
+            } else {
+                sum_t0 = sum_t0 + y;
+                cnt_t0 = cnt_t0 + 1.0;
+            }
+        } else {
+            if p > 0.5 {
+                sum_cp = sum_cp + y;
+                cnt_cp = cnt_cp + 1.0;
+            } else {
+                sum_c0 = sum_c0 + y;
+                cnt_c0 = cnt_c0 + 1.0;
+            }
+        }
+    }
+
+    if cnt_tp < 2.0 || cnt_t0 < 2.0 || cnt_cp < 2.0 || cnt_c0 < 2.0 {
+        panic("Each 2x2 DiD cell (Treated/Control x Pre/Post) must contain at least 2 observations.");
+    }
+
+    let m_tp = sum_tp / cnt_tp;
+    let m_t0 = sum_t0 / cnt_t0;
+    let m_cp = sum_cp / cnt_cp;
+    let m_c0 = sum_c0 / cnt_c0;
+
+    // Pass 2: compute cell variances
+    let mut ssq_tp = 0.0;
+    let mut ssq_t0 = 0.0;
+    let mut ssq_cp = 0.0;
+    let mut ssq_c0 = 0.0;
+
+    for i in 0..n {
+        let y = y_vals[i];
+        let t = t_vals[i];
+        let p = p_vals[i];
+
+        if t > 0.5 {
+            if p > 0.5 {
+                let dev = y - m_tp;
+                ssq_tp = ssq_tp + (dev * dev);
+            } else {
+                let dev = y - m_t0;
+                ssq_t0 = ssq_t0 + (dev * dev);
+            }
+        } else {
+            if p > 0.5 {
+                let dev = y - m_cp;
+                ssq_cp = ssq_cp + (dev * dev);
+            } else {
+                let dev = y - m_c0;
+                ssq_c0 = ssq_c0 + (dev * dev);
+            }
+        }
+    }
+
+    let var_tp = ssq_tp / (cnt_tp - 1.0);
+    let var_t0 = ssq_t0 / (cnt_t0 - 1.0);
+    let var_cp = ssq_cp / (cnt_cp - 1.0);
+    let var_c0 = ssq_c0 / (cnt_c0 - 1.0);
+
+    // DiD Estimator
+    let delta_treat = m_tp - m_t0;
+    let delta_ctrl = m_cp - m_c0;
+    let att = delta_treat - delta_ctrl;
+    let counterfactual = m_t0 + delta_ctrl;
+
+    // Variance and Standard Error of DiD
+    let var_did = (var_tp / cnt_tp) + (var_t0 / cnt_t0) + (var_cp / cnt_cp) + (var_c0 / cnt_c0);
+    let se = sqrt(var_did);
+    let t_stat = if se > 0.0 { att / se } else { 0.0 };
+
+    // Two-sided p-value using Normal distribution
+    let norm = Normal { mean: 0.0, sd: 1.0 };
+    let p_val = p_value(t_stat, norm, "two_sided");
+
+    let conf_low = att - (1.95996 * se);
+    let conf_high = att + (1.95996 * se);
+    let is_sig = p_val < 0.05;
+
+    DidResult {
+        att: att,
+        std_error: se,
+        t_stat: t_stat,
+        p_value: p_val,
+        conf_low: conf_low,
+        conf_high: conf_high,
+        mean_treated_post: m_tp,
+        mean_treated_pre: m_t0,
+        mean_control_post: m_cp,
+        mean_control_pre: m_c0,
+        counterfactual: counterfactual,
+        n_treated_post: cnt_tp,
+        n_treated_pre: cnt_t0,
+        n_control_post: cnt_cp,
+        n_control_pre: cnt_c0,
+        is_significant: is_sig
+    }
+}
+
+/// Renders visual Cockpit Deck panel for 2x2 DiD causal estimates.
+fn render_did_cockpit(res: DidResult) {
+    println("┌─ [GHL Causal] Difference-in-Differences (2x2 DiD) ────────────");
+    println("│ Outcome Change Analysis:");
+    println("│ • Treated Group: pre =", format("{:.2}", res.mean_treated_pre), "-> post =", format("{:.2}", res.mean_treated_post), "(Δ =", format("{:.2}", res.mean_treated_post - res.mean_treated_pre), ")");
+    println("│ • Control Group: pre =", format("{:.2}", res.mean_control_pre), "-> post =", format("{:.2}", res.mean_control_post), "(Δ =", format("{:.2}", res.mean_control_post - res.mean_control_pre), ")");
+    println("│ • Counterfactual Expectation Y_1(0):", format("{:.2}", res.counterfactual));
+    println("├───────────────────────────────────────────────────────────────");
+    println("│ Estimate             Std.Err     t-stat     p-val   95% Conf. Int");
+    println("│ ATT =", format("{:.4}", res.att), "    ", format("{:.4}", res.std_error), "   ", format("{:.2}", res.t_stat), "   ", format("{:.4}", res.p_value), "  [", format("{:.2}", res.conf_low), ",", format("{:.2}", res.conf_high), "]");
+    println("├───────────────────────────────────────────────────────────────");
+    if res.is_significant {
+        println("│ /ᐠ˵- ⩊ -˵マ ✧ STATISTICALLY SIGNIFICANT CAUSAL EFFECT IDENTIFIED!");
+    } else {
+        println("│ ≽(◉˕ ◉ ≼マ INSUFFICIENT EVIDENCE TO REJECT NULL EFFECT (p >= 0.05)");
+    }
+    println("└───────────────────────────────────────────────────────────────");
+}
+
+/// Tidy extraction for DidResult.
+fn tidy_did(res: DidResult) -> DataFrame {
+    dataframe {
+        term: ["ATT"],
+        estimate: [res.att],
+        std_error: [res.std_error],
+        statistic: [res.t_stat],
+        p_value: [res.p_value]
+    }
+}
+
+/// Glance summary for DidResult.
+fn glance_did(res: DidResult) -> DataFrame {
+    dataframe {
+        n_obs: [res.n_treated_post + res.n_treated_pre + res.n_control_post + res.n_control_pre],
+        att: [res.att],
+        conf_low: [res.conf_low],
+        conf_high: [res.conf_high]
+    }
+}

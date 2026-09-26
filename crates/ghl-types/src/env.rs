@@ -1003,6 +1003,28 @@ impl TypeEnv {
             );
         }
 
+        // Probability Distributions Subsystem (`std::prob` per RFC 15)
+        env.insert_struct("Normal".into(), vec![("mean".into(), Type::F64), ("sd".into(), Type::F64)]);
+        env.insert_struct("StudentT".into(), vec![("df".into(), Type::F64)]);
+        env.insert_struct("FisherF".into(), vec![("df1".into(), Type::F64), ("df2".into(), Type::F64)]);
+        env.insert_struct("ChiSq".into(), vec![("df".into(), Type::F64)]);
+        env.insert_struct("Gamma".into(), vec![("shape".into(), Type::F64), ("rate".into(), Type::F64)]);
+        env.insert_struct("Beta".into(), vec![("alpha".into(), Type::F64), ("beta".into(), Type::F64)]);
+        env.insert_struct("Binomial".into(), vec![("n".into(), Type::F64), ("p".into(), Type::F64)]);
+        env.insert_struct("Poisson".into(), vec![("lambda".into(), Type::F64)]);
+        env.insert_struct("Uniform".into(), vec![("min".into(), Type::F64), ("max".into(), Type::F64)]);
+        env.insert_struct("Exponential".into(), vec![("rate".into(), Type::F64)]);
+
+        for name in [
+            "p_value", "conf_int", "z_test_one_sample", "cor_test",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
         env
     }
 

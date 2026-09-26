@@ -211,6 +211,25 @@ impl Type {
                 }
                 Some(Type::Record(unified))
             }
+            (Type::DataFrame(f1), Type::DataFrame(f2)) => {
+                if f1.is_empty() {
+                    return Some(Type::DataFrame(f2.clone()));
+                }
+                if f2.is_empty() {
+                    return Some(Type::DataFrame(f1.clone()));
+                }
+                if f1.len() != f2.len() {
+                    return None;
+                }
+                let mut unified = Vec::new();
+                for ((n1, t1), (n2, t2)) in f1.iter().zip(f2.iter()) {
+                    if n1 != n2 {
+                        return None;
+                    }
+                    unified.push((n1.clone(), t1.unify(t2)?));
+                }
+                Some(Type::DataFrame(unified))
+            }
             (Type::Struct { name: n1, fields: f1 }, Type::Struct { name: n2, fields: f2 }) => {
                 if n1 != n2 || f1.len() != f2.len() {
                     return None;

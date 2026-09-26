@@ -1,0 +1,149 @@
+// ghl_causal :: Parallel Trends Assumption Diagnostic Test
+// Evaluates differential pre-intervention trajectories between treatment and control groups.
+
+struct ParallelTrendsResult {
+    slope_treated: f64,
+    slope_control: f64,
+    diff_slope: f64,
+    std_error: f64,
+    t_stat: f64,
+    p_value: f64,
+    is_validated: bool
+}
+
+/// Tests the parallel pre-trends assumption before intervention (time < cutoff_time).
+/// Fits linear pre-trends for treated and control units and checks if their slopes differ significantly.
+fn test_parallel_trends(df: DataFrame, outcome_col: String, treat_col: String, time_col: String, cutoff_time: f64) -> ParallelTrendsResult {
+    let y_all = pull(df, outcome_col);
+    let tr_all = pull(df, treat_col);
+    let time_all = pull(df, time_col);
+    let n = length(y_all);
+
+    // Filter to pre-treatment period
+    let mut y_t = [];
+    let mut time_t = [];
+    let mut y_c = [];
+    let mut time_c = [];
+
+    for i in 0..n {
+        let t_val = time_all[i];
+        if t_val < cutoff_time {
+            let tr = tr_all[i];
+            let y = y_all[i];
+            if tr > 0.5 {
+                y_t = append(y_t, y);
+                time_t = append(time_t, t_val);
+            } else {
+                y_c = append(y_c, y);
+                time_c = append(time_c, t_val);
+            }
+        }
+    }
+
+    let n_t = length(y_t);
+    let n_c = length(y_c);
+
+    if n_t < 3 || n_c < 3 {
+        panic("Parallel trends test requires at least 3 pre-intervention time observations per group.");
+    }
+
+    let n_t_f = n_t * 1.0;
+    let n_c_f = n_c * 1.0;
+
+    // Compute treated slope
+    let mut sum_y_t = 0.0;
+    let mut sum_time_t = 0.0;
+    for i in 0..n_t {
+        sum_y_t = sum_y_t + y_t[i];
+        sum_time_t = sum_time_t + time_t[i];
+    }
+    let mean_y_t = sum_y_t / n_t_f;
+    let mean_time_t = sum_time_t / n_t_f;
+
+    let mut cov_t = 0.0;
+    let mut var_time_t = 0.0;
+    for i in 0..n_t {
+        let d_time = time_t[i] - mean_time_t;
+        let d_y = y_t[i] - mean_y_t;
+        cov_t = cov_t + (d_time * d_y);
+        var_time_t = var_time_t + (d_time * d_time);
+    }
+    let beta_t = if var_time_t > 0.0 { cov_t / var_time_t } else { 0.0 };
+
+    let mut rss_t = 0.0;
+    let alpha_t = mean_y_t - (beta_t * mean_time_t);
+    for i in 0..n_t {
+        let y_hat = alpha_t + (beta_t * time_t[i]);
+        let err = y_t[i] - y_hat;
+        rss_t = rss_t + (err * err);
+    }
+    let s2_t = rss_t / (n_t_f - 2.0);
+    let se2_beta_t = if var_time_t > 0.0 { s2_t / var_time_t } else { 0.0 };
+
+    // Compute control slope
+    let mut sum_y_c = 0.0;
+    let mut sum_time_c = 0.0;
+    for i in 0..n_c {
+        sum_y_c = sum_y_c + y_c[i];
+        sum_time_c = sum_time_c + time_c[i];
+    }
+    let mean_y_c = sum_y_c / n_c_f;
+    let mean_time_c = sum_time_c / n_c_f;
+
+    let mut cov_c = 0.0;
+    let mut var_time_c = 0.0;
+    for i in 0..n_c {
+        let d_time = time_c[i] - mean_time_c;
+        let d_y = y_c[i] - mean_y_c;
+        cov_c = cov_c + (d_time * d_y);
+        var_time_c = var_time_c + (d_time * d_time);
+    }
+    let beta_c = if var_time_c > 0.0 { cov_c / var_time_c } else { 0.0 };
+
+    let mut rss_c = 0.0;
+    let alpha_c = mean_y_c - (beta_c * mean_time_c);
+    for i in 0..n_c {
+        let y_hat = alpha_c + (beta_c * time_c[i]);
+        let err = y_c[i] - y_hat;
+        rss_c = rss_c + (err * err);
+    }
+    let s2_c = rss_c / (n_c_f - 2.0);
+    let se2_beta_c = if var_time_c > 0.0 { s2_c / var_time_c } else { 0.0 };
+
+    // Difference in slopes
+    let diff_slope = beta_t - beta_c;
+    let se_diff = sqrt(se2_beta_t + se2_beta_c);
+    let t_stat = if se_diff > 0.0 { diff_slope / se_diff } else { 0.0 };
+
+    let norm = Normal { mean: 0.0, sd: 1.0 };
+    let p_val = p_value(t_stat, norm, "two_sided");
+    let is_valid = p_val >= 0.05;
+
+    ParallelTrendsResult {
+        slope_treated: beta_t,
+        slope_control: beta_c,
+        diff_slope: diff_slope,
+        std_error: se_diff,
+        t_stat: t_stat,
+        p_value: p_val,
+        is_validated: is_valid
+    }
+}
+
+/// Renders visual Cockpit Deck panel for parallel pre-trends diagnostic test.
+fn render_parallel_trends_cockpit(res: ParallelTrendsResult) {
+    println("┌─ [GHL Causal] Parallel Pre-Trends Diagnostic Test ────────────");
+    println("│ Pre-Intervention Trajectory Analysis:");
+    println("│ • Treated Slope (β_T):", format("{:.4}", res.slope_treated));
+    println("│ • Control Slope (β_C):", format("{:.4}", res.slope_control));
+    println("│ • Differential Slope (Δβ):", format("{:.4}", res.diff_slope));
+    println("├───────────────────────────────────────────────────────────────");
+    println("│ Test Statistic: t =", format("{:.2}", res.t_stat), "| p-value =", format("{:.4}", res.p_value));
+    println("├───────────────────────────────────────────────────────────────");
+    if res.is_validated {
+        println("│ /ᐠ˵- ⩊ -˵マ ✧ PARALLEL PRE-TRENDS ASSUMPTION SATISFIED (p >= 0.05)");
+    } else {
+        println("│ ≽(◉˕ ◉ ≼マ PARALLEL TRENDS VIOLATION SUSPECTED: Slopes differ (p < 0.05)");
+    }
+    println("└───────────────────────────────────────────────────────────────");
+}

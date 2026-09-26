@@ -542,39 +542,37 @@ impl Interpreter {
             ExprKind::For { var, start, end, body } => {
                 let start_val = self.eval_expr(start)?;
                 let end_val = self.eval_expr(end)?;
-                match (&start_val, &end_val) {
-                    (Value::I64(s), Value::I64(e)) => {
-                        self.env.push_scope();
-                        for i in *s..*e {
-                            self.env.set(var.clone(), Value::I64(i));
-                            self.eval_expr(body)?;
-                            if self.pending_return.is_some() {
-                                break;
-                            }
+                if let (Some(s), Some(e)) = (start_val.as_i64(), end_val.as_i64()) {
+                    self.env.push_scope();
+                    for i in s..e {
+                        self.env.set(var.clone(), Value::I64(i));
+                        self.eval_expr(body)?;
+                        if self.pending_return.is_some() {
+                            break;
                         }
-                        self.env.pop_scope();
-                        Ok(Value::Unit)
                     }
-                    (_, Value::Vector(vd)) => {
-                        self.env.push_scope();
-                        for item in vd.iter() {
-                            self.env.set(var.clone(), item.clone());
-                            self.eval_expr(body)?;
-                            if self.pending_return.is_some() {
-                                break;
-                            }
+                    self.env.pop_scope();
+                    Ok(Value::Unit)
+                } else if let Value::Vector(vd) = &end_val {
+                    self.env.push_scope();
+                    for item in vd.iter() {
+                        self.env.set(var.clone(), item.clone());
+                        self.eval_expr(body)?;
+                        if self.pending_return.is_some() {
+                            break;
                         }
-                        self.env.pop_scope();
-                        Ok(Value::Unit)
                     }
-                    _ => Err(Diagnostic::compute_error(
+                    self.env.pop_scope();
+                    Ok(Value::Unit)
+                } else {
+                    Err(Diagnostic::compute_error(
                         "C0104",
                         format!(
                             "for loop requires integer range or Vector, got `{}` and `{}`",
                             start_val.type_name(),
                             end_val.type_name()
                         ),
-                    )),
+                    ))
                 }
             }
 

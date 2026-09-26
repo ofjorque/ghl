@@ -1,0 +1,4 @@
+// Entry point for packages/ghl_causal
+fn main() {
+    println("Hello from Gojo & Haru Language (GHL)!");
+}

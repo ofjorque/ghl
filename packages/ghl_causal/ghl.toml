@@ -1,0 +1,8 @@
+[package]
+name = "ghl_causal"
+version = "0.1.0"
+authors = ["GHL Community <community@ghl-lang.org>"]
+description = "Advanced Causal Inference in Pure GHL: Difference-in-Differences, Event Studies, and Causal Diagnostics"
+edition = "2026"
+
+[dependencies]

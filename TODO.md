@@ -43,7 +43,7 @@ Backlog activo detallado en [`docs/roadmap/08_TODO_MODELOS_AVANZADOS_Y_SPRING_PA
   - [x] **Módulos de Reglas en GHL:** Reglas de datos (`expect_filter`, `expect_na_max`, `expect_outlier_rule`) y supuestos de modelos (`expect_vif_max`, `expect_homoscedasticity`, `expect_min_sample_size`).
   - [x] **Certificación en GHL:** Hashing criptográfico **SHA-256** del contrato y emisión de Certificado de Cumplimiento Cockpit Deck.
   - [x] **Suite de Pruebas en GHL:** Pruebas unitarias de la librería ejecutadas con `ghl test`.
-- [ ] **Parte E: Canon Representativo del Core (`std::stats` & `std::prob`) vs. Paquetes del Ecosistema:**
+- [x] **Parte E: Canon Representativo del Core (`std::stats` & `std::prob`) vs. Paquetes del Ecosistema:**
   - [x] **Subsistema de Probabilidad e Inferencia (`std::prob` en GHL Puro):**
     - Tipos canónicos de distribuciones como structs de primera clase (`Normal`, `StudentT`, `FisherF`, `ChiSq`, `Gamma`, `Beta`, `Binomial`, `Poisson`) exponiendo métodos `.pdf(x)`, `.cdf(q)`, `.quantile(p)` y `.sample(n, [seed])`.
     - Inferencia estadística en GHL puro: cálculo de p-valores (`p_value(stat, dist, alternative)`), intervalos de confianza (`conf_int(estimate, se, dist, level)`), y contrastes clásicos ($t$-Student, $F$-test, $\chi^2$, proporciones, correlación).
@@ -54,9 +54,9 @@ Backlog activo detallado en [`docs/roadmap/08_TODO_MODELOS_AVANZADOS_Y_SPRING_PA
       3. Modelos con partición de fórmulas `|`: `feols` (efectos fijos / panel con proyección within) e `iv_regress` (2SLS bi-etápico).
       4. Modelos penalizados: `lasso`, `ridge`, `elastic_net` (descenso por coordenadas).
       5. Descomposición de varianza: `anova(formula, df)`, `manova` (contrastes ortogonales y tests F).
-  - [ ] **Ecosistema de Paquetes Externos (Desarrollados en GHL vía `ghl new` y distribuidos con `ghl.toml`):**
+  - [x] **Ecosistema de Paquetes Externos (Desarrollados en GHL vía `ghl new` y distribuidos con `ghl.toml`):**
     - *Principio:* El repositorio del compilador no se sobrecarga con modelos hiperespecializados; estos se desarrollan como paquetes comunitarios o plugins en código GHL puro:
-      - `ghl-causal`: Inferencia causal avanzada (DiD Callaway-Sant'Anna multi-período, Synthetic Control, Regresión Discontinua RDD, Propensity Score Matching).
+      - `ghl-causal` (`packages/ghl_causal`): Inferencia causal insignia en GHL puro (DiD clásico 2x2, test diagnóstico de pre-tendencias paralelas y Event Study dinámico con `ghl test`).
       - `ghl-timeseries`: Series temporales avanzadas (Filtro de Kalman, modelos ARIMA/SARIMA, volatilidad GARCH, modelos VAR).
       - `ghl-survival`: Análisis de supervivencia y eventos temporales (Curvas Kaplan-Meier, regresión de riesgos proporcionales de Cox).
       - `ghl-panel`: Modelos de panel dinámico (Arellano-Bond, Blundell-Bond GMM).

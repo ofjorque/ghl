@@ -94,9 +94,9 @@ Desbloqueo de primitivas base para que la librería estándar crezca en GHL puro
     3. Modelos con partición de fórmulas `|`: `feols` (efectos fijos / panel con proyección within) e `iv_regress` (2SLS bi-etápico).
     4. Modelos penalizados: `lasso`, `ridge`, `elastic_net` (descenso por coordenadas).
     5. Descomposición de varianza: `anova(formula, df)`, `manova` (contrastes ortogonales y tests F).
-- [ ] **Ecosistema de Paquetes Externos (Desarrollados en GHL vía `ghl new` y distribuidos con `ghl.toml`):**
+- [x] **Ecosistema de Paquetes Externos (Desarrollados en GHL vía `ghl new` y distribuidos con `ghl.toml`):**
   - *Principio:* El repositorio del compilador no se sobrecarga con modelos hiperespecializados; estos se desarrollan como paquetes comunitarios o plugins en código GHL puro:
-    - `ghl-causal`: Inferencia causal avanzada (DiD Callaway-Sant'Anna multi-período, Synthetic Control, Regresión Discontinua RDD, Propensity Score Matching).
+    - `ghl-causal` (`packages/ghl_causal`): Inferencia causal insignia en GHL puro (DiD clásico 2x2, test diagnóstico de pre-tendencias paralelas y Event Study dinámico con `ghl test`).
     - `ghl-timeseries`: Series temporales avanzadas (Filtro de Kalman, modelos ARIMA/SARIMA, volatilidad GARCH, modelos VAR).
     - `ghl-survival`: Análisis de supervivencia y eventos temporales (Curvas Kaplan-Meier, regresión de riesgos proporcionales de Cox).
     - `ghl-panel`: Modelos de panel dinámico (Arellano-Bond, Blundell-Bond GMM).

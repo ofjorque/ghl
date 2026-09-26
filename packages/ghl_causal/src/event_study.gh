@@ -1,0 +1,176 @@
+// ghl_causal :: Dynamic Event Study Estimator
+// Estimates leads (pre-treatment placebo checks) and lags (dynamic post-treatment effects).
+
+struct EventStudyPoint {
+    period: f64,
+    estimate: f64,
+    std_error: f64,
+    t_stat: f64,
+    p_value: f64,
+    conf_low: f64,
+    conf_high: f64,
+    is_lead: bool
+}
+
+struct EventStudyResult {
+    baseline_period: f64,
+    estimates: Vector,
+    n_obs: i64,
+    pre_trends_pass: bool
+}
+
+/// Dynamic Event Study estimator relative to an intervention time.
+/// Uses period k = -1 as the normalized baseline.
+fn event_study(df: DataFrame, outcome_col: String, treat_col: String, time_col: String, event_time: f64) -> EventStudyResult {
+    let y_all = pull(df, outcome_col);
+    let tr_all = pull(df, treat_col);
+    let time_all = pull(df, time_col);
+    let n = length(y_all);
+
+    // Discover discrete relative periods
+    let mut min_rel = 999;
+    let mut max_rel = -999;
+
+    for i in 0..n {
+        let rel_f = round(time_all[i] - event_time);
+        if rel_f < min_rel {
+            min_rel = rel_f;
+        }
+        if rel_f > max_rel {
+            max_rel = rel_f;
+        }
+    }
+
+    // Baseline difference at k = -1
+    let mut sum_y_t_base = 0.0;
+    let mut cnt_t_base = 0.0;
+    let mut sum_y_c_base = 0.0;
+    let mut cnt_c_base = 0.0;
+
+    for i in 0..n {
+        let rel_f = round(time_all[i] - event_time);
+        if rel_f == -1.0 {
+            let tr = tr_all[i];
+            let y = y_all[i];
+            if tr > 0.5 {
+                sum_y_t_base = sum_y_t_base + y;
+                cnt_t_base = cnt_t_base + 1.0;
+            } else {
+                sum_y_c_base = sum_y_c_base + y;
+                cnt_c_base = cnt_c_base + 1.0;
+            }
+        }
+    }
+
+    let diff_baseline = if cnt_t_base > 0.0 && cnt_c_base > 0.0 {
+        (sum_y_t_base / cnt_t_base) - (sum_y_c_base / cnt_c_base)
+    } else {
+        0.0
+    };
+
+    let mut points = [];
+    let mut all_leads_pass = true;
+
+    for k in min_rel..(max_rel + 1) {
+        let mut sum_y_tk = 0.0;
+        let mut cnt_tk = 0.0;
+        let mut sum_y_ck = 0.0;
+        let mut cnt_ck = 0.0;
+        let k_f = k * 1.0;
+
+        for i in 0..n {
+            let rel_f = round(time_all[i] - event_time);
+            if rel_f == k_f {
+                let tr = tr_all[i];
+                let y = y_all[i];
+                if tr > 0.5 {
+                    sum_y_tk = sum_y_tk + y;
+                    cnt_tk = cnt_tk + 1.0;
+                } else {
+                    sum_y_ck = sum_y_ck + y;
+                    cnt_ck = cnt_ck + 1.0;
+                }
+            }
+        }
+
+        if cnt_tk > 0.0 && cnt_ck > 0.0 {
+            let mean_tk = sum_y_tk / cnt_tk;
+            let mean_ck = sum_y_ck / cnt_ck;
+            let diff_k = mean_tk - mean_ck;
+
+            let est = if k == -1 {
+                0.0
+            } else {
+                diff_k - diff_baseline
+            };
+
+            // Pooled sample variance for period k
+            let mut ssq = 0.0;
+            for i in 0..n {
+                let rel_f = round(time_all[i] - event_time);
+                if rel_f == k_f {
+                    let tr = tr_all[i];
+                    let y = y_all[i];
+                    let m = if tr > 0.5 { mean_tk } else { mean_ck };
+                    let d = y - m;
+                    ssq = ssq + (d * d);
+                }
+            }
+            let denom = if (cnt_tk + cnt_ck - 2.0) > 0.0 { cnt_tk + cnt_ck - 2.0 } else { 1.0 };
+            let pooled_var = ssq / denom;
+            let se = sqrt((pooled_var / cnt_tk) + (pooled_var / cnt_ck));
+            let t_val = if se > 0.0 { est / se } else { 0.0 };
+
+            let norm = Normal { mean: 0.0, sd: 1.0 };
+            let p_val = if k == -1 { 1.0 } else { p_value(t_val, norm, "two_sided") };
+            let is_lead = k < 0;
+
+            if is_lead && k < -1 && p_val < 0.05 {
+                all_leads_pass = false;
+            }
+
+            let pt = EventStudyPoint {
+                period: k_f,
+                estimate: est,
+                std_error: se,
+                t_stat: t_val,
+                p_value: p_val,
+                conf_low: est - (1.95996 * se),
+                conf_high: est + (1.95996 * se),
+                is_lead: is_lead
+            };
+            points = append(points, pt);
+        }
+    }
+
+    EventStudyResult {
+        baseline_period: -1.0,
+        estimates: points,
+        n_obs: n,
+        pre_trends_pass: all_leads_pass
+    }
+}
+
+/// Renders visual Cockpit Deck panel for Dynamic Event Study.
+fn render_event_study_cockpit(res: EventStudyResult) {
+    println("┌─ [GHL Causal] Dynamic Event Study Trajectory ─────────────────");
+    println("│ Relative Period   Estimate    Std.Err     t-stat     p-val    Type");
+    println("├───────────────────────────────────────────────────────────────");
+    for pt in res.estimates {
+        let p_type = if pt.period == -1 {
+            "[BASELINE]"
+        } else if pt.is_lead {
+            "[LEAD (placebo)]"
+        } else {
+            "[LAG (effect)]"
+        };
+        println("│ t =", pt.period, "          ", format("{:.4}", pt.estimate), "    ", format("{:.4}", pt.std_error), "   ", format("{:.2}", pt.t_stat), "   ", format("{:.4}", pt.p_value), "  ", p_type);
+    }
+    println("├───────────────────────────────────────────────────────────────");
+    if res.pre_trends_pass {
+        println("│ /ᐠ˵- ⩊ -˵マ ✧ EVENT STUDY VALIDATED: Pre-treatment leads satisfy null (≈ 0)");
+    } else {
+        println("│ ≽(◉˕ ◉ ≼マ EVENT STUDY WARNING: Pre-treatment anticipation or non-parallel leads detected");
+    }
+    println("└───────────────────────────────────────────────────────────────");
+}

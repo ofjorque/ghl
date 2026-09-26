@@ -1,0 +1,101 @@
+// Integration test suite for ghl_causal package (RFC 15 Parte E)
+
+println("Running ghl_causal integration test suite...");
+
+// 1. Construct synthetic quasi-experimental panel dataset
+// Time periods: 0, 1 (pre) and 2, 3 (post). Cutoff is at 2.0.
+// Common time trend = +2.0 per period.
+// True causal treatment effect ATT = +5.0 starting at t = 2.0.
+let df_causal = dataframe {
+    y: [
+        // Control units (t=0, 1, 2, 3)
+        10.0, 10.2, 9.8, 10.0,
+        12.0, 11.9, 12.1, 12.0,
+        14.0, 14.1, 13.9, 14.0,
+        16.0, 15.9, 16.1, 16.0,
+        // Treated units (t=0, 1, 2, 3)
+        20.0, 19.9, 20.1, 20.0,
+        22.0, 22.1, 21.9, 22.0,
+        29.0, 29.2, 28.8, 29.0, // 24 + 5 = 29
+        31.0, 30.9, 31.1, 31.0  // 26 + 5 = 31
+    ],
+    treat: [
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0
+    ],
+    post: [
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0,
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0
+    ],
+    time: [
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 1.0, 1.0, 1.0,
+        2.0, 2.0, 2.0, 2.0,
+        3.0, 3.0, 3.0, 3.0,
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 1.0, 1.0, 1.0,
+        2.0, 2.0, 2.0, 2.0,
+        3.0, 3.0, 3.0, 3.0
+    ]
+};
+
+// 2. Test Parallel Pre-Trends Diagnostic
+let pt_res = test_parallel_trends(df_causal, "y", "treat", "time", 2.0);
+render_parallel_trends_cockpit(pt_res);
+
+if !pt_res.is_validated {
+    panic("Expected parallel pre-trends to be validated for common slope dataset");
+}
+if abs(pt_res.diff_slope) > 0.1 {
+    panic("Expected difference in pre-slopes to be ~0.0");
+}
+
+// 3. Test 2x2 Difference-in-Differences
+let did_res = did_2x2(df_causal, "y", "treat", "post");
+render_did_cockpit(did_res);
+
+if abs(did_res.att - 5.0) > 0.2 {
+    panic("Expected ATT to recover known causal effect ~5.0");
+}
+if !did_res.is_significant {
+    panic("Expected ATT to be statistically significant");
+}
+if abs(did_res.counterfactual - 25.0) > 0.2 {
+    panic("Expected counterfactual Y_1(0) to be ~25.0");
+}
+
+// 4. Test Tidy and Glance verbs
+let td = tidy_did(did_res);
+println("Tidy DiD terms:", pull(td, "term"));
+let gl = glance_did(did_res);
+println("Glance DiD N:", pull(gl, "n_obs"));
+
+// 5. Test Dynamic Event Study
+let es_res = event_study(df_causal, "y", "treat", "time", 2.0);
+render_event_study_cockpit(es_res);
+
+if !es_res.pre_trends_pass {
+    panic("Event study pre-treatment leads should satisfy null (placebo check)");
+}
+
+// 6. Test Full Causal Audit Pipeline
+let audit = audit_causal_pipeline(df_causal, "y", "treat", "post", "time", 2.0);
+render_causal_audit(audit);
+
+if !audit.is_fully_certified {
+    panic("Causal audit pipeline should be fully certified");
+}
+
+println("All ghl_causal tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
