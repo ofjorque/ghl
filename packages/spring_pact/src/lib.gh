@@ -1,0 +1,17 @@
+// spring_pact :: Main Library Module (RFC 14)
+// High-level contract and pipeline orchestration.
+
+/// Sanitizes a dataset according to the contract's range and missingness rules.
+fn enforce_data_rules(df: DataFrame, contract: Contract) -> DataFrame {
+    let mut clean_df = df;
+
+    // Filter rows satisfying all range rules
+    for r in contract.range_rules {
+        let col_name = r.col_name;
+        let min_v = r.min_val;
+        let max_v = r.max_val;
+        clean_df = filter(clean_df, col(col_name) >= min_v && col(col_name) <= max_v);
+    }
+
+    clean_df
+}

@@ -78,7 +78,7 @@ impl RuntimeEnv {
             Ok(Value::Bool(enable))
         }));
 
-        // Print helpers
+        // Print and string helpers
         env.set("println".into(), Value::NativeFn(|args| {
             for (i, a) in args.iter().enumerate() {
                 if i > 0 {
@@ -92,6 +92,56 @@ impl RuntimeEnv {
             println!();
             Ok(Value::Unit)
         }));
+        env.set("to_string".into(), Value::NativeFn(|args| {
+            let val = args.first().map(|v| match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            }).unwrap_or_default();
+            Ok(Value::String(val))
+        }));
+        env.set("format".into(), Value::NativeFn(|args| {
+            if args.is_empty() {
+                return Ok(Value::String(String::new()));
+            }
+            let first_str = match &args[0] {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            if first_str.contains("{}") && args.len() > 1 {
+                let mut res = String::new();
+                let mut arg_idx = 1;
+                let parts: Vec<&str> = first_str.split("{}").collect();
+                for (i, part) in parts.iter().enumerate() {
+                    res.push_str(part);
+                    if i + 1 < parts.len() && arg_idx < args.len() {
+                        match &args[arg_idx] {
+                            Value::String(s) => res.push_str(s),
+                            other => res.push_str(&other.to_string()),
+                        }
+                        arg_idx += 1;
+                    }
+                }
+                Ok(Value::String(res))
+            } else {
+                let res = args.iter().map(|v| match v {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                }).collect::<Vec<_>>().join("");
+                Ok(Value::String(res))
+            }
+        }));
+        env.set("panic".into(), Value::NativeFn(|args| {
+            let msg = args.first().map(|v| match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            }).unwrap_or_else(|| "Explicit panic triggered".into());
+            Err(Diagnostic::compute_error("C0999", msg))
+        }));
+        env.set("length".into(), Value::NativeFn(native_len));
+        env.set("filter_na".into(), Value::NativeFn(native_filter_na));
+        env.set("quantile".into(), Value::NativeFn(native_quantile));
+        env.set("append".into(), Value::NativeFn(native_append));
+
 
         // NEKO Statistical Modeling Verbs
         env.set("fit".into(), Value::NativeFn(native_fit_ols));
@@ -152,6 +202,7 @@ impl RuntimeEnv {
         env.set("write_file".into(), Value::NativeFn(native_write_file));
         env.set("append_file".into(), Value::NativeFn(native_append_file));
         env.set("file_exists".into(), Value::NativeFn(native_file_exists));
+        env.set("sha256".into(), Value::NativeFn(native_sha256));
 
         // Tabular CSV I/O
         env.set("read_csv".into(), Value::NativeFn(native_read_csv));

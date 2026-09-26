@@ -52,6 +52,80 @@ impl TypeChecker {
     }
 
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<Diagnostic>> {
+        // Pass 1: Register all Struct and Trait definitions upfront
+        for stmt in &program.statements {
+            match &stmt.kind {
+                StmtKind::Struct(decl) => {
+                    let fields = decl
+                        .fields
+                        .iter()
+                        .map(|f| (f.name.clone(), Type::from_annotation(&f.ty)))
+                        .collect::<Vec<_>>();
+                    self.env.insert_struct(decl.name.clone(), fields);
+                }
+                StmtKind::Trait(decl) => {
+                    let mut methods = HashMap::new();
+                    for item in &decl.items {
+                        if let TraitItem::Method(sig) = item {
+                            let param_types = sig
+                                .params
+                                .iter()
+                                .map(|p| {
+                                    p.ty.as_ref()
+                                        .map(Type::from_annotation)
+                                        .unwrap_or(Type::Any)
+                                })
+                                .collect::<Vec<_>>();
+                            let ret = sig
+                                .ret_ty
+                                .as_ref()
+                                .map(Type::from_annotation)
+                                .unwrap_or(Type::Unit);
+                            methods.insert(sig.name.clone(), (param_types, ret));
+                        }
+                    }
+                    self.env.insert_trait(decl.name.clone(), methods);
+                }
+                _ => {}
+            }
+        }
+
+        // Pass 2: Register all top-level Function signatures upfront
+        for stmt in &program.statements {
+            if let StmtKind::Fn {
+                name,
+                params,
+                ret_ty,
+                ..
+            } = &stmt.kind
+            {
+                let expected_ret = ret_ty
+                    .as_ref()
+                    .map(Type::from_annotation)
+                    .unwrap_or(Type::Any);
+
+                let mut param_types = Vec::new();
+                for p in params {
+                    let p_ty = p
+                        .ty
+                        .as_ref()
+                        .map(Type::from_annotation)
+                        .unwrap_or(Type::Any);
+                    param_types.push(p_ty);
+                }
+
+                self.env.insert(
+                    name.clone(),
+                    Type::Function {
+                        params: param_types,
+                        ret: Box::new(expected_ret),
+                    },
+                    false,
+                );
+            }
+        }
+
+        // Pass 3: Check all statements in sequence
         for stmt in &program.statements {
             self.check_stmt(stmt);
         }
@@ -791,28 +865,27 @@ impl TypeChecker {
                 Type::Unit
             }
 
-            ExprKind::For { start, end, body, .. } => {
-                let start_ty = self.check_expr(start);
-                if start_ty != Type::I64 && start_ty != Type::Any {
-                    self.diagnostics.push(
-                        Diagnostic::compute_error(
-                            "C0103",
-                            format!("`for` range start must be `i64`, found `{}`", start_ty),
-                        )
-                        .locate(&self.source_index, &self.source_file, &start.span),
-                    );
-                }
+            ExprKind::For { var, start, end, body } => {
+                let _start_ty = self.check_expr(start);
                 let end_ty = self.check_expr(end);
-                if end_ty != Type::I64 && end_ty != Type::Any {
+                let elem_ty = match &end_ty {
+                    Type::Vector(inner) => (**inner).clone(),
+                    Type::I64 => Type::I64,
+                    _ => Type::Any,
+                };
+                if end_ty != Type::I64 && !matches!(end_ty, Type::Vector(_)) && end_ty != Type::Any {
                     self.diagnostics.push(
                         Diagnostic::compute_error(
                             "C0103",
-                            format!("`for` range end must be `i64`, found `{}`", end_ty),
+                            format!("`for` loop iterable must be `i64` range or `Vector`, found `{}`", end_ty),
                         )
                         .locate(&self.source_index, &self.source_file, &end.span),
                     );
                 }
+                self.env.push_scope();
+                self.env.insert(var.clone(), elem_ty, false);
                 self.check_expr(body);
+                self.env.pop_scope();
                 Type::Unit
             }
 

@@ -34,6 +34,19 @@ pub(crate) fn native_rm(interp: &mut Interpreter, args: Vec<Value>) -> Result<Va
     Ok(Value::Unit)
 }
 
+pub(crate) fn native_sha256(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    use sha2::{Digest, Sha256};
+    let text = match args.first() {
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => format!("{}", other),
+        None => return Err(Diagnostic::compute_error("C0201", "`sha256()` requires an argument")),
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    Ok(Value::String(hash))
+}
+
 pub(crate) fn native_help(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let caps = RenderCaps::rich_terminal(72);
     if let Some(arg) = args.first() {

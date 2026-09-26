@@ -344,7 +344,7 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
 
     let src_dir = root_dir.join("src");
     if src_dir.exists() && src_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(src_dir) {
+        if let Ok(entries) = fs::read_dir(&src_dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
                 if p.is_file()
@@ -364,6 +364,47 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
         return Ok(());
     }
 
+    // Discover library files in src/ (excluding main.gh and test files)
+    let mut lib_files = Vec::new();
+    if src_dir.exists() && src_dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(&src_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file()
+                    && p.extension().map(|e| e == "gh" || e == "ghl").unwrap_or(false)
+                {
+                    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                        if name != "main.gh" && name != "main.ghl" && !name.ends_with("_test.gh") && !name.ends_with("_test.ghl") {
+                            lib_files.push(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    lib_files.sort();
+
+    // Pre-read and parse library source files
+    let mut lib_statements = Vec::new();
+    let mut lib_source_header = String::new();
+    for lib_file in &lib_files {
+        if let Ok(c) = fs::read_to_string(lib_file) {
+            match ghl_syntax::parse(&c) {
+                Ok(prog) => {
+                    lib_statements.extend(prog.statements);
+                    lib_source_header.push_str(&c);
+                    lib_source_header.push('\n');
+                }
+                Err(errs) => {
+                    eprintln!("Error parsing library file {}:", lib_file.display());
+                    for err in errs {
+                        eprintln!("  {err}");
+                    }
+                }
+            }
+        }
+    }
+
     let mut passed = 0;
     let mut failed = 0;
 
@@ -378,17 +419,31 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
             }
         };
 
-        let program = match ghl_syntax::parse(&content) {
+        let test_program = match ghl_syntax::parse(&content) {
             Ok(p) => p,
             Err(errs) => {
                 println!("  test {} ... {} (syntax errors: {})", display_name, caps.red("FAILED"), errs.len());
+                for err in &errs {
+                    eprintln!("    {err}");
+                }
                 failed += 1;
                 continue;
             }
         };
 
-        if let Err(diags) = ghl_types::check(&program, &display_name, &content) {
+        let mut combined_statements = lib_statements.clone();
+        combined_statements.extend(test_program.statements);
+        let program = ghl_syntax::ast::Program {
+            statements: combined_statements,
+        };
+
+        let combined_content = format!("{}\n{}", lib_source_header, content);
+
+        if let Err(diags) = ghl_types::check(&program, &display_name, &combined_content) {
             println!("  test {} ... {} (type errors: {})", display_name, caps.red("FAILED"), diags.len());
+            for diag in &diags {
+                eprintln!("{}", diag.render_with_caps(caps));
+            }
             failed += 1;
             continue;
         }

@@ -1,0 +1,10 @@
+[package]
+name = "spring_pact"
+version = "0.1.0"
+authors = ["GHL Community <community@ghl-lang.org>"]
+description = "Statistical Contracts and Expectation Protocols for GHL (RFC 14)"
+edition = "2026"
+
+[dependencies]
+# Example:
+# stats_core = { path = "../stats_core" }

@@ -240,10 +240,11 @@ impl Type {
     pub fn from_annotation(ann: &TypeAnnotation) -> Self {
         match ann {
             TypeAnnotation::Simple(name) => match name.as_str() {
-                "i64" | "int" => Type::I64,
-                "f64" | "float" => Type::F64,
-                "bool" => Type::Bool,
-                "str" | "string" => Type::String,
+                "i64" | "int" | "I64" | "Int" => Type::I64,
+                "f64" | "float" | "F64" | "Float" => Type::F64,
+                "bool" | "Bool" => Type::Bool,
+                "str" | "string" | "String" => Type::String,
+                "Vector" | "vector" => Type::Vector(Box::new(Type::Any)),
                 "DataFrame" | "dataframe" => Type::DataFrame(Vec::new()),
                 "Factor" | "factor" => Type::Factor {
                     levels: Vec::new(),

@@ -1,0 +1,76 @@
+// spring_pact :: Model Expectation Rules Module (RFC 14)
+// Audits econometric assumptions: multicollinearity (VIF), sample size, and covariance matrices.
+
+struct VifRule {
+    max_vif: f64
+}
+
+struct MinSampleRule {
+    min_n: i64
+}
+
+struct VcovRule {
+    expected_vcov: String
+}
+
+struct HomoscedasticityRule {
+    p_min: f64
+}
+
+fn create_vif_rule(max_vif: f64) -> VifRule {
+    VifRule { max_vif: max_vif }
+}
+
+fn create_min_sample_rule(min_n: i64) -> MinSampleRule {
+    MinSampleRule { min_n: min_n }
+}
+
+fn create_vcov_rule(expected_vcov: String) -> VcovRule {
+    VcovRule { expected_vcov: expected_vcov }
+}
+
+fn create_homoscedasticity_rule(p_min: f64) -> HomoscedasticityRule {
+    HomoscedasticityRule { p_min: p_min }
+}
+
+/// Evaluates minimum effective sample size N.
+fn evaluate_min_sample_rule(rule: MinSampleRule, n_obs: i64) -> RuleEvaluation {
+    let passed = n_obs >= rule.min_n;
+    let exp_str = format("N >= {}", rule.min_n);
+    let obs_str = format("N = {}", n_obs);
+
+    RuleEvaluation {
+        rule: "Effective Sample Size (N)",
+        expected: exp_str,
+        observed: obs_str,
+        passed: passed
+    }
+}
+
+/// Evaluates variance-covariance matrix specification (e.g. "HC1", "HC3", "cluster").
+fn evaluate_vcov_rule(rule: VcovRule, observed_vcov: String) -> RuleEvaluation {
+    let passed = observed_vcov == rule.expected_vcov;
+    let exp_str = format("Covariance {}", rule.expected_vcov);
+    let obs_str = format("{}", observed_vcov);
+
+    RuleEvaluation {
+        rule: "Standard Error Covariance Policy",
+        expected: exp_str,
+        observed: obs_str,
+        passed: passed
+    }
+}
+
+/// Evaluates maximum predictor multicollinearity (VIF threshold).
+fn evaluate_vif_rule(rule: VifRule, max_observed_vif: f64) -> RuleEvaluation {
+    let passed = max_observed_vif <= rule.max_vif;
+    let exp_str = format("VIF <= {:.2}", rule.max_vif);
+    let obs_str = format("max VIF = {:.2}", max_observed_vif);
+
+    RuleEvaluation {
+        rule: "Predictor Multicollinearity (VIF)",
+        expected: exp_str,
+        observed: obs_str,
+        passed: passed
+    }
+}

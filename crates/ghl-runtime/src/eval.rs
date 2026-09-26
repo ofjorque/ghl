@@ -42,11 +42,20 @@ impl Interpreter {
     }
 
     pub fn eval_program(&mut self, program: &Program) -> Result<Value, Diagnostic> {
+        // Pre-register top-level functions so order of declaration does not matter
+        for stmt in &program.statements {
+            if let StmtKind::Fn { .. } = &stmt.kind {
+                let _ = self.eval_stmt(stmt)?;
+            }
+        }
+
         let mut last_val = Value::Unit;
         for stmt in &program.statements {
-            last_val = self.eval_stmt(stmt)?;
-            if self.pending_return.is_some() {
-                break;
+            if !matches!(&stmt.kind, StmtKind::Fn { .. }) {
+                last_val = self.eval_stmt(stmt)?;
+                if self.pending_return.is_some() {
+                    break;
+                }
             }
         }
         self.pending_return = None;
@@ -66,20 +75,18 @@ impl Interpreter {
                     return Ok(existing);
                 }
                 let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
-                let mut captured_env = self.env.clone();
-                let placeholder = Value::Closure {
-                    params: param_names.clone(),
-                    body: body.clone(),
-                    env: captured_env.clone(),
+                let captured_env = if self.env.scopes.len() > 1 {
+                    self.env.clone()
+                } else {
+                    RuntimeEnv::new()
                 };
-                captured_env.set(name.clone(), placeholder);
-                let recursive_closure = Value::Closure {
+                let closure = Value::Closure {
                     params: param_names,
                     body: body.clone(),
                     env: captured_env,
                 };
-                self.env.set(name.clone(), recursive_closure.clone());
-                Ok(recursive_closure)
+                self.env.set(name.clone(), closure.clone());
+                Ok(closure)
             }
             StmtKind::Struct(_) => Ok(Value::Unit),
             StmtKind::Trait(_) => Ok(Value::Unit),
@@ -99,7 +106,7 @@ impl Interpreter {
                         let method_closure = Value::Closure {
                             params: param_names,
                             body: body.clone(),
-                            env: self.env.clone(),
+                            env: if self.env.scopes.len() > 1 { self.env.clone() } else { RuntimeEnv::new() },
                         };
                         let method_key = format!("{}::{}", impl_decl.target_type, name);
                         self.env.set(method_key, method_closure);
@@ -529,31 +536,42 @@ impl Interpreter {
             }
 
             ExprKind::For { var, start, end, body } => {
-                // Native Rust loop — no recursion, no heap allocation per iteration.
-                // The loop variable is bound in its own pushed scope; each iteration
-                // overwrites the same slot (no alloc). The scope is popped after the
-                // loop so the variable does not leak into the surrounding env.
                 let start_val = self.eval_expr(start)?;
                 let end_val = self.eval_expr(end)?;
-                let (start_i, end_i) = match (&start_val, &end_val) {
-                    (Value::I64(s), Value::I64(e)) => (*s, *e),
-                    _ => return Err(Diagnostic::compute_error(
-                        "C0104",
-                        format!("for loop range requires integer bounds, got `{}` and `{}`",
-                            start_val.type_name(), end_val.type_name()),
-                    )),
-                };
-                self.env.push_scope();
-                self.env.set(var.clone(), Value::I64(start_i));
-                for i in start_i..end_i {
-                    self.env.set(var.clone(), Value::I64(i));
-                    self.eval_expr(body)?;
-                    if self.pending_return.is_some() {
-                        break;
+                match (&start_val, &end_val) {
+                    (Value::I64(s), Value::I64(e)) => {
+                        self.env.push_scope();
+                        for i in *s..*e {
+                            self.env.set(var.clone(), Value::I64(i));
+                            self.eval_expr(body)?;
+                            if self.pending_return.is_some() {
+                                break;
+                            }
+                        }
+                        self.env.pop_scope();
+                        Ok(Value::Unit)
                     }
+                    (_, Value::Vector(vd)) => {
+                        self.env.push_scope();
+                        for item in vd.iter() {
+                            self.env.set(var.clone(), item.clone());
+                            self.eval_expr(body)?;
+                            if self.pending_return.is_some() {
+                                break;
+                            }
+                        }
+                        self.env.pop_scope();
+                        Ok(Value::Unit)
+                    }
+                    _ => Err(Diagnostic::compute_error(
+                        "C0104",
+                        format!(
+                            "for loop requires integer range or Vector, got `{}` and `{}`",
+                            start_val.type_name(),
+                            end_val.type_name()
+                        ),
+                    )),
                 }
-                self.env.pop_scope();
-                Ok(Value::Unit)
             }
 
             ExprKind::Match { expr: target, arms } => {

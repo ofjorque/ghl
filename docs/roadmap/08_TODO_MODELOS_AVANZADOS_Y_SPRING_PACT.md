@@ -47,23 +47,23 @@ Diseño e implementación de la primera librería de la comunidad escrita comple
   - [x] Creación de paquetes estandarizados con `ghl new`.
   - [x] Manifiesto canónico `ghl.toml` y resolución reproducible con `ghl fetch` (`ghl.lock` con SHA-256).
   - [x] Harness de pruebas unitarias ejecutadas directamente con `ghl test`.
-- [ ] **Desarrollo de la Librería `spring_pact` en GHL Puro:**
-  - [ ] Inicialización del paquete mediante `ghl new spring_pact`.
-  - [ ] **Módulo de Expectativas de Datos (`data_rules.gh`):**
-    - [ ] `expect_range(col, min, max)`: Verificación de rangos válidos admisibles (ej. edad $\ge 18$).
-    - [ ] `expect_na_max(col, threshold)`: Tolerancia porcentual de valores faltantes.
-    - [ ] `expect_outlier_rule(col, method, factor)`: Detección y tratamiento de casos extremos (IQR / Z-score).
-    - [ ] `enforce_data_rules(df, contract)`: Pipeline de saneamiento conforme al pacto.
-  - [ ] **Módulo de Expectativas de Modelos (`model_rules.gh`):**
-    - [ ] `expect_vif_max(threshold)`: Auditoría de multicolinealidad entre predictores.
-    - [ ] `expect_homoscedasticity(p_min)`: Exigencia de matrices de covarianza robustas (HC0–HC3) si hay heterocedasticidad.
-    - [ ] `expect_min_sample_size(min_n)`: Restricción de muestra mínima efectiva para inferencia.
-  - [ ] **Sello Criptográfico y Certificado de Cumplimiento (`certificate.gh`):**
-    - [ ] Generación de hash determinista **SHA-256** del contrato pactado.
-    - [ ] Emisión de recibo formal de cumplimiento (`AuditReceipt`) con resumen de reglas aprobadas/falladas.
-    - [ ] Renderizado en terminal mediante panel visual **Cockpit Deck** con felicitación de Haru (`/ᐠ˵- ⩊ -˵マ ✧`).
-  - [ ] **Suite de Pruebas y Validación:**
-    - [ ] Pruebas unitarias de la librería ejecutadas directamente con `ghl test`.
+- [x] **Desarrollo de la Librería `spring_pact` en GHL Puro:**
+  - [x] Inicialización del paquete mediante `ghl new spring_pact`.
+  - [x] **Módulo de Expectativas de Datos (`data_rules.gh`):**
+    - [x] `expect_range(col, min, max)`: Verificación de rangos válidos admisibles (ej. edad $\ge 18$).
+    - [x] `expect_na_max(col, threshold)`: Tolerancia porcentual de valores faltantes.
+    - [x] `expect_outlier_rule(col, method, factor)`: Detección y tratamiento de casos extremos (IQR / Z-score).
+    - [x] `enforce_data_rules(df, contract)`: Pipeline de saneamiento conforme al pacto.
+  - [x] **Módulo de Expectativas de Modelos (`model_rules.gh`):**
+    - [x] `expect_vif_max(threshold)`: Auditoría de multicolinealidad entre predictores.
+    - [x] `expect_homoscedasticity(p_min)`: Exigencia de matrices de covarianza robustas (HC0–HC3) si hay heterocedasticidad.
+    - [x] `expect_min_sample_size(min_n)`: Restricción de muestra mínima efectiva para inferencia.
+  - [x] **Sello Criptográfico y Certificado de Cumplimiento (`certificate.gh`):**
+    - [x] Generación de hash determinista **SHA-256** del contrato pactado.
+    - [x] Emisión de recibo formal de cumplimiento (`AuditReceipt`) con resumen de reglas aprobadas/falladas.
+    - [x] Renderizado en terminal mediante panel visual **Cockpit Deck** con felicitación de Haru (`/ᐠ˵- ⩊ -˵マ ✧`).
+  - [x] **Suite de Pruebas y Validación:**
+    - [x] Pruebas unitarias de la librería ejecutadas directamente con `ghl test`.
 
 ---
 

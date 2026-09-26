@@ -40,11 +40,15 @@ pub struct VectorData {
 
 impl VectorData {
     pub fn len(&self) -> usize {
-        self.column.len()
+        if let Some(mat) = self.materialized.get() {
+            mat.len()
+        } else {
+            self.column.len()
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.column.is_empty()
+        self.len() == 0
     }
 
     /// Builds from a boxed `Vec<Value>` — the compatibility path every pre-existing
@@ -53,6 +57,25 @@ impl VectorData {
     /// legacy builtin's `Vec<Value>` result infers its type the same way a DataFrame
     /// column would.
     pub fn from_values(values: Vec<Value>) -> Self {
+        let has_complex = values.iter().any(|v| {
+            matches!(
+                v,
+                Value::Struct { .. }
+                    | Value::Record(_)
+                    | Value::Closure { .. }
+                    | Value::Vector(_)
+            )
+        });
+        if has_complex {
+            let column = polars_bridge::value_column_to_polars(VECTOR_COL, &[]);
+            let cell = OnceLock::new();
+            let _ = cell.set(values);
+            return VectorData {
+                column,
+                na_reasons: Arc::new(NaReasonTable::new()),
+                materialized: Arc::new(cell),
+            };
+        }
         let column = polars_bridge::value_column_to_polars(VECTOR_COL, &values);
         let mut na_reasons = NaReasonTable::new();
         for (row, v) in values.iter().enumerate() {
@@ -60,10 +83,12 @@ impl VectorData {
                 na_reasons.set(VECTOR_COL, row, reason.clone());
             }
         }
+        let cell = OnceLock::new();
+        let _ = cell.set(values);
         VectorData {
             column,
             na_reasons: Arc::new(na_reasons),
-            materialized: Arc::new(OnceLock::new()),
+            materialized: Arc::new(cell),
         }
     }
 

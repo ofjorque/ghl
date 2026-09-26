@@ -378,3 +378,69 @@ pub(crate) fn native_rank(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
     Ok(Value::Vector(VectorData::from_f64(ranks)))
 }
+
+pub(crate) fn native_filter_na(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`filter_na()` requires a Vector argument")
+    })?;
+    if vd.null_count() == 0 {
+        return Ok(Value::Vector(vd.clone()));
+    }
+    let non_na: Vec<Value> = vd.iter().filter(|v| !matches!(v, Value::NA(_))).cloned().collect();
+    Ok(Value::Vector(VectorData::from_values(non_na)))
+}
+
+pub(crate) fn native_quantile(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error("C0201", "`quantile()` requires 2 arguments: (vector, prob)"));
+    }
+    let vd = as_vector_data(&args[0]).ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`quantile()` first argument must be a Vector")
+    })?;
+    let prob = args[1].as_f64().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`quantile()` second argument must be a number between 0 and 1")
+    })?;
+    if prob < 0.0 || prob > 1.0 {
+        return Err(Diagnostic::compute_error("C0202", format!("Quantile prob must be in [0, 1], got {prob}")));
+    }
+
+    let mut vals: Vec<f64> = Vec::new();
+    for v in vd.iter() {
+        if let Some(f) = v.as_f64() {
+            vals.push(f);
+        }
+    }
+    if vals.is_empty() {
+        return Ok(Value::NA(None));
+    }
+    vals.sort_by(|a, b| a.total_cmp(b));
+    let n = vals.len();
+    if n == 1 {
+        return Ok(Value::F64(vals[0]));
+    }
+    let index = (n - 1) as f64 * prob;
+    let lo = index.floor() as usize;
+    let hi = index.ceil() as usize;
+    let frac = index - lo as f64;
+    let result = if lo == hi {
+        vals[lo]
+    } else {
+        vals[lo] + frac * (vals[hi] - vals[lo])
+    };
+    Ok(Value::F64(result))
+}
+
+pub(crate) fn native_append(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error("C0201", "`append()` requires at least 2 arguments: (vector, element)"));
+    }
+    let mut items: Vec<Value> = match &args[0] {
+        Value::Vector(vd) => vd.iter().cloned().collect(),
+        other => vec![other.clone()],
+    };
+    for arg in args.into_iter().skip(1) {
+        items.push(arg);
+    }
+    Ok(Value::Vector(VectorData::from_values(items)))
+}
+

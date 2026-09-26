@@ -1646,6 +1646,7 @@ dependencies = [
  "rand_distr 0.6.0",
  "rand_xoshiro",
  "rayon",
+ "sha2 0.10.9",
  "statrs",
 ]
 

@@ -253,6 +253,70 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "to_string".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::String),
+            },
+            false,
+        );
+        env.insert(
+            "format".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::String),
+            },
+            false,
+        );
+        env.insert(
+            "panic".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
+            "sha256".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::String),
+            },
+            false,
+        );
+        env.insert(
+            "length".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::I64),
+            },
+            false,
+        );
+        env.insert(
+            "filter_na".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Vector(Box::new(Type::Any))),
+            },
+            false,
+        );
+        env.insert(
+            "quantile".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::Any],
+                ret: Box::new(Type::F64),
+            },
+            false,
+        );
+        env.insert(
+            "append".into(),
+            Type::Function {
+                params: vec![Type::Any, Type::Any],
+                ret: Box::new(Type::Vector(Box::new(Type::Any))),
+            },
+            false,
+        );
+        env.insert(
             "print".into(),
             Type::Function {
                 params: vec![Type::Any],

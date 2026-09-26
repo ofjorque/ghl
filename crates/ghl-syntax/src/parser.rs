@@ -311,8 +311,27 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
 
             let expr_stmt = expr
                 .clone()
-                .then_ignore(just(Token::Semicolon))
-                .map_with_span(|e, span| Stmt::new(StmtKind::Expr(e), span));
+                .then(
+                    just(Token::Semicolon)
+                        .map(|_| true)
+                        .or(filter(|t: &Token| *t != Token::RBrace).rewind().map(|_| false)),
+                )
+                .try_map(|(e, has_semi), span| {
+                    if has_semi
+                        || matches!(
+                            &e.kind,
+                            ExprKind::If { .. }
+                                | ExprKind::While { .. }
+                                | ExprKind::For { .. }
+                                | ExprKind::Match { .. }
+                                | ExprKind::Block { .. }
+                        )
+                    {
+                        Ok(Stmt::new(StmtKind::Expr(e), span))
+                    } else {
+                        Err(Simple::custom(span, "Expected ';' after expression"))
+                    }
+                });
 
             let use_stmt = use_stmt_parser();
 

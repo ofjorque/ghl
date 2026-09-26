@@ -21,4 +21,5 @@ bumpalo = "3.20.3"
 polars-ops = { version = "0.55.2", features = ["pivot"] }
 polars-io = { version = "0.55.2", features = ["csv", "parquet"] }
 polars-lazy = { version = "0.55.2", features = ["csv", "parquet", "streaming", "pivot"] }
+sha2 = "0.10"
 

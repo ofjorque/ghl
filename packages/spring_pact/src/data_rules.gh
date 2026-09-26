@@ -1,0 +1,104 @@
+// spring_pact :: Data Expectation Rules Module (RFC 14)
+// Defines data sanitation, validation, range, missingness, and outlier protocols.
+
+struct RangeRule {
+    col_name: String,
+    min_val: f64,
+    max_val: f64
+}
+
+struct NaRule {
+    col_name: String,
+    threshold: f64
+}
+
+struct OutlierRule {
+    col_name: String,
+    method: String,
+    factor: f64
+}
+
+fn create_range_rule(col_name: String, min_val: f64, max_val: f64) -> RangeRule {
+    RangeRule {
+        col_name: col_name,
+        min_val: min_val,
+        max_val: max_val
+    }
+}
+
+fn create_na_rule(col_name: String, threshold: f64) -> NaRule {
+    NaRule {
+        col_name: col_name,
+        threshold: threshold
+    }
+}
+
+fn create_outlier_rule(col_name: String, method: String, factor: f64) -> OutlierRule {
+    OutlierRule {
+        col_name: col_name,
+        method: method,
+        factor: factor
+    }
+}
+
+/// Evaluates whether a column's values satisfy the range expectation [min_val, max_val].
+fn evaluate_range_rule(rule: RangeRule, df: DataFrame) -> RuleEvaluation {
+    let col_data = pull(df, rule.col_name);
+    let c_min = min(col_data);
+    let c_max = max(col_data);
+
+    let passed = c_min >= rule.min_val && c_max <= rule.max_val;
+    let exp_str = format("[{}, {}]", rule.min_val, rule.max_val);
+    let obs_str = format("min = {}, max = {}", c_min, c_max);
+
+    RuleEvaluation {
+        rule: format("Range check on `{}`", rule.col_name),
+        expected: exp_str,
+        observed: obs_str,
+        passed: passed
+    }
+}
+
+/// Evaluates whether a column's missing values proportion is below the threshold.
+fn evaluate_na_rule(rule: NaRule, df: DataFrame) -> RuleEvaluation {
+    let col_data = pull(df, rule.col_name);
+    let total_n = length(col_data);
+    let na_count = sum(is_na(col_data));
+    let na_ratio = (na_count * 1.0) / (total_n * 1.0);
+
+    let passed = na_ratio <= rule.threshold;
+    let exp_str = format("NA proportion <= {:.2}%", rule.threshold * 100.0);
+    let obs_str = format("{:.2}% ({} / {})", na_ratio * 100.0, na_count, total_n);
+
+    RuleEvaluation {
+        rule: format("NA threshold on `{}`", rule.col_name),
+        expected: exp_str,
+        observed: obs_str,
+        passed: passed
+    }
+}
+
+/// Evaluates whether a column has outliers according to IQR (factor * IQR) or Z-score rule.
+fn evaluate_outlier_rule(rule: OutlierRule, df: DataFrame) -> RuleEvaluation {
+    let col_data = pull(df, rule.col_name);
+    let clean = filter_na(col_data);
+    let q25 = quantile(clean, 0.25);
+    let q75 = quantile(clean, 0.75);
+    let col_iqr = q75 - q25;
+
+    let lower_bound = q25 - rule.factor * col_iqr;
+    let upper_bound = q75 + rule.factor * col_iqr;
+
+    let outliers_count = sum(col_data < lower_bound || col_data > upper_bound);
+    let passed = outliers_count == 0;
+
+    let exp_str = format("0 outliers via {} (factor = {})", rule.method, rule.factor);
+    let obs_str = format("{} outliers detected outside [{:.2}, {:.2}]", outliers_count, lower_bound, upper_bound);
+
+    RuleEvaluation {
+        rule: format("Outlier check on `{}`", rule.col_name),
+        expected: exp_str,
+        observed: obs_str,
+        passed: passed
+    }
+}

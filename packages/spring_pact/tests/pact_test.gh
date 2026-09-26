@@ -1,0 +1,53 @@
+// Integration test suite for spring_pact package (RFC 14)
+
+let df_valid = dataframe {
+    age: [25.0, 32.0, 45.0, 29.0, 52.0, 38.0],
+    salary: [50000.0, 65000.0, 85000.0, 55000.0, 95000.0, 72000.0]
+};
+
+// 1. Define contract
+let contract = new_contract("Auditoría Laboral 2026")
+    |> expect_range("age", 18.0, 65.0)
+    |> expect_na_max("salary", 0.10)
+    |> expect_min_sample_size(5);
+
+// 2. Compute digest
+let digest = contract_digest(contract);
+println("Contract Digest:", digest);
+
+// 3. Verify compliant dataset
+let receipt = verify_contract(contract, df_valid);
+render_cockpit(receipt);
+
+// Assertions
+if !receipt.is_compliant {
+    panic("Expected contract to be compliant for valid dataset");
+}
+
+// 4. Verify non-compliant dataset (violates age minimum >= 18 and min sample size >= 5)
+let df_invalid = dataframe {
+    age: [15.0, 16.0, 17.0],
+    salary: [20000.0, 22000.0, 25000.0]
+};
+
+let fail_receipt = verify_contract(contract, df_invalid);
+render_cockpit(fail_receipt);
+
+if fail_receipt.is_compliant {
+    panic("Expected contract to fail for invalid dataset");
+}
+
+// 5. Test data sanitation pipeline (enforce_data_rules)
+let df_mixed = dataframe {
+    age: [16.0, 25.0, 30.0, 35.0, 42.0, 50.0, 60.0, 70.0],
+    salary: [10000.0, 50000.0, 60000.0, 65000.0, 72000.0, 80000.0, 90000.0, 110000.0]
+};
+
+let clean_df = enforce_data_rules(df_mixed, contract);
+let clean_receipt = verify_contract(contract, clean_df);
+
+if !clean_receipt.is_compliant {
+    panic("Sanitized dataset should satisfy range expectations");
+}
+
+println("All spring_pact tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
