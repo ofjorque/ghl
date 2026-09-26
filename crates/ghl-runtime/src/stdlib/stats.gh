@@ -1,0 +1,265 @@
+// GHL Canonical Standard Library: Inference & Classical Testing (`std::stats`).
+// Implemented 100% in self-hosted GHL Layer 1 per RFC 15 & Roadmap 08 Parte F.
+
+// ============================================================================
+// ANOVA: Analysis of Variance
+// ============================================================================
+
+struct AnovaResult {
+    model: String,
+    df_table: DataFrame,
+    f_stat: f64,
+    p_value: f64,
+    df_model: f64,
+    df_resid: f64,
+    ss_model: f64,
+    ss_resid: f64,
+    r2: f64
+}
+
+impl AnovaResult {
+    fn summary(&self) {
+        println("/ᐠ˵- ⩊ -˵マ ✧ Analysis of Variance Table (ANOVA)");
+        println("===============================================================");
+        println(self.df_table);
+        println("---------------------------------------------------------------");
+        let f_str = format("F-statistic: {:.4} on {} and {} DF, p-value: {:.4}", self.f_stat, self.df_model, self.df_resid, self.p_value);
+        println(f_str);
+        println("===============================================================");
+    }
+
+    fn tidy(&self) -> DataFrame {
+        self.df_table
+    }
+
+    fn glance(&self) -> DataFrame {
+        dataframe {
+            f_statistic: [self.f_stat],
+            p_value: [self.p_value],
+            df_model: [self.df_model],
+            df_resid: [self.df_resid],
+            r2: [self.r2]
+        }
+    }
+}
+
+fn anova(formula: any, df: any) -> AnovaResult {
+    let m = fit(formula, df);
+    let res = residuals(m);
+    let n_obs = length(res);
+    let coefs = coef(m);
+    let p = length(coefs);
+    let df_model = p - 1.0;
+    let df_resid = n_obs - p;
+
+    let sse = sum(res * res);
+    let mm = model_matrix(formula, df);
+    let y = mm.y;
+    let y_bar = mean(y);
+    let dev_y = y - y_bar;
+    let sst = sum(dev_y * dev_y);
+    let ssm = sst - sse;
+
+    let msm = ssm / df_model;
+    let mse = sse / df_resid;
+    let f_stat = msm / mse;
+    let p_val = 1.0 - f_dist_cdf(f_stat, df_model, df_resid);
+    let r2 = ssm / sst;
+
+    let df_table = dataframe {
+        source: ["Model", "Residuals"],
+        df: [df_model, df_resid],
+        sum_sq: [ssm, sse],
+        mean_sq: [msm, mse],
+        statistic: [f_stat, NA],
+        p_value: [p_val, NA]
+    };
+
+    return AnovaResult {
+        model: "One-way / Multi-factor ANOVA",
+        df_table: df_table,
+        f_stat: f_stat,
+        p_value: p_val,
+        df_model: df_model,
+        df_resid: df_resid,
+        ss_model: ssm,
+        ss_resid: sse,
+        r2: r2
+    };
+}
+
+// ============================================================================
+// Student's t-Test (Two-Sample & One-Sample)
+// ============================================================================
+
+struct TTestResult {
+    statistic: f64,
+    p_value: f64,
+    df: f64,
+    estimate: f64,
+    std_error: f64,
+    conf_low: f64,
+    conf_high: f64,
+    method: String,
+    df_table: DataFrame
+}
+
+impl TTestResult {
+    fn summary(&self) {
+        println("/ᐠ˵- ⩊ -˵マ ✧ Hypothesis Testing:", self.method);
+        println("===============================================================");
+        let stat_str = format("t = {:.4}, df = {:.2}, p-value = {:.4}", self.statistic, self.df, self.p_value);
+        println(stat_str);
+        let ci_str = format("95 percent confidence interval: [{:.4}, {:.4}]", self.conf_low, self.conf_high);
+        println(ci_str);
+        let est_str = format("mean estimate: {:.4} (SE = {:.4})", self.estimate, self.std_error);
+        println(est_str);
+        println("===============================================================");
+    }
+
+    fn tidy(&self) -> DataFrame {
+        self.df_table
+    }
+
+    fn glance(&self) -> DataFrame {
+        self.df_table
+    }
+}
+
+fn t_test(x: any, y: any) -> TTestResult {
+    let n1 = length(x);
+    let n2 = length(y);
+    let m1 = mean(x);
+    let m2 = mean(y);
+    let diff = m1 - m2;
+
+    let v1 = var(x);
+    let v2 = var(y);
+    let se = sqrt(v1 / n1 + v2 / n2);
+    let t_stat = diff / se;
+
+    // Welch-Satterthwaite degrees of freedom
+    let num = (v1 / n1 + v2 / n2) * (v1 / n1 + v2 / n2);
+    let den = ((v1 / n1) * (v1 / n1)) / (n1 - 1.0) + ((v2 / n2) * (v2 / n2)) / (n2 - 1.0);
+    let df = num / den;
+
+    let p_val = 2.0 * (1.0 - student_t_cdf(abs(t_stat), df));
+    let t_crit = student_t_quantile(0.975, df);
+    let conf_low = diff - t_crit * se;
+    let conf_high = diff + t_crit * se;
+
+    let df_table = dataframe {
+        estimate: [diff],
+        statistic: [t_stat],
+        p_value: [p_val],
+        df: [df],
+        std_error: [se],
+        conf_low: [conf_low],
+        conf_high: [conf_high]
+    };
+
+    return TTestResult {
+        statistic: t_stat,
+        p_value: p_val,
+        df: df,
+        estimate: diff,
+        std_error: se,
+        conf_low: conf_low,
+        conf_high: conf_high,
+        method: "Welch Two Sample t-test",
+        df_table: df_table
+    };
+}
+
+fn t_test_one_sample(x: any, mu: any) -> TTestResult {
+    let n = length(x);
+    let m = mean(x);
+    let diff = m - mu;
+    let v = var(x);
+    let s = sqrt(v);
+    let se = s / sqrt(n);
+    let t_stat = diff / se;
+    let df = n - 1.0;
+
+    let p_val = 2.0 * (1.0 - student_t_cdf(abs(t_stat), df));
+    let t_crit = student_t_quantile(0.975, df);
+    let conf_low = m - t_crit * se;
+    let conf_high = m + t_crit * se;
+
+    let df_table = dataframe {
+        estimate: [m],
+        statistic: [t_stat],
+        p_value: [p_val],
+        df: [df],
+        std_error: [se],
+        conf_low: [conf_low],
+        conf_high: [conf_high]
+    };
+
+    return TTestResult {
+        statistic: t_stat,
+        p_value: p_val,
+        df: df,
+        estimate: m,
+        std_error: se,
+        conf_low: conf_low,
+        conf_high: conf_high,
+        method: "One Sample t-test",
+        df_table: df_table
+    };
+}
+
+// ============================================================================
+// Pearson's Chi-Squared Goodness-of-Fit Test
+// ============================================================================
+
+struct ChisqResult {
+    statistic: f64,
+    p_value: f64,
+    df: f64,
+    method: String,
+    df_table: DataFrame
+}
+
+impl ChisqResult {
+    fn summary(&self) {
+        println("/ᐠ˵- ⩊ -˵マ ✧ Hypothesis Testing:", self.method);
+        println("===============================================================");
+        let stat_str = format("X-squared = {:.4}, df = {}, p-value = {:.4}", self.statistic, self.df, self.p_value);
+        println(stat_str);
+        println("===============================================================");
+    }
+
+    fn tidy(&self) -> DataFrame {
+        self.df_table
+    }
+
+    fn glance(&self) -> DataFrame {
+        self.df_table
+    }
+}
+
+fn chisq_test(observed: any) -> ChisqResult {
+    let k = length(observed);
+    let total = sum(observed);
+    let expected = total / k;
+    let diff = observed - expected;
+    let terms = (diff * diff) / expected;
+    let stat = sum(terms);
+    let df = k - 1.0;
+    let p_val = 1.0 - chisq_cdf(stat, df);
+
+    let df_table = dataframe {
+        statistic: [stat],
+        p_value: [p_val],
+        df: [df]
+    };
+
+    return ChisqResult {
+        statistic: stat,
+        p_value: p_val,
+        df: df,
+        method: "Chi-squared test for given probabilities",
+        df_table: df_table
+    };
+}

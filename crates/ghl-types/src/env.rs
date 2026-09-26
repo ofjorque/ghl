@@ -828,7 +828,28 @@ impl TypeEnv {
             "ungroup", "first", "last", "n_distinct", "count", "coalesce", "desc",
             "pull", "fill_na", "fill_na_all", "glimpse", "slice_min", "slice_max",
             "sample_n", "sample_frac", "inner_join", "left_join",
-            "na_reason", "na_reasons", "is_na",
+            "na_reason", "na_reasons", "is_na", "is_vector",
+        ] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                false,
+            );
+        }
+
+        // Statistical distributions & testing (RFC 15 Capa 0 Kernel + Capa 1 Stdlib)
+        for name in [
+            "t_pdf", "t_cdf", "t_quantile", "random_t",
+            "f_pdf", "f_cdf", "f_quantile", "random_f",
+            "chisq_pdf", "chisq_cdf", "chisq_quantile", "random_chisq",
+            "beta_pdf", "beta_cdf", "beta_quantile", "random_beta",
+            "uniform_pdf", "uniform_cdf", "uniform_quantile",
+            "exponential_pdf", "exponential_cdf", "exponential_quantile", "random_exponential",
+            "binomial_pmf", "binomial_cdf", "binomial_quantile", "random_binomial",
+            "poisson_pmf", "poisson_cdf", "poisson_quantile", "random_poisson",
+            "normal_quantile", "gamma_quantile",
+            "feols", "iv_regress", "ridge", "lasso", "elastic_net",
+            "sem", "optim", "sample_cov", "anova", "t_test", "t_test_one_sample", "chisq_test",
         ] {
             env.insert(
                 name.into(),

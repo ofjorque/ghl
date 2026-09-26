@@ -279,6 +279,10 @@ impl Interpreter {
             ExprKind::FieldAccess { target, field } => {
                 let target_val = self.eval_expr_ctx(target, col_ctx)?;
                 match target_val {
+                    Value::DataFrame { ref frame, ref na_reasons } => {
+                        let values = crate::polars_bridge::pull_column_as_values(frame, na_reasons, field)?;
+                        Ok(Value::Vector(crate::vector_data::VectorData::from_values(values)))
+                    }
                     Value::Record(map) => {
                         map.get(field).cloned().ok_or_else(|| {
                             Diagnostic::compute_error("C0102", format!("Field `{field}` not found in record"))
@@ -1045,6 +1049,33 @@ impl Interpreter {
                         Ok(Value::Vector(vd.slice(start_u, len_u)))
                     }
                 }
+            }
+
+            Value::DataFrame { ref frame, ref na_reasons } => {
+                if indices.len() == 1 {
+                    match &indices[0] {
+                        IndexSpec::Expr(e) => {
+                            let idx_val = self.eval_expr_ctx(e, col_ctx)?;
+                            match idx_val {
+                                Value::String(col_name) => {
+                                    let values = crate::polars_bridge::pull_column_as_values(frame, na_reasons, &col_name)?;
+                                    return Ok(Value::Vector(crate::vector_data::VectorData::from_values(values)));
+                                }
+                                Value::I64(i) => {
+                                    if i < 0 || (i as usize) >= frame.width() {
+                                        return Err(Diagnostic::compute_error("C0203", format!("Column index {i} out of bounds for DataFrame with {} columns", frame.width())));
+                                    }
+                                    let col_name = frame.get_column_names()[i as usize].to_string();
+                                    let values = crate::polars_bridge::pull_column_as_values(frame, na_reasons, &col_name)?;
+                                    return Ok(Value::Vector(crate::vector_data::VectorData::from_values(values)));
+                                }
+                                other => return Err(Diagnostic::compute_error("C0201", format!("DataFrame column index must be string or integer, found `{}`", other.type_name()))),
+                            }
+                        }
+                        _ => return Err(Diagnostic::compute_error("C0201", "Invalid DataFrame index")),
+                    }
+                }
+                Err(Diagnostic::compute_error("C0201", "DataFrame indexing requires 1 index (column name or index)"))
             }
 
             Value::Matrix { rows, cols, data } => {

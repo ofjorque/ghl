@@ -8,6 +8,33 @@ pub struct RuntimeEnv {
     pub scope_pool: Vec<HashMap<String, Value>>,
 }
 
+static BASE_PRELUDE_ENV: std::sync::LazyLock<RuntimeEnv> = std::sync::LazyLock::new(|| {
+    let mut env = RuntimeEnv::new_kernel_prelude();
+    let stdlib_files = [
+        ("feols.gh", include_str!("stdlib/feols.gh")),
+        ("iv.gh", include_str!("stdlib/iv.gh")),
+        ("regularized.gh", include_str!("stdlib/regularized.gh")),
+        ("sem.gh", include_str!("stdlib/sem.gh")),
+        ("stats.gh", include_str!("stdlib/stats.gh")),
+    ];
+    for (name, src) in stdlib_files {
+        match ghl_syntax::parse(src) {
+            Ok(prog) => {
+                let mut interp = crate::eval::Interpreter::with_env(env.clone());
+                if let Err(e) = interp.eval_program(&prog) {
+                    eprintln!("Error evaluating stdlib/{name}: {e:?}");
+                } else {
+                    env = interp.env;
+                }
+            }
+            Err(errs) => {
+                eprintln!("Error parsing stdlib/{name}: {:?}", errs);
+            }
+        }
+    }
+    env
+});
+
 impl RuntimeEnv {
     pub fn new() -> Self {
         Self {
@@ -17,6 +44,10 @@ impl RuntimeEnv {
     }
 
     pub fn with_prelude() -> Self {
+        BASE_PRELUDE_ENV.clone()
+    }
+
+    pub fn new_kernel_prelude() -> Self {
         let mut env = Self::new();
 
         // Native function: mean
@@ -236,6 +267,7 @@ impl RuntimeEnv {
         env.set("append_file".into(), Value::NativeFn(native_append_file));
         env.set("file_exists".into(), Value::NativeFn(native_file_exists));
         env.set("sha256".into(), Value::NativeFn(native_sha256));
+        env.set("is_vector".into(), Value::NativeFn(native_is_vector));
 
         // Tabular CSV I/O
         env.set("read_csv".into(), Value::NativeFn(native_read_csv));
@@ -350,11 +382,19 @@ impl RuntimeEnv {
         env.set("student_t_cdf".into(), Value::NativeFn(native_student_t_cdf));
         env.set("student_t_quantile".into(), Value::NativeFn(native_student_t_quantile));
         env.set("random_student_t".into(), Value::NativeFn(native_random_student_t));
+        env.set("t_pdf".into(), Value::NativeFn(native_student_t_pdf));
+        env.set("t_cdf".into(), Value::NativeFn(native_student_t_cdf));
+        env.set("t_quantile".into(), Value::NativeFn(native_student_t_quantile));
+        env.set("random_t".into(), Value::NativeFn(native_random_student_t));
 
         env.set("f_dist_pdf".into(), Value::NativeFn(native_f_dist_pdf));
         env.set("f_dist_cdf".into(), Value::NativeFn(native_f_dist_cdf));
         env.set("f_dist_quantile".into(), Value::NativeFn(native_f_dist_quantile));
         env.set("random_f_dist".into(), Value::NativeFn(native_random_f_dist));
+        env.set("f_pdf".into(), Value::NativeFn(native_f_dist_pdf));
+        env.set("f_cdf".into(), Value::NativeFn(native_f_dist_cdf));
+        env.set("f_quantile".into(), Value::NativeFn(native_f_dist_quantile));
+        env.set("random_f".into(), Value::NativeFn(native_random_f_dist));
 
         env.set("chisq_pdf".into(), Value::NativeFn(native_chisq_pdf));
         env.set("chisq_cdf".into(), Value::NativeFn(native_chisq_cdf));
@@ -374,6 +414,10 @@ impl RuntimeEnv {
         env.set("exp_cdf".into(), Value::NativeFn(native_exp_cdf));
         env.set("exp_quantile".into(), Value::NativeFn(native_exp_quantile));
         env.set("random_exp".into(), Value::NativeFn(native_random_exp));
+        env.set("exponential_pdf".into(), Value::NativeFn(native_exp_pdf));
+        env.set("exponential_cdf".into(), Value::NativeFn(native_exp_cdf));
+        env.set("exponential_quantile".into(), Value::NativeFn(native_exp_quantile));
+        env.set("random_exponential".into(), Value::NativeFn(native_random_exp));
 
         // Statistical distributions: Discrete (Binomial, Poisson)
         env.set("binomial_pmf".into(), Value::NativeFn(native_binomial_pmf));

@@ -47,6 +47,10 @@ pub(crate) fn native_sha256(args: Vec<Value>) -> Result<Value, Diagnostic> {
     Ok(Value::String(hash))
 }
 
+pub(crate) fn native_is_vector(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    Ok(Value::Bool(args.first().map(|v| matches!(v, Value::Vector(_))).unwrap_or(false)))
+}
+
 pub(crate) fn native_help(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let caps = RenderCaps::rich_terminal(72);
     if let Some(arg) = args.first() {
