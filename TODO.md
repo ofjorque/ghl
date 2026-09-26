@@ -61,11 +61,42 @@ Backlog activo detallado en [`docs/roadmap/08_TODO_MODELOS_AVANZADOS_Y_SPRING_PA
       - `ghl-survival`: Análisis de supervivencia y eventos temporales (Curvas Kaplan-Meier, regresión de riesgos proporcionales de Cox).
       - `ghl-panel`: Modelos de panel dinámico (Arellano-Bond, Blundell-Bond GMM).
       - `ghl-multilevel`: Modelos jerárquicos multinivel de efectos mixtos (`lme4`-style).
+      - `ghl_irt` (`packages/ghl_irt`): Suite psicométrica completa en GHL puro (1PL, 2PL, 3PL, 4PL, GRM, GPCM, PCM, RSM, NRM, Person Fit Zh, DIF Mantel-Haenszel, Equating, MIRT M2PL, y motor CAT adaptativo MFI).
 - [x] **Parte D: Identidad Felina Dual y Dinámica de Personalidades (Gojo & Haru):**
   - [x] Corregir historia oficial en `AGENT.md` y RFCs (ambos son gatos reales del creador: Haru blanco/naranja y Gojo gris dominante; cero perros).
   - [x] Catálogo canónico de Kaomojis en `ghl-diagnostics::registry` y colores de terminal (`caps.haru` naranja cálido, `caps.gojo` gris pizarra).
   - [x] Reemplazo universal de `(U・ᴥ・U)` y tabla rota en runtime, REPL, CLI y diagnósticos por Haru y Gojo.
   - [x] Regla de oro *"Show, don't tell"*: jamás narrar acciones en texto ("Gojo te dio un zarpazo:"), dejar que el glifo se exprese por sí solo.
+
+---
+
+## En Trabajo Activo: Roadmap 09 — Psicometría Computacional Avanzada, Sintaxis Unificada SEM-IRT y Paridad Total con `mirt`
+
+Backlog temático activo detallado en [`docs/roadmap/09_TODO_PSICOMETRIA_AVANZADA_MIRT_Y_PARIDAD.md`](docs/roadmap/09_TODO_PSICOMETRIA_AVANZADA_MIRT_Y_PARIDAD.md):
+
+- [x] **Paquete Insignia `ghl_irt` (Fase 1 Inicial):**
+  - [x] Modelos dicotómicos (1PL, 2PL, 3PL, 4PL) y politómicos (GRM, GPCM, PCM, RSM, NRM).
+  - [x] Diagnóstico de ajuste de sujetos (*Person Fit*: $Z_h$ de Drasgow con alerta para $Z_h < -2.0$).
+  - [x] Detección de sesgo (*DIF* Mantel-Haenszel y métrica ETS Delta Clases A/B/C).
+  - [x] Enlace de escalas (*Equating* Mean-Sigma y Mean-Mean).
+  - [x] Multidimensional IRT (M2PL compensatorio, métricas de Reckase $MDISC$/$MDIFF$, EAP 2D).
+  - [x] Motor de test adaptativo (*CAT* con selección por Máxima Información de Fisher $MFI$, parada por SEM y simulador de trayectorias con sparklines).
+  - [x] Cockpits visuales interactivos con sparklines ASCII (`  ▂▅▇███▇▅▂ ` y `▄ ▄█▇█`) y telemetría felina.
+- [ ] **Sintaxis Unificada SEM-IRT y Restricciones de Parámetros:**
+  - [ ] Habilitar bloque `irt_spec` reutilizando operadores `=~` (medición) y `~~` (covarianza de dimensiones) de SEM.
+  - [ ] Restricciones de igualdad entre ítems (`item1.a == item2.a`) y fijación de parámetros (`item3.a == 1.0`, `item4.c == 0.20`).
+- [ ] **Diagnósticos Avanzados de Ajuste Global y Dependencia Local:**
+  - [ ] Estadístico $M_2$ de información limitada (Maydeu-Olivares & Joe) para tablas dispersas $2^J$ con RMSEA/CFI categórico.
+  - [ ] Matriz de residuos $Q_3$ de Yen para evaluar dependencia local de ítems (*Local Item Dependence* / LID).
+  - [ ] Estadístico $S-X^2$ de Orlando & Thissen por puntaje total observado.
+- [ ] **Modelos Estructurales Complejos y Bi-Factor:**
+  - [ ] Modelo Bi-Factor canónico (`bfactor`) con factor general ortogonal a factores específicos y métricas $ECV$ y $\omega_h$.
+- [ ] **DIF Multigrupo Formal por Razón de Verosimilitud (LRT):**
+  - [ ] Calibración conjunta multigrupo (`multiple_group_irt`) para contraste simultáneo de DIF uniforme ($\Delta d$) y no uniforme ($\Delta a$).
+- [ ] **Muestreador MHRM para Alta Dimensionalidad ($>5D$):**
+  - [ ] Algoritmo estocástico Metropolis-Hastings Robbins-Monro (Cai, 2010) para modelos confirmatorios continuos de muchas dimensiones.
+- [ ] **Modelos Mixtos IRT (`mixedmirt`):**
+  - [ ] Modelos lineales logísticos de test (LLTM de Fischer) y regresión latente con covariables de examinado/ítem.
 
 ---
 
