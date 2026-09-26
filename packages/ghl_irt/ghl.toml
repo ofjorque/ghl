@@ -1,0 +1,8 @@
+[package]
+name = "ghl_irt"
+version = "0.1.0"
+authors = ["Antigravity Team", "GHL Community"]
+description = "Comprehensive Item Response Theory (IRT) & Psychometric Measurement in pure GHL (1PL/Rasch, 2PL, 3PL, Graded Response Model, MMLE-EM Gauss-Hermite, EAP scoring, Test Information TIF, Infit/Outfit MNSQ, Cockpit Telemetry)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]

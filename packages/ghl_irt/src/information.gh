@@ -1,0 +1,120 @@
+// packages/ghl_irt/src/information.gh
+// Psychometric Information Functions, Test Standard Error (SEM), and Infit/Outfit MNSQ Fit Diagnostics
+
+struct IrtScaleDiagnostics {
+    infit_mnsq: Vector,
+    outfit_mnsq: Vector,
+    tif_curve: Vector,
+    sem_curve: Vector,
+    eval_thetas: Vector,
+    peak_info_theta: f64,
+    peak_information: f64,
+    items_well_fitted: bool
+}
+
+fn compute_item_info_dichotomous(theta: f64, a: f64, b: f64, c: f64) -> f64 {
+    let p = prob_3pl(theta, a, b, c);
+    let safe_p = if p < 0.0001 { 0.0001 } else { if p > 0.9999 { 0.9999 } else { p } };
+
+    if c < 0.0001 {
+        // 1PL / 2PL: a^2 * P * (1 - P)
+        (a * a) * safe_p * (1.0 - safe_p)
+    } else {
+        // 3PL: a^2 * ((P - c) / (1 - c))^2 * ((1 - P) / P)
+        let num = (safe_p - c) / (1.0 - c);
+        (a * a) * (num * num) * ((1.0 - safe_p) / safe_p)
+    }
+}
+
+fn compute_dichotomous_diagnostics(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    a_params: Vector,
+    b_params: Vector,
+    c_params: Vector,
+    thetas: Vector
+) -> IrtScaleDiagnostics {
+    // 1. Compute Infit and Outfit Mean-Squares (MNSQ) per item
+    let mut infit_vec = [];
+    let mut outfit_vec = [];
+    let mut all_fitted = true;
+
+    for j in 0..n_items {
+        let a_j = a_params[j];
+        let b_j = b_params[j];
+        let c_j = c_params[j];
+
+        let mut sum_sq_err = 0.0;
+        let mut sum_var = 0.0;
+        let mut sum_std_sq = 0.0;
+
+        for i in 0..n_persons {
+            let th_i = thetas[i];
+            let p_ij = prob_3pl(th_i, a_j, b_j, c_j);
+            let safe_p = if p_ij < 0.0001 { 0.0001 } else { if p_ij > 0.9999 { 0.9999 } else { p_ij } };
+            let w_ij = safe_p * (1.0 - safe_p);
+
+            let y_ij = responses[(i * n_items) + j];
+            let err = y_ij - safe_p;
+            let err2 = err * err;
+
+            sum_sq_err = sum_sq_err + err2;
+            sum_var = sum_var + w_ij;
+
+            let std_sq = if w_ij > 0.0000000001 { err2 / w_ij } else { 1.0 };
+            sum_std_sq = sum_std_sq + std_sq;
+        }
+
+        let fn_p = 0.0 + n_persons;
+        let outfit = sum_std_sq / fn_p;
+        let infit = if sum_var > 0.0000000001 { sum_sq_err / sum_var } else { 1.0 };
+
+        infit_vec = append(infit_vec, infit);
+        outfit_vec = append(outfit_vec, outfit);
+
+        // Good psychometric fit: MNSQ in [0.60, 1.40]
+        if infit < 0.60 || infit > 1.40 || outfit < 0.60 || outfit > 1.40 {
+            all_fitted = false;
+        }
+    }
+
+    // 2. Test Information Function (TIF) and SEM Curve across theta grid [-3.0, +3.0]
+    let eval_thetas = [
+        -3.0, -2.5, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0
+    ];
+
+    let mut tif_curve = [];
+    let mut sem_curve = [];
+    let mut max_info = 0.0;
+    let mut peak_th = 0.0;
+
+    for th in eval_thetas {
+        let mut info_total = 0.0;
+        for j in 0..n_items {
+            let info_j = compute_item_info_dichotomous(th, a_params[j], b_params[j], c_params[j]);
+            info_total = info_total + info_j;
+        }
+
+        let sem = if info_total > 0.0000000001 { 1.0 / sqrt(info_total) } else { 999.0 };
+
+        tif_curve = append(tif_curve, info_total);
+        sem_curve = append(sem_curve, sem);
+
+        if info_total > max_info {
+            max_info = info_total;
+            peak_th = th;
+        }
+    }
+
+    IrtScaleDiagnostics {
+        infit_mnsq: infit_vec,
+        outfit_mnsq: outfit_vec,
+        tif_curve: tif_curve,
+        sem_curve: sem_curve,
+        eval_thetas: eval_thetas,
+        peak_info_theta: peak_th,
+        peak_information: max_info,
+        items_well_fitted: all_fitted
+    }
+}

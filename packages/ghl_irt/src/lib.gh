@@ -1,0 +1,83 @@
+// packages/ghl_irt/src/lib.gh
+// Modern Psychometric Item Response Theory Suite in Pure GHL
+
+struct DichotomousIrtAudit {
+    model: DichotomousIrtResult,
+    scores: PersonScoreResult,
+    diagnostics: IrtScaleDiagnostics,
+    certified: bool
+}
+
+struct GradedResponseAudit {
+    model: GradedResponseResult,
+    scores: PersonScoreResult,
+    certified: bool
+}
+
+fn audit_dichotomous_irt(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    model_type: String
+) -> DichotomousIrtAudit {
+    let fit_res = fit_dichotomous_irt(responses, n_persons, n_items, model_type);
+    let scores = score_persons_dichotomous(
+        responses,
+        n_persons,
+        n_items,
+        fit_res.a_params,
+        fit_res.b_params,
+        fit_res.c_params
+    );
+    let diag = compute_dichotomous_diagnostics(
+        responses,
+        n_persons,
+        n_items,
+        fit_res.a_params,
+        fit_res.b_params,
+        fit_res.c_params,
+        scores.thetas
+    );
+
+    let is_cert = fit_res.converged && scores.reliability > 0.60;
+
+    DichotomousIrtAudit {
+        model: fit_res,
+        scores: scores,
+        diagnostics: diag,
+        certified: is_cert
+    }
+}
+
+fn render_dichotomous_irt_report(audit: DichotomousIrtAudit) {
+    render_irt_dichotomous_cockpit(audit.model, audit.scores, audit.diagnostics);
+}
+
+fn audit_graded_response_irt(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    n_categories: i64
+) -> GradedResponseAudit {
+    let fit_res = fit_graded_response(responses, n_persons, n_items, n_categories);
+    let scores = score_persons_graded(
+        responses,
+        n_persons,
+        n_items,
+        n_categories,
+        fit_res.a_params,
+        fit_res.thresholds
+    );
+
+    let is_cert = fit_res.converged && scores.reliability > 0.60;
+
+    GradedResponseAudit {
+        model: fit_res,
+        scores: scores,
+        certified: is_cert
+    }
+}
+
+fn render_graded_response_irt_report(audit: GradedResponseAudit) {
+    render_irt_graded_cockpit(audit.model, audit.scores);
+}

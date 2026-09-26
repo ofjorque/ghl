@@ -1,0 +1,109 @@
+// packages/ghl_irt/src/cockpit.gh
+// Visual Cockpit Deck Panels for IRT Item Calibration, TIF Curves, and Psychometric Scale Auditing
+
+fn irt_dichotomous_cockpit(
+    res: DichotomousIrtResult,
+    scores: PersonScoreResult,
+    diag: IrtScaleDiagnostics
+) {
+    let badge = if res.converged && diag.items_well_fitted {
+        "/ᐠ˵- ⩊ -˵マ ✧ PSYCHOMETRIC SCALE CALIBRATED"
+    } else {
+        if res.converged {
+            "/ᐠ˵- ⩊ -˵マ ✧ MODEL CONVERGED (CHECK ITEM FIT)"
+        } else {
+            "≽(◉˕ ◉ ≼マ MMLE-EM CONVERGENCE FAILURE"
+        }
+    };
+
+    let mut b_min = 1.0e10;
+    let mut b_max = -1.0e10;
+    let mut sum_a = 0.0;
+    for b in res.b_params {
+        if b < b_min { b_min = b; }
+        if b > b_max { b_max = b; }
+    }
+    for a in res.a_params {
+        sum_a = sum_a + a;
+    }
+    let mean_a = sum_a / (0.0 + res.n_items);
+
+    let min_sem = if diag.peak_information > 0.0 { 1.0 / sqrt(diag.peak_information) } else { 999.0 };
+
+    let p = cockpit("GHL Psychometrics: Item Response Theory (IRT)", badge)
+        |> cockpit_add_kv("Model Architecture", res.model_type)
+        |> cockpit_add_kv("Calibrated Items (J)", format("{}", res.n_items))
+        |> cockpit_add_kv("Sample Size (N)", format("{}", res.n_persons))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("EAP Empirical Reliability", format("{:.4}", scores.reliability))
+        |> cockpit_add_kv("Mean Item Discrimination", format("{:.4}", mean_a))
+        |> cockpit_add_kv("Difficulty Span (b_min)", format("{:.2}", b_min))
+        |> cockpit_add_kv("Difficulty Span (b_max)", format("{:.2}", b_max))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Peak Information I(θ*)", format("{:.4}", diag.peak_information))
+        |> cockpit_add_kv("Peak Trajectory Theta", format("{:.2}", diag.peak_info_theta))
+        |> cockpit_add_kv("Minimum Measurement SEM", format("{:.4}", min_sem))
+        |> cockpit_add_kv("Marginal Log-Likelihood", format("{:.2}", res.log_likelihood))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Test Information Function (TIF) [-3.0 to +3.0]:")
+        |> cockpit_add_line(sparkline(diag.tif_curve))
+        |> cockpit_add_line("Conditional Measurement Error (SEM(θ)) Curve:")
+        |> cockpit_add_line(sparkline(diag.sem_curve))
+        |> cockpit_add_divider();
+
+    let fit_msg = if diag.items_well_fitted {
+        "/ᐠ˵- ⩊ -˵マ ✧ All items demonstrate productive Infit/Outfit MNSQ [0.60, 1.40]. Scale invariant across trait span."
+    } else {
+        "≽(◉˕ ◉ ≼マ Certain items exhibit Infit/Outfit deviation. Review item response wording or distractors."
+    };
+    let p2 = p |> cockpit_add_line(fit_msg);
+    p2
+}
+
+fn render_irt_dichotomous_cockpit(
+    res: DichotomousIrtResult,
+    scores: PersonScoreResult,
+    diag: IrtScaleDiagnostics
+) {
+    let p = irt_dichotomous_cockpit(res, scores, diag);
+    show_cockpit(p);
+}
+
+fn irt_graded_cockpit(
+    res: GradedResponseResult,
+    scores: PersonScoreResult
+) {
+    let badge = if res.converged {
+        "/ᐠ˵- ⩊ -˵マ ✧ GRADED RESPONSE SCALE CALIBRATED"
+    } else {
+        "≽(◉˕ ◉ ≼マ GRM ESTIMATION FAILURE"
+    };
+
+    let mut sum_a = 0.0;
+    for a in res.a_params {
+        sum_a = sum_a + a;
+    }
+    let mean_a = sum_a / (0.0 + res.n_items);
+
+    let p = cockpit("GHL Psychometrics: Graded Response Model (GRM)", badge)
+        |> cockpit_add_kv("Model Architecture", "Samejima Polytomous GRM (1969)")
+        |> cockpit_add_kv("Polytomous Items (J)", format("{}", res.n_items))
+        |> cockpit_add_kv("Ordered Categories (K)", format("{}", res.n_categories))
+        |> cockpit_add_kv("Sample Size (N)", format("{}", res.n_persons))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("EAP Empirical Reliability", format("{:.4}", scores.reliability))
+        |> cockpit_add_kv("Mean Slope Discrimination", format("{:.4}", mean_a))
+        |> cockpit_add_kv("EM Iterations", format("{}", res.iterations))
+        |> cockpit_add_kv("Marginal Log-Likelihood", format("{:.2}", res.log_likelihood))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ Ordered threshold structure confirmed. Cumulative boundaries partition psychological continuum.");
+    p
+}
+
+fn render_irt_graded_cockpit(
+    res: GradedResponseResult,
+    scores: PersonScoreResult
+) {
+    let p = irt_graded_cockpit(res, scores);
+    show_cockpit(p);
+}

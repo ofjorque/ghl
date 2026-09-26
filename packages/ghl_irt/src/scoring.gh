@@ -1,0 +1,205 @@
+// packages/ghl_irt/src/scoring.gh
+// Robust Person Ability Scoring via Expected A Posteriori (EAP) Integration
+
+struct PersonScoreResult {
+    thetas: Vector,
+    standard_errors: Vector,
+    mean_theta: f64,
+    var_theta: f64,
+    reliability: f64
+}
+
+fn score_persons_dichotomous(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    a_params: Vector,
+    b_params: Vector,
+    c_params: Vector
+) -> PersonScoreResult {
+    let quad = get_standard_quadrature();
+    let q_nodes = quad.nodes;
+    let q_weights = quad.weights;
+    let n_q = quad.n_points;
+
+    let mut thetas = [];
+    let mut ses = [];
+    let mut sum_th = 0.0;
+    let mut sum_se2 = 0.0;
+
+    for i in 0..n_persons {
+        let mut log_p_node = [];
+        let mut max_log_p = -1.0e10;
+
+        for q in 0..n_q {
+            let theta_q = q_nodes[q];
+            let mut log_l = 0.0;
+
+            for j in 0..n_items {
+                let a_j = a_params[j];
+                let b_j = b_params[j];
+                let c_j = c_params[j];
+                let p_jq = prob_3pl(theta_q, a_j, b_j, c_j);
+                let safe_p = if p_jq < 0.0001 { 0.0001 } else { if p_jq > 0.9999 { 0.9999 } else { p_jq } };
+
+                let y_ij = responses[(i * n_items) + j];
+                if y_ij > 0.5 {
+                    log_l = log_l + ln(safe_p);
+                } else {
+                    log_l = log_l + ln(1.0 - safe_p);
+                }
+            }
+
+            log_p_node = append(log_p_node, log_l);
+            if log_l > max_log_p {
+                max_log_p = log_l;
+            }
+        }
+
+        let mut post_weights = [];
+        let mut sum_post = 0.0;
+        for q in 0..n_q {
+            let unnorm = exp(log_p_node[q] - max_log_p) * q_weights[q];
+            post_weights = append(post_weights, unnorm);
+            sum_post = sum_post + unnorm;
+        }
+
+        // Expected A Posteriori: mean and standard deviation of posterior
+        let mut eap_theta = 0.0;
+        for q in 0..n_q {
+            let prob_q = post_weights[q] / sum_post;
+            eap_theta = eap_theta + (q_nodes[q] * prob_q);
+        }
+
+        let mut eap_var = 0.0;
+        for q in 0..n_q {
+            let prob_q = post_weights[q] / sum_post;
+            let diff = q_nodes[q] - eap_theta;
+            eap_var = eap_var + (diff * diff * prob_q);
+        }
+        let eap_se = sqrt(eap_var);
+
+        thetas = append(thetas, eap_theta);
+        ses = append(ses, eap_se);
+        sum_th = sum_th + eap_theta;
+        sum_se2 = sum_se2 + eap_var;
+    }
+
+    let fn_p = 0.0 + n_persons;
+    let mean_th = sum_th / fn_p;
+
+    let mut sum_var = 0.0;
+    for th in thetas {
+        let diff = th - mean_th;
+        sum_var = sum_var + (diff * diff);
+    }
+    let var_th = if fn_p > 1.0 { sum_var / (fn_p - 1.0) } else { 0.0 };
+    let mean_err_var = sum_se2 / fn_p;
+
+    // Empirical EAP Reliability: Var(theta) / (Var(theta) + Mean(SE^2))
+    let total_v = var_th + mean_err_var;
+    let rel = if total_v > 0.0 { var_th / total_v } else { 0.0 };
+
+    PersonScoreResult {
+        thetas: thetas,
+        standard_errors: ses,
+        mean_theta: mean_th,
+        var_theta: var_th,
+        reliability: rel
+    }
+}
+
+fn score_persons_graded(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    n_categories: i64,
+    a_params: Vector,
+    thresholds: Vector
+) -> PersonScoreResult {
+    let quad = get_standard_quadrature();
+    let q_nodes = quad.nodes;
+    let q_weights = quad.weights;
+    let n_q = quad.n_points;
+
+    let mut thetas = [];
+    let mut ses = [];
+    let mut sum_th = 0.0;
+    let mut sum_se2 = 0.0;
+
+    for i in 0..n_persons {
+        let mut log_p_node = [];
+        let mut max_log_p = -1.0e10;
+
+        for q in 0..n_q {
+            let theta_q = q_nodes[q];
+            let mut log_l = 0.0;
+
+            for j in 0..n_items {
+                let a_j = a_params[j];
+                let y_ij = responses[(i * n_items) + j];
+                let mut k_val = 0;
+                for k in 0..n_categories {
+                    if (0.0 + k) == y_ij {
+                        k_val = k;
+                    }
+                }
+                let p_cat = grm_category_prob(theta_q, a_j, thresholds, j, n_categories, k_val);
+                log_l = log_l + ln(p_cat);
+            }
+
+            log_p_node = append(log_p_node, log_l);
+            if log_l > max_log_p {
+                max_log_p = log_l;
+            }
+        }
+
+        let mut post_weights = [];
+        let mut sum_post = 0.0;
+        for q in 0..n_q {
+            let unnorm = exp(log_p_node[q] - max_log_p) * q_weights[q];
+            post_weights = append(post_weights, unnorm);
+            sum_post = sum_post + unnorm;
+        }
+
+        let mut eap_theta = 0.0;
+        for q in 0..n_q {
+            let prob_q = post_weights[q] / sum_post;
+            eap_theta = eap_theta + (q_nodes[q] * prob_q);
+        }
+
+        let mut eap_var = 0.0;
+        for q in 0..n_q {
+            let prob_q = post_weights[q] / sum_post;
+            let diff = q_nodes[q] - eap_theta;
+            eap_var = eap_var + (diff * diff * prob_q);
+        }
+        let eap_se = sqrt(eap_var);
+
+        thetas = append(thetas, eap_theta);
+        ses = append(ses, eap_se);
+        sum_th = sum_th + eap_theta;
+        sum_se2 = sum_se2 + eap_var;
+    }
+
+    let fn_p = 0.0 + n_persons;
+    let mean_th = sum_th / fn_p;
+
+    let mut sum_var = 0.0;
+    for th in thetas {
+        let diff = th - mean_th;
+        sum_var = sum_var + (diff * diff);
+    }
+    let var_th = if fn_p > 1.0 { sum_var / (fn_p - 1.0) } else { 0.0 };
+    let mean_err_var = sum_se2 / fn_p;
+    let total_v = var_th + mean_err_var;
+    let rel = if total_v > 0.0 { var_th / total_v } else { 0.0 };
+
+    PersonScoreResult {
+        thetas: thetas,
+        standard_errors: ses,
+        mean_theta: mean_th,
+        var_theta: var_th,
+        reliability: rel
+    }
+}

@@ -1,0 +1,230 @@
+// packages/ghl_irt/src/polytomous.gh
+// Polytomous IRT: Samejima's Graded Response Model (GRM, 1969) via MMLE-EM Algorithm
+
+struct GradedResponseResult {
+    a_params: Vector,
+    thresholds: Vector,
+    n_categories: i64,
+    n_items: i64,
+    n_persons: i64,
+    log_likelihood: f64,
+    iterations: f64,
+    converged: bool
+}
+
+fn grm_boundary_prob(theta: f64, a: f64, b_k: f64) -> f64 {
+    let z = a * (theta - b_k);
+    let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
+    exp_z / (1.0 + exp_z)
+}
+
+fn grm_category_prob(
+    theta: f64,
+    a: f64,
+    thresh_vec: Vector,
+    j_idx: i64,
+    n_cat: i64,
+    k_resp: i64
+) -> f64 {
+    let n_thresh = n_cat - 1;
+    let base_idx = j_idx * n_thresh;
+
+    let p_star_k = if k_resp == 0 {
+        1.0
+    } else {
+        let b_val = thresh_vec[base_idx + (k_resp - 1)];
+        grm_boundary_prob(theta, a, b_val)
+    };
+
+    let p_star_k_next = if k_resp >= n_thresh {
+        0.0
+    } else {
+        let b_next = thresh_vec[base_idx + k_resp];
+        grm_boundary_prob(theta, a, b_next)
+    };
+
+    let diff = p_star_k - p_star_k_next;
+    if diff < 0.0001 { 0.0001 } else { if diff > 0.9999 { 0.9999 } else { diff } }
+}
+
+fn fit_graded_response(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    n_categories: i64
+) -> GradedResponseResult {
+    let quad = get_standard_quadrature();
+    let q_nodes = quad.nodes;
+    let q_weights = quad.weights;
+    let n_q = quad.n_points;
+
+    let n_thresh = n_categories - 1;
+
+    // 1. Initial parameter estimates based on cumulative response proportions
+    let mut a_params = [];
+    let mut thresholds = [];
+
+    for j in 0..n_items {
+        a_params = append(a_params, 1.2);
+
+        for k in 0..n_thresh {
+            let fk = 0.0 + (k + 1);
+            let mut sum_ge = 0.0;
+            for i in 0..n_persons {
+                let resp = responses[(i * n_items) + j];
+                if resp >= fk {
+                    sum_ge = sum_ge + 1.0;
+                }
+            }
+            let cp = (sum_ge + 0.5) / ((0.0 + n_persons) + 1.0);
+            let logit_cp = ln(cp / (1.0 - cp));
+            let init_b = 0.0 - logit_cp;
+            thresholds = append(thresholds, init_b);
+        }
+    }
+
+    let max_iter = 20;
+    let tol = 0.005;
+    let mut converged = false;
+    let mut iter_count = 0.0;
+    let mut final_loglik = 0.0;
+
+    let mut iter = 0;
+    while !converged && iter < max_iter {
+        iter = iter + 1;
+        iter_count = iter_count + 1.0;
+
+        // --- E-STEP: Compute person posterior distributions ---
+        let mut n_table = [];
+        for q in 0..n_q {
+            n_table = append(n_table, 0.0);
+        }
+
+        // r_counts[j * n_thresh * n_q + k * n_q + q]: expected endorsements >= k+1
+        let mut r_counts = [];
+        for idx in 0..(n_items * n_thresh * n_q) {
+            r_counts = append(r_counts, 0.0);
+        }
+
+        let mut current_loglik = 0.0;
+
+        for i in 0..n_persons {
+            let mut log_p_node = [];
+            let mut max_log_p = -1.0e10;
+
+            for q in 0..n_q {
+                let theta_q = q_nodes[q];
+                let mut log_l = 0.0;
+
+                for j in 0..n_items {
+                    let a_j = a_params[j];
+                    let y_ij = responses[(i * n_items) + j];
+                    let mut k_val = 0;
+                    for k in 0..n_categories {
+                        if (0.0 + k) == y_ij {
+                            k_val = k;
+                        }
+                    }
+                    let p_cat = grm_category_prob(theta_q, a_j, thresholds, j, n_categories, k_val);
+                    log_l = log_l + ln(p_cat);
+                }
+
+                log_p_node = append(log_p_node, log_l);
+                if log_l > max_log_p {
+                    max_log_p = log_l;
+                }
+            }
+
+            let mut post_weights = [];
+            let mut sum_post = 0.0;
+            for q in 0..n_q {
+                let unnorm = exp(log_p_node[q] - max_log_p) * q_weights[q];
+                post_weights = append(post_weights, unnorm);
+                sum_post = sum_post + unnorm;
+            }
+
+            let p_i_marginal = sum_post * exp(max_log_p);
+            if p_i_marginal > 0.0000000001 {
+                current_loglik = current_loglik + ln(p_i_marginal);
+            }
+
+            for q in 0..n_q {
+                let post_q = if sum_post > 0.0 { post_weights[q] / sum_post } else { 0.0 };
+                let old_n = n_table[q];
+                n_table = set(n_table, q, old_n + post_q);
+
+                for j in 0..n_items {
+                    let y_ij = responses[(i * n_items) + j];
+                    for k in 0..n_thresh {
+                        let fk = 0.0 + (k + 1);
+                        if y_ij >= fk {
+                            let idx_r = (j * n_thresh * n_q) + (k * n_q) + q;
+                            let old_r = r_counts[idx_r];
+                            r_counts = set(r_counts, idx_r, old_r + post_q);
+                        }
+                    }
+                }
+            }
+        }
+
+        final_loglik = current_loglik;
+
+        // --- M-STEP: Update thresholds b_{jk} and discrimination a_j ---
+        let mut max_change = 0.0;
+
+        for j in 0..n_items {
+            let old_a = a_params[j];
+
+            for k in 0..n_thresh {
+                let t_idx = (j * n_thresh) + k;
+                let old_b = thresholds[t_idx];
+
+                let mut grad_b = 0.0;
+                let mut info_b = 0.0;
+
+                for q in 0..n_q {
+                    let theta_q = q_nodes[q];
+                    let p_star = grm_boundary_prob(theta_q, old_a, old_b);
+                    let safe_p = if p_star < 0.0001 { 0.0001 } else { if p_star > 0.9999 { 0.9999 } else { p_star } };
+
+                    let n_q_val = n_table[q];
+                    let r_val = r_counts[(j * n_thresh * n_q) + (k * n_q) + q];
+                    let exp_diff = r_val - (n_q_val * safe_p);
+
+                    let dp_db = 0.0 - (old_a * safe_p * (1.0 - safe_p));
+                    let var_inv = 1.0 / (safe_p * (1.0 - safe_p));
+
+                    grad_b = grad_b + (exp_diff * var_inv * dp_db);
+                    info_b = info_b + (n_q_val * var_inv * dp_db * dp_db);
+                }
+
+                let step_b = if info_b > 0.0000000001 { grad_b / info_b } else { 0.0 };
+                let mut new_b = old_b + step_b;
+                if new_b < -3.5 { new_b = -3.5; }
+                if new_b > 3.5 { new_b = 3.5; }
+
+                let change = abs(new_b - old_b);
+                if change > max_change {
+                    max_change = change;
+                }
+
+                thresholds = set(thresholds, t_idx, new_b);
+            }
+        }
+
+        if max_change < tol {
+            converged = true;
+        }
+    }
+
+    GradedResponseResult {
+        a_params: a_params,
+        thresholds: thresholds,
+        n_categories: n_categories,
+        n_items: n_items,
+        n_persons: n_persons,
+        log_likelihood: final_loglik,
+        iterations: iter_count,
+        converged: converged
+    }
+}

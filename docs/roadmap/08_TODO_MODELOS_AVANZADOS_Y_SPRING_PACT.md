@@ -102,6 +102,7 @@ Desbloqueo de primitivas base para que la librería estándar crezca en GHL puro
     - [x] `ghl-survival` (`packages/ghl_survival`): Análisis de supervivencia y eventos temporales (Curvas Kaplan-Meier con Greenwood CI, test de hipótesis Log-Rank de 2 muestras, regresión de Cox con Newton-Raphson y telemetría Cockpit).
     - [x] `ghl-panel` (`packages/ghl_panel`): Modelos de panel dinámico (Arellano-Bond Difference GMM, Blundell-Bond System GMM, tests de correlación serial AR(1)/AR(2) clusterizados, test de Sargan y telemetría Cockpit).
     - [x] `ghl-multilevel` (`packages/ghl_multilevel`): Modelos jerárquicos multinivel de efectos mixtos (`lme4`-style con descomposición de varianza REML/EM, Intraclass Correlation ICC, efectos de diseño de Kish y BLUPs empíricos de Bayes).
+    - [x] `ghl-irt` (`packages/ghl_irt`): Teoría de Respuesta al Ítem (IRT) y psicometría moderna en GHL puro (Modelos dicotómicos 1PL Rasch, 2PL, 3PL con pseudo-guessing; Modelo de Respuesta Graduada Politómico de Samejima; scoring de habilidad latente EAP con cuadratura Gauss-Hermite; funciones de información IIF/TIF y curva SEM($\theta$); diagnósticos de ajuste Infit/Outfit MNSQ; telemetría visual Cockpit con sparklines).
 
 ---
 

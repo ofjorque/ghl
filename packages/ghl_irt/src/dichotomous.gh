@@ -1,0 +1,241 @@
+// packages/ghl_irt/src/dichotomous.gh
+// Dichotomous IRT Models: 1PL (Rasch), 2PL, and 3PL Calibration via MMLE-EM Algorithm
+
+struct DichotomousIrtResult {
+    model_type: String,
+    a_params: Vector,
+    b_params: Vector,
+    c_params: Vector,
+    log_likelihood: f64,
+    iterations: f64,
+    converged: bool,
+    n_items: i64,
+    n_persons: i64
+}
+
+fn prob_3pl(theta: f64, a: f64, b: f64, c: f64) -> f64 {
+    let z = a * (theta - b);
+    let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
+    let p_logit = exp_z / (1.0 + exp_z);
+    c + ((1.0 - c) * p_logit)
+}
+
+fn fit_dichotomous_irt(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    model_type: String
+) -> DichotomousIrtResult {
+    let quad = get_standard_quadrature();
+    let q_nodes = quad.nodes;
+    let q_weights = quad.weights;
+    let n_q = quad.n_points;
+
+    // 1. Initial parameter estimates based on classical item p-values
+    let mut a_params = [];
+    let mut b_params = [];
+    let mut c_params = [];
+
+    for j in 0..n_items {
+        let mut sum_correct = 0.0;
+        for i in 0..n_persons {
+            let resp = responses[(i * n_items) + j];
+            if resp > 0.5 {
+                sum_correct = sum_correct + 1.0;
+            }
+        }
+        let p_val = (sum_correct + 0.5) / ((0.0 + n_persons) + 1.0);
+        let logit_p = ln(p_val / (1.0 - p_val));
+        let init_b = 0.0 - logit_p;
+
+        let init_a = 1.0;
+        let init_c = if model_type == "3PL" { 0.20 } else { 0.0 };
+
+        a_params = append(a_params, init_a);
+        b_params = append(b_params, init_b);
+        c_params = append(c_params, init_c);
+    }
+
+    let max_iter = 40;
+    let tol = 0.015;
+    let mut converged = false;
+    let mut iter_count = 0.0;
+    let mut final_loglik = 0.0;
+
+    let mut iter = 0;
+    while !converged && iter < max_iter {
+        iter = iter + 1;
+        iter_count = iter_count + 1.0;
+
+        // --- E-STEP: Compute posterior person distribution across quadrature nodes ---
+        // r_table[j * n_q + q]: expected correct endorsements
+        // n_table[q]: expected test-takers at node q
+        let mut r_table = [];
+        for idx in 0..(n_items * n_q) {
+            r_table = append(r_table, 0.0);
+        }
+        let mut n_table = [];
+        for q in 0..n_q {
+            n_table = append(n_table, 0.0);
+        }
+
+        let mut current_loglik = 0.0;
+
+        for i in 0..n_persons {
+            // Compute log-likelihood for person i at each node q
+            let mut log_p_node = [];
+            let mut max_log_p = -1.0e10;
+
+            for q in 0..n_q {
+                let theta_q = q_nodes[q];
+                let mut log_l = 0.0;
+
+                for j in 0..n_items {
+                    let a_j = a_params[j];
+                    let b_j = b_params[j];
+                    let c_j = c_params[j];
+                    let p_jq = prob_3pl(theta_q, a_j, b_j, c_j);
+                    let safe_p = if p_jq < 0.0001 { 0.0001 } else { if p_jq > 0.9999 { 0.9999 } else { p_jq } };
+
+                    let y_ij = responses[(i * n_items) + j];
+                    if y_ij > 0.5 {
+                        log_l = log_l + ln(safe_p);
+                    } else {
+                        log_l = log_l + ln(1.0 - safe_p);
+                    }
+                }
+
+                log_p_node = append(log_p_node, log_l);
+                if log_l > max_log_p {
+                    max_log_p = log_l;
+                }
+            }
+
+            // Exponentiate with max-subtraction and multiply by prior weight
+            let mut post_weights = [];
+            let mut sum_post = 0.0;
+            for q in 0..n_q {
+                let unnorm = exp(log_p_node[q] - max_log_p) * q_weights[q];
+                post_weights = append(post_weights, unnorm);
+                sum_post = sum_post + unnorm;
+            }
+
+            // Normalize posterior distribution
+            let p_i_marginal = sum_post * exp(max_log_p);
+            if p_i_marginal > 0.0000000001 {
+                current_loglik = current_loglik + ln(p_i_marginal);
+            }
+
+            for q in 0..n_q {
+                let post_q = if sum_post > 0.0 { post_weights[q] / sum_post } else { 0.0 };
+                let old_n = n_table[q];
+                n_table = set(n_table, q, old_n + post_q);
+
+                for j in 0..n_items {
+                    let y_ij = responses[(i * n_items) + j];
+                    if y_ij > 0.5 {
+                        let r_idx = (j * n_q) + q;
+                        let old_r = r_table[r_idx];
+                        r_table = set(r_table, r_idx, old_r + post_q);
+                    }
+                }
+            }
+        }
+
+        final_loglik = current_loglik;
+
+        // --- M-STEP: Update item parameters based on expected counts r_{jq} and n_q ---
+        let mut max_param_change = 0.0;
+
+        for j in 0..n_items {
+            let old_a = a_params[j];
+            let old_b = b_params[j];
+            let old_c = c_params[j];
+
+            let mut grad_b = 0.0;
+            let mut info_b = 0.0;
+            let mut grad_a = 0.0;
+            let mut info_a = 0.0;
+
+            for q in 0..n_q {
+                let theta_q = q_nodes[q];
+                let p_jq = prob_3pl(theta_q, old_a, old_b, old_c);
+                let safe_p = if p_jq < 0.0001 { 0.0001 } else { if p_jq > 0.9999 { 0.9999 } else { p_jq } };
+
+                let n_q_val = n_table[q];
+                let r_jq_val = r_table[(j * n_q) + q];
+                let exp_diff = r_jq_val - (n_q_val * safe_p);
+
+                // Logistic derivative components
+                let w_factor = (safe_p - old_c) / (1.0 - old_c);
+                let dp_db = 0.0 - (old_a * w_factor * (1.0 - safe_p));
+                let dp_da = (theta_q - old_b) * w_factor * (1.0 - safe_p);
+
+                let var_inv = 1.0 / (safe_p * (1.0 - safe_p));
+
+                grad_b = grad_b + (exp_diff * var_inv * dp_db);
+                info_b = info_b + (n_q_val * var_inv * dp_db * dp_db);
+
+                grad_a = grad_a + (exp_diff * var_inv * dp_da);
+                info_a = info_a + (n_q_val * var_inv * dp_da * dp_da);
+            }
+
+            // Update difficulty b_j
+            let raw_step_b = if info_b > 0.0000000001 { grad_b / info_b } else { 0.0 };
+            let clip_step_b = if raw_step_b > 0.40 { 0.40 } else { if raw_step_b < -0.40 { -0.40 } else { raw_step_b } };
+            let step_b = clip_step_b * 0.75;
+            let mut new_b = old_b + step_b;
+            if new_b < -3.5 { new_b = -3.5; }
+            if new_b > 3.5 { new_b = 3.5; }
+
+            // Update discrimination a_j (if 2PL or 3PL)
+            let mut new_a = old_a;
+            if model_type != "1PL" {
+                let raw_step_a = if info_a > 0.0000000001 { grad_a / info_a } else { 0.0 };
+                let clip_step_a = if raw_step_a > 0.35 { 0.35 } else { if raw_step_a < -0.35 { -0.35 } else { raw_step_a } };
+                let step_a = clip_step_a * 0.75;
+                new_a = old_a + step_a;
+                if new_a < 0.20 { new_a = 0.20; }
+                if new_a > 3.00 { new_a = 3.00; }
+            }
+
+            let change_b = abs(new_b - old_b);
+            let change_a = abs(new_a - old_a);
+            let change_j = if change_b > change_a { change_b } else { change_a };
+            if change_j > max_param_change {
+                max_param_change = change_j;
+            }
+
+            a_params = set(a_params, j, new_a);
+            b_params = set(b_params, j, new_b);
+        }
+
+        if max_param_change < tol {
+            converged = true;
+        }
+    }
+
+    DichotomousIrtResult {
+        model_type: model_type,
+        a_params: a_params,
+        b_params: b_params,
+        c_params: c_params,
+        log_likelihood: final_loglik,
+        iterations: iter_count,
+        converged: converged,
+        n_items: n_items,
+        n_persons: n_persons
+    }
+}
+
+fn fit_1pl(responses: Vector, n_persons: i64, n_items: i64) -> DichotomousIrtResult {
+    fit_dichotomous_irt(responses, n_persons, n_items, "1PL")
+}
+
+fn fit_2pl(responses: Vector, n_persons: i64, n_items: i64) -> DichotomousIrtResult {
+    fit_dichotomous_irt(responses, n_persons, n_items, "2PL")
+}
+
+fn fit_3pl(responses: Vector, n_persons: i64, n_items: i64) -> DichotomousIrtResult {
+    fit_dichotomous_irt(responses, n_persons, n_items, "3PL")
+}

@@ -1,0 +1,185 @@
+// packages/ghl_irt/tests/irt_test.gh
+// Comprehensive integration test suite for ghl_irt
+
+println("Running ghl_irt integration test suite...");
+
+// 1. Generate Synthetic Dichotomous IRT Test Data (N = 30 examinees, J = 5 items)
+// True item difficulties: [-1.5, -0.8, 0.0, 0.8, 1.5]
+let n_persons = 30;
+let n_items = 5;
+
+let true_b = [-1.5, -0.8, 0.0, 0.8, 1.5];
+let true_a = [1.0, 1.2, 1.0, 1.4, 1.1];
+
+let mut responses = [];
+for i in 0..n_persons {
+    // Generate trait spanning from -2.2 to +2.2
+    let fi = 0.0 + i;
+    let theta_i = -2.2 + ((4.4 / 29.0) * fi);
+
+    for j in 0..n_items {
+        let a_j = true_a[j];
+        let b_j = true_b[j];
+        let p_val = prob_3pl(theta_i, a_j, b_j, 0.0);
+        let resp = if p_val > 0.50 { 1.0 } else { 0.0 };
+        responses = append(responses, resp);
+    }
+}
+
+if length(responses) != 150 {
+    panic("Responses matrix length mismatch");
+}
+
+// 2. Test 1PL (Rasch) Model Calibration
+println("Testing 1PL (Rasch) Model Calibration...");
+let res_1pl = fit_1pl(responses, n_persons, n_items);
+if !res_1pl.converged {
+    panic("1PL Rasch MMLE-EM must converge");
+}
+for a in res_1pl.a_params {
+    if a != 1.0 {
+        panic("1PL discrimination must be fixed to 1.0");
+    }
+}
+if res_1pl.b_params[0] >= res_1pl.b_params[4] {
+    panic("Item 1 must be estimated easier than Item 5");
+}
+
+// 3. Test 2PL Model Calibration
+println("Testing 2PL Model Calibration...");
+let res_2pl = fit_2pl(responses, n_persons, n_items);
+if !res_2pl.converged {
+    panic("2PL MMLE-EM must converge");
+}
+for a in res_2pl.a_params {
+    if a <= 0.0 {
+        panic("2PL discrimination must be strictly positive");
+    }
+}
+
+// 4. Test 3PL Model Calibration (with pseudo-guessing)
+println("Testing 3PL Model Calibration...");
+let mut responses_3pl = [];
+for i in 0..n_persons {
+    let fi = 0.0 + i;
+    let theta_i = -2.2 + ((4.4 / 29.0) * fi);
+    for j in 0..n_items {
+        let p_val = prob_3pl(theta_i, true_a[j], true_b[j], 0.20);
+        let resp = if p_val > 0.50 { 1.0 } else { 0.0 };
+        responses_3pl = append(responses_3pl, resp);
+    }
+}
+let res_3pl = fit_3pl(responses_3pl, n_persons, n_items);
+if !res_3pl.converged {
+    panic("3PL MMLE-EM must converge");
+}
+
+// 5. Test Person Ability Scoring (EAP)
+println("Testing Person Ability Scoring (EAP)...");
+let scores_2pl = score_persons_dichotomous(
+    responses,
+    n_persons,
+    n_items,
+    res_2pl.a_params,
+    res_2pl.b_params,
+    res_2pl.c_params
+);
+
+if length(scores_2pl.thetas) != n_persons {
+    panic("Scores count must match person count");
+}
+if scores_2pl.thetas[0] >= scores_2pl.thetas[n_persons - 1] {
+    panic("Lowest performing examinee must receive lower theta than highest performing examinee");
+}
+for se in scores_2pl.standard_errors {
+    if se <= 0.0 {
+        panic("EAP standard error must be positive");
+    }
+}
+if scores_2pl.reliability <= 0.50 {
+    panic("Test reliability should be substantial");
+}
+
+// 6. Test Psychometric Information & Diagnostics
+println("Testing Information & Diagnostics...");
+let diag_2pl = compute_dichotomous_diagnostics(
+    responses,
+    n_persons,
+    n_items,
+    res_2pl.a_params,
+    res_2pl.b_params,
+    res_2pl.c_params,
+    scores_2pl.thetas
+);
+
+if diag_2pl.peak_information <= 0.0 {
+    panic("Peak information must be positive");
+}
+render_irt_dichotomous_cockpit(res_2pl, scores_2pl, diag_2pl);
+
+// 7. Test Samejima Graded Response Model (GRM) for Polytomous Items
+println("Testing Samejima Graded Response Model (GRM)...");
+let n_poly_persons = 25;
+let n_poly_items = 4;
+let n_categories = 3;
+
+let mut poly_responses = [];
+for i in 0..n_poly_persons {
+    let fi = 0.0 + i;
+    let theta_i = -2.0 + ((4.0 / 24.0) * fi);
+
+    for j in 0..n_poly_items {
+        let b1 = -0.8;
+        let b2 = 0.8;
+        let p1 = grm_boundary_prob(theta_i, 1.2, b1);
+        let p2 = grm_boundary_prob(theta_i, 1.2, b2);
+
+        let k_val = if p2 > 0.5 {
+            2.0
+        } else {
+            if p1 > 0.5 { 1.0 } else { 0.0 }
+        };
+        poly_responses = append(poly_responses, k_val);
+    }
+}
+
+let res_grm = fit_graded_response(poly_responses, n_poly_persons, n_poly_items, n_categories);
+if !res_grm.converged {
+    panic("Graded Response MMLE-EM must converge");
+}
+for j in 0..n_poly_items {
+    let t1 = res_grm.thresholds[(j * 2) + 0];
+    let t2 = res_grm.thresholds[(j * 2) + 1];
+    if t1 >= t2 {
+        panic("Threshold 1 must be strictly smaller than Threshold 2");
+    }
+}
+
+let scores_grm = score_persons_graded(
+    poly_responses,
+    n_poly_persons,
+    n_poly_items,
+    n_categories,
+    res_grm.a_params,
+    res_grm.thresholds
+);
+if scores_grm.thetas[0] >= scores_grm.thetas[n_poly_persons - 1] {
+    panic("Polytomous ability must be monotonically ordered");
+}
+render_irt_graded_cockpit(res_grm, scores_grm);
+
+// 8. Test Executive Audits
+println("Testing Executive IRT Audits...");
+let audit_2pl = audit_dichotomous_irt(responses, n_persons, n_items, "2PL");
+if !audit_2pl.certified {
+    panic("2PL audit must certify scale");
+}
+render_dichotomous_irt_report(audit_2pl);
+
+let audit_grm = audit_graded_response_irt(poly_responses, n_poly_persons, n_poly_items, n_categories);
+if !audit_grm.certified {
+    panic("GRM audit must certify scale");
+}
+render_graded_response_irt_report(audit_grm);
+
+println("All ghl_irt tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
