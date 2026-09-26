@@ -22,6 +22,7 @@ pub mod native_plot;
 pub mod native_string_ops;
 pub mod native_vector_ops;
 pub mod native_arena_ops;
+pub mod native_distributions;
 pub mod eval;
 pub mod neko;
 pub mod plot_stats;

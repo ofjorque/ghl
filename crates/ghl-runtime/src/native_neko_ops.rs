@@ -417,7 +417,7 @@ pub(crate) fn native_glance(interp: &mut crate::eval::Interpreter, args: Vec<Val
     }
 }
 
-pub(crate) fn native_augment(args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_augment(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
         return Err(Diagnostic::compute_error(
             "C0201",
@@ -429,14 +429,27 @@ pub(crate) fn native_augment(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Value::ModelFit(m) => m.augment(&args[1]),
         Value::GlmFit(m) => m.augment(&args[1]),
         Value::GmmFit(m) => m.augment(&args[1]),
+        Value::Struct { name, fields } => {
+            if let Some(aug) = fields.get("augmented") {
+                return Ok(aug.clone());
+            }
+            let method_key = format!("{}::augment", name);
+            if let Some(fn_val) = interp.env.get(&method_key) {
+                return interp.call_value(fn_val, args);
+            }
+            Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("`augment()` is not implemented for struct `{}`", name),
+            ))
+        }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("First argument of `augment()` must be a ModelFit, found `{}`", other.type_name()),
+            format!("First argument of `augment()` must be a ModelFit or Struct, found `{}`", other.type_name()),
         )),
     }
 }
 
-pub(crate) fn native_predict(args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_predict(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
         return Err(Diagnostic::compute_error(
             "C0201",
@@ -448,14 +461,24 @@ pub(crate) fn native_predict(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Value::ModelFit(m) => m.predict(&args[1]),
         Value::GlmFit(m) => m.predict(&args[1]),
         Value::GmmFit(m) => m.predict(&args[1]),
-        Value::Struct { name, fields } if name == "RegularizedResult" => {
-            match &args[1] {
-                Value::DataFrame { frame, .. } => crate::regularized::predict_regularized(fields, frame),
-                other => Err(Diagnostic::statistical_error(
-                    "S0200",
-                    format!("Second argument of `predict()` must be a DataFrame, found `{}`", other.type_name()),
-                )),
+        Value::Struct { name, fields } => {
+            if name == "RegularizedResult" {
+                match &args[1] {
+                    Value::DataFrame { frame, .. } => return crate::regularized::predict_regularized(fields, frame),
+                    other => return Err(Diagnostic::statistical_error(
+                        "S0200",
+                        format!("Second argument of `predict()` must be a DataFrame, found `{}`", other.type_name()),
+                    )),
+                }
             }
+            let method_key = format!("{}::predict", name);
+            if let Some(fn_val) = interp.env.get(&method_key) {
+                return interp.call_value(fn_val, args);
+            }
+            Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("`predict()` is not implemented for struct `{}`", name),
+            ))
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
@@ -466,7 +489,7 @@ pub(crate) fn native_predict(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub(crate) fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`residuals()` requires a ModelFit")
+        Diagnostic::compute_error("C0201", "`residuals()` requires a ModelFit or Struct")
     })?;
 
     match model_val {
@@ -477,10 +500,8 @@ pub(crate) fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
             Ok(Value::Vector(VectorData::from_f64(m.residuals.clone())))
         }
         Value::Struct { name, fields } => {
-            if name == "FeolsResult" || name == "IvResult" || name == "RegularizedResult" {
-                if let Some(res) = fields.get("residuals") {
-                    return Ok(res.clone());
-                }
+            if let Some(res) = fields.get("residuals") {
+                return Ok(res.clone());
             }
             Err(Diagnostic::statistical_error(
                 "S0200",
@@ -489,14 +510,14 @@ pub(crate) fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`residuals()` requires a ModelFit, found `{}`", other.type_name()),
+            format!("`residuals()` requires a ModelFit or Struct, found `{}`", other.type_name()),
         )),
     }
 }
 
 pub(crate) fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`coef()` requires a ModelFit")
+        Diagnostic::compute_error("C0201", "`coef()` requires a ModelFit or Struct")
     })?;
 
     match model_val {
@@ -514,10 +535,8 @@ pub(crate) fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
             })
         }
         Value::Struct { name, fields } => {
-            if name == "FeolsResult" || name == "IvResult" || name == "RegularizedResult" {
-                if let Some(c) = fields.get("coefficients") {
-                    return Ok(c.clone());
-                }
+            if let Some(c) = fields.get("coefficients") {
+                return Ok(c.clone());
             }
             Err(Diagnostic::statistical_error(
                 "S0200",
@@ -526,7 +545,7 @@ pub(crate) fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`coef()` requires a ModelFit, found `{}`", other.type_name()),
+            format!("`coef()` requires a ModelFit or Struct, found `{}`", other.type_name()),
         )),
     }
 }

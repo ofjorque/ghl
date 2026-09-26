@@ -185,8 +185,8 @@ impl RuntimeEnv {
         env.set("summary".into(), Value::NativeFnCtx(native_summary));
         env.set("tidy".into(), Value::NativeFnCtx(native_tidy));
         env.set("glance".into(), Value::NativeFnCtx(native_glance));
-        env.set("augment".into(), Value::NativeFn(native_augment));
-        env.set("predict".into(), Value::NativeFn(native_predict));
+        env.set("augment".into(), Value::NativeFnCtx(native_augment));
+        env.set("predict".into(), Value::NativeFnCtx(native_predict));
         env.set("residuals".into(), Value::NativeFn(native_residuals));
         env.set("coef".into(), Value::NativeFn(native_coef));
         env.set("vcov".into(), Value::NativeFnCtx(native_vcov));
@@ -340,8 +340,51 @@ impl RuntimeEnv {
         env.set("random_gamma".into(), Value::NativeFn(native_random_gamma));
         env.set("normal_pdf".into(), Value::NativeFn(native_normal_pdf));
         env.set("normal_cdf".into(), Value::NativeFn(native_normal_cdf));
+        env.set("normal_quantile".into(), Value::NativeFn(native_normal_quantile));
         env.set("gamma_pdf".into(), Value::NativeFn(native_gamma_pdf));
         env.set("gamma_cdf".into(), Value::NativeFn(native_gamma_cdf));
+        env.set("gamma_quantile".into(), Value::NativeFn(native_gamma_quantile));
+
+        // Statistical distributions: Continuous (Student-t, F, ChiSq, Beta, Uniform, Exp)
+        env.set("student_t_pdf".into(), Value::NativeFn(native_student_t_pdf));
+        env.set("student_t_cdf".into(), Value::NativeFn(native_student_t_cdf));
+        env.set("student_t_quantile".into(), Value::NativeFn(native_student_t_quantile));
+        env.set("random_student_t".into(), Value::NativeFn(native_random_student_t));
+
+        env.set("f_dist_pdf".into(), Value::NativeFn(native_f_dist_pdf));
+        env.set("f_dist_cdf".into(), Value::NativeFn(native_f_dist_cdf));
+        env.set("f_dist_quantile".into(), Value::NativeFn(native_f_dist_quantile));
+        env.set("random_f_dist".into(), Value::NativeFn(native_random_f_dist));
+
+        env.set("chisq_pdf".into(), Value::NativeFn(native_chisq_pdf));
+        env.set("chisq_cdf".into(), Value::NativeFn(native_chisq_cdf));
+        env.set("chisq_quantile".into(), Value::NativeFn(native_chisq_quantile));
+        env.set("random_chisq".into(), Value::NativeFn(native_random_chisq));
+
+        env.set("beta_pdf".into(), Value::NativeFn(native_beta_pdf));
+        env.set("beta_cdf".into(), Value::NativeFn(native_beta_cdf));
+        env.set("beta_quantile".into(), Value::NativeFn(native_beta_quantile));
+        env.set("random_beta".into(), Value::NativeFn(native_random_beta));
+
+        env.set("uniform_pdf".into(), Value::NativeFn(native_uniform_pdf));
+        env.set("uniform_cdf".into(), Value::NativeFn(native_uniform_cdf));
+        env.set("uniform_quantile".into(), Value::NativeFn(native_uniform_quantile));
+
+        env.set("exp_pdf".into(), Value::NativeFn(native_exp_pdf));
+        env.set("exp_cdf".into(), Value::NativeFn(native_exp_cdf));
+        env.set("exp_quantile".into(), Value::NativeFn(native_exp_quantile));
+        env.set("random_exp".into(), Value::NativeFn(native_random_exp));
+
+        // Statistical distributions: Discrete (Binomial, Poisson)
+        env.set("binomial_pmf".into(), Value::NativeFn(native_binomial_pmf));
+        env.set("binomial_cdf".into(), Value::NativeFn(native_binomial_cdf));
+        env.set("binomial_quantile".into(), Value::NativeFn(native_binomial_quantile));
+        env.set("random_binomial".into(), Value::NativeFn(native_random_binomial));
+
+        env.set("poisson_pmf".into(), Value::NativeFn(native_poisson_pmf));
+        env.set("poisson_cdf".into(), Value::NativeFn(native_poisson_cdf));
+        env.set("poisson_quantile".into(), Value::NativeFn(native_poisson_quantile));
+        env.set("random_poisson".into(), Value::NativeFn(native_random_poisson));
         env.set("qr".into(),           Value::NativeFn(native_qr));
         env.set("qr_q".into(),         Value::NativeFn(native_qr_q));
         env.set("qr_r".into(),         Value::NativeFn(native_qr_r));
@@ -539,3 +582,4 @@ use crate::native_plot::*;
 use crate::native_io_ops::*;
 use crate::native_dataframe_ext::*;
 use crate::native_arena_ops::*;
+use crate::native_distributions::*;
