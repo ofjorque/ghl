@@ -729,7 +729,26 @@ impl FittedModel {
     pub fn predict(&self, newdata: &Value) -> Result<Value, Diagnostic> {
         match newdata {
             Value::DataFrame { frame, na_reasons } => {
-                let (x_data, _, dispositions, _, p, _, _) = self.blueprint.bake(frame, na_reasons)?;
+                let temp_frame;
+                let frame_ref = if frame.column(&self.blueprint.response).is_err() {
+                    let mut cloned = frame.clone();
+                    cloned
+                        .with_column(crate::polars_bridge::f64_opt_column(
+                            &self.blueprint.response,
+                            vec![Some(0.0); frame.height()],
+                        ))
+                        .map_err(|e| {
+                            Diagnostic::compute_error(
+                                "C0210",
+                                format!("Failed to create dummy response column for predict: {e}"),
+                            )
+                        })?;
+                    temp_frame = cloned;
+                    &temp_frame
+                } else {
+                    frame
+                };
+                let (x_data, _, dispositions, _, p, _, _) = self.blueprint.bake(frame_ref, na_reasons)?;
                 let mut predictions = Vec::with_capacity(dispositions.len());
                 let mut included_idx = 0;
 

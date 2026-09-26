@@ -87,7 +87,7 @@ Desbloqueo de primitivas base para que la librería estándar crezca en GHL puro
 - [x] **Subsistema de Probabilidad e Inferencia (`std::prob` en GHL Puro):**
   - [x] Tipos canónicos de distribuciones como structs de primera clase (`Normal`, `StudentT`, `FisherF`, `ChiSq`, `Gamma`, `Beta`, `Binomial`, `Poisson`) exponiendo métodos `.pdf(x)`, `.cdf(q)`, `.quantile(p)` y `.sample(n, [seed])`.
   - [x] Inferencia estadística en GHL puro: cálculo de p-valores (`p_value(stat, dist, alternative)`), intervalos de confianza (`conf_int(estimate, se, dist, level)`), y contrastes clásicos ($t$-Student, $F$-test, $\chi^2$, proporciones, correlación).
-- [ ] **Canon Representativo del Core de GHL (`std::stats`):**
+- [x] **Canon Representativo del Core de GHL (`std::stats`):**
   - Solo los estimadores fundamentales que justifican o ejercitan las capacidades nucleares del lenguaje:
     1. Regresión lineal y generalizada: `ols`, `logistic`, `poisson` (álgebra lineal `faer`, IRLS y `model_matrix`).
     2. Ecuaciones estructurales: `sem(spec, df)` (DSL sintáctico específico con `=~`, `~~`, `sem_spec` y optimizador $F_{ML}$).

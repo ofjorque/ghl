@@ -93,6 +93,45 @@ pub(crate) fn native_fit_logistic(args: Vec<Value>) -> Result<Value, Diagnostic>
     Ok(Value::GlmFit(Box::new(model)))
 }
 
+/// `poisson(y ~ x1 + ... + xP, df)` -- IRLS-fit Poisson regression (log link).
+pub(crate) fn native_fit_poisson(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`poisson()` requires Formula and DataFrame arguments: `poisson(model, df)`",
+        ));
+    }
+
+    let (response, terms) = match &args[0] {
+        Value::Formula { op: FormulaOp::Regression, response, terms, .. } => (response.clone(), terms.clone()),
+        Value::Formula { op, .. } => {
+            return Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("First argument of `poisson()` must be a regression formula (`~`), found `{op}`"),
+            ));
+        }
+        other => {
+            return Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("First argument of `poisson()` must be a Formula, found `{}`", other.type_name()),
+            ));
+        }
+    };
+
+    let (frame, na_reasons) = match &args[1] {
+        Value::DataFrame { frame, na_reasons } => (frame, na_reasons),
+        other => {
+            return Err(Diagnostic::statistical_error(
+                "S0200",
+                format!("Second argument of `poisson()` must be a DataFrame, found `{}`", other.type_name()),
+            ));
+        }
+    };
+    let blueprint = crate::neko::Blueprint::new(response, terms);
+    let model = crate::glm::FittedGlm::fit_poisson(blueprint, frame, na_reasons)?;
+    Ok(Value::GlmFit(Box::new(model)))
+}
+
 pub(crate) fn native_fit_gmm(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
         return Err(Diagnostic::compute_error(

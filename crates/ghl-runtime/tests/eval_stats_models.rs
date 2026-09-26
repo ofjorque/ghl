@@ -488,3 +488,57 @@ fn test_glm_vcov_hc0_differs_from_classical() {
     );
 }
 
+#[test]
+fn test_fit_poisson_recovers_trend_and_verbs() {
+    let code = r#"
+        let df = dataframe {
+            x: [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+            y: [1.0, 2.0, 4.0, 7.0, 12.0, 20.0, 33.0, 55.0, 90.0, 150.0]
+        };
+        let model = poisson(y ~ x, df);
+        let coefs = coef(model);
+        let td = tidy(model);
+        let gl = glance(model);
+        let sm = summary(model);
+        let aug = augment(model, df);
+
+        let new_df = dataframe { x: [2.5, 4.5] };
+        let preds = predict(model, new_df);
+    "#;
+    let program = parse(code).expect("syntax ok");
+    let mut interp = Interpreter::new();
+    interp.eval_program(&program).expect("evaluation ok");
+
+    let coefs = vector_f64(&interp.env.get("coefs").unwrap());
+    assert_eq!(coefs.len(), 2);
+    // Intercept b0 ~ 0, slope b1 ~ 0.55 (since y grows exponentially with x)
+    assert!(coefs[1] > 0.4 && coefs[1] < 0.7, "Expected positive slope for Poisson growth, got {}", coefs[1]);
+
+    let td_val = interp.env.get("td").unwrap();
+    assert!(matches!(td_val, Value::DataFrame { .. }));
+    let gl_val = interp.env.get("gl").unwrap();
+    assert!(matches!(gl_val, Value::DataFrame { .. }));
+    let aug_val = interp.env.get("aug").unwrap();
+    assert!(matches!(aug_val, Value::DataFrame { .. }));
+
+    let preds = vector_f64(&interp.env.get("preds").unwrap());
+    assert_eq!(preds.len(), 2);
+    assert!(preds[1] > preds[0], "Predictions must be monotonically increasing");
+}
+
+#[test]
+fn test_fit_poisson_rejects_negative_response() {
+    let code = r#"
+        let df = dataframe {
+            x: [1.0, 2.0, 3.0],
+            y: [2.0, -1.0, 4.0]
+        };
+        let model = poisson(y ~ x, df);
+    "#;
+    let program = parse(code).expect("syntax ok");
+    let mut interp = Interpreter::new();
+    let err = interp.eval_program(&program).expect_err("should reject negative count");
+    assert_eq!(err.code, "S0204");
+}
+
+

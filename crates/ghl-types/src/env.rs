@@ -375,6 +375,30 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "logistic".into(),
+            Type::Function {
+                params: vec![Type::Formula, Type::Any],
+                ret: Box::new(Type::ModelFit),
+            },
+            false,
+        );
+        env.insert(
+            "fit_poisson".into(),
+            Type::Function {
+                params: vec![Type::Formula, Type::Any],
+                ret: Box::new(Type::ModelFit),
+            },
+            false,
+        );
+        env.insert(
+            "poisson".into(),
+            Type::Function {
+                params: vec![Type::Formula, Type::Any],
+                ret: Box::new(Type::ModelFit),
+            },
+            false,
+        );
+        env.insert(
             "fit_gmm".into(),
             Type::Function {
                 params: vec![Type::Any, Type::I64],

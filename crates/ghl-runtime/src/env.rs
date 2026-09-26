@@ -212,6 +212,9 @@ impl RuntimeEnv {
         env.set("fit".into(), Value::NativeFn(native_fit_ols));
         env.set("ols".into(), Value::NativeFn(native_fit_ols));
         env.set("fit_logistic".into(), Value::NativeFn(native_fit_logistic));
+        env.set("logistic".into(), Value::NativeFn(native_fit_logistic));
+        env.set("fit_poisson".into(), Value::NativeFn(native_fit_poisson));
+        env.set("poisson".into(), Value::NativeFn(native_fit_poisson));
         env.set("fit_gmm".into(), Value::NativeFn(native_fit_gmm));
         env.set("gmm".into(), Value::NativeFn(native_fit_gmm));
         env.set("summary".into(), Value::NativeFnCtx(native_summary));
