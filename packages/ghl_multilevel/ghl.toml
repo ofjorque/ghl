@@ -1,0 +1,8 @@
+[package]
+name = "ghl_multilevel"
+version = "0.1.0"
+authors = ["Antigravity Team", "GHL Community"]
+description = "Hierarchical and Mixed-Effects Linear Models in pure GHL (lme4-style random intercepts, REML variance components, Intraclass Correlation, Empirical Bayes BLUPs, Cockpit Telemetry)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]

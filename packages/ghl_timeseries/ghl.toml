@@ -1,0 +1,8 @@
+[package]
+name = "ghl_timeseries"
+version = "0.1.0"
+authors = ["GHL Community <community@ghl-lang.org>"]
+description = "Advanced Time Series Analysis in Pure GHL: Kalman Filter, ARIMA/SARIMA, and GARCH Volatility"
+edition = "2026"
+
+[dependencies]

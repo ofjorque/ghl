@@ -1,0 +1,8 @@
+[package]
+name = "ghl_survival"
+version = "0.1.0"
+authors = ["Antigravity Team", "GHL Community"]
+description = "Advanced survival analysis and event-time modeling in pure GHL (Kaplan-Meier, Log-Rank test, Cox Proportional Hazards, Cockpit Telemetry)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]

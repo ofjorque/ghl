@@ -1,0 +1,59 @@
+// packages/ghl_multilevel/src/diagnostics.gh
+// Multilevel Hierarchical Diagnostics: Design Effect, Effective N, and Empirical Bayes BLUP Analysis
+
+struct MultilevelDiagnostics {
+    design_effect: f64,
+    effective_sample_size: f64,
+    blup_min: f64,
+    blup_max: f64,
+    clustering_justified: bool
+}
+
+fn compute_multilevel_diagnostics(res: MixedModelResult) -> MultilevelDiagnostics {
+    let fn_obs = 0.0 + res.n_obs;
+    let fj_groups = 0.0 + res.n_groups;
+    let n_bar = if fj_groups > 0.0 { fn_obs / fj_groups } else { 1.0 };
+
+    let deff = 1.0 + ((n_bar - 1.0) * res.icc);
+    let n_eff = if deff > 0.0 { fn_obs / deff } else { fn_obs };
+
+    let mut b_min = 1.0e10;
+    let mut b_max = -1.0e10;
+
+    for u in res.blup_intercepts {
+        if u < b_min { b_min = u; }
+        if u > b_max { b_max = u; }
+    }
+
+    let justified = res.icc > 0.05 && deff > 1.10;
+
+    MultilevelDiagnostics {
+        design_effect: deff,
+        effective_sample_size: n_eff,
+        blup_min: b_min,
+        blup_max: b_max,
+        clustering_justified: justified
+    }
+}
+
+fn multilevel_diagnostics_cockpit(diag: MultilevelDiagnostics) {
+    let badge = if diag.clustering_justified {
+        "/ᐠ˵- ⩊ -˵マ ✧ HIERARCHICAL STRUCTURE CONFIRMED"
+    } else {
+        "≽(◉˕ ◉ ≼マ WEAK CLUSTERING DESIGN"
+    };
+
+    cockpit("Multilevel Diagnostics: Design Effects & Shrinkage", badge)
+        |> cockpit_add_kv("Kish Design Effect (Deff)", format("{:.4}", diag.design_effect))
+        |> cockpit_add_kv("Effective Sample Size (N_eff)", format("{:.2}", diag.effective_sample_size))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Empirical Bayes BLUP Minimum", format("{:.4}", diag.blup_min))
+        |> cockpit_add_kv("Empirical Bayes BLUP Maximum", format("{:.4}", diag.blup_max))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ Empirical Bayes shrinkage pulls unreliable group estimates toward grand mean.")
+}
+
+fn render_multilevel_diagnostics_cockpit(diag: MultilevelDiagnostics) {
+    let p = multilevel_diagnostics_cockpit(diag);
+    show_cockpit(p);
+}

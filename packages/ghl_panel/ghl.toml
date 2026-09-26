@@ -1,0 +1,8 @@
+[package]
+name = "ghl_panel"
+version = "0.1.0"
+authors = ["Antigravity Team", "GHL Community"]
+description = "Dynamic Panel Econometrics in pure GHL (Arellano-Bond Difference GMM, Blundell-Bond System GMM, Sargan/Hansen overidentification test, AR(1)/AR(2) serial correlation tests, Cockpit Telemetry)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]

@@ -1,0 +1,76 @@
+// packages/ghl_survival/tests/survival_test.gh
+// Integration test suite for ghl_survival
+
+println("Running ghl_survival integration test suite...");
+
+// 1. Test Kaplan-Meier Non-Parametric Estimator
+println("Testing Kaplan-Meier survival estimation...");
+let times = [6.0, 7.0, 10.0, 15.0, 19.0, 25.0, 32.0, 36.0, 42.0, 48.0];
+let events = [1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0];
+
+let km = fit_kaplan_meier(times, events);
+if km.n_total != 10 {
+    panic("Total count must be 10");
+}
+if km.n_events != 6.0 {
+    panic("Events count must be 6");
+}
+if km.n_censored != 4.0 {
+    panic("Censored count must be 4");
+}
+
+let n_steps = length(km.survival);
+if n_steps == 0 {
+    panic("Must have survival steps");
+}
+for i in 1..n_steps {
+    if km.survival[i] > km.survival[i - 1] {
+        panic("Survival curve must be non-increasing");
+    }
+    if km.ci_lower[i] < 0.0 {
+        panic("CI lower bound must be >= 0");
+    }
+    if km.ci_upper[i] > 1.0 {
+        panic("CI upper bound must be <= 1");
+    }
+}
+render_km_cockpit(km);
+
+// 2. Test Two-Sample Log-Rank Hypothesis Test
+println("Testing Two-Sample Log-Rank hypothesis test...");
+let test_times = [4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 18.0, 22.0, 28.0, 35.0];
+let test_events = [1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0];
+let test_groups = [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+
+let lr = logrank_test(test_times, test_events, test_groups);
+if lr.n_group0 != 5.0 || lr.n_group1 != 5.0 {
+    panic("Group sizes must both be 5");
+}
+if lr.chisq_stat < 0.0 {
+    panic("Chi-Square must be non-negative");
+}
+if lr.p_value < 0.0 || lr.p_value > 1.0 {
+    panic("P-value must be between 0 and 1");
+}
+render_logrank_cockpit(lr);
+
+// 3. Test Cox Proportional Hazards Model
+println("Testing Cox Proportional Hazards model...");
+let cox = fit_cox_ph(test_times, test_events, test_groups);
+if !cox.converged {
+    panic("Cox Newton-Raphson optimizer must converge");
+}
+if cox.hazard_ratio <= 0.0 {
+    panic("Hazard ratio must be positive");
+}
+if cox.std_err <= 0.0 {
+    panic("Standard error must be strictly positive");
+}
+render_cox_cockpit(cox);
+
+// 4. Test Complete Survival Pipeline Audit
+println("Testing Complete Survival Pipeline Audit...");
+let audit = audit_survival_pipeline(test_times, test_events, test_groups);
+render_survival_report(audit);
+
+println("All ghl_survival tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");

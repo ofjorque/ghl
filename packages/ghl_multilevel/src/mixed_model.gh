@@ -1,0 +1,248 @@
+// packages/ghl_multilevel/src/mixed_model.gh
+// Hierarchical Linear Mixed-Effects Model (lme4-style) with EM/REML Variance Decomposition & Cockpit Telemetry
+
+struct MixedModelResult {
+    beta0: f64,
+    beta0_se: f64,
+    beta1: f64,
+    beta1_se: f64,
+    tau2_intercept: f64,
+    sigma2_residual: f64,
+    icc: f64,
+    log_reml: f64,
+    iterations: f64,
+    converged: bool,
+    blup_intercepts: Vector,
+    n_obs: i64,
+    n_groups: i64
+}
+
+fn fit_mixed_model(y: Vector, x: Vector, groups: Vector, n_groups: i64) -> MixedModelResult {
+    let n = length(y);
+    if n < 4 {
+        panic("Sample size insufficient for mixed model estimation.");
+    }
+
+    // 1. Initial Pooled OLS to seed fixed effects and total variance
+    let mut sum_x = 0.0;
+    let mut sum_y = 0.0;
+    let mut sum_xx = 0.0;
+    let mut sum_xy = 0.0;
+
+    for i in 0..n {
+        let xi = x[i];
+        let yi = y[i];
+        sum_x = sum_x + xi;
+        sum_y = sum_y + yi;
+        sum_xx = sum_xx + (xi * xi);
+        sum_xy = sum_xy + (xi * yi);
+    }
+
+    let fn_obs = 0.0 + n;
+    let denom_ols = (fn_obs * sum_xx) - (sum_x * sum_x);
+    let mut b1 = if abs(denom_ols) > 0.0000000001 {
+        ((fn_obs * sum_xy) - (sum_x * sum_y)) / denom_ols
+    } else {
+        0.0
+    };
+    let mut b0 = (sum_y - (b1 * sum_x)) / fn_obs;
+
+    let mut ols_ssq = 0.0;
+    for i in 0..n {
+        let res = y[i] - (b0 + (b1 * x[i]));
+        ols_ssq = ols_ssq + (res * res);
+    }
+    let total_s2 = ols_ssq / (fn_obs - 2.0);
+
+    // Initial variance components: 50% between, 50% within
+    let mut tau2 = total_s2 * 0.5;
+    let mut sigma2 = total_s2 * 0.5;
+    if tau2 < 0.0001 { tau2 = 0.01; }
+    if sigma2 < 0.0001 { sigma2 = 0.01; }
+
+    let max_iter = 30;
+    let tol = 0.00001;
+    let mut converged = false;
+    let mut iter_count = 0.0;
+    let mut final_blups = [];
+    let mut final_cov00 = 0.0;
+    let mut final_cov11 = 0.0;
+
+    let mut iter = 0;
+    while !converged && iter < max_iter {
+        iter = iter + 1;
+        iter_count = iter_count + 1.0;
+
+        // Group summary statistics and shrinkage factors
+        let mut blups = [];
+        let mut sum_blup_sq = 0.0;
+        let mut sum_unshrink = 0.0;
+
+        // GLS Information matrix: X' V^{-1} X and vector X' V^{-1} y
+        let mut iv_00 = 0.0;
+        let mut iv_01 = 0.0;
+        let mut iv_11 = 0.0;
+        let mut ivy_0 = 0.0;
+        let mut ivy_1 = 0.0;
+
+        for g in 0..n_groups {
+            let fg = 0.0 + g;
+            let mut n_g = 0.0;
+            let mut g_sum_x = 0.0;
+            let mut g_sum_y = 0.0;
+            let mut g_sum_xx = 0.0;
+            let mut g_sum_xy = 0.0;
+
+            for i in 0..n {
+                if groups[i] == fg {
+                    let xi = x[i];
+                    let yi = y[i];
+                    n_g = n_g + 1.0;
+                    g_sum_x = g_sum_x + xi;
+                    g_sum_y = g_sum_y + yi;
+                    g_sum_xx = g_sum_xx + (xi * xi);
+                    g_sum_xy = g_sum_xy + (xi * yi);
+                }
+            }
+
+            if n_g > 0.0 {
+                let lambda_g = (n_g * tau2) / (sigma2 + (n_g * tau2));
+                let mean_x = g_sum_x / n_g;
+                let mean_y = g_sum_y / n_g;
+
+                // V_g^{-1} contributions
+                let c_00 = (n_g - (lambda_g * n_g)) / sigma2;
+                let c_01 = (g_sum_x - (lambda_g * g_sum_x)) / sigma2;
+                let c_11 = (g_sum_xx - (lambda_g * n_g * mean_x * mean_x)) / sigma2;
+
+                let cy_0 = (g_sum_y - (lambda_g * g_sum_y)) / sigma2;
+                let cy_1 = (g_sum_xy - (lambda_g * n_g * mean_x * mean_y)) / sigma2;
+
+                iv_00 = iv_00 + c_00;
+                iv_01 = iv_01 + c_01;
+                iv_11 = iv_11 + c_11;
+                ivy_0 = ivy_0 + cy_0;
+                ivy_1 = ivy_1 + cy_1;
+
+                // Group residual mean under current beta
+                let e_mean = mean_y - (b0 + (b1 * mean_x));
+                let u_g = lambda_g * e_mean;
+                blups = append(blups, u_g);
+                sum_blup_sq = sum_blup_sq + (u_g * u_g);
+                sum_unshrink = sum_unshrink + (tau2 * (1.0 - lambda_g));
+            } else {
+                blups = append(blups, 0.0);
+            }
+        }
+
+        // Solve GLS for beta
+        let det_iv = (iv_00 * iv_11) - (iv_01 * iv_01);
+        if abs(det_iv) > 0.000000001 {
+            let cov00 = iv_11 / det_iv;
+            let cov01 = (0.0 - iv_01) / det_iv;
+            let cov11 = iv_00 / det_iv;
+
+            final_cov00 = cov00;
+            final_cov11 = cov11;
+
+            let new_b0 = (cov00 * ivy_0) + (cov01 * ivy_1);
+            let new_b1 = (cov01 * ivy_0) + (cov11 * ivy_1);
+
+            // Update variance components
+            let fg_count = 0.0 + n_groups;
+            let new_tau2 = (sum_blup_sq + sum_unshrink) / fg_count;
+
+            let mut within_ssq = 0.0;
+            for i in 0..n {
+                let g_idx = groups[i];
+                let mut u_i = 0.0;
+                for g in 0..n_groups {
+                    if (0.0 + g) == g_idx {
+                        u_i = blups[g];
+                    }
+                }
+                let pred = new_b0 + (new_b1 * x[i]) + u_i;
+                let err = y[i] - pred;
+                within_ssq = within_ssq + (err * err);
+            }
+            let new_sigma2 = within_ssq / (fn_obs - 2.0);
+
+            let delta_tau = abs(new_tau2 - tau2);
+            let delta_sig = abs(new_sigma2 - sigma2);
+            let delta_b = abs(new_b0 - b0) + abs(new_b1 - b1);
+
+            b0 = new_b0;
+            b1 = new_b1;
+            tau2 = if new_tau2 > 0.000001 { new_tau2 } else { 0.000001 };
+            sigma2 = if new_sigma2 > 0.000001 { new_sigma2 } else { 0.000001 };
+            final_blups = blups;
+
+            if delta_tau < tol && delta_sig < tol && delta_b < tol {
+                converged = true;
+            }
+        } else {
+            iter = max_iter;
+        }
+    }
+
+    let b0_se = sqrt(abs(final_cov00));
+    let b1_se = sqrt(abs(final_cov11));
+    let icc_val = tau2 / (tau2 + sigma2);
+
+    // Approximate Restricted Log Likelihood
+    let log_lik = (0.0 - (0.5 * fn_obs)) * (1.0 + ln(sigma2));
+
+    MixedModelResult {
+        beta0: b0,
+        beta0_se: b0_se,
+        beta1: b1,
+        beta1_se: b1_se,
+        tau2_intercept: tau2,
+        sigma2_residual: sigma2,
+        icc: icc_val,
+        log_reml: log_lik,
+        iterations: iter_count,
+        converged: converged,
+        blup_intercepts: final_blups,
+        n_obs: n,
+        n_groups: n_groups
+    }
+}
+
+fn mixed_model_cockpit(res: MixedModelResult) {
+    let badge = if res.converged {
+        "/ᐠ˵- ⩊ -˵マ ✧ MIXED MODEL CONVERGED"
+    } else {
+        "≽(◉˕ ◉ ≼マ VARIANCE COMPONENTS NON-CONVERGENCE"
+    };
+
+    let p = cockpit("Hierarchical Mixed Model (lme4-style)", badge)
+        |> cockpit_add_kv("Total Observations (N)", format("{}", res.n_obs))
+        |> cockpit_add_kv("Clusters / Groups (J)", format("{}", res.n_groups))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Fixed Intercept (β0)", format("{:.4}", res.beta0))
+        |> cockpit_add_kv("Fixed Intercept SE", format("{:.4}", res.beta0_se))
+        |> cockpit_add_kv("Fixed Slope (β1)", format("{:.4}", res.beta1))
+        |> cockpit_add_kv("Fixed Slope SE", format("{:.4}", res.beta1_se))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Between-Group Variance (τ0²)", format("{:.4}", res.tau2_intercept))
+        |> cockpit_add_kv("Within-Group Variance (σ²)", format("{:.4}", res.sigma2_residual))
+        |> cockpit_add_kv("Intraclass Correlation (ICC)", format("{:.4}", res.icc))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("REML Log-Likelihood", format("{:.4}", res.log_reml))
+        |> cockpit_add_kv("EM / IGLS Iterations", format("{}", res.iterations))
+        |> cockpit_add_divider();
+
+    let icc_interp = if res.icc > 0.10 {
+        "/ᐠ˵- ⩊ -˵マ ✧ Substantial clustering (ICC > 0.10). Multilevel hierarchical adjustment necessary."
+    } else {
+        "≽(◉˕ ◉ ≼マ Low clustering (ICC <= 0.10). Group heterogeneity is negligible."
+    };
+    let p2 = p |> cockpit_add_line(icc_interp);
+    p2
+}
+
+fn render_mixed_model_cockpit(res: MixedModelResult) {
+    let p = mixed_model_cockpit(res);
+    show_cockpit(p);
+}

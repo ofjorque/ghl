@@ -1,0 +1,83 @@
+// packages/ghl_panel/tests/panel_test.gh
+// Integration test suite for ghl_panel dynamic panel econometrics
+
+println("Running ghl_panel integration test suite...");
+
+// 1. Generate Synthetic Dynamic Panel (N = 6, T = 5)
+// Data generating process: y_{it} = 0.5 * y_{i, t-1} + 1.2 * x_{it} + eta_i + e_{it}
+let n_units = 6;
+let n_time = 5;
+
+let total_obs = n_units * n_time;
+let errors = random_normal(total_obs, 0.0, 0.05, 42);
+
+let mut y_panel = [];
+let mut x_panel = [];
+
+for i in 0..n_units {
+    let fi = 0.0 + i;
+    let eta_i = 0.4 * fi;
+    let mut y_prev = 2.0 + eta_i;
+
+    for t in 0..n_time {
+        let ft = 0.0 + t;
+        let x_val = 1.0 + (0.5 * ft) + (0.2 * fi);
+        let e_val = errors[(i * n_time) + t];
+        let y_val = eta_i + (0.5 * y_prev) + (1.2 * x_val) + e_val;
+
+        x_panel = append(x_panel, x_val);
+        y_panel = append(y_panel, y_val);
+        y_prev = y_val;
+    }
+}
+
+let expected_len = n_units * n_time;
+if length(y_panel) != expected_len {
+    panic("Panel length mismatch");
+}
+
+// 2. Test Arellano-Bond Difference GMM
+println("Testing Arellano-Bond Difference GMM...");
+let diff_gmm = fit_arellano_bond(y_panel, x_panel, n_units, n_time);
+if diff_gmm.n_units != 6 {
+    panic("Unit count must be 6");
+}
+let expected_diff_obs = n_units * (n_time - 2);
+if diff_gmm.n_obs != expected_diff_obs {
+    panic("Differenced equation count must match N * (T - 2)");
+}
+if diff_gmm.alpha <= 0.0 {
+    panic("Lagged alpha estimate must be positive");
+}
+if diff_gmm.beta <= 0.0 {
+    panic("Exogenous beta estimate must be positive");
+}
+render_arellano_bond_cockpit(diff_gmm);
+
+// 3. Test Blundell-Bond System GMM
+println("Testing Blundell-Bond System GMM...");
+let sys_gmm = fit_blundell_bond(y_panel, x_panel, n_units, n_time, diff_gmm);
+if !sys_gmm.converged {
+    panic("System GMM must converge");
+}
+let expected_sys_eqs = expected_diff_obs * 2;
+if sys_gmm.n_total_equations != expected_sys_eqs {
+    panic("System GMM equations must equal diff + level equations");
+}
+if sys_gmm.alpha <= 0.0 {
+    panic("System alpha estimate must be positive");
+}
+if sys_gmm.beta <= 0.0 {
+    panic("System beta estimate must be positive");
+}
+render_blundell_bond_cockpit(sys_gmm);
+
+// 4. Test Complete Dynamic Panel Executive Audit
+println("Testing Complete Dynamic Panel Executive Audit...");
+let audit = audit_panel_pipeline(y_panel, x_panel, n_units, n_time);
+if !audit.certified {
+    panic("Dynamic panel pipeline must certify moment conditions");
+}
+render_panel_report(audit);
+
+println("All ghl_panel tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");

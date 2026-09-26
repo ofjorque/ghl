@@ -1,0 +1,186 @@
+// packages/ghl_survival/src/logrank.gh
+// Two-Sample Log-Rank Hypothesis Test for Survival Distributions with Cockpit Telemetry
+
+struct LogRankResult {
+    n_group0: f64,
+    n_group1: f64,
+    observed_0: f64,
+    expected_0: f64,
+    observed_1: f64,
+    expected_1: f64,
+    chisq_stat: f64,
+    z_stat: f64,
+    p_value: f64,
+    significant: bool
+}
+
+fn logrank_test(times: Vector, events: Vector, groups: Vector) -> LogRankResult {
+    let n = length(times);
+    if n == 0 {
+        return LogRankResult {
+            n_group0: 0.0,
+            n_group1: 0.0,
+            observed_0: 0.0,
+            expected_0: 0.0,
+            observed_1: 0.0,
+            expected_1: 0.0,
+            chisq_stat: 0.0,
+            z_stat: 0.0,
+            p_value: 1.0,
+            significant: false
+        };
+    }
+
+    // 1. Sort indices ascending by time
+    let mut order = [];
+    let mut used = [];
+    for k in 0..n {
+        used = append(used, false);
+    }
+    for step in 0..n {
+        let mut min_val = 1.0e15;
+        let mut min_idx = 0;
+        for i in 0..n {
+            if !used[i] && times[i] < min_val {
+                min_val = times[i];
+                min_idx = i;
+            }
+        }
+        used = set(used, min_idx, true);
+        order = append(order, min_idx);
+    }
+
+    let mut s_times = [];
+    let mut s_events = [];
+    let mut s_groups = [];
+    for idx in order {
+        s_times = append(s_times, times[idx]);
+        s_events = append(s_events, events[idx]);
+        s_groups = append(s_groups, groups[idx]);
+    }
+
+    // 2. Count sample size per group
+    let mut n0_total = 0.0;
+    let mut n1_total = 0.0;
+    for g in s_groups {
+        if g > 0.5 {
+            n1_total = n1_total + 1.0;
+        } else {
+            n0_total = n0_total + 1.0;
+        }
+    }
+
+    // 3. Accumulate observed and expected events
+    let mut n0_risk = n0_total;
+    let mut n1_risk = n1_total;
+
+    let mut o1_total = 0.0;
+    let mut e1_total = 0.0;
+    let mut v1_total = 0.0;
+    let mut o0_total = 0.0;
+
+    let mut i = 0;
+    while i < n {
+        let t_curr = s_times[i];
+        let mut d0 = 0.0;
+        let mut d1 = 0.0;
+        let mut c0 = 0.0;
+        let mut c1 = 0.0;
+        let mut same_time = true;
+
+        while i < n && same_time {
+            if s_times[i] == t_curr {
+                let ev = s_events[i];
+                let grp = s_groups[i];
+                if grp > 0.5 {
+                    if ev > 0.0 { d1 = d1 + 1.0; } else { c1 = c1 + 1.0; }
+                } else {
+                    if ev > 0.0 { d0 = d0 + 1.0; } else { c0 = c0 + 1.0; }
+                }
+                i = i + 1;
+            } else {
+                same_time = false;
+            }
+        }
+
+        let d_total = d0 + d1;
+        let n_risk = n0_risk + n1_risk;
+
+        if d_total > 0.0 && n_risk > 1.0 {
+            let e1 = d_total * (n1_risk / n_risk);
+            let num = n1_risk * n0_risk * d_total * (n_risk - d_total);
+            let den = (n_risk * n_risk) * (n_risk - 1.0);
+            let v1 = if den > 0.0 { num / den } else { 0.0 };
+
+            o1_total = o1_total + d1;
+            o0_total = o0_total + d0;
+            e1_total = e1_total + e1;
+            v1_total = v1_total + v1;
+        }
+
+        n0_risk = n0_risk - (d0 + c0);
+        n1_risk = n1_risk - (d1 + c1);
+    }
+
+    let z = if v1_total > 0.0000000001 {
+        (o1_total - e1_total) / sqrt(v1_total)
+    } else {
+        0.0
+    };
+    let chisq = z * z;
+
+    let abs_z = if z < 0.0 { 0.0 - z } else { z };
+    let p_val = 2.0 * (1.0 - normal_cdf(abs_z, 0.0, 1.0));
+    let is_sig = p_val < 0.05;
+
+    let e0_total = (o0_total + o1_total) - e1_total;
+
+    LogRankResult {
+        n_group0: n0_total,
+        n_group1: n1_total,
+        observed_0: o0_total,
+        expected_0: e0_total,
+        observed_1: o1_total,
+        expected_1: e1_total,
+        chisq_stat: chisq,
+        z_stat: z,
+        p_value: p_val,
+        significant: is_sig
+    }
+}
+
+fn logrank_cockpit(lr: LogRankResult) {
+    let badge = if lr.significant {
+        "/ᐠ˵- ⩊ -˵マ ✧ SIGNIFICANT SEPARATION (p < 0.05)"
+    } else {
+        "≽(◉˕ ◉ ≼マ NULL SURVIVAL DIFFERENCE (p >= 0.05)"
+    };
+
+    let ratio1 = if lr.expected_1 > 0.0 { lr.observed_1 / lr.expected_1 } else { 1.0 };
+    let concl = if lr.significant {
+        "/ᐠ˵- ⩊ -˵マ ✧ Significant survival divergence across arms (reject H0)."
+    } else {
+        "≽(◉˕ ◉ ≼マ No statistically significant divergence in survival curves."
+    };
+
+    cockpit("Log-Rank Hypothesis Test", badge)
+        |> cockpit_add_kv("Group 0 Sample (N0)", format("{}", lr.n_group0))
+        |> cockpit_add_kv("Group 0 Observed Events", format("{}", lr.observed_0))
+        |> cockpit_add_kv("Group 0 Expected Events", format("{:.2}", lr.expected_0))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Group 1 Sample (N1)", format("{}", lr.n_group1))
+        |> cockpit_add_kv("Group 1 Observed Events", format("{}", lr.observed_1))
+        |> cockpit_add_kv("Group 1 Expected Events", format("{:.2}", lr.expected_1))
+        |> cockpit_add_kv("Group 1 O/E Ratio", format("{:.4}", ratio1))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Chi-Square Statistic (1 df)", format("{:.4}", lr.chisq_stat))
+        |> cockpit_add_kv("Z-Score", format("{:.4}", lr.z_stat))
+        |> cockpit_add_kv("Asymptotic P-Value", format("{:.6}", lr.p_value))
+        |> cockpit_add_divider()
+        |> cockpit_add_line(concl)
+}
+
+fn render_logrank_cockpit(lr: LogRankResult) {
+    let p = logrank_cockpit(lr);
+    show_cockpit(p);
+}

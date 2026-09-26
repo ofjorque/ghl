@@ -886,7 +886,7 @@ impl TypeEnv {
         }
 
         // Math helpers — scalar + Vector[f64]
-        for name in ["log", "log2", "log10", "exp", "sqrt", "abs", "floor", "ceil", "round", "pow", "clamp", "sin", "cos"] {
+        for name in ["ln", "log", "log2", "log10", "exp", "sqrt", "abs", "floor", "ceil", "round", "pow", "clamp", "sin", "cos"] {
             env.insert(
                 name.into(),
                 Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },

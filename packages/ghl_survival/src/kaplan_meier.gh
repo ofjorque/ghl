@@ -1,0 +1,164 @@
+// packages/ghl_survival/src/kaplan_meier.gh
+// Kaplan-Meier Non-Parametric Survival Analysis with Greenwood Confidence Intervals & Cockpit Telemetry
+
+struct KMResult {
+    n_total: i64,
+    n_events: f64,
+    n_censored: f64,
+    median_survival: f64,
+    timeline: Vector,
+    survival: Vector,
+    std_err: Vector,
+    ci_lower: Vector,
+    ci_upper: Vector
+}
+
+fn fit_kaplan_meier(times: Vector, events: Vector) -> KMResult {
+    let n = length(times);
+    if n == 0 {
+        return KMResult {
+            n_total: 0,
+            n_events: 0.0,
+            n_censored: 0.0,
+            median_survival: 0.0,
+            timeline: [],
+            survival: [],
+            std_err: [],
+            ci_lower: [],
+            ci_upper: []
+        };
+    }
+
+    // 1. Sort indices ascending by time
+    let mut order = [];
+    let mut used = [];
+    for k in 0..n {
+        used = append(used, false);
+    }
+    for step in 0..n {
+        let mut min_val = 1.0e15;
+        let mut min_idx = 0;
+        for i in 0..n {
+            if !used[i] && times[i] < min_val {
+                min_val = times[i];
+                min_idx = i;
+            }
+        }
+        used = set(used, min_idx, true);
+        order = append(order, min_idx);
+    }
+
+    let mut s_times = [];
+    let mut s_events = [];
+    for idx in order {
+        s_times = append(s_times, times[idx]);
+        s_events = append(s_events, events[idx]);
+    }
+
+    // 2. Aggregate events and calculate Kaplan-Meier curve
+    let mut timeline = [];
+    let mut survival = [];
+    let mut std_err = [];
+    let mut ci_lower = [];
+    let mut ci_upper = [];
+
+    let mut n_at_risk = 0.0;
+    for t in times {
+        n_at_risk = n_at_risk + 1.0;
+    }
+    let mut current_surv = 1.0;
+    let mut greenwood_sum = 0.0;
+    let mut total_events = 0.0;
+    let mut total_censored = 0.0;
+    let mut median_time = -1.0;
+
+    let mut i = 0;
+    while i < n {
+        let t_curr = s_times[i];
+        let mut d_curr = 0.0;
+        let mut c_curr = 0.0;
+        let mut same_time = true;
+
+        while i < n && same_time {
+            if s_times[i] == t_curr {
+                if s_events[i] > 0.0 {
+                    d_curr = d_curr + 1.0;
+                } else {
+                    c_curr = c_curr + 1.0;
+                }
+                i = i + 1;
+            } else {
+                same_time = false;
+            }
+        }
+
+        total_events = total_events + d_curr;
+        total_censored = total_censored + c_curr;
+
+        if d_curr > 0.0 {
+            let p_surv_step = 1.0 - (d_curr / n_at_risk);
+            current_surv = current_surv * p_surv_step;
+
+            let denom = n_at_risk * (n_at_risk - d_curr);
+            if denom > 0.0 {
+                greenwood_sum = greenwood_sum + (d_curr / denom);
+            }
+
+            let se = current_surv * sqrt(greenwood_sum);
+            let margin = 1.96 * se;
+            let mut lower = current_surv - margin;
+            let mut upper = current_surv + margin;
+            if lower < 0.0 { lower = 0.0; }
+            if upper > 1.0 { upper = 1.0; }
+
+            timeline = append(timeline, t_curr);
+            survival = append(survival, current_surv);
+            std_err = append(std_err, se);
+            ci_lower = append(ci_lower, lower);
+            ci_upper = append(ci_upper, upper);
+
+            if median_time < 0.0 && current_surv <= 0.5 {
+                median_time = t_curr;
+            }
+        }
+
+        n_at_risk = n_at_risk - (d_curr + c_curr);
+    }
+
+    KMResult {
+        n_total: n,
+        n_events: total_events,
+        n_censored: total_censored,
+        median_survival: median_time,
+        timeline: timeline,
+        survival: survival,
+        std_err: std_err,
+        ci_lower: ci_lower,
+        ci_upper: ci_upper
+    }
+}
+
+fn km_cockpit(km: KMResult) {
+    let p = cockpit("Kaplan-Meier Survival Estimator", "/ᐠ˵- ⩊ -˵マ ✧ SURVIVAL ESTIMATED")
+        |> cockpit_add_kv("Total Sample (N)", format("{}", km.n_total))
+        |> cockpit_add_kv("Observed Events (d)", format("{}", km.n_events))
+        |> cockpit_add_kv("Right-Censored (c)", format("{}", km.n_censored));
+
+    let med_display = if km.median_survival >= 0.0 { format("{:.2}", km.median_survival) } else { "Not Reached (> t_max)" };
+    let p2 = p
+        |> cockpit_add_kv("Median Survival Time (t50)", med_display)
+        |> cockpit_add_divider();
+
+    let n_steps = length(km.survival);
+    let final_surv = if n_steps > 0 { km.survival[n_steps - 1] } else { 1.0 };
+    let p3 = p2
+        |> cockpit_add_kv("Terminal Survival S(t_max)", format("{:.4}", final_surv))
+        |> cockpit_add_line("Survival Trajectory (Step Curve):")
+        |> cockpit_add_line(sparkline(km.survival));
+    p3
+}
+
+fn render_km_cockpit(km: KMResult) {
+    let p = km_cockpit(km);
+    show_cockpit(p);
+}

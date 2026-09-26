@@ -1,0 +1,193 @@
+// packages/ghl_survival/src/cox.gh
+// Cox Proportional Hazards Model (Partial Likelihood & Newton-Raphson Optimizer) with Cockpit Telemetry
+
+struct CoxResult {
+    beta: f64,
+    hazard_ratio: f64,
+    std_err: f64,
+    z_stat: f64,
+    p_value: f64,
+    hr_ci_lower: f64,
+    hr_ci_upper: f64,
+    log_partial_lik: f64,
+    iterations: f64,
+    converged: bool
+}
+
+fn fit_cox_ph(times: Vector, events: Vector, x: Vector) -> CoxResult {
+    let n = length(times);
+    if n == 0 {
+        return CoxResult {
+            beta: 0.0,
+            hazard_ratio: 1.0,
+            std_err: 0.0,
+            z_stat: 0.0,
+            p_value: 1.0,
+            hr_ci_lower: 1.0,
+            hr_ci_upper: 1.0,
+            log_partial_lik: 0.0,
+            iterations: 0.0,
+            converged: false
+        };
+    }
+
+    // 1. Sort indices ascending by time
+    let mut order = [];
+    let mut used = [];
+    for k in 0..n {
+        used = append(used, false);
+    }
+    for step in 0..n {
+        let mut min_val = 1.0e15;
+        let mut min_idx = 0;
+        for i in 0..n {
+            if !used[i] && times[i] < min_val {
+                min_val = times[i];
+                min_idx = i;
+            }
+        }
+        used = set(used, min_idx, true);
+        order = append(order, min_idx);
+    }
+
+    let mut s_times = [];
+    let mut s_events = [];
+    let mut s_x = [];
+    for idx in order {
+        s_times = append(s_times, times[idx]);
+        s_events = append(s_events, events[idx]);
+        s_x = append(s_x, x[idx]);
+    }
+
+    // 2. Newton-Raphson optimization of log partial likelihood
+    let mut beta = 0.0;
+    let max_iter = 25;
+    let tol = 0.000001;
+    let mut converged = false;
+    let mut final_info = 1.0;
+    let mut final_loglik = 0.0;
+    let mut iter_count = 0.0;
+
+    let mut iter = 0;
+    while !converged && iter < max_iter {
+        iter = iter + 1;
+        iter_count = iter_count + 1.0;
+        let mut score = 0.0;
+        let mut info = 0.0;
+        let mut loglik = 0.0;
+
+        for j in 0..n {
+            if s_events[j] > 0.0 {
+                let t_j = s_times[j];
+                let x_j = s_x[j];
+
+                let mut s0 = 0.0;
+                let mut s1 = 0.0;
+                let mut s2 = 0.0;
+
+                for k in 0..n {
+                    if s_times[k] >= t_j {
+                        let x_k = s_x[k];
+                        let w_k = exp(beta * x_k);
+                        s0 = s0 + w_k;
+                        s1 = s1 + (x_k * w_k);
+                        s2 = s2 + (x_k * x_k * w_k);
+                    }
+                }
+
+                if s0 > 0.0000000001 {
+                    let mean_x = s1 / s0;
+                    score = score + (x_j - mean_x);
+                    let var_x = (s2 / s0) - (mean_x * mean_x);
+                    info = info + var_x;
+                    loglik = loglik + ((beta * x_j) - ln(s0));
+                }
+            }
+        }
+
+        final_info = info;
+        final_loglik = loglik;
+
+        let abs_score = if score < 0.0 { 0.0 - score } else { score };
+        if abs_score < tol {
+            converged = true;
+        } else {
+            if info > 0.0000000001 {
+                let step = score / info;
+                beta = beta + step;
+                let abs_step = if step < 0.0 { 0.0 - step } else { step };
+                if abs_step < tol {
+                    converged = true;
+                }
+            } else {
+                // Singular info matrix, terminate
+                iter = max_iter;
+            }
+        }
+    }
+
+    let se = if final_info > 0.0000000001 {
+        sqrt(1.0 / final_info)
+    } else {
+        999.0
+    };
+
+    let hr = exp(beta);
+    let hr_low = exp(beta - (1.96 * se));
+    let hr_high = exp(beta + (1.96 * se));
+
+    let z = if se > 0.0 { beta / se } else { 0.0 };
+    let abs_z = if z < 0.0 { 0.0 - z } else { z };
+    let p_val = 2.0 * (1.0 - normal_cdf(abs_z, 0.0, 1.0));
+
+    CoxResult {
+        beta: beta,
+        hazard_ratio: hr,
+        std_err: se,
+        z_stat: z,
+        p_value: p_val,
+        hr_ci_lower: hr_low,
+        hr_ci_upper: hr_high,
+        log_partial_lik: final_loglik,
+        iterations: iter_count,
+        converged: converged
+    }
+}
+
+fn cox_cockpit(cox: CoxResult) {
+    let badge = if cox.converged {
+        "/ᐠ˵- ⩊ -˵マ ✧ COX MODEL CONVERGED"
+    } else {
+        "≽(◉˕ ◉ ≼マ PARTIAL LIKELIHOOD NON-CONVERGENCE"
+    };
+
+    let effect_str = if cox.hazard_ratio > 1.05 {
+        "Risk Interpretation: Positive association with event rate (increased hazard)."
+    } else {
+        if cox.hazard_ratio < 0.95 {
+            "Risk Interpretation: Protective association with event rate (reduced hazard)."
+        } else {
+            "Risk Interpretation: Neutral association (hazard ratio near 1.0)."
+        }
+    };
+
+    cockpit("Cox Proportional Hazards Model", badge)
+        |> cockpit_add_kv("Log Hazard Ratio (β)", format("{:.4}", cox.beta))
+        |> cockpit_add_kv("Hazard Ratio exp(β)", format("{:.4}", cox.hazard_ratio))
+        |> cockpit_add_kv("Standard Error SE(β)", format("{:.4}", cox.std_err))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("HR 95% CI Lower", format("{:.4}", cox.hr_ci_lower))
+        |> cockpit_add_kv("HR 95% CI Upper", format("{:.4}", cox.hr_ci_upper))
+        |> cockpit_add_kv("Wald Z-Score", format("{:.4}", cox.z_stat))
+        |> cockpit_add_kv("P-Value (Wald test)", format("{:.6}", cox.p_value))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Log Partial Likelihood", format("{:.4}", cox.log_partial_lik))
+        |> cockpit_add_kv("Newton-Raphson Iterations", format("{}", cox.iterations))
+        |> cockpit_add_divider()
+        |> cockpit_add_line(effect_str)
+}
+
+fn render_cox_cockpit(cox: CoxResult) {
+    let p = cox_cockpit(cox);
+    show_cockpit(p);
+}

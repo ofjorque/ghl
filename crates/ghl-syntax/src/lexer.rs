@@ -109,7 +109,7 @@ pub enum Token {
     Ident(String),
 
     // Numeric Literals
-    #[regex(r"[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?", |lex| lex.slice().to_string())]
+    #[regex(r"([0-9]+\.[0-9]+([eE][+-]?[0-9]+)?)|([0-9]+[eE][+-]?[0-9]+)", |lex| lex.slice().to_string())]
     FloatLit(String),
 
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]

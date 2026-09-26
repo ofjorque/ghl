@@ -351,6 +351,7 @@ impl RuntimeEnv {
 
         // Math helpers — scalar + Vector[f64], NaN-safe
         env.set("log".into(),   Value::NativeFn(native_log));
+        env.set("ln".into(),    Value::NativeFn(native_log));
         env.set("log2".into(),  Value::NativeFn(native_log2));
         env.set("log10".into(), Value::NativeFn(native_log10));
         env.set("exp".into(),   Value::NativeFn(native_exp));

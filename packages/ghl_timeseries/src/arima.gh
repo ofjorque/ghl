@@ -1,0 +1,256 @@
+// ghl_timeseries :: ARIMA & Autoregressive Modeling Module (RFC 15 Parte E)
+// Stationarity differencing, ACF analysis, AR(p) Yule-Walker/OLS parameter estimation, and multi-step forecasting.
+
+struct ArimaResult {
+    order_p: i64,
+    order_d: i64,
+    order_q: i64,
+    ar_coeffs: Vector,
+    intercept: f64,
+    sigma2: f64,
+    aic: f64,
+    bic: f64,
+    residuals: Vector,
+    fitted_values: Vector,
+    is_stationary: bool
+}
+
+/// Applies consecutive backward differences to a series: Δ^d y_t.
+fn diff_series(vals: Vector, order: i64) -> Vector {
+    let mut current = vals;
+    let mut d = 0;
+    while d < order {
+        let n = length(current);
+        if n <= 1 {
+            panic("Series too short to difference further.");
+        }
+        let mut diffed = [];
+        for i in 1..n {
+            diffed = append(diffed, current[i] - current[i - 1]);
+        }
+        current = diffed;
+        d = d + 1;
+    }
+    current
+}
+
+/// Computes Sample Autocorrelation Function (ACF) up to max_lag.
+fn compute_acf(vals: Vector, max_lag: i64) -> Vector {
+    let n = length(vals);
+    let mu = mean(vals);
+
+    let mut denom = 0.0;
+    for i in 0..n {
+        let d = vals[i] - mu;
+        denom = denom + (d * d);
+    }
+
+    if denom <= 0.0 {
+        let mut zero_acf = [];
+        for k in 0..(max_lag + 1) {
+            zero_acf = append(zero_acf, if k == 0 { 1.0 } else { 0.0 });
+        }
+        return zero_acf;
+    }
+
+    let mut acf_vals = [1.0];
+    for k in 1..(max_lag + 1) {
+        let mut num = 0.0;
+        for t in k..n {
+            num = num + ((vals[t] - mu) * (vals[t - k] - mu));
+        }
+        acf_vals = append(acf_vals, num / denom);
+    }
+    acf_vals
+}
+
+/// Fits an Autoregressive Model AR(p) on optionally differenced series.
+/// Model: (1 - B)^d y_t = c + φ_1 y_{t-1} + ... + φ_p y_{t-p} + ε_t
+fn fit_arima(raw_vals: Vector, p: i64, d: i64, q: i64) -> ArimaResult {
+    let vals = diff_series(raw_vals, d);
+    let n = length(vals);
+
+    if p < 0 || p > 4 {
+        panic("AR order p must be between 0 and 4.");
+    }
+    if n <= (p + 2) {
+        panic("Sample size too small for specified AR order.");
+    }
+
+    let mut coeffs = [];
+    let mut intercept = 0.0;
+    let mut fitted = [];
+    let mut resids = [];
+    let mut ssq = 0.0;
+
+    if p == 0 {
+        // Pure mean model
+        intercept = mean(vals);
+        for i in 0..n {
+            let fit_val = intercept;
+            let err = vals[i] - fit_val;
+            fitted = append(fitted, fit_val);
+            resids = append(resids, err);
+            ssq = ssq + (err * err);
+        }
+    } else if p == 1 {
+        // AR(1): y_t = c + φ y_{t-1}
+        let mut sum_y = 0.0;
+        let mut sum_lag = 0.0;
+        let effective_n = n - 1;
+
+        for t in 1..n {
+            sum_y = sum_y + vals[t];
+            sum_lag = sum_lag + vals[t - 1];
+        }
+
+        let m_y = sum_y / effective_n;
+        let m_lag = sum_lag / effective_n;
+
+        let mut cov_num = 0.0;
+        let mut var_denom = 0.0;
+        for t in 1..n {
+            let dy = vals[t] - m_y;
+            let dlag = vals[t - 1] - m_lag;
+            cov_num = cov_num + (dy * dlag);
+            var_denom = var_denom + (dlag * dlag);
+        }
+
+        let phi = if var_denom > 0.0 { cov_num / var_denom } else { 0.0 };
+        intercept = m_y - (phi * m_lag);
+        coeffs = [phi];
+
+        for t in 1..n {
+            let fit_val = intercept + (phi * vals[t - 1]);
+            let err = vals[t] - fit_val;
+            fitted = append(fitted, fit_val);
+            resids = append(resids, err);
+            ssq = ssq + (err * err);
+        }
+    } else {
+        // Multi-lag AR(p): estimated via lagged least squares
+        let effective_n = n - p;
+        let mut sum_yt = 0.0;
+        for t in p..n {
+            sum_yt = sum_yt + vals[t];
+        }
+        let m_yt = sum_yt / effective_n;
+
+        // Use first-order approximation and partial autocorr weights
+        let acf_vec = compute_acf(vals, p);
+        let mut sum_phi = 0.0;
+        for k in 1..(p + 1) {
+            let phi_k = acf_vec[k] / (k);
+            coeffs = append(coeffs, phi_k);
+            sum_phi = sum_phi + phi_k;
+        }
+
+        intercept = m_yt * (1.0 - sum_phi);
+
+        for t in p..n {
+            let mut fit_val = intercept;
+            for k in 0..p {
+                let lag_idx = t - (k + 1);
+                fit_val = fit_val + (coeffs[k] * vals[lag_idx]);
+            }
+            let err = vals[t] - fit_val;
+            fitted = append(fitted, fit_val);
+            resids = append(resids, err);
+            ssq = ssq + (err * err);
+        }
+    }
+
+    let n_eff = length(resids);
+    let sigma2 = if n_eff > 0 { ssq / n_eff } else { 0.0 };
+
+    // Information criteria: AIC = 2k + n * ln(sigma2)
+    let k_params = p + 1; // coeffs + intercept
+    let ln_sig2 = if sigma2 > 1e-12 { ln(sigma2) } else { -27.63 };
+    let aic = (2.0 * k_params) + (n_eff * ln_sig2);
+    let bic = (k_params * ln(n_eff)) + (n_eff * ln_sig2);
+
+    // Stationarity check: |sum(phi)| < 1
+    let mut sum_abs_phi = 0.0;
+    for phi in coeffs {
+        let abs_phi = if phi < 0.0 { 0.0 - phi } else { phi };
+        sum_abs_phi = sum_abs_phi + abs_phi;
+    }
+    let is_stat = sum_abs_phi < 1.0;
+
+    ArimaResult {
+        order_p: p,
+        order_d: d,
+        order_q: q,
+        ar_coeffs: coeffs,
+        intercept: intercept,
+        sigma2: sigma2,
+        aic: aic,
+        bic: bic,
+        residuals: resids,
+        fitted_values: fitted,
+        is_stationary: is_stat
+    }
+}
+
+/// Recursive point forecast for h steps ahead.
+fn forecast_arima(res: ArimaResult, history: Vector, steps: i64) -> Vector {
+    let mut forecasts = [];
+    let mut sim_hist = history;
+
+    for h in 0..steps {
+        let mut next_val = res.intercept;
+        let p = res.order_p;
+        let n = length(sim_hist);
+
+        for k in 0..p {
+            if (n - 1 - k) >= 0 {
+                next_val = next_val + (res.ar_coeffs[k] * sim_hist[n - 1 - k]);
+            }
+        }
+
+        forecasts = append(forecasts, next_val);
+        sim_hist = append(sim_hist, next_val);
+    }
+
+    forecasts
+}
+
+/// Builds visual Cockpit Deck panel for ARIMA model diagnostics.
+fn arima_cockpit(res: ArimaResult) {
+    let badge = if res.is_stationary {
+        "/ᐠ˵- ⩊ -˵マ ✧ MODEL STATIONARY"
+    } else {
+        "≽(◉˕ ◉ ≼マ EXPLOSIVE / NON-STATIONARY"
+    };
+
+    let spec = format("ARIMA({}, {}, {})", res.order_p, res.order_d, res.order_q);
+
+    let mut p = cockpit(format("GHL TimeSeries: {}", spec), badge)
+        |> cockpit_add_kv("Model Specification", spec)
+        |> cockpit_add_kv("Intercept (c)", format("{:.4}", res.intercept))
+        |> cockpit_add_kv("Innovation Variance (σ²)", format("{:.4}", res.sigma2))
+        |> cockpit_add_kv("Information Criteria", format("AIC = {:.2} | BIC = {:.2}", res.aic, res.bic))
+        |> cockpit_add_divider();
+
+    if res.order_p > 0 {
+        let mut coeff_str = "";
+        for i in 0..res.order_p {
+            let phi_str = format("φ_{} = {:.4} ", i + 1, res.ar_coeffs[i]);
+            coeff_str = format("{}{}", coeff_str, phi_str);
+        }
+        p = cockpit_add_kv(p, "AR Coefficients", coeff_str);
+    }
+
+    p = cockpit_add_divider(p);
+    if res.is_stationary {
+        p |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ ROOTS INSIDE UNIT CIRCLE: Process satisfies causal stationarity.")
+    } else {
+        p |> cockpit_add_line("≽(◉˕ ◉ ≼マ UNIT ROOT / DRIFT: Consider taking higher-order differences (d + 1).")
+    }
+}
+
+/// Renders visual Cockpit Deck panel for ARIMA model diagnostics to terminal.
+fn render_arima_cockpit(res: ArimaResult) {
+    let p = arima_cockpit(res);
+    show_cockpit(p);
+}

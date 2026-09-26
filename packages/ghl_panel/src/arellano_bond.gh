@@ -1,0 +1,242 @@
+// packages/ghl_panel/src/arellano_bond.gh
+// Arellano-Bond Dynamic Panel Difference GMM Estimator (1991) with Serial Correlation & Sargan Tests
+
+struct ArellanoBondResult {
+    alpha: f64,
+    alpha_se: f64,
+    beta: f64,
+    beta_se: f64,
+    sargan_stat: f64,
+    sargan_p: f64,
+    ar1_stat: f64,
+    ar1_p: f64,
+    ar2_stat: f64,
+    ar2_p: f64,
+    n_units: i64,
+    n_obs: i64,
+    is_valid_model: bool
+}
+
+fn fit_arellano_bond(y: Vector, x: Vector, n_units: i64, n_time: i64) -> ArellanoBondResult {
+    // Each unit i in 0..n_units has observations at t in 0..n_time
+    // Linear index in flat vector: i * n_time + t
+    // First-differenced equations available for t >= 2:
+    // dy_{it} = y_{it} - y_{i, t-1}
+    // dylag_{it} = y_{i, t-1} - y_{i, t-2}
+    // dx_{it} = x_{it} - x_{i, t-1}
+    // Instrument 1: z1 = y_{i, t-2} (level lag 2)
+    // Instrument 2: z2 = dx_{it} (strictly exogenous first-diff)
+
+    let mut dy_vec = [];
+    let mut dylag_vec = [];
+    let mut dx_vec = [];
+    let mut z1_vec = [];
+    let mut z2_vec = [];
+
+    for i in 0..n_units {
+        for t in 2..n_time {
+            let idx_t = (i * n_time) + t;
+            let idx_t1 = (i * n_time) + (t - 1);
+            let idx_t2 = (i * n_time) + (t - 2);
+
+            let dy = y[idx_t] - y[idx_t1];
+            let dylag = y[idx_t1] - y[idx_t2];
+            let dx = x[idx_t] - x[idx_t1];
+            let z1 = y[idx_t2];
+            let z2 = dx;
+
+            dy_vec = append(dy_vec, dy);
+            dylag_vec = append(dylag_vec, dylag);
+            dx_vec = append(dx_vec, dx);
+            z1_vec = append(z1_vec, z1);
+            z2_vec = append(z2_vec, z2);
+        }
+    }
+
+    let m = length(dy_vec);
+    if m < 4 {
+        panic("Panel sample too small for Arellano-Bond GMM estimation.");
+    }
+
+    // Two-Stage Least Squares (2SLS) / IV Closed Form
+    // Stage 1: Project X1 (dylag) and X2 (dx) onto Z1 (z1) and Z2 (z2)
+    // Matrix Z'Z = [[z11, z12], [z21, z22]]
+    let mut z11 = 0.0;
+    let mut z12 = 0.0;
+    let mut z22 = 0.0;
+    for k in 0..m {
+        z11 = z11 + (z1_vec[k] * z1_vec[k]);
+        z12 = z12 + (z1_vec[k] * z2_vec[k]);
+        z22 = z22 + (z2_vec[k] * z2_vec[k]);
+    }
+
+    let det_zz = (z11 * z22) - (z12 * z12);
+    if abs(det_zz) < 0.000000001 {
+        panic("Singular instrument covariance matrix in Arellano-Bond.");
+    }
+
+    let inv_z11 = z22 / det_zz;
+    let inv_z12 = (0.0 - z12) / det_zz;
+    let inv_z22 = z11 / det_zz;
+
+    // Regress dylag on Z
+    let mut z1_dylag = 0.0;
+    let mut z2_dylag = 0.0;
+    for k in 0..m {
+        z1_dylag = z1_dylag + (z1_vec[k] * dylag_vec[k]);
+        z2_dylag = z2_dylag + (z2_vec[k] * dylag_vec[k]);
+    }
+    let gamma1 = (inv_z11 * z1_dylag) + (inv_z12 * z2_dylag);
+    let gamma2 = (inv_z12 * z1_dylag) + (inv_z22 * z2_dylag);
+
+    // Fitted dylag_hat = gamma1 * z1 + gamma2 * z2
+    let mut dylag_hat = [];
+    for k in 0..m {
+        dylag_hat = append(dylag_hat, (gamma1 * z1_vec[k]) + (gamma2 * z2_vec[k]));
+    }
+
+    // Stage 2: Regress dy on dylag_hat and dx
+    // Matrix Xhat'Xhat
+    let mut xh11 = 0.0;
+    let mut xh12 = 0.0;
+    let mut xh22 = 0.0;
+    let mut xh1_y = 0.0;
+    let mut xh2_y = 0.0;
+
+    for k in 0..m {
+        let xh1 = dylag_hat[k];
+        let xh2 = dx_vec[k];
+        let y_val = dy_vec[k];
+
+        xh11 = xh11 + (xh1 * xh1);
+        xh12 = xh12 + (xh1 * xh2);
+        xh22 = xh22 + (xh2 * xh2);
+        xh1_y = xh1_y + (xh1 * y_val);
+        xh2_y = xh2_y + (xh2 * y_val);
+    }
+
+    let det_xh = (xh11 * xh22) - (xh12 * xh12);
+    if abs(det_xh) < 0.000000001 {
+        panic("Singular second-stage matrix in Arellano-Bond.");
+    }
+
+    let inv_xh11 = xh22 / det_xh;
+    let inv_xh12 = (0.0 - xh12) / det_xh;
+    let inv_xh22 = xh11 / det_xh;
+
+    let alpha_hat = (inv_xh11 * xh1_y) + (inv_xh12 * xh2_y);
+    let beta_hat = (inv_xh12 * xh1_y) + (inv_xh22 * xh2_y);
+
+    // Compute residuals e = dy - alpha * dylag - beta * dx
+    let mut resids = [];
+    let mut ssq = 0.0;
+    for k in 0..m {
+        let fit = (alpha_hat * dylag_vec[k]) + (beta_hat * dx_vec[k]);
+        let e = dy_vec[k] - fit;
+        resids = append(resids, e);
+        ssq = ssq + (e * e);
+    }
+
+    let df = if m > 2 { 0.0 + (m - 2) } else { 1.0 };
+    let sigma2 = ssq / df;
+    let alpha_se = sqrt(sigma2 * inv_xh11);
+    let beta_se = sqrt(sigma2 * inv_xh22);
+
+    // Arellano-Bond AR(1) & AR(2) autocorrelation tests (Unit-Clustered Asymptotic Form)
+    let t_eff = n_time - 2;
+    let mut sum_a = 0.0;
+    let mut sum_a2 = 0.0;
+    let mut sum_b = 0.0;
+    let mut sum_b2 = 0.0;
+
+    for i in 0..n_units {
+        let mut a_i = 0.0;
+        for t_idx in 1..t_eff {
+            let curr = resids[(i * t_eff) + t_idx];
+            let lag1 = resids[(i * t_eff) + (t_idx - 1)];
+            a_i = a_i + (curr * lag1);
+        }
+        sum_a = sum_a + a_i;
+        sum_a2 = sum_a2 + (a_i * a_i);
+
+        let mut b_i = 0.0;
+        for t_idx in 2..t_eff {
+            let curr = resids[(i * t_eff) + t_idx];
+            let lag2 = resids[(i * t_eff) + (t_idx - 2)];
+            b_i = b_i + (curr * lag2);
+        }
+        sum_b = sum_b + b_i;
+        sum_b2 = sum_b2 + (b_i * b_i);
+    }
+
+    let ar1_z = if sum_a2 > 0.0000000001 { sum_a / sqrt(sum_a2) } else { 0.0 };
+    let abs_ar1 = if ar1_z < 0.0 { 0.0 - ar1_z } else { ar1_z };
+    let ar1_p = 2.0 * (1.0 - normal_cdf(abs_ar1, 0.0, 1.0));
+
+    let ar2_z = if sum_b2 > 0.0000000001 { sum_b / sqrt(sum_b2) } else { 0.0 };
+    let abs_ar2 = if ar2_z < 0.0 { 0.0 - ar2_z } else { ar2_z };
+    let ar2_p = 2.0 * (1.0 - normal_cdf(abs_ar2, 0.0, 1.0));
+
+    // Sargan Test of Overidentifying Restrictions
+    // In exactly identified 2-instrument case, J = 0, p = 1.0
+    let sargan_j = 0.0;
+    let sargan_p = 1.0;
+
+    // Model valid if AR(2) autocorrelation is NOT significant (p >= 0.05)
+    let is_valid = ar2_p >= 0.05;
+
+    ArellanoBondResult {
+        alpha: alpha_hat,
+        alpha_se: alpha_se,
+        beta: beta_hat,
+        beta_se: beta_se,
+        sargan_stat: sargan_j,
+        sargan_p: sargan_p,
+        ar1_stat: ar1_z,
+        ar1_p: ar1_p,
+        ar2_stat: ar2_z,
+        ar2_p: ar2_p,
+        n_units: n_units,
+        n_obs: m,
+        is_valid_model: is_valid
+    }
+}
+
+fn arellano_bond_cockpit(res: ArellanoBondResult) {
+    let badge = if res.is_valid_model {
+        "/ᐠ˵- ⩊ -˵マ ✧ ARELLANO-BOND GMM VALIDATED"
+    } else {
+        "≽(◉˕ ◉ ≼マ AR(2) SPECIFICATION WARNING"
+    };
+
+    let p = cockpit("Dynamic Panel: Arellano-Bond Difference GMM", badge)
+        |> cockpit_add_kv("Cross-Section Units (N)", format("{}", res.n_units))
+        |> cockpit_add_kv("Differenced Sample (N*T)", format("{}", res.n_obs))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Lagged Dependent Coeff (α)", format("{:.4}", res.alpha))
+        |> cockpit_add_kv("Lagged Coeff SE", format("{:.4}", res.alpha_se))
+        |> cockpit_add_kv("Exogenous Coeff (β)", format("{:.4}", res.beta))
+        |> cockpit_add_kv("Exogenous Coeff SE", format("{:.4}", res.beta_se))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Arellano-Bond AR(1) Z", format("{:.4}", res.ar1_stat))
+        |> cockpit_add_kv("Arellano-Bond AR(1) P-Value", format("{:.4}", res.ar1_p))
+        |> cockpit_add_kv("Arellano-Bond AR(2) Z", format("{:.4}", res.ar2_stat))
+        |> cockpit_add_kv("Arellano-Bond AR(2) P-Value", format("{:.4}", res.ar2_p))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Sargan Overidentification J", format("{:.4}", res.sargan_stat))
+        |> cockpit_add_kv("Sargan P-Value", format("{:.4}", res.sargan_p))
+        |> cockpit_add_divider();
+
+    let diag_msg = if res.is_valid_model {
+        "/ᐠ˵- ⩊ -˵マ ✧ AR(2) absence confirmed (p >= 0.05). Second-order lag instruments satisfy orthogonality."
+    } else {
+        "≽(◉˕ ◉ ≼マ Significant AR(2) detected (p < 0.05). Deeper lags required as instruments."
+    };
+    let p2 = p |> cockpit_add_line(diag_msg);
+    p2
+}
+
+fn render_arellano_bond_cockpit(res: ArellanoBondResult) {
+    let p = arellano_bond_cockpit(res);
+    show_cockpit(p);
+}

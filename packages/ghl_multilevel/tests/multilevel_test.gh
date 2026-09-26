@@ -1,0 +1,86 @@
+// packages/ghl_multilevel/tests/multilevel_test.gh
+// Integration test suite for ghl_multilevel hierarchical mixed models
+
+println("Running ghl_multilevel integration test suite...");
+
+// 1. Generate Synthetic Clustered Hierarchical Dataset (J = 5 clusters, n_j = 8, N = 40)
+// True parameters: beta0 = 3.0, beta1 = 1.5, u_j in [-2.0, -1.0, 0.0, 1.0, 2.0]
+let n_groups = 5;
+let obs_per_group = 8;
+let total_n = n_groups * obs_per_group;
+
+let group_effects = [-2.0, -1.0, 0.0, 1.0, 2.0];
+let noise = random_normal(total_n, 0.0, 0.15, 99);
+
+let mut y_vec = [];
+let mut x_vec = [];
+let mut g_vec = [];
+
+let mut row_idx = 0;
+for g in 0..n_groups {
+    let fg = 0.0 + g;
+    let u_j = group_effects[g];
+
+    for i in 0..obs_per_group {
+        let fi = 0.0 + i;
+        let x_val = 1.0 + (0.3 * fi);
+        let e_val = noise[row_idx];
+        let y_val = 3.0 + (1.5 * x_val) + u_j + e_val;
+
+        x_vec = append(x_vec, x_val);
+        y_vec = append(y_vec, y_val);
+        g_vec = append(g_vec, fg);
+        row_idx = row_idx + 1;
+    }
+}
+
+if length(y_vec) != 40 {
+    panic("Dataset length should be 40");
+}
+
+// 2. Test Hierarchical Mixed-Effects Model Estimation
+println("Testing Mixed-Effects Model Estimation...");
+let model = fit_mixed_model(y_vec, x_vec, g_vec, n_groups);
+if !model.converged {
+    panic("EM / IGLS algorithm must converge");
+}
+if model.beta0 < 2.0 || model.beta0 > 4.0 {
+    panic("Fixed intercept beta0 must be close to 3.0");
+}
+if model.beta1 < 1.0 || model.beta1 > 2.0 {
+    panic("Fixed slope beta1 must be close to 1.5");
+}
+if model.tau2_intercept <= 0.0 {
+    panic("Between-group variance tau0^2 must be positive");
+}
+if model.sigma2_residual <= 0.0 {
+    panic("Within-group residual variance sigma^2 must be positive");
+}
+if model.icc <= 0.20 {
+    panic("ICC must reflect substantial clustering (ICC > 0.20)");
+}
+render_mixed_model_cockpit(model);
+
+// 3. Test Multilevel Diagnostics
+println("Testing Multilevel Diagnostics...");
+let diag = compute_multilevel_diagnostics(model);
+if !diag.clustering_justified {
+    panic("Hierarchical clustering must be justified");
+}
+if diag.design_effect <= 1.0 {
+    panic("Kish Design Effect must be > 1.0 in clustered data");
+}
+if diag.effective_sample_size >= 40.0 {
+    panic("Effective sample size must be smaller than nominal sample size due to ICC");
+}
+render_multilevel_diagnostics_cockpit(diag);
+
+// 4. Test Complete Multilevel Pipeline Audit
+println("Testing Complete Multilevel Pipeline Audit...");
+let audit = audit_multilevel_pipeline(y_vec, x_vec, g_vec, n_groups);
+if !audit.certified {
+    panic("Multilevel pipeline audit must certify hierarchical model");
+}
+render_multilevel_report(audit);
+
+println("All ghl_multilevel tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");

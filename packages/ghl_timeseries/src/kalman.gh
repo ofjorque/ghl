@@ -1,0 +1,142 @@
+// ghl_timeseries :: Kalman Filter Module (RFC 15 Parte E)
+// 1D Linear Gaussian State-Space Filter & Smoother for noisy sequential observations.
+
+struct KalmanResult {
+    filtered_states: Vector,
+    predicted_states: Vector,
+    kalman_gains: Vector,
+    innovations: Vector,
+    variances: Vector,
+    raw_observations: Vector,
+    pred_mse: f64,
+    filtered_mse: f64,
+    noise_reduction: f64,
+    final_state: f64,
+    final_variance: f64,
+    is_converged: bool
+}
+
+/// Runs a 1D recursive Kalman filter over an observation series.
+/// - `obs`: series of scalar measurements z_t
+/// - `F`: state transition factor (e.g. 1.0 for random walk)
+/// - `H`: observation model factor (e.g. 1.0 for direct measurement)
+/// - `Q`: process noise covariance
+/// - `R`: measurement noise covariance
+/// - `init_x`: initial state prior x_0
+/// - `init_p`: initial state variance P_0
+fn kalman_filter_1d(obs: Vector, F: f64, H: f64, Q: f64, R: f64, init_x: f64, init_p: f64) -> KalmanResult {
+    let n = length(obs);
+    if n == 0 {
+        panic("Cannot run Kalman filter on empty observation series.");
+    }
+
+    let mut x_est = init_x;
+    let mut p_est = init_p;
+
+    let mut filtered = [];
+    let mut predicted = [];
+    let mut gains = [];
+    let mut innovs = [];
+    let mut vars = [];
+
+    let mut ssq_pred = 0.0;
+    let mut ssq_filt = 0.0;
+
+    for i in 0..n {
+        let z = obs[i];
+
+        // 1. Prediction step: project state and error covariance ahead
+        let x_pred = F * x_est;
+        let p_pred = (F * p_est * F) + Q;
+
+        // 2. Innovation: measurement residual and variance
+        let y_innov = z - (H * x_pred);
+        let s_var = (H * p_pred * H) + R;
+
+        // 3. Kalman Gain: optimal weight given to measurement vs prior
+        let k_gain = if s_var > 0.0 { (p_pred * H) / s_var } else { 0.0 };
+
+        // 4. Update step: incorporate measurement
+        x_est = x_pred + (k_gain * y_innov);
+        p_est = (1.0 - (k_gain * H)) * p_pred;
+
+        filtered = append(filtered, x_est);
+        predicted = append(predicted, x_pred);
+        gains = append(gains, k_gain);
+        innovs = append(innovs, y_innov);
+        vars = append(vars, p_est);
+
+        let err_pred = z - x_pred;
+        let err_filt = z - x_est;
+        ssq_pred = ssq_pred + (err_pred * err_pred);
+        ssq_filt = ssq_filt + (err_filt * err_filt);
+    }
+
+    let n_f = n;
+    let pred_mse = ssq_pred / n_f;
+    let filt_mse = ssq_filt / n_f;
+
+    let var_obs = var(obs);
+    let var_filt = var(filtered);
+    let noise_reduction = if var_obs > 0.0 {
+        let ratio = 1.0 - (var_filt / var_obs);
+        if ratio < 0.0 { 0.0 } else { ratio }
+    } else {
+        0.0
+    };
+
+    // Convergence check: steady-state reached if last variance change is small
+    let last_gain = gains[n - 1];
+    let is_conv = p_est < (R + Q) && last_gain > 0.0 && last_gain < 1.0;
+
+    KalmanResult {
+        filtered_states: filtered,
+        predicted_states: predicted,
+        kalman_gains: gains,
+        innovations: innovs,
+        variances: vars,
+        raw_observations: obs,
+        pred_mse: pred_mse,
+        filtered_mse: filt_mse,
+        noise_reduction: noise_reduction,
+        final_state: x_est,
+        final_variance: p_est,
+        is_converged: is_conv
+    }
+}
+
+/// Builds visual Cockpit Deck panel for Kalman Filter diagnostics.
+fn kalman_cockpit(res: KalmanResult) {
+    let badge = if res.is_converged {
+        "/ᐠ˵- ⩊ -˵マ ✧ FILTER CONVERGED"
+    } else {
+        "≽(◉˕ ◉ ≼マ HIGH UNCERTAINTY"
+    };
+
+    let n = length(res.raw_observations);
+    let last_k = res.kalman_gains[n - 1];
+
+    let p = cockpit("GHL TimeSeries: 1D State-Space Kalman Filter", badge)
+        |> cockpit_add_kv("Model Architecture", "Linear Gaussian State-Space Filter (1D)")
+        |> cockpit_add_kv("Observations (N)", format("{}", n))
+        |> cockpit_add_kv("Final State Estimate", format("{:.4}", res.final_state))
+        |> cockpit_add_kv("Final Error Variance", format("{:.6}", res.final_variance))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Prediction MSE", format("{:.4}", res.pred_mse))
+        |> cockpit_add_kv("Filtered MSE", format("{:.4}", res.filtered_mse))
+        |> cockpit_add_kv("Noise Reduction Ratio", format("{:.2}%", res.noise_reduction * 100.0))
+        |> cockpit_add_kv("Steady-State Kalman Gain", format("{:.4}", last_k))
+        |> cockpit_add_divider();
+
+    if res.is_converged {
+        p |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ STATE TRACKING STABILIZED: Kalman gain reached steady state.")
+    } else {
+        p |> cockpit_add_line("≽(◉˕ ◉ ≼マ ESTIMATION UNCERTAINTY: Innovation variance remains elevated.")
+    }
+}
+
+/// Renders visual Cockpit Deck panel for Kalman Filter diagnostics to terminal.
+fn render_kalman_cockpit(res: KalmanResult) {
+    let p = kalman_cockpit(res);
+    show_cockpit(p);
+}

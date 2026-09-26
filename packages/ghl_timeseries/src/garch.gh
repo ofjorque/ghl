@@ -1,0 +1,156 @@
+// ghl_timeseries :: GARCH Volatility Modeling Module (RFC 15 Parte E)
+// Generalized Autoregressive Conditional Heteroskedasticity GARCH(1, 1) for financial returns and risk clustering.
+
+struct GarchResult {
+    mu: f64,
+    omega: f64,
+    alpha: f64,
+    beta: f64,
+    persistence: f64,
+    long_run_vol: f64,
+    half_life: f64,
+    log_likelihood: f64,
+    conditional_vols: Vector,
+    standardized_resids: Vector,
+    is_stationary: bool
+}
+
+/// Fits a GARCH(1, 1) model with variance targeting.
+/// Return equation:   r_t = μ + ε_t
+/// Variance equation: σ_t² = ω + α ε_{t-1}² + β σ_{t-1}²
+fn fit_garch(returns: Vector) -> GarchResult {
+    let n = length(returns);
+    if n < 10 {
+        panic("GARCH modeling requires at least 10 return observations.");
+    }
+
+    let mu = mean(returns);
+    let sample_var = var(returns);
+
+    if sample_var <= 0.0 {
+        panic("Return series exhibits zero variance; GARCH estimation degenerate.");
+    }
+
+    // Compute demeaned innovations ε_t and squared innovations ε_t²
+    let mut eps = [];
+    let mut eps2 = [];
+    for i in 0..n {
+        let e = returns[i] - mu;
+        eps = append(eps, e);
+        eps2 = append(eps2, e * e);
+    }
+
+    // Estimate persistence from autocorrelation of squared returns
+    let mean_eps2 = mean(eps2);
+    let mut num_cov = 0.0;
+    let mut den_var = 0.0;
+    for t in 1..n {
+        let d0 = eps2[t] - mean_eps2;
+        let d1 = eps2[t - 1] - mean_eps2;
+        num_cov = num_cov + (d0 * d1);
+        den_var = den_var + (d1 * d1);
+    }
+
+    let rho_sq = if den_var > 0.0 { num_cov / den_var } else { 0.0 };
+
+    // Calibrate α and β with stability bounds
+    let mut persistence = rho_sq;
+    if persistence < 0.10 {
+        persistence = 0.75;
+    } else if persistence >= 0.999 {
+        persistence = 0.98;
+    }
+
+    // Stylized empirical financial ratio: α ≈ 15% of persistence, β ≈ 85%
+    let alpha = 0.15 * persistence;
+    let beta = 0.85 * persistence;
+
+    // Variance targeting: ω = S² * (1 - α - β)
+    let omega = sample_var * (1.0 - alpha - beta);
+
+    // Filter conditional variances σ_t² and volatilities σ_t
+    let mut cond_vols = [];
+    let mut std_resids = [];
+    let mut log_lik = 0.0;
+    let pi_2 = 6.283185307179586;
+
+    let mut sig2_t = sample_var;
+
+    for t in 0..n {
+        if t > 0 {
+            let prev_e2 = eps2[t - 1];
+            sig2_t = omega + (alpha * prev_e2) + (beta * sig2_t);
+        }
+
+        let sig_t = sqrt(sig2_t);
+        cond_vols = append(cond_vols, sig_t);
+
+        let z_t = if sig_t > 0.0 { eps[t] / sig_t } else { 0.0 };
+        std_resids = append(std_resids, z_t);
+
+        // Gaussian log-likelihood term: -0.5 * (ln(2π) + ln(σ²) + ε²/σ²)
+        let term = -0.5 * (ln(pi_2) + ln(sig2_t) + (z_t * z_t));
+        log_lik = log_lik + term;
+    }
+
+    let is_stat = (alpha + beta) < 1.0;
+    let long_run_v = if is_stat && (1.0 - alpha - beta) > 0.0 {
+        sqrt(omega / (1.0 - alpha - beta))
+    } else {
+        sqrt(sample_var)
+    };
+
+    let p_sum = alpha + beta;
+    let half_life = if p_sum > 0.0 && p_sum < 0.9999 {
+        ln(0.5) / ln(p_sum)
+    } else {
+        999.0
+    };
+
+    GarchResult {
+        mu: mu,
+        omega: omega,
+        alpha: alpha,
+        beta: beta,
+        persistence: p_sum,
+        long_run_vol: long_run_v,
+        half_life: half_life,
+        log_likelihood: log_lik,
+        conditional_vols: cond_vols,
+        standardized_resids: std_resids,
+        is_stationary: is_stat
+    }
+}
+
+/// Builds visual Cockpit Deck panel for GARCH volatility diagnostics.
+fn garch_cockpit(res: GarchResult) {
+    let badge = if res.is_stationary {
+        "/ᐠ˵- ⩊ -˵マ ✧ VOLATILITY CLUSTERING IDENTIFIED"
+    } else {
+        "≽(◉˕ ◉ ≼マ INTEGRATED GARCH (IGARCH) / EXPLOSIVE"
+    };
+
+    let p = cockpit("GHL TimeSeries: GARCH(1, 1) Volatility Model", badge)
+        |> cockpit_add_kv("Mean Return (μ)", format("{:.6}", res.mu))
+        |> cockpit_add_kv("Variance Constant (ω)", format("{:.8}", res.omega))
+        |> cockpit_add_kv("ARCH Effect (α)", format("{:.4} (reaction to news/shocks)", res.alpha))
+        |> cockpit_add_kv("GARCH Effect (β)", format("{:.4} (volatility memory/persistence)", res.beta))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Persistence (α + β)", format("{:.4}", res.persistence))
+        |> cockpit_add_kv("Shock Half-Life", format("{:.1} periods", res.half_life))
+        |> cockpit_add_kv("Unconditional Volatility", format("{:.4} ({:.2}% annualized)", res.long_run_vol, res.long_run_vol * 15.8745))
+        |> cockpit_add_kv("Log-Likelihood", format("{:.2}", res.log_likelihood))
+        |> cockpit_add_divider();
+
+    if res.is_stationary {
+        p |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ MEAN-REVERTING VOLATILITY: Shocks decay asymptotically toward long-run level.")
+    } else {
+        p |> cockpit_add_line("≽(◉˕ ◉ ≼マ NON-DECAYING VOLATILITY: Infinite memory detected in variance process.")
+    }
+}
+
+/// Renders visual Cockpit Deck panel for GARCH volatility diagnostics to terminal.
+fn render_garch_cockpit(res: GarchResult) {
+    let p = garch_cockpit(res);
+    show_cockpit(p);
+}

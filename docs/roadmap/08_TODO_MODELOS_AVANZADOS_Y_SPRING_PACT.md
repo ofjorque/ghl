@@ -97,11 +97,11 @@ Desbloqueo de primitivas base para que la librería estándar crezca en GHL puro
     5. Descomposición de varianza: `anova(formula, df)`, `manova` (contrastes ortogonales y tests F).
 - [x] **Ecosistema de Paquetes Externos (Desarrollados en GHL vía `ghl new` y distribuidos con `ghl.toml`):**
   - *Principio:* El repositorio del compilador no se sobrecarga con modelos hiperespecializados; estos se desarrollan como paquetes comunitarios o plugins en código GHL puro:
-    - `ghl-causal` (`packages/ghl_causal`): Inferencia causal insignia en GHL puro (DiD clásico 2x2, test diagnóstico de pre-tendencias paralelas y Event Study dinámico con `ghl test`).
-    - `ghl-timeseries`: Series temporales avanzadas (Filtro de Kalman, modelos ARIMA/SARIMA, volatilidad GARCH, modelos VAR).
-    - `ghl-survival`: Análisis de supervivencia y eventos temporales (Curvas Kaplan-Meier, regresión de riesgos proporcionales de Cox).
-    - `ghl-panel`: Modelos de panel dinámico (Arellano-Bond, Blundell-Bond GMM).
-    - `ghl-multilevel`: Modelos jerárquicos multinivel de efectos mixtos (`lme4`-style).
+    - [x] `ghl-causal` (`packages/ghl_causal`): Inferencia causal insignia en GHL puro (DiD clásico 2x2, test diagnóstico de pre-tendencias paralelas y Event Study dinámico con `ghl test`).
+    - [x] `ghl-timeseries` (`packages/ghl_timeseries`): Series temporales avanzadas (Filtro de Kalman 1D de espacio de estados, modelos ARIMA/SARIMA con forecasting, volatilidad GARCH(1,1), telemetría Cockpit y test suites en GHL puro).
+    - [x] `ghl-survival` (`packages/ghl_survival`): Análisis de supervivencia y eventos temporales (Curvas Kaplan-Meier con Greenwood CI, test de hipótesis Log-Rank de 2 muestras, regresión de Cox con Newton-Raphson y telemetría Cockpit).
+    - [x] `ghl-panel` (`packages/ghl_panel`): Modelos de panel dinámico (Arellano-Bond Difference GMM, Blundell-Bond System GMM, tests de correlación serial AR(1)/AR(2) clusterizados, test de Sargan y telemetría Cockpit).
+    - [x] `ghl-multilevel` (`packages/ghl_multilevel`): Modelos jerárquicos multinivel de efectos mixtos (`lme4`-style con descomposición de varianza REML/EM, Intraclass Correlation ICC, efectos de diseño de Kish y BLUPs empíricos de Bayes).
 
 ---
 
