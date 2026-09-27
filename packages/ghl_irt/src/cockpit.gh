@@ -282,4 +282,57 @@ fn render_bfactor_cockpit(audit: BfactorAudit) {
     show_cockpit(p);
 }
 
+// =========================================================================
+// 8. Multigroup LRT DIF Telemetry Deck (Uniform & Non-Uniform Bias)
+// =========================================================================
+
+fn render_lrt_dif_cockpit(audit: LrtDifAudit) {
+    let mg = audit.model;
+    let badge = if audit.scale_invariance_certified {
+        "/ᐠ˵- ⩊ -˵マ ✧ MEASUREMENT INVARIANCE CONFIRMED"
+    } else {
+        if audit.n_flagged_non_uniform > 0 {
+            "≽(◉˕ ◉ ≼マ SEVERE NON-UNIFORM DIF DETECTED"
+        } else {
+            "/ᐠ ·•᷄ ˕ •᷅マ UNIFORM DIF DETECTED (INTERCEPT SHIFT)"
+        }
+    };
+
+    let mut p = cockpit("GHL Psychometrics: Multigroup Likelihood Ratio Test (LRT) DIF", badge)
+        |> cockpit_add_kv("Methodology", "Thissen, Steinberg & Wainer (1993) Hierarchical LRT")
+        |> cockpit_add_kv("Reference Group Count", format("{}", mg.n_reference))
+        |> cockpit_add_kv("Focal Group Count", format("{}", mg.n_focal))
+        |> cockpit_add_kv("Focal Group Impact (μ_foc)", format("{:.4}", mg.focal_mean))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Uniform DIF Items (Δd, df=1)", format("{}", audit.n_flagged_uniform))
+        |> cockpit_add_kv("Non-Uniform DIF Items (Δa, df=1)", format("{}", audit.n_flagged_non_uniform))
+        |> cockpit_add_kv("Total Flagged Items (Omnibus, df=2)", format("{}", audit.n_flagged_omnibus))
+        |> cockpit_add_divider();
+
+    if audit.n_flagged_omnibus > 0 {
+        for j in 0..length(audit.items) {
+            let it = audit.items[j];
+            if it.is_flagged {
+                let msg = it.dif_type + " DIF (Favors " + it.favored_group + ", LRT=" + format("{:.2}", it.lrt_omnibus) + ", p=" + format("{:.4}", it.p_omnibus) + ")";
+                p = p |> cockpit_add_kv("Item " + format("{}", it.item_index), msg);
+            }
+        }
+        p = p |> cockpit_add_divider();
+    }
+
+    let summary_msg = if audit.scale_invariance_certified {
+        "/ᐠ˵- ⩊ -˵マ ✧ Item parameters are invariant across demographic groups. Scores are fair and unbiased."
+    } else {
+        if audit.n_flagged_non_uniform > 0 {
+            "≽(◉˕ ◉ ≼マ Items exhibit non-parallel ICC curves. Examine item discrimination across groups."
+        } else {
+            "/ᐠ ·•᷄ ˕ •᷅マ Items exhibit uniform difficulty offsets. Consider split-item equating or revision."
+        }
+    };
+
+    p = p |> cockpit_add_line(summary_msg);
+    show_cockpit(p);
+}
+
+
 

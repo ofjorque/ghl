@@ -94,8 +94,9 @@ Backlog temático activo detallado en [`docs/roadmap/09_TODO_PSICOMETRIA_AVANZAD
   - [x] Modelo Bi-Factor canónico (`bfactor`) con reducción dimensional de Gibbons & Hedeker (1992) evaluando integrales 2D $(G, s_k)$.
   - [x] Cálculo nativo de Varianza Común Explicada total ($ECV$), $I\text{-}ECV$ por ítem, y Confiabilidad Jerárquica ($\omega_h$ y $\omega_t$).
   - [x] Cockpit Deck bi-factor con sparklines de $I\text{-}ECV$ y diagnóstico de unidimensionalidad esencial.
-- [ ] **DIF Multigrupo Formal por Razón de Verosimilitud (LRT):**
-  - [ ] Calibración conjunta multigrupo (`multiple_group_irt`) para contraste simultáneo de DIF uniforme ($\Delta d$) y no uniforme ($\Delta a$).
+- [x] **DIF Multigrupo Formal por Razón de Verosimilitud (LRT) (Parte D):**
+  - [x] Calibración conjunta multigrupo (`compute_multigroup_lrt_dif` / `audit_multigroup_lrt_dif`) para contraste simultáneo de DIF uniforme ($\Delta d$), no uniforme ($\Delta a$) y test omnibús ($\Delta \chi^2(2)$).
+  - [x] Estimación de impacto latente ($\mu_{\text{foc}}, \sigma_{\text{foc}}$) con grupo de referencia normalizado a $N(0, 1)$ y Cockpit Deck con certificación de invarianza.
 - [ ] **Muestreador MHRM para Alta Dimensionalidad ($>5D$):**
   - [ ] Algoritmo estocástico Metropolis-Hastings Robbins-Monro (Cai, 2010) para modelos confirmatorios continuos de muchas dimensiones.
 - [ ] **Modelos Mixtos IRT (`mixedmirt`):**

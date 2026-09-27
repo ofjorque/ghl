@@ -199,6 +199,9 @@ impl VectorData {
     /// silently shadowed that Deref-provided one at every existing call site instead of
     /// just the ones meant to use this.
     pub fn value_at(&self, index: usize) -> Option<Value> {
+        if let Some(mat) = self.materialized.get() {
+            return mat.get(index).cloned();
+        }
         let av = self.column.get(index).ok()?;
         Some(polars_bridge::any_value_to_value(&av, VECTOR_COL, index, &self.na_reasons))
     }

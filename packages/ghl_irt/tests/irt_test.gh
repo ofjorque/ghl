@@ -435,7 +435,50 @@ if bfactor_audit.model.omega_hierarchical > bfactor_audit.model.omega_total {
     panic("Omega Hierarchical cannot exceed Omega Total");
 }
 
+// 20. Test Multigroup Likelihood Ratio Test (LRT) DIF
+println("Testing Multigroup Likelihood Ratio Test (LRT) DIF...");
+let mg_audit = audit_multigroup_lrt_dif(
+    responses,
+    group_demo,
+    n_persons,
+    n_items
+);
+if mg_audit.model.n_reference + mg_audit.model.n_focal != n_persons {
+    panic("Multigroup examinee count mismatch");
+}
+if length(mg_audit.items) != n_items {
+    panic("LRT DIF items count mismatch");
+}
+
+// Test detection of induced severe DIF in candidate item
+let mut dif_induced_resp = [];
+for i in 0..n_persons {
+    for j in 0..n_items {
+        let base_val = responses[(i * n_items) + j];
+        // Introduce massive bias on item 0: Focal group systematically fails item 0
+        let val = if j == 0 && group_demo[i] > 0.5 { 0.0 } else { base_val };
+        dif_induced_resp = append(dif_induced_resp, val);
+    }
+}
+let mg_biased_audit = compute_multigroup_lrt_dif(
+    dif_induced_resp,
+    group_demo,
+    n_persons,
+    n_items
+);
+if mg_biased_audit.n_flagged_omnibus == 0 {
+    panic("Multigroup LRT DIF must flag induced biased item");
+}
+let biased_item0 = mg_biased_audit.items[0];
+if !biased_item0.is_flagged {
+    panic("Item 1 must be flagged by LRT DIF test");
+}
+if biased_item0.favored_group != "Reference" {
+    panic("Biased item must favor Reference group");
+}
+
 println("All extended ghl_irt tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
+
 
 
 

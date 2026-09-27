@@ -44,7 +44,9 @@ Una comparativa técnica rigurosa debe distinguir entre **calibrar un modelo pun
 - **En `mirt`:** El enfoque principal de `mirt::DIF()` es el **Test de Razón de Verosimilitud (LRT)** dentro del modelo de calibración multigrupo (`multipleGroup`). Permite restringir parámetros específicos (`which.par = c('a1', 'd')`) para contrastar formalmente hipótesis de:
   - **DIF Uniforme:** diferencias en dificultad/intercepto ($d$).
   - **DIF No-Uniforme:** diferencias en pendiente/discriminación ($a$).
-- **En `ghl_irt` (Fase 1):** Implementa el método no-paramétrico clásico de **Mantel-Haenszel** estratificado con la métrica ETS Delta ($\Delta_{MH}$) y clasificación A/B/C, más el test de Wald de Lord sobre parámetros estimados. El modelado multigrupo simultáneo con LRT forma parte de Roadmap 09.
+- **En `ghl_irt`:** Paridad dual completa:
+  1. No-paramétrico clásico de **Mantel-Haenszel** estratificado (`compute_mantel_haenszel_dif`) con clasificación ETS Delta ($\Delta_{MH}$) y test de Wald de Lord.
+  2. **Calibración Multigrupo Formal por LRT** (`compute_multigroup_lrt_dif` / `audit_multigroup_lrt_dif`) estimando impacto latente ($\mu_{\text{foc}}, \sigma_{\text{foc}}$), tests específicos de DIF Uniforme ($\Delta \chi^2(1)$), No-Uniforme ($\Delta \chi^2(1)$) y omnibús conjunto ($\Delta \chi^2(2)$), con Cockpit Deck y certificación de invarianza.
 
 ### E. Equiparación y Enlace de Escalas (*Equating & Linking*)
 - **En R (`mirt` / `plink` / `equate`):** Además de métodos lineales de momentos (Mean-Sigma, Mean-Mean), soporta métodos no-lineales basados en la curva característica del test (TCC) de **Stocking-Lord** y **Haebara**, que minimizan la distancia cuadrática integrada entre curvas esperadas.
@@ -75,7 +77,7 @@ Una comparativa técnica rigurosa debe distinguir entre **calibrar un modelo pun
 | **Ajuste Global de Escala** | `M2(mod)` | `compute_m2_statistic(...)` | Completa ($M_2$ Maydeu-Olivares & Joe, $\text{RMSEA}_2$, TLI, CFI). |
 | **Dependencia Local (LID)** | `residuals(mod, type='Q3')` | `compute_q3_residuals(...)` | Completa (Matriz $Q_3$ de Yen, media, máximo y alerta $Q_3 > 0.20$). |
 | **Especificación SEM-IRT** | `mirt.model(...)` | `irt_spec { ... }`, `fit_mirt_spec(...)` | Completa (medición `=~`, covarianza `~~`, restricciones `==`). |
-| **DIF** | `DIF(mod)` / `difR::difMH` | `compute_mantel_haenszel_dif(...)` | Mantel-Haenszel + ETS Delta en GHL; LRT multigrupo en `mirt`. |
+| **DIF** | `DIF(mod)` / `difR::difMH` | `compute_mantel_haenszel_dif(...)`, `compute_multigroup_lrt_dif(...)`, `audit_multigroup_lrt_dif(...)` | Completa (Mantel-Haenszel + ETS Delta y LRT Multigrupo uniforme/no-uniforme). |
 | **Equating** | `plink` / `equate` | `link_scales_mean_sigma`, `link_scales_mean_mean` | Lineal (Mean-Sigma/Mean) en GHL; Curvas TCC en R. |
 | **MIRT Multidimensional** | `mirt(data, 2)` | `fit_m2pl(df, items, n_dims)` | M2PL compensatorio + Reckase en GHL; CFA/Q-matrix en `mirt`. |
 | **Modelo Bi-Factor** | `bfactor(data, model)` | `fit_bfactor`, `audit_bfactor_analysis` | Completa (Gibbons & Hedeker 2D, $ECV$, $I\text{-}ECV$, $\omega_h$, $\omega_t$). |

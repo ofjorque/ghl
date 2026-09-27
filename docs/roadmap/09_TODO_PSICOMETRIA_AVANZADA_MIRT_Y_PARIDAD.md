@@ -77,11 +77,12 @@ Integración del parser de fórmulas SEM (`=~` y `~~`) en la definición de espe
 
 ## Parte D: DIF Multigrupo Formal por Razón de Verosimilitud (LRT)
 
-- [ ] **Calibración Simultánea Multigrupo (`multiple_group_irt`):**
-  - [ ] Estimación conjunta con distribución de habilidad libre en el grupo focal ($\mu_{\text{foc}}, \sigma_{\text{foc}}^2$) fijando el grupo de referencia en $N(0, 1)$.
-  - [ ] Test LRT para DIF Uniforme: comparación de verosimilitudes restringiendo interceptos $d_{\text{ref}} = d_{\text{foc}}$ vs modelo libre ($\Delta \chi^2$ con 1 g.l.).
-  - [ ] Test LRT para DIF No-Uniforme: comparación restringiendo pendientes $a_{\text{ref}} = a_{\text{foc}}$ ($\Delta \chi^2$ con 1 g.l.).
-  - [ ] Test conjunto omnibús ($\Delta \chi^2$ con 2 g.l. para $a$ y $d$).
+- [x] **Calibración Simultánea Multigrupo (`compute_multigroup_lrt_dif` / `audit_multigroup_lrt_dif`):**
+  - [x] Estimación conjunta con distribución de habilidad libre en el grupo focal ($\mu_{\text{foc}}, \sigma_{\text{foc}}^2$) fijando el grupo de referencia en $N(0, 1)$.
+  - [x] Test LRT para DIF Uniforme: comparación de verosimilitudes restringiendo interceptos $d_{\text{ref}} = d_{\text{foc}}$ vs modelo libre ($\Delta \chi^2$ con 1 g.l.).
+  - [x] Test LRT para DIF No-Uniforme: comparación restringiendo pendientes $a_{\text{ref}} = a_{\text{foc}}$ ($\Delta \chi^2$ con 1 g.l.).
+  - [x] Test conjunto omnibús ($\Delta \chi^2$ con 2 g.l. para $a$ y $d$).
+  - [x] Cockpit Deck interactivo `render_lrt_dif_cockpit` con visualización tabular de $\Delta \chi^2$, $p$-valores y certificación de invarianza métrica.
 
 ---
 

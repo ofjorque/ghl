@@ -166,5 +166,17 @@ fn audit_bfactor_analysis(
     audit
 }
 
+fn audit_multigroup_lrt_dif(
+    responses: Vector,
+    group_membership: Vector,
+    n_persons: i64,
+    n_items: i64
+) -> LrtDifAudit {
+    let audit = compute_multigroup_lrt_dif(responses, group_membership, n_persons, n_items);
+    render_lrt_dif_cockpit(audit);
+    audit
+}
+
+
 
 
