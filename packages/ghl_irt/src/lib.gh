@@ -188,6 +188,21 @@ fn audit_mhrm_analysis(
     audit
 }
 
+fn audit_mixed_irt_analysis(
+    responses: Vector,
+    person_covariates: Vector,
+    item_q_matrix: Vector,
+    n_persons: i64,
+    n_items: i64,
+    n_covariates: i64,
+    n_features: i64
+) -> MixedIrtAudit {
+    let audit = audit_mixed_irt(responses, person_covariates, item_q_matrix, n_persons, n_items, n_covariates, n_features);
+    render_mixed_irt_cockpit(audit);
+    audit
+}
+
+
 
 
 

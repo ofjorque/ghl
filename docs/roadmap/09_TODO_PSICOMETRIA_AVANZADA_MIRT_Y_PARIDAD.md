@@ -100,7 +100,9 @@ Integración del parser de fórmulas SEM (`=~` y `~~`) en la definición de espe
 
 ## Parte F: Modelos Mixtos IRT (`mixedmirt`)
 
-- [ ] **Incorporación de Covariables y Efectos Aleatorios:**
-  - [ ] Predicción de dificultad del ítem a partir de propiedades de diseño (LLTM - *Linear Logistic Test Model* de Fischer):
-    $$b_j = \sum_{p=1}^P \beta_p Q_{jp} + c$$
-  - [ ] Incorporación de predictores a nivel de examinado (género, nivel educativo, escuela) en la distribución latente de habilidad (*Latent Regression IRT*).
+- [x] **Incorporación de Covariables y Efectos Aleatorios:**
+  - [x] Predicción de dificultad del ítem a partir de propiedades de diseño (LLTM - *Linear Logistic Test Model* de Fischer):
+    $$b_j = \sum_{p=1}^P \beta_p Q_{jp} + c_0$$
+  - [x] Incorporación de predictores a nivel de examinado (género, nivel educativo, escuela) en la distribución latente de habilidad (*Latent Regression IRT*), eliminando el sesgo de atenuación de dos etapas.
+  - [x] Cálculo automático de $R^2_{\text{LLTM}}$ (proporción de varianza de dificultad explicada por las operaciones cognitivas) y errores estándar para pesos $\beta_p$ y $\gamma_k$.
+  - [x] Cockpit Deck interactivo `render_mixed_irt_cockpit` con tablas formateadas de coeficientes, significancia estadística y certificación de validez de constructo.

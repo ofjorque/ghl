@@ -101,8 +101,10 @@ Backlog temático activo detallado en [`docs/roadmap/09_TODO_PSICOMETRIA_AVANZAD
   - [x] Algoritmo estocástico Metropolis-Hastings Robbins-Monro (Cai, 2010) con propuesta adaptativa, decaimiento de ganancia $\gamma_k = \gamma_0 / k^{0.75}$ y suavizado asintótico de Polyak-Ruppert.
   - [x] Reducción de complejidad: evita la explosión combinatoria cartesiana $15^D$ ($11.39\text{M}$ nodos para $D=6$) sustituyéndola por imputación estocástica $\mathcal{O}(D)$.
   - [x] Cockpit Deck interactivo `render_mhrm_cockpit` con telemetría de tasa de aceptación, sparklines de $MDISC$ y kaomojis de certificación.
-- [ ] **Modelos Mixtos IRT (`mixedmirt`):**
-  - [ ] Modelos lineales logísticos de test (LLTM de Fischer) y regresión latente con covariables de examinado/ítem.
+- [x] **Modelos Mixtos IRT (`mixedmirt`) (Parte F):**
+  - [x] Modelo Logístico Lineal de Test (LLTM de Fischer) para predecir dificultades a partir de la matriz de diseño de operaciones cognitivas ($\mathbf{Q}$).
+  - [x] Regresión latente conjunta (*Latent Regression IRT*) con covariables de examinado ($\mathbf{X}$), eliminando el sesgo de atenuación de dos etapas.
+  - [x] Cockpit Deck interactivo `render_mixed_irt_cockpit` con tabla de coeficientes $\beta_p$ y $\gamma_k$, $R^2$ cognitivo y certificación de validez de constructo.
 
 ---
 

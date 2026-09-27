@@ -82,6 +82,7 @@ Una comparativa técnica rigurosa debe distinguir entre **calibrar un modelo pun
 | **MIRT Multidimensional** | `mirt(data, 2)` | `fit_m2pl(df, items, n_dims)` | M2PL compensatorio + Reckase en GHL; CFA/Q-matrix en `mirt`. |
 | **Modelo Bi-Factor** | `bfactor(data, model)` | `fit_bfactor`, `audit_bfactor_analysis` | Completa (Gibbons & Hedeker 2D, $ECV$, $I\text{-}ECV$, $\omega_h$, $\omega_t$). |
 | **MHRM Alta Dimensionalidad** | `mirt(data, model, method = 'MHRM')` | `fit_mhrm(...)`, `audit_mhrm_analysis(...)` | Completa (Metropolis-Hastings Robbins-Monro, propuesta adaptativa, ganancia decreciente, Polyak-Ruppert). |
+| **Modelos Mixtos IRT** | `mixedmirt(...)` | `fit_mixed_irt(...)`, `audit_mixed_irt_analysis(...)` | Completa (LLTM de Fischer con matriz Q de diseño cognitivo y Regresión Latente con covariables de examinado). |
 | **Test Adaptativo (CAT)** | `mirtCAT` / `catR` | `simulate_cat`, `select_next_item_mfi` | MFI + parada SEM + simulación con sparklines. |
 
 ---

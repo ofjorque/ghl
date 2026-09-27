@@ -516,7 +516,72 @@ for j in 0..mhrm_n_items {
     }
 }
 
+// 22. Test Mixed-Effects IRT (LLTM & Latent Regression)
+println("Testing Mixed-Effects IRT (LLTM & Latent Regression)...");
+let mixed_n_items = 6;
+let mixed_n_features = 2;
+let mixed_n_covs = 1;
+
+let mixed_item_q = [
+    1.0, 0.0,
+    1.0, 1.0,
+    0.0, 1.0,
+    0.0, 1.0,
+    1.0, 0.0,
+    0.0, 1.0
+];
+
+let mut mixed_person_covs = [];
+for i in 0..n_persons {
+    let grp = if i >= 15 { 1.0 } else { 0.0 };
+    mixed_person_covs = append(mixed_person_covs, grp);
+}
+
+let mut mixed_responses = [];
+for i in 0..n_persons {
+    let grp = mixed_person_covs[i];
+    let theta_i = -1.0 + (grp * 0.75) + ((0.0 + i) * 0.07);
+
+    for j in 0..mixed_n_items {
+        let q1 = mixed_item_q[(j * mixed_n_features) + 0];
+        let q2 = mixed_item_q[(j * mixed_n_features) + 1];
+        let b_j = -0.50 + (q1 * 0.80) + (q2 * 0.60);
+
+        let z = theta_i - b_j;
+        let p_val = 1.0 / (1.0 + exp(if z < -20.0 { 20.0 } else { if z > 20.0 { -20.0 } else { -z } }));
+        let resp = if p_val > 0.50 { 1.0 } else { 0.0 };
+        mixed_responses = append(mixed_responses, resp);
+    }
+}
+
+let mixed_audit = audit_mixed_irt_analysis(
+    mixed_responses,
+    mixed_person_covs,
+    mixed_item_q,
+    n_persons,
+    mixed_n_items,
+    mixed_n_covs,
+    mixed_n_features
+);
+
+if !mixed_audit.model.converged {
+    panic("Mixed IRT model must converge");
+}
+if length(mixed_audit.model.features) != mixed_n_features {
+    panic("LLTM features count mismatch");
+}
+if length(mixed_audit.model.covariates) != mixed_n_covs {
+    panic("Person covariates count mismatch");
+}
+if mixed_audit.model.r_squared_lltm < 0.0 || mixed_audit.model.r_squared_lltm > 1.0 {
+    panic("LLTM R-squared must be bounded in [0, 1]");
+}
+if !mixed_audit.cognitive_validity_certified {
+    panic("Cognitive construct validity must be certified when R2 >= 0.50");
+}
+
 println("All extended ghl_irt tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
+
 
 
 
