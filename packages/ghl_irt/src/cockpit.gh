@@ -334,5 +334,46 @@ fn render_lrt_dif_cockpit(audit: LrtDifAudit) {
     show_cockpit(p);
 }
 
+// =========================================================================
+// 9. Metropolis-Hastings Robbins-Monro (MHRM) High-Dimensional Deck
+// =========================================================================
+
+fn render_mhrm_cockpit(audit: MhrmAudit) {
+    let m = audit.model;
+    let badge = if audit.stochastic_efficiency_certified {
+        "/ᐠ˵- ⩊ -˵マ ✧ HIGH-DIMENSIONAL STOCHASTIC CONVERGENCE"
+    } else {
+        "≽(◉˕ ◉ ≼マ STOCHASTIC CHAIN MIXING SUB-OPTIMAL"
+    };
+
+    let mut mdisc_vals = [];
+    for j in 0..length(m.items) {
+        let it = m.items[j];
+        mdisc_vals = append(mdisc_vals, it.mdisc);
+    }
+
+    let p = cockpit("GHL Psychometrics: Metropolis-Hastings Robbins-Monro (MHRM)", badge)
+        |> cockpit_add_kv("Estimation Method", "Stochastic Approximation MHRM (Cai, 2010)")
+        |> cockpit_add_kv("Latent Dimensions (D)", format("{}", m.n_dimensions))
+        |> cockpit_add_kv("Manifest Items (J)", format("{}", m.n_items))
+        |> cockpit_add_kv("Sample Size (N)", format("{}", m.n_persons))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Quadrature Nodes Avoided", format("{:.0} (15^D)", audit.quadrature_nodes_avoided))
+        |> cockpit_add_kv("Total Stochastic Cycles", format("{}", m.total_cycles))
+        |> cockpit_add_kv("Polyak-Ruppert Cycles", format("{}", m.stage3_polyak_cycles))
+        |> cockpit_add_kv("M-H Proposal Acceptance", format("{:.1}%", m.acceptance_rate * 100.0))
+        |> cockpit_add_kv("Adaptive Proposal SD (σ)", format("{:.3}", m.proposal_sd))
+        |> cockpit_add_kv("Final R-M Gain (γ)", format("{:.4}", m.final_gain))
+        |> cockpit_add_kv("Marginal Log-Likelihood", format("{:.2}", m.log_likelihood))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Multidimensional Discrimination (MDISC) Profile:")
+        |> cockpit_add_line(sparkline(mdisc_vals))
+        |> cockpit_add_divider()
+        |> cockpit_add_line(audit.recommendation);
+
+    show_cockpit(p);
+}
+
+
 
 

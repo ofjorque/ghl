@@ -97,8 +97,10 @@ Backlog temático activo detallado en [`docs/roadmap/09_TODO_PSICOMETRIA_AVANZAD
 - [x] **DIF Multigrupo Formal por Razón de Verosimilitud (LRT) (Parte D):**
   - [x] Calibración conjunta multigrupo (`compute_multigroup_lrt_dif` / `audit_multigroup_lrt_dif`) para contraste simultáneo de DIF uniforme ($\Delta d$), no uniforme ($\Delta a$) y test omnibús ($\Delta \chi^2(2)$).
   - [x] Estimación de impacto latente ($\mu_{\text{foc}}, \sigma_{\text{foc}}$) con grupo de referencia normalizado a $N(0, 1)$ y Cockpit Deck con certificación de invarianza.
-- [ ] **Muestreador MHRM para Alta Dimensionalidad ($>5D$):**
-  - [ ] Algoritmo estocástico Metropolis-Hastings Robbins-Monro (Cai, 2010) para modelos confirmatorios continuos de muchas dimensiones.
+- [x] **Muestreador MHRM para Alta Dimensionalidad ($>5D$) (Parte E):**
+  - [x] Algoritmo estocástico Metropolis-Hastings Robbins-Monro (Cai, 2010) con propuesta adaptativa, decaimiento de ganancia $\gamma_k = \gamma_0 / k^{0.75}$ y suavizado asintótico de Polyak-Ruppert.
+  - [x] Reducción de complejidad: evita la explosión combinatoria cartesiana $15^D$ ($11.39\text{M}$ nodos para $D=6$) sustituyéndola por imputación estocástica $\mathcal{O}(D)$.
+  - [x] Cockpit Deck interactivo `render_mhrm_cockpit` con telemetría de tasa de aceptación, sparklines de $MDISC$ y kaomojis de certificación.
 - [ ] **Modelos Mixtos IRT (`mixedmirt`):**
   - [ ] Modelos lineales logísticos de test (LLTM de Fischer) y regresión latente con covariables de examinado/ítem.
 

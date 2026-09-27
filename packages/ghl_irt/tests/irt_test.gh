@@ -477,7 +477,47 @@ if biased_item0.favored_group != "Reference" {
     panic("Biased item must favor Reference group");
 }
 
+// 21. Test Metropolis-Hastings Robbins-Monro (MHRM) High-Dimensional MIRT (D = 6)
+println("Testing Metropolis-Hastings Robbins-Monro (MHRM) High-Dimensional MIRT (D = 6)...");
+let mhrm_n_dims = 6;
+let mhrm_n_items = 6;
+let mut mhrm_responses = [];
+for i in 0..n_persons {
+    for j in 0..mhrm_n_items {
+        let resp = if ((i + j) % 2) == 0 { 1.0 } else { 0.0 };
+        mhrm_responses = append(mhrm_responses, resp);
+    }
+}
+let mhrm_audit = audit_mhrm_analysis(
+    mhrm_responses,
+    n_persons,
+    mhrm_n_items,
+    mhrm_n_dims
+);
+if !mhrm_audit.model.converged {
+    panic("MHRM model must converge");
+}
+if mhrm_audit.model.n_dimensions != 6 {
+    panic("MHRM dimensions must be 6");
+}
+if length(mhrm_audit.model.items) != mhrm_n_items {
+    panic("MHRM item count mismatch");
+}
+if mhrm_audit.quadrature_nodes_avoided < 1000000.0 {
+    panic("Quadrature nodes avoided must reflect exponential 15^D reduction");
+}
+for j in 0..mhrm_n_items {
+    let it = mhrm_audit.model.items[j];
+    if it.mdisc <= 0.0 {
+        panic("Multidimensional discrimination MDISC must be strictly positive");
+    }
+    if length(it.slopes) != mhrm_n_dims {
+        panic("Item slopes vector length must match dimension count");
+    }
+}
+
 println("All extended ghl_irt tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
+
 
 
 

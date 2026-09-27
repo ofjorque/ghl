@@ -177,6 +177,18 @@ fn audit_multigroup_lrt_dif(
     audit
 }
 
+fn audit_mhrm_analysis(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    n_dimensions: i64
+) -> MhrmAudit {
+    let audit = audit_mhrm(responses, n_persons, n_items, n_dimensions);
+    render_mhrm_cockpit(audit);
+    audit
+}
+
+
 
 
 

@@ -88,11 +88,13 @@ Integración del parser de fórmulas SEM (`=~` y `~~`) en la definición de espe
 
 ## Parte E: Muestreador MHRM para Alta Dimensionalidad ($>5$ Dimensiones)
 
-- [ ] **Algoritmo Metropolis-Hastings Robbins-Monro (Cai, 2010):**
-  - [ ] Sustitución de la cuadratura numérica cartesiana (que explota exponencialmente $Q^D$) por un muestreador estocástico MHRM.
-  - [ ] Fase 1: Cadena M-H para muestrear del posterior $p(\boldsymbol{\theta} \mid \mathbf{Y})$.
-  - [ ] Fase 2: Actualización estocástica de parámetros del modelo con paso decreciente de Robbins-Monro ($\gamma_t = 1 / t^\alpha$).
-  - [ ] Habilitación de modelos confirmatorios de 5 a 20 dimensiones en tiempo lineal.
+- [x] **Algoritmo Metropolis-Hastings Robbins-Monro (Cai, 2010):**
+  - [x] Sustitución de la cuadratura numérica cartesiana (que explota exponencialmente $Q^D$) por un muestreador estocástico MHRM.
+  - [x] Fase 1: Cadena M-H con paso de propuesta adaptativo $\sigma_{\text{prop}}$ para muestrear del posterior $p(\boldsymbol{\theta} \mid \mathbf{Y})$ dentro del rango óptimo de aceptación ($25\% - 35\%$).
+  - [x] Fase 2: Actualización estocástica de parámetros del modelo con paso decreciente de Robbins-Monro ($\gamma_t = \gamma_0 / t^{0.75}$) y precondicionamiento de Fisher amortiguado.
+  - [x] Fase 3: Suavizado asintótico de Polyak-Ruppert para cancelar la varianza estocástica de los parámetros finales.
+  - [x] Habilitación de modelos de alta dimensionalidad ($D \ge 6$) en tiempo lineal $\mathcal{O}(D)$, evitando millones de nodos de cuadratura ($15^6 = 11.39\text{M}$ nodos).
+  - [x] Cockpit Deck interactivo `render_mhrm_cockpit` con telemetría de tasa de aceptación, ganancia final $\gamma_k$ y sparklines de $MDISC$.
 
 ---
 
