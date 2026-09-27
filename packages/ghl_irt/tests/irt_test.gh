@@ -303,4 +303,34 @@ if !cat_sim.is_terminated {
     panic("CAT simulation must reach termination criterion");
 }
 
+// 16. Test IRT Specification (irt_spec / sem_spec) with Structural Constraints
+println("Testing IRT Specification (irt_spec) & Constraints...");
+let test_df = dataframe {
+    item_1: [1, 1, 0, 1, 0, 1, 1, 0],
+    item_2: [1, 0, 0, 1, 0, 1, 1, 1],
+    item_3: [0, 1, 1, 1, 0, 0, 1, 1],
+    item_4: [1, 1, 1, 1, 0, 1, 0, 1]
+};
+
+let spec = irt_spec {
+    Math =~ item_1 + item_2;
+    Verbal =~ item_3 + item_4;
+    Math ~~ Verbal;
+    item_1.a == item_2.a;
+    item_3.a == 1.0;
+    item_4.c == 0.20;
+};
+
+let spec_res = audit_mirt_spec_model(spec, test_df);
+if spec_res.n_items != 4 {
+    panic("Spec model must ingest 4 items");
+}
+if spec_res.n_factors != 2 {
+    panic("Spec model must detect 2 latent dimensions");
+}
+if spec_res.n_constraints != 3 {
+    panic("Spec model must register 3 active constraints");
+}
+
 println("All extended ghl_irt tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
+

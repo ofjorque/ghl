@@ -587,8 +587,13 @@ impl TypeChecker {
                             return Type::Any;
                         }
 
-                        if *op == BinaryOp::Add && t_lhs == Type::String && t_rhs == Type::String {
-                            return Type::String;
+                        if *op == BinaryOp::Add {
+                            if t_lhs == Type::String && t_rhs == Type::String {
+                                return Type::String;
+                            }
+                            if (t_lhs == Type::String && t_rhs == Type::Any) || (t_rhs == Type::String && t_lhs == Type::Any) {
+                                return Type::String;
+                            }
                         }
 
                         if (t_lhs == Type::String && t_rhs.is_numeric()) || (t_rhs == Type::String && t_lhs.is_numeric()) {
@@ -659,7 +664,9 @@ impl TypeChecker {
                         }
 
                         // Numeric combination
-                        if t_lhs == Type::F64 || t_rhs == Type::F64 {
+                        if t_lhs == Type::Any || t_rhs == Type::Any {
+                            Type::Any
+                        } else if t_lhs == Type::F64 || t_rhs == Type::F64 {
                             Type::F64
                         } else if t_lhs == Type::I64 && t_rhs == Type::I64 {
                             Type::I64
@@ -921,21 +928,25 @@ impl TypeChecker {
 
             ExprKind::SemSpec { equations } => {
                 for eq in equations {
-                    let eq_ty = self.check_expr(eq);
-                    if !matches!(eq.kind, ExprKind::Formula { .. }) {
-                        self.diagnostics.push(
-                            Diagnostic::compute_error(
-                                "C0615",
-                                format!(
-                                    "`sem_spec` equations must use `~`, `=~`, or `~~`, found `{}`",
-                                    eq_ty
+                    match &eq.kind {
+                        ExprKind::Formula { .. } => {}
+                        ExprKind::Binary { op: BinaryOp::Eq, .. } => {}
+                        _ => {
+                            let eq_ty = self.check_expr(eq);
+                            self.diagnostics.push(
+                                Diagnostic::compute_error(
+                                    "C0615",
+                                    format!(
+                                        "`sem_spec` / `irt_spec` equations must be formulas (`~`, `=~`, `~~`) or constraints (`==`), found `{}`",
+                                        eq_ty
+                                    ),
+                                )
+                                .locate(&self.source_index, &self.source_file, &eq.span)
+                                .with_help(
+                                    "Each line inside the spec block must be a formula equation (e.g. `f1 =~ x1 + x2;`) or parameter constraint (e.g. `m1.a == m2.a;`).",
                                 ),
-                            )
-                            .locate(&self.source_index, &self.source_file, &eq.span)
-                            .with_help(
-                                "Each line inside `sem_spec { ... }` must be a formula equation, e.g. `f1 =~ x1 + x2;`.",
-                            ),
-                        );
+                            );
+                        }
                     }
                 }
                 Type::SemSpec

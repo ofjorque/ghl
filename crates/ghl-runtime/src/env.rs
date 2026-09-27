@@ -272,6 +272,7 @@ impl RuntimeEnv {
         env.set("__sem_fit_core".into(), Value::NativeFn(crate::sem::native_sem_fit_core));
         env.set("sem".into(), Value::NativeFn(crate::sem::native_sem));
         env.set("formula_parts".into(), Value::NativeFn(native_formula_parts));
+        env.set("decompose_spec".into(), Value::NativeFn(native_decompose_spec));
         env.set("feols".into(), Value::NativeFn(crate::feols::native_feols));
         env.set("iv_regress".into(), Value::NativeFn(crate::iv::native_iv_regress));
         env.set("iv".into(), Value::NativeFn(crate::iv::native_iv_regress));

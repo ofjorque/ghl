@@ -207,6 +207,8 @@ pub enum FormulaOp {
     Measurement,
     /// `~~` — covariance or residual variance, e.g. `x1 ~~ x2`.
     Covariance,
+    /// `==` — equality constraint or parameter fixing, e.g. `m1.a == m2.a` or `m3.a == 1.0`.
+    Constraint,
 }
 
 impl std::fmt::Display for FormulaOp {
@@ -215,6 +217,7 @@ impl std::fmt::Display for FormulaOp {
             FormulaOp::Regression => write!(f, "~"),
             FormulaOp::Measurement => write!(f, "=~"),
             FormulaOp::Covariance => write!(f, "~~"),
+            FormulaOp::Constraint => write!(f, "=="),
         }
     }
 }

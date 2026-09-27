@@ -88,6 +88,8 @@ pub enum Token {
     Col,
     #[token("sem_spec")]
     SemSpec,
+    #[token("irt_spec")]
+    IrtSpec,
 
     // Boolean & Missing Values
     #[token("true")]

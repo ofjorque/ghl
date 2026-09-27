@@ -124,3 +124,10 @@ fn audit_cat_simulation(
     render_cat_cockpit(session);
     session
 }
+
+fn audit_mirt_spec_model(spec: any, df: any) -> MirtSpecResult {
+    let res = fit_mirt_spec(spec, df);
+    render_mirt_spec_cockpit(res);
+    res
+}
+

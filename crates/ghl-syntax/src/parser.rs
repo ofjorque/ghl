@@ -191,10 +191,11 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             )
             .map_with_span(|cols, span| Expr::new(ExprKind::DataFrameLit(cols), span));
 
-        // SEM/CFA specification literal: sem_spec { f1 =~ x1 + x2; f1 ~~ f2; f2 ~ f1; }
+        // SEM/CFA and IRT specification literal: sem_spec { ... } or irt_spec { ... }
         // Each equation is mandatorily `;`-terminated: unlike a regular `{ ... }`
         // block, there's no last-expression return-value convention to protect here.
         let sem_spec_literal = just(Token::SemSpec)
+            .or(just(Token::IrtSpec))
             .ignore_then(
                 expr.clone()
                     .then_ignore(just(Token::Semicolon))

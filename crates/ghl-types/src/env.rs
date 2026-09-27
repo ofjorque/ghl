@@ -921,7 +921,7 @@ impl TypeEnv {
             "poisson_pmf", "poisson_cdf", "poisson_quantile", "random_poisson",
             "normal_quantile", "gamma_quantile",
             "feols", "iv_regress", "ridge", "lasso", "elastic_net",
-            "sem", "optim", "sample_cov", "anova", "t_test", "t_test_one_sample", "chisq_test",
+            "sem", "decompose_spec", "optim", "sample_cov", "anova", "t_test", "t_test_one_sample", "chisq_test",
             "normal", "student_t", "fisher_f", "chisq", "gamma_dist", "beta_dist",
             "uniform", "exponential", "binomial", "poisson_dist",
             "conf_int", "p_value", "z_test_one_sample", "cor_test",
@@ -975,12 +975,28 @@ impl TypeEnv {
 
         // String helpers — scalar String + Vector[String]
         for name in [
-            "str_upper", "str_lower", "str_trim", "str_len", "str_contains",
-            "str_starts", "str_ends", "str_replace", "str_split", "str_pad",
+            "str_upper", "str_lower", "str_trim", "str_replace", "str_pad",
         ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function { params: vec![Type::Any], ret: Box::new(Type::String) },
+                false,
+            );
+        }
+        env.insert(
+            "str_split".into(),
+            Type::Function { params: vec![Type::Any, Type::Any], ret: Box::new(Type::Vector(Box::new(Type::String))) },
+            false,
+        );
+        env.insert(
+            "str_len".into(),
+            Type::Function { params: vec![Type::Any], ret: Box::new(Type::I64) },
+            false,
+        );
+        for name in ["str_contains", "str_starts", "str_ends"] {
+            env.insert(
+                name.into(),
+                Type::Function { params: vec![Type::Any, Type::Any], ret: Box::new(Type::Bool) },
                 false,
             );
         }

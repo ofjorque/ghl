@@ -5,6 +5,7 @@
 
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::FormulaOp;
+use polars_core::prelude::NamedFrom;
 use crate::value::Value;
 use crate::vector_data::VectorData;
 
@@ -709,6 +710,53 @@ pub(crate) fn native_formula_parts(args: Vec<Value>) -> Result<Value, Diagnostic
             format!("`formula_parts()` expects a Formula, found `{}`", other.type_name()),
         )),
     }
+}
+
+/// `decompose_spec(spec)` -- extracts equations from a `sem_spec` or `irt_spec` into a DataFrame.
+pub(crate) fn native_decompose_spec(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.is_empty() {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`decompose_spec()` requires a specification argument: `decompose_spec(spec)`",
+        ));
+    }
+
+    let equations = match &args[0] {
+        Value::SemSpec(eqs) => eqs.clone(),
+        Value::Formula { .. } => vec![args[0].clone()],
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!("`decompose_spec(spec)` expects `sem_spec`, `irt_spec`, or `Formula`, found `{}`", other.type_name()),
+            ));
+        }
+    };
+
+    let mut lhs_vec: Vec<String> = Vec::with_capacity(equations.len());
+    let mut op_vec: Vec<String> = Vec::with_capacity(equations.len());
+    let mut rhs_vec: Vec<String> = Vec::with_capacity(equations.len());
+
+    for eq in &equations {
+        if let Value::Formula { op, response, terms, .. } = eq {
+            lhs_vec.push(response.clone());
+            op_vec.push(op.to_string());
+            rhs_vec.push(terms.join(" + "));
+        }
+    }
+
+    let frame = polars_core::frame::DataFrame::new(
+        equations.len(),
+        vec![
+            polars_core::series::Series::new("lhs".into(), lhs_vec).into(),
+            polars_core::series::Series::new("op".into(), op_vec).into(),
+            polars_core::series::Series::new("rhs".into(), rhs_vec).into(),
+        ],
+    ).map_err(|e| Diagnostic::compute_error("C0105", format!("Failed to create DataFrame: {e}")))?;
+
+    Ok(Value::DataFrame {
+        frame,
+        na_reasons: std::sync::Arc::new(crate::na_reasons::NaReasonTable::new()),
+    })
 }
 
 /// `model_matrix(formula, df)` -- bakes a Formula and DataFrame into design matrix X and response y.

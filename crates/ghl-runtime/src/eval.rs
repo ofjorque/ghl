@@ -677,7 +677,27 @@ impl Interpreter {
             ExprKind::SemSpec { equations } => {
                 let mut values = Vec::with_capacity(equations.len());
                 for eq in equations {
-                    values.push(self.eval_expr(eq)?);
+                    match &eq.kind {
+                        ExprKind::Formula { .. } => {
+                            values.push(self.eval_expr(eq)?);
+                        }
+                        ExprKind::Binary { op: BinaryOp::Eq, lhs, rhs } => {
+                            let mut left_terms = Vec::new();
+                            let mut right_terms = Vec::new();
+                            extract_formula_term(lhs, &mut left_terms);
+                            extract_formula_term(rhs, &mut right_terms);
+                            let lhs_str = left_terms.join("+");
+                            values.push(Value::Formula {
+                                op: FormulaOp::Constraint,
+                                response: lhs_str,
+                                terms: right_terms.clone(),
+                                parts: vec![right_terms],
+                            });
+                        }
+                        _ => {
+                            values.push(self.eval_expr(eq)?);
+                        }
+                    }
                 }
                 Ok(Value::SemSpec(values))
             }
@@ -1853,6 +1873,7 @@ fn match_pattern(pattern: &Pattern, target: &Value, env: &mut RuntimeEnv) -> boo
 fn extract_formula_term(expr: &Expr, acc: &mut Vec<String>) {
     match &expr.kind {
         ExprKind::Ident(s) => acc.push(s.clone()),
+        ExprKind::FieldAccess { target, field } => acc.push(format!("{target}.{field}")),
         ExprKind::Lit(ghl_syntax::ast::Literal::Int(n)) => acc.push(n.to_string()),
         ExprKind::Lit(ghl_syntax::ast::Literal::Float(s)) => acc.push(s.to_string()),
         ExprKind::Binary { op: BinaryOp::Add, lhs, rhs } => {
