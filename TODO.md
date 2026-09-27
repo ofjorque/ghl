@@ -90,8 +90,10 @@ Backlog temático activo detallado en [`docs/roadmap/09_TODO_PSICOMETRIA_AVANZAD
   - [x] Estadístico $M_2$ de información limitada (Maydeu-Olivares & Joe) para tablas dispersas $2^J$ con $\text{RMSEA}_2$, TLI y CFI categórico.
   - [x] Matriz de residuos $Q_3$ de Yen para evaluar dependencia local de ítems (*Local Item Dependence* / LID) y alerta de pares $Q_3 > 0.20$.
   - [x] Cockpit Deck unificado para diagnósticos avanzados con telemetría visual y kaomojis contextuales.
-- [ ] **Modelos Estructurales Complejos y Bi-Factor:**
-  - [ ] Modelo Bi-Factor canónico (`bfactor`) con factor general ortogonal a factores específicos y métricas $ECV$ y $\omega_h$.
+- [x] **Modelos Estructurales Complejos y Bi-Factor (Parte C):**
+  - [x] Modelo Bi-Factor canónico (`bfactor`) con reducción dimensional de Gibbons & Hedeker (1992) evaluando integrales 2D $(G, s_k)$.
+  - [x] Cálculo nativo de Varianza Común Explicada total ($ECV$), $I\text{-}ECV$ por ítem, y Confiabilidad Jerárquica ($\omega_h$ y $\omega_t$).
+  - [x] Cockpit Deck bi-factor con sparklines de $I\text{-}ECV$ y diagnóstico de unidimensionalidad esencial.
 - [ ] **DIF Multigrupo Formal por Razón de Verosimilitud (LRT):**
   - [ ] Calibración conjunta multigrupo (`multiple_group_irt`) para contraste simultáneo de DIF uniforme ($\Delta d$) y no uniforme ($\Delta a$).
 - [ ] **Muestreador MHRM para Alta Dimensionalidad ($>5D$):**

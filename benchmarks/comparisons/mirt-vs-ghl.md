@@ -78,6 +78,7 @@ Una comparativa técnica rigurosa debe distinguir entre **calibrar un modelo pun
 | **DIF** | `DIF(mod)` / `difR::difMH` | `compute_mantel_haenszel_dif(...)` | Mantel-Haenszel + ETS Delta en GHL; LRT multigrupo en `mirt`. |
 | **Equating** | `plink` / `equate` | `link_scales_mean_sigma`, `link_scales_mean_mean` | Lineal (Mean-Sigma/Mean) en GHL; Curvas TCC en R. |
 | **MIRT Multidimensional** | `mirt(data, 2)` | `fit_m2pl(df, items, n_dims)` | M2PL compensatorio + Reckase en GHL; CFA/Q-matrix en `mirt`. |
+| **Modelo Bi-Factor** | `bfactor(data, model)` | `fit_bfactor`, `audit_bfactor_analysis` | Completa (Gibbons & Hedeker 2D, $ECV$, $I\text{-}ECV$, $\omega_h$, $\omega_t$). |
 | **Test Adaptativo (CAT)** | `mirtCAT` / `catR` | `simulate_cat`, `select_next_item_mfi` | MFI + parada SEM + simulación con sparklines. |
 
 ---

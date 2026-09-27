@@ -155,4 +155,16 @@ fn audit_advanced_fit_analysis(
     audit
 }
 
+fn audit_bfactor_analysis(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    specific_factor_map: Vector
+) -> BfactorAudit {
+    let audit = audit_bfactor_model(responses, n_persons, n_items, specific_factor_map);
+    render_bfactor_cockpit(audit);
+    audit
+}
+
+
 

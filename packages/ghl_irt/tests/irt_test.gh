@@ -407,6 +407,35 @@ if !q3_lid.has_local_dependence {
     panic("Q3 diagnostic must flag induced local item dependence");
 }
 
+// 19. Test Canonical Bi-Factor Model (Gibbons & Hedeker, ECV, Omega Hierarchical)
+println("Testing Canonical Bi-Factor Model & Unidimensionality (ECV, ω_h)...");
+let spec_map = [1, 1, 2, 2, 2]; // 5 items: items 1-2 on specific factor 1, items 3-5 on specific factor 2
+let bfactor_audit = audit_bfactor_analysis(
+    responses,
+    n_persons,
+    n_items,
+    spec_map
+);
+if bfactor_audit.model.n_specific_factors != 2 {
+    panic("Bi-Factor model must detect 2 specific domain factors");
+}
+if length(bfactor_audit.model.item_ecv) != n_items {
+    panic("Item ECV vector length mismatch");
+}
+if bfactor_audit.model.ecv_total <= 0.0 || bfactor_audit.model.ecv_total > 1.0 {
+    panic("Total ECV must be bounded in (0, 1]");
+}
+if bfactor_audit.model.omega_hierarchical <= 0.0 || bfactor_audit.model.omega_hierarchical > 1.0 {
+    panic("Omega Hierarchical must be bounded in (0, 1]");
+}
+if bfactor_audit.model.omega_total <= 0.0 || bfactor_audit.model.omega_total > 1.0 {
+    panic("Omega Total must be bounded in (0, 1]");
+}
+if bfactor_audit.model.omega_hierarchical > bfactor_audit.model.omega_total {
+    panic("Omega Hierarchical cannot exceed Omega Total");
+}
+
 println("All extended ghl_irt tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
+
 
 

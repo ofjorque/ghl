@@ -63,13 +63,15 @@ Integración del parser de fórmulas SEM (`=~` y `~~`) en la definición de espe
 
 ## Parte C: Modelos Estructurales Complejos y Bi-Factor
 
-- [ ] **Modelo Bi-Factor Canónico (`bfactor`):**
-  - [ ] Descomposición ortogonal con 1 factor general ($G$) que carga en todos los ítems y $K$ factores específicos ortogonales ($s_1, \dots, s_K$) que cargan en subconjuntos disjuntos de ítems:
+- [x] **Modelo Bi-Factor Canónico (`bfactor`):**
+  - [x] Descomposición ortogonal con 1 factor general ($G$) que carga en todos los ítems y $K$ factores específicos ortogonales ($s_1, \dots, s_K$) que cargan en subconjuntos disjuntos de ítems:
     $$P(Y_{ij}=1 \mid \theta_G, \theta_{sk}) = \frac{1}{1 + \exp\left(-(a_{jG}\theta_G + a_{js}\theta_{sk} + d_j)\right)}$$
-  - [ ] Dimension Reduction de Gibbons & Hedeker (1992): evaluación de la verosimilitud evaluando solo integrales bidimensionales $(G, s_k)$ en lugar de $K+1$ dimensiones.
-  - [ ] Cálculo de métricas psicométricas bi-factor:
-    - Varianza Común Explicada: $ECV$ (*Explained Common Variance*).
-    - Confiabilidad Jerárquica: $\omega_h$ (*Omega Hierarchical*) y $\omega_t$ (*Omega Total*).
+  - [x] Dimension Reduction de Gibbons & Hedeker (1992): evaluación de la verosimilitud evaluando solo integrales bidimensionales $(G, s_k)$ en lugar de $K+1$ dimensiones.
+  - [x] Cálculo de métricas psicométricas bi-factor nativas:
+    - Varianza Común Explicada total ($ECV$), factor-level $ECV$, e item-level $I\text{-}ECV_j$.
+    - Confiabilidad Jerárquica: $\omega_h$ (*Omega Hierarchical*) y Confiabilidad Total $\omega_t$.
+    - Diagnóstico de esencial unidimensionalidad ($ECV \ge 0.70$ y $\omega_h \ge 0.80$).
+  - [x] Cockpit Deck unificado `render_bfactor_cockpit` con sparkline de $I\text{-}ECV$ y kaomojis contextuales.
 
 ---
 

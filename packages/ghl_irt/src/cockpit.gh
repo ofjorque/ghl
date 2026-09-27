@@ -247,3 +247,39 @@ fn render_advanced_fit_cockpit(audit: AdvancedFitAudit) {
     show_cockpit(p);
 }
 
+// =========================================================================
+// 7. Canonical Bi-Factor Model & Unidimensionality Telemetry Deck
+// =========================================================================
+
+fn render_bfactor_cockpit(audit: BfactorAudit) {
+    let res = audit.model;
+    let badge = if res.essentially_unidimensional {
+        "/ᐠ˵- ⩊ -˵マ ✧ ESSENTIALLY UNIDIMENSIONAL SCALE"
+    } else {
+        if res.converged {
+            "/ᐠ ·•᷄ ˕ •᷅マ MULTIDIMENSIONAL SUB-FACTORS ACTIVE"
+        } else {
+            "≽(◉˕ ◉ ≼マ BI-FACTOR ESTIMATION FAILURE"
+        }
+    };
+
+    let p = cockpit("GHL Psychometrics: Bi-Factor Structural Decomposition", badge)
+        |> cockpit_add_kv("Model Architecture", "Gibbons & Hedeker (1992) Orthogonal Bi-Factor")
+        |> cockpit_add_kv("Total Manifest Items (J)", format("{}", res.n_items))
+        |> cockpit_add_kv("Specific Domain Factors (K)", format("{}", res.n_specific_factors))
+        |> cockpit_add_kv("Sample Size (N)", format("{}", res.n_persons))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Total Explained Common Variance (ECV)", format("{:.4}", res.ecv_total))
+        |> cockpit_add_kv("Omega Hierarchical (ω_h)", format("{:.4}", res.omega_hierarchical))
+        |> cockpit_add_kv("Omega Total (ω_t)", format("{:.4}", res.omega_total))
+        |> cockpit_add_kv("Marginal Log-Likelihood", format("{:.2}", res.log_likelihood))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Item-Level Explained Common Variance (I-ECV):")
+        |> cockpit_add_line(sparkline(res.item_ecv))
+        |> cockpit_add_divider()
+        |> cockpit_add_line(audit.recommendation);
+
+    show_cockpit(p);
+}
+
+
