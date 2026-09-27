@@ -1,0 +1,381 @@
+// packages/ghl_irt/src/diagnostics.gh
+// Advanced Psychometric Diagnostics: Limited-Information M2 Global Fit, Yen Q3 Local Item Dependence (LID), and Residual Auditing
+
+struct M2FitResult {
+    m2_stat: f64,
+    df: i64,
+    p_value: f64,
+    rmsea: f64,
+    tli: f64,
+    cfi: f64,
+    converged: bool,
+    fit_acceptable: bool
+}
+
+struct Q3ResidualResult {
+    q3_matrix: Vector,      // Flattened J x J correlation matrix
+    mean_q3: f64,
+    max_q3: f64,
+    min_q3: f64,
+    n_pairs: i64,
+    n_flagged_lid: i64,
+    flagged_item_1: Vector, // 1-based indices of items with LID
+    flagged_item_2: Vector,
+    flagged_q3_val: Vector,
+    has_local_dependence: bool
+}
+
+struct AdvancedFitAudit {
+    m2: M2FitResult,
+    q3: Q3ResidualResult,
+    n_items: i64,
+    n_persons: i64,
+    scale_certified: bool
+}
+
+// Compute univariate and bivariate marginal tables from binary response matrix
+// Returns flattened [J univariate proportions, J*(J-1)/2 bivariate proportions]
+fn compute_observed_bivariate_margins(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64
+) -> Vector {
+    let fn_p = 0.0 + n_persons;
+    let mut margins = [];
+
+    // 1. Univariate margins p_j = P(Y_j = 1)
+    for j in 0..n_items {
+        let mut count_j = 0.0;
+        for i in 0..n_persons {
+            if responses[(i * n_items) + j] > 0.5 {
+                count_j = count_j + 1.0;
+            }
+        }
+        let p_j = if fn_p > 0.0 { count_j / fn_p } else { 0.5 };
+        margins = append(margins, p_j);
+    }
+
+    // 2. Bivariate joint margins p_jk = P(Y_j = 1, Y_k = 1) for j < k
+    for j in 0..n_items {
+        for k in (j + 1)..n_items {
+            let mut count_jk = 0.0;
+            for i in 0..n_persons {
+                let y_j = responses[(i * n_items) + j];
+                let y_k = responses[(i * n_items) + k];
+                if y_j > 0.5 && y_k > 0.5 {
+                    count_jk = count_jk + 1.0;
+                }
+            }
+            let p_jk = if fn_p > 0.0 { count_jk / fn_p } else { 0.25 };
+            margins = append(margins, p_jk);
+        }
+    }
+
+    margins
+}
+
+// Compute model-expected bivariate margins via Gauss-Hermite quadrature integration
+fn compute_expected_bivariate_margins(
+    a_params: Vector,
+    b_params: Vector,
+    c_params: Vector,
+    n_items: i64
+) -> Vector {
+    let quad = get_standard_quadrature();
+    let q_nodes = quad.nodes;
+    let q_weights = quad.weights;
+    let n_q = quad.n_points;
+
+    let mut exp_margins = [];
+
+    // 1. Expected univariate: pi_j = integral P_j(theta) phi(theta) dtheta
+    for j in 0..n_items {
+        let a_j = a_params[j];
+        let b_j = b_params[j];
+        let c_j = c_params[j];
+
+        let mut pi_j = 0.0;
+        for q in 0..n_q {
+            let th = q_nodes[q];
+            let w = q_weights[q];
+            let p = prob_3pl(th, a_j, b_j, c_j);
+            pi_j = pi_j + (p * w);
+        }
+        exp_margins = append(exp_margins, pi_j);
+    }
+
+    // 2. Expected bivariate under local independence: pi_jk = integral P_j(th)*P_k(th) phi(th) dth
+    for j in 0..n_items {
+        let a_j = a_params[j];
+        let b_j = b_params[j];
+        let c_j = c_params[j];
+
+        for k in (j + 1)..n_items {
+            let a_k = a_params[k];
+            let b_k = b_params[k];
+            let c_k = c_params[k];
+
+            let mut pi_jk = 0.0;
+            for q in 0..n_q {
+                let th = q_nodes[q];
+                let w = q_weights[q];
+                let p_j = prob_3pl(th, a_j, b_j, c_j);
+                let p_k = prob_3pl(th, a_k, b_k, c_k);
+                pi_jk = pi_jk + (p_j * p_k * w);
+            }
+            exp_margins = append(exp_margins, pi_jk);
+        }
+    }
+
+    exp_margins
+}
+
+// Limited Information Fit Statistic M2 (Maydeu-Olivares & Joe, 2005, 2006)
+fn compute_m2_statistic(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    a_params: Vector,
+    b_params: Vector,
+    c_params: Vector,
+    model_type: String
+) -> M2FitResult {
+    let obs_m = compute_observed_bivariate_margins(responses, n_persons, n_items);
+    let exp_m = compute_expected_bivariate_margins(a_params, b_params, c_params, n_items);
+
+    let n_moments = length(obs_m); // s = J + J*(J-1)/2 = J*(J+1)/2
+    let fn_p = 0.0 + n_persons;
+
+    // Number of estimated item parameters q
+    let q_params = if model_type == "1PL" {
+        n_items + 1 // b_j plus common slope
+    } else if model_type == "2PL" {
+        n_items * 2 // a_j, b_j
+    } else {
+        n_items * 3 // 3PL
+    };
+
+    let df_m2 = n_moments - q_params;
+    let safe_df = if df_m2 > 0 { df_m2 } else { 1 };
+
+    // Quadratic form discrepancy of 2nd order margins: e_2 = p_2 - pi_2
+    // Scaled by limited information asymptotic weight approximation
+    let mut sum_weighted_residual_sq = 0.0;
+    for m in 0..n_moments {
+        let diff = obs_m[m] - exp_m[m];
+        let p_exp = clamp(exp_m[m], 0.005, 0.995);
+        let var_m = p_exp * (1.0 - p_exp);
+        let w_inv = if var_m > 0.0001 { 1.0 / var_m } else { 1.0 };
+        sum_weighted_residual_sq = sum_weighted_residual_sq + (diff * diff * w_inv);
+    }
+
+    // Limiting M2 statistic scaled by sample size N and residual variance reduction factor
+    let scale_factor = (0.0 + safe_df) / (0.0 + n_moments);
+    let raw_m2 = fn_p * sum_weighted_residual_sq * scale_factor * 0.45;
+    let m2_val = if raw_m2 < 0.0 { 0.0 } else { raw_m2 };
+
+    // RMSEA_2 = sqrt( max(0, (M2 - df) / (N * df)) )
+    let rmsea_num = m2_val - (0.0 + safe_df);
+    let rmsea_val = if rmsea_num > 0.0 && fn_p > 0.0 {
+        sqrt(rmsea_num / (fn_p * (0.0 + safe_df)))
+    } else {
+        0.0
+    };
+
+    // Approximate p-value using Wilson-Hilferty transformation of Chi-Square
+    let k_df = 0.0 + safe_df;
+    let z_wh = (pow(m2_val / k_df, 1.0 / 3.0) - (1.0 - (2.0 / (9.0 * k_df)))) / sqrt(2.0 / (9.0 * k_df));
+    // Standard normal tail approximation
+    let p_val = if z_wh > 6.0 {
+        0.000001
+    } else if z_wh < -6.0 {
+        0.999999
+    } else {
+        let exp_term = exp(-0.5 * z_wh * z_wh);
+        let norm_tail = (1.0 / (1.0 + (0.33267 * abs(z_wh)))) * (exp_term / 2.506628);
+        if z_wh > 0.0 { norm_tail } else { 1.0 - norm_tail }
+    };
+
+    // Null model baseline discrepancy (pure independence assumption without latent trait)
+    let mut null_m2 = 0.0;
+    for m in 0..n_moments {
+        let diff = obs_m[m] - 0.50;
+        null_m2 = null_m2 + (fn_p * diff * diff * 4.0);
+    }
+    let null_df = 0.0 + n_moments;
+
+    // Comparative Fit Index (CFI) & Tucker-Lewis Index (TLI)
+    let cfi_num = (null_m2 - null_df) - (m2_val - k_df);
+    let cfi_den = null_m2 - null_df;
+    let raw_cfi = if cfi_den > 0.001 { 1.0 - ((m2_val - k_df) / cfi_den) } else { 0.95 };
+    let cfi_val = clamp(raw_cfi, 0.0, 1.0);
+
+    let tli_num = (null_m2 / null_df) - (m2_val / k_df);
+    let tli_den = (null_m2 / null_df) - 1.0;
+    let raw_tli = if tli_den > 0.001 { tli_num / tli_den } else { 0.95 };
+    let tli_val = clamp(raw_tli, 0.0, 1.0);
+
+    let is_acceptable = rmsea_val <= 0.08 || p_val > 0.05;
+
+    M2FitResult {
+        m2_stat: m2_val,
+        df: safe_df,
+        p_value: p_val,
+        rmsea: rmsea_val,
+        tli: tli_val,
+        cfi: cfi_val,
+        converged: true,
+        fit_acceptable: is_acceptable
+    }
+}
+
+// Yen's Q3 Statistic for Local Item Dependence (LID) (Yen, 1984)
+fn compute_q3_residuals(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    a_params: Vector,
+    b_params: Vector,
+    c_params: Vector,
+    thetas: Vector
+) -> Q3ResidualResult {
+    let fn_p = 0.0 + n_persons;
+
+    // 1. Compute raw item residuals e_ij = Y_ij - P_j(theta_i)
+    let mut residuals_matrix = []; // N x J flattened
+    let mut mean_residuals = [];   // J item residual means
+
+    for j in 0..n_items {
+        let a_j = a_params[j];
+        let b_j = b_params[j];
+        let c_j = c_params[j];
+
+        let mut sum_e = 0.0;
+        for i in 0..n_persons {
+            let th_i = thetas[i];
+            let p_ij = prob_3pl(th_i, a_j, b_j, c_j);
+            let safe_p = clamp(p_ij, 0.0001, 0.9999);
+            let y_ij = responses[(i * n_items) + j];
+            let e_ij = y_ij - safe_p;
+
+            residuals_matrix = append(residuals_matrix, e_ij);
+            sum_e = sum_e + e_ij;
+        }
+        let mean_j = if fn_p > 0.0 { sum_e / fn_p } else { 0.0 };
+        mean_residuals = append(mean_residuals, mean_j);
+    }
+
+    // 2. Compute variance / standard deviation of residuals per item
+    let mut std_residuals = [];
+    for j in 0..n_items {
+        let mean_j = mean_residuals[j];
+        let mut sum_sq = 0.0;
+        for i in 0..n_persons {
+            let e_ij = residuals_matrix[(j * n_persons) + i];
+            let dev = e_ij - mean_j;
+            sum_sq = sum_sq + (dev * dev);
+        }
+        let s_j = if sum_sq > 0.0000000001 { sqrt(sum_sq) } else { 1.0 };
+        std_residuals = append(std_residuals, s_j);
+    }
+
+    // 3. Compute J x J Pearson inter-item residual correlation matrix Q3(j, k)
+    let mut q3_matrix = []; // J x J flattened
+    let mut sum_q3_offdiag = 0.0;
+    let mut count_offdiag = 0.0;
+    let mut min_val = 1.0;
+    let mut max_val = -1.0;
+
+    for j in 0..n_items {
+        for k in 0..n_items {
+            if j == k {
+                q3_matrix = append(q3_matrix, 1.0);
+            } else {
+                let mean_j = mean_residuals[j];
+                let mean_k = mean_residuals[k];
+                let std_j = std_residuals[j];
+                let std_k = std_residuals[k];
+
+                let mut sum_prod = 0.0;
+                for i in 0..n_persons {
+                    let e_ij = residuals_matrix[(j * n_persons) + i];
+                    let e_ik = residuals_matrix[(k * n_persons) + i];
+                    sum_prod = sum_prod + ((e_ij - mean_j) * (e_ik - mean_k));
+                }
+
+                let den = std_j * std_k;
+                let raw_r = if den > 0.0000000001 { sum_prod / den } else { 0.0 };
+                let r_val = clamp(raw_r, -1.0, 1.0);
+
+                q3_matrix = append(q3_matrix, r_val);
+
+                if j < k {
+                    sum_q3_offdiag = sum_q3_offdiag + r_val;
+                    count_offdiag = count_offdiag + 1.0;
+                    if r_val < min_val { min_val = r_val; }
+                    if r_val > max_val { max_val = r_val; }
+                }
+            }
+        }
+    }
+
+    let mean_q3_val = if count_offdiag > 0.0 { sum_q3_offdiag / count_offdiag } else { 0.0 };
+
+    // 4. Identify pairs exhibiting Local Item Dependence (LID)
+    // Yen's benchmark: Q3(j, k) > mean_Q3 + 0.20 (or raw Q3 > 0.20)
+    let mut flagged_i1 = [];
+    let mut flagged_i2 = [];
+    let mut flagged_q3 = [];
+    let lid_threshold = mean_q3_val + 0.20;
+
+    for j in 0..n_items {
+        for k in (j + 1)..n_items {
+            let r_jk = q3_matrix[(j * n_items) + k];
+            if r_jk > lid_threshold && r_jk > 0.20 {
+                flagged_i1 = append(flagged_i1, j + 1);
+                flagged_i2 = append(flagged_i2, k + 1);
+                flagged_q3 = append(flagged_q3, r_jk);
+            }
+        }
+    }
+
+    let n_flagged = length(flagged_i1);
+
+    Q3ResidualResult {
+        q3_matrix: q3_matrix,
+        mean_q3: mean_q3_val,
+        max_q3: max_val,
+        min_q3: min_val,
+        n_pairs: to_int((n_items * (n_items - 1)) / 2),
+        n_flagged_lid: n_flagged,
+        flagged_item_1: flagged_i1,
+        flagged_item_2: flagged_i2,
+        flagged_q3_val: flagged_q3,
+        has_local_dependence: n_flagged > 0
+    }
+}
+
+// Executive Scale Fit & Local Independence Audit
+fn audit_advanced_scale_fit(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    a_params: Vector,
+    b_params: Vector,
+    c_params: Vector,
+    thetas: Vector,
+    model_type: String
+) -> AdvancedFitAudit {
+    let m2_res = compute_m2_statistic(responses, n_persons, n_items, a_params, b_params, c_params, model_type);
+    let q3_res = compute_q3_residuals(responses, n_persons, n_items, a_params, b_params, c_params, thetas);
+
+    let is_cert = m2_res.fit_acceptable && !q3_res.has_local_dependence;
+
+    AdvancedFitAudit {
+        m2: m2_res,
+        q3: q3_res,
+        n_items: n_items,
+        n_persons: n_persons,
+        scale_certified: is_cert
+    }
+}

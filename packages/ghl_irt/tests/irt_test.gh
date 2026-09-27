@@ -332,5 +332,81 @@ if spec_res.n_constraints != 3 {
     panic("Spec model must register 3 active constraints");
 }
 
+// 17. Test Limited Information Global Fit (M2, RMSEA_2, CFI, TLI)
+println("Testing Limited Information Global Fit (M2, RMSEA, CFI)...");
+let m2_res = compute_m2_statistic(
+    responses,
+    n_persons,
+    n_items,
+    res_2pl.a_params,
+    res_2pl.b_params,
+    res_2pl.c_params,
+    "2PL"
+);
+if m2_res.df <= 0 {
+    panic("M2 degrees of freedom must be positive");
+}
+if m2_res.rmsea < 0.0 || m2_res.rmsea > 1.0 {
+    panic("RMSEA_2 must be bounded in [0, 1]");
+}
+if m2_res.cfi < 0.0 || m2_res.cfi > 1.0 {
+    panic("CFI must be bounded in [0, 1]");
+}
+
+// 18. Test Yen's Q3 Residual Correlation & Local Item Dependence (LID)
+println("Testing Yen's Q3 Residuals and LID Auditing...");
+let q3_res = compute_q3_residuals(
+    responses,
+    n_persons,
+    n_items,
+    res_2pl.a_params,
+    res_2pl.b_params,
+    res_2pl.c_params,
+    scores_2pl.thetas
+);
+if length(q3_res.q3_matrix) != (n_items * n_items) {
+    panic("Q3 correlation matrix must be J x J");
+}
+if q3_res.n_pairs != to_int((n_items * (n_items - 1)) / 2) {
+    panic("Q3 evaluated pairs count mismatch");
+}
+
+// Executive Advanced Fit Audit
+let adv_audit = audit_advanced_fit_analysis(
+    responses,
+    n_persons,
+    n_items,
+    res_2pl.a_params,
+    res_2pl.b_params,
+    res_2pl.c_params,
+    scores_2pl.thetas,
+    "2PL"
+);
+if !adv_audit.scale_certified {
+    panic("Clean 2PL scale must pass advanced fit and local independence certification");
+}
+
+// Test detection of induced Local Item Dependence (cloned items)
+let mut cloned_resp = [];
+for i in 0..n_persons {
+    for j in 0..n_items {
+        let val = if j == 1 { responses[(i * n_items) + 0] } else { responses[(i * n_items) + j] };
+        cloned_resp = append(cloned_resp, val);
+    }
+}
+let q3_lid = compute_q3_residuals(
+    cloned_resp,
+    n_persons,
+    n_items,
+    res_2pl.a_params,
+    res_2pl.b_params,
+    res_2pl.c_params,
+    scores_2pl.thetas
+);
+if !q3_lid.has_local_dependence {
+    panic("Q3 diagnostic must flag induced local item dependence");
+}
+
 println("All extended ghl_irt tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
+
 

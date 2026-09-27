@@ -131,3 +131,28 @@ fn audit_mirt_spec_model(spec: any, df: any) -> MirtSpecResult {
     res
 }
 
+fn audit_advanced_fit_analysis(
+    responses: Vector,
+    n_persons: i64,
+    n_items: i64,
+    a_params: Vector,
+    b_params: Vector,
+    c_params: Vector,
+    thetas: Vector,
+    model_type: String
+) -> AdvancedFitAudit {
+    let audit = audit_advanced_scale_fit(
+        responses,
+        n_persons,
+        n_items,
+        a_params,
+        b_params,
+        c_params,
+        thetas,
+        model_type
+    );
+    render_advanced_fit_cockpit(audit);
+    audit
+}
+
+

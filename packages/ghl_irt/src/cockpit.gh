@@ -192,3 +192,58 @@ fn render_cat_cockpit(session: CatSession) {
 
     show_cockpit(p);
 }
+
+// =========================================================================
+// 6. Advanced Global Fit (M2) and Local Item Dependence (Q3) Cockpit Deck
+// =========================================================================
+
+fn render_advanced_fit_cockpit(audit: AdvancedFitAudit) {
+    let badge = if audit.scale_certified {
+        "/ᐠ˵- ⩊ -˵マ ✧ GLOBAL FIT & LOCAL INDEPENDENCE CONFIRMED"
+    } else {
+        if audit.q3.has_local_dependence {
+            "/ᐠ ·•᷄ ˕ •᷅マ LOCAL ITEM DEPENDENCE (LID) DETECTED"
+        } else {
+            "≽(◉˕ ◉ ≼マ GLOBAL SPECIFICATION MISFIT"
+        }
+    };
+
+    let mut p = cockpit("GHL Psychometrics: Advanced Fit & Local Independence", badge)
+        |> cockpit_add_kv("Limited Information M2", format("{:.2}", audit.m2.m2_stat))
+        |> cockpit_add_kv("Degrees of Freedom (df)", format("{}", audit.m2.df))
+        |> cockpit_add_kv("M2 p-value (Asymptotic)", format("{:.4}", audit.m2.p_value))
+        |> cockpit_add_kv("RMSEA_2 (Limited Info)", format("{:.4}", audit.m2.rmsea))
+        |> cockpit_add_kv("Comparative Fit (CFI)", format("{:.4}", audit.m2.cfi))
+        |> cockpit_add_kv("Tucker-Lewis Index (TLI)", format("{:.4}", audit.m2.tli))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Yen Mean Residual Q3", format("{:.4}", audit.q3.mean_q3))
+        |> cockpit_add_kv("Maximum Residual Q3", format("{:.4}", audit.q3.max_q3))
+        |> cockpit_add_kv("Item Pairs Evaluated", format("{}", audit.q3.n_pairs))
+        |> cockpit_add_kv("Flagged LID Item Pairs", format("{}", audit.q3.n_flagged_lid))
+        |> cockpit_add_divider();
+
+    if audit.q3.has_local_dependence {
+        for f in 0..audit.q3.n_flagged_lid {
+            let i1 = audit.q3.flagged_item_1[f];
+            let i2 = audit.q3.flagged_item_2[f];
+            let q_val = audit.q3.flagged_q3_val[f];
+            let pair_msg = "Item " + format("{}", i1) + " <-> Item " + format("{}", i2) + ": Q3 = " + format("{:.3}", q_val) + " (> 0.20 threshold)";
+            p = p |> cockpit_add_kv("LID Violation " + format("{}", f + 1), pair_msg);
+        }
+        p = p |> cockpit_add_divider();
+    }
+
+    let summary_msg = if audit.scale_certified {
+        "/ᐠ˵- ⩊ -˵マ ✧ Empirical moments conform to low-dimensional manifold. No redundant items detected."
+    } else {
+        if audit.q3.has_local_dependence {
+            "/ᐠ ·•᷄ ˕ •᷅マ Certain items share excess residual variance. Consider combining or revising content."
+        } else {
+            "≽(◉˕ ◉ ≼マ Model structure deviates from observed bivariate margins. Test multidimensionality."
+        }
+    };
+
+    p = p |> cockpit_add_line(summary_msg);
+    show_cockpit(p);
+}
+

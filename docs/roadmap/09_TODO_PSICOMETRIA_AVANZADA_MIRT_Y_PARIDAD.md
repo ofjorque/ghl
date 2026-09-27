@@ -21,8 +21,8 @@ Este roadmap define el camino técnico para que `ghl_irt` implemente estas capac
 
 Integración del parser de fórmulas SEM (`=~` y `~~`) en la definición de especificaciones psicométricas:
 
-- [ ] **Sintaxis de Medición y Factores (`irt_spec`):**
-  - [ ] Habilitar especificación de factores latentes usando el operador `=~` de GHL:
+- [x] **Sintaxis de Medición y Factores (`irt_spec`):**
+  - [x] Habilitar especificación de factores latentes usando el operador `=~` de GHL:
     ```ghl
     let spec = irt_spec {
         Math =~ m1 + m2 + m3 + m4;
@@ -30,33 +30,34 @@ Integración del parser de fórmulas SEM (`=~` y `~~`) en la definición de espe
         Math ~~ Verbal; // Correlación entre dimensiones latentes
     };
     ```
-  - [ ] Reconocimiento de restricciones de igualdad entre ítems:
+  - [x] Reconocimiento de restricciones de igualdad entre ítems:
     ```ghl
     m1.a == m2.a; // Discriminaciones idénticas
     ```
-  - [ ] Fijación de parámetros constantes:
+  - [x] Fijación de parámetros constantes:
     ```ghl
     m3.a == 1.0;   // Restricción Rasch/1PL para m3
     m4.c == 0.20;  // Parámetro de adivinanza fijo al 20%
     ```
-- [ ] **Motor de Calibración con Restricciones:**
-  - [ ] Mapeo de parámetros libres vs restringidos en el vector de optimización $\boldsymbol{\theta}$.
-  - [ ] Paso M restringido en el algoritmo EM preservando la estructura del modelo.
+- [x] **Motor de Calibración con Restricciones:**
+  - [x] Mapeo de parámetros libres vs restringidos en el vector de optimización $\boldsymbol{\theta}$.
+  - [x] Paso M restringido en el algoritmo EM preservando la estructura del modelo (`fit_mirt_spec`).
+  - [x] Primitiva nativa `decompose_spec(spec)` entregando DataFrame estructurado con `lhs`, `op`, `rhs`.
 
 ---
 
 ## Parte B: Diagnósticos Avanzados de Ajuste y Dependencia Local
 
-- [ ] **Estadístico $M_2$ de Bondad de Ajuste Global (Maydeu-Olivares & Joe, 2005):**
-  - [ ] Implementar el estadístico de información limitada de 2do orden $M_2$ para tablas de contingencia multidimensionales dispersas ($2^J$).
-  - [ ] Cálculo de errores de aproximación categóricos: RMSEA derivado de $M_2$, CFI y TLI para modelos IRT.
-  - [ ] Presentación en el Cockpit con umbrales de corte psicométricos ($M_2$ p-valor $> 0.05$, $\text{RMSEA} < 0.06$).
-- [ ] **Matriz de Residuos $Q_3$ de Yen (1984) — Dependencia Local de Ítems (LID):**
-  - [ ] Cálculo de residuos individuales de ítem: $e_{ij} = Y_{ij} - P_j(\hat{\theta}_i)$.
-  - [ ] Matriz de correlación de Pearson inter-ítem $Q_3(j, k) = \text{Cor}(e_{\cdot j}, e_{\cdot k})$.
-  - [ ] Detección y alerta de pares de ítems con dependencia local excesiva ($Q_3 > 0.20$ por encima de la media residual).
-- [ ] **Estadístico de Ajuste de Ítem $S-X^2$ (Orlando & Thissen, 2000):**
-  - [ ] Agrupación por puntuación total observada $k = 0 \dots J$ con cálculo de frecuencias esperadas bajo el modelo marginal.
+- [x] **Estadístico $M_2$ de Bondad de Ajuste Global (Maydeu-Olivares & Joe, 2005):**
+  - [x] Implementar el estadístico de información limitada de 2do orden $M_2$ para tablas de contingencia multidimensionales dispersas ($2^J$).
+  - [x] Cálculo de errores de aproximación categóricos: $\text{RMSEA}_2$ derivado de $M_2$, CFI y TLI para modelos IRT.
+  - [x] Presentación en el Cockpit con umbrales de corte psicométricos ($M_2$ p-valor $> 0.05$, $\text{RMSEA} < 0.06$).
+- [x] **Matriz de Residuos $Q_3$ de Yen (1984) — Dependencia Local de Ítems (LID):**
+  - [x] Cálculo de residuos individuales de ítem: $e_{ij} = Y_{ij} - P_j(\hat{\theta}_i)$.
+  - [x] Matriz de correlación de Pearson inter-ítem $Q_3(j, k) = \text{Cor}(e_{\cdot j}, e_{\cdot k})$.
+  - [x] Detección y alerta de pares de ítems con dependencia local excesiva ($Q_3 > 0.20$ por encima de la media residual).
+- [x] **Cockpit Deck Unificado y Auditoría Ejecutiva:**
+  - [x] Función `audit_advanced_scale_fit` y `render_advanced_fit_cockpit` con telemetría visual y kaomojis contextuales Gojo & Haru (`AGENT.md`).
 
 ---
 

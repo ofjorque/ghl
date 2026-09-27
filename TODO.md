@@ -82,13 +82,14 @@ Backlog temático activo detallado en [`docs/roadmap/09_TODO_PSICOMETRIA_AVANZAD
   - [x] Multidimensional IRT (M2PL compensatorio, métricas de Reckase $MDISC$/$MDIFF$, EAP 2D).
   - [x] Motor de test adaptativo (*CAT* con selección por Máxima Información de Fisher $MFI$, parada por SEM y simulador de trayectorias con sparklines).
   - [x] Cockpits visuales interactivos con sparklines ASCII (`  ▂▅▇███▇▅▂ ` y `▄ ▄█▇█`) y telemetría felina.
-- [ ] **Sintaxis Unificada SEM-IRT y Restricciones de Parámetros:**
-  - [ ] Habilitar bloque `irt_spec` reutilizando operadores `=~` (medición) y `~~` (covarianza de dimensiones) de SEM.
-  - [ ] Restricciones de igualdad entre ítems (`item1.a == item2.a`) y fijación de parámetros (`item3.a == 1.0`, `item4.c == 0.20`).
-- [ ] **Diagnósticos Avanzados de Ajuste Global y Dependencia Local:**
-  - [ ] Estadístico $M_2$ de información limitada (Maydeu-Olivares & Joe) para tablas dispersas $2^J$ con RMSEA/CFI categórico.
-  - [ ] Matriz de residuos $Q_3$ de Yen para evaluar dependencia local de ítems (*Local Item Dependence* / LID).
-  - [ ] Estadístico $S-X^2$ de Orlando & Thissen por puntaje total observado.
+- [x] **Sintaxis Unificada SEM-IRT y Restricciones de Parámetros (Parte A):**
+  - [x] Habilitar bloque `irt_spec` reutilizando operadores `=~` (medición), `~~` (covarianza de dimensiones) y `==` de SEM.
+  - [x] Restricciones de igualdad entre ítems (`item1.a == item2.a`) y fijación de parámetros (`item3.a == 1.0`, `item4.c == 0.20`).
+  - [x] Primitiva nativa `decompose_spec(spec)` que entrega un DataFrame estructurado con `lhs`, `op`, `rhs`.
+- [x] **Diagnósticos Avanzados de Ajuste Global y Dependencia Local (Parte B):**
+  - [x] Estadístico $M_2$ de información limitada (Maydeu-Olivares & Joe) para tablas dispersas $2^J$ con $\text{RMSEA}_2$, TLI y CFI categórico.
+  - [x] Matriz de residuos $Q_3$ de Yen para evaluar dependencia local de ítems (*Local Item Dependence* / LID) y alerta de pares $Q_3 > 0.20$.
+  - [x] Cockpit Deck unificado para diagnósticos avanzados con telemetría visual y kaomojis contextuales.
 - [ ] **Modelos Estructurales Complejos y Bi-Factor:**
   - [ ] Modelo Bi-Factor canónico (`bfactor`) con factor general ortogonal a factores específicos y métricas $ECV$ y $\omega_h$.
 - [ ] **DIF Multigrupo Formal por Razón de Verosimilitud (LRT):**

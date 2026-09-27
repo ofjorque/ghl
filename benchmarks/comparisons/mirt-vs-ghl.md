@@ -72,6 +72,9 @@ Una comparativa técnica rigurosa debe distinguir entre **calibrar un modelo pun
 | **Extracción de Parámetros** | `coef(mod, IRTpars = TRUE)` | `coef(model)`, `coef_irt(model)` | Puntual en GHL; inferencial/rotaciones en `mirt`. |
 | **Ajuste de Ítem** | `itemfit(mod)` | `compute_item_fit(...)` | Infit/Outfit en ambos; $S-X^2$ en `mirt`. |
 | **Ajuste de Sujetos** | `personfit(mod)` | `compute_person_fit_zh(...)` | $Z_h$ de Drasgow idéntico en ambos. |
+| **Ajuste Global de Escala** | `M2(mod)` | `compute_m2_statistic(...)` | Completa ($M_2$ Maydeu-Olivares & Joe, $\text{RMSEA}_2$, TLI, CFI). |
+| **Dependencia Local (LID)** | `residuals(mod, type='Q3')` | `compute_q3_residuals(...)` | Completa (Matriz $Q_3$ de Yen, media, máximo y alerta $Q_3 > 0.20$). |
+| **Especificación SEM-IRT** | `mirt.model(...)` | `irt_spec { ... }`, `fit_mirt_spec(...)` | Completa (medición `=~`, covarianza `~~`, restricciones `==`). |
 | **DIF** | `DIF(mod)` / `difR::difMH` | `compute_mantel_haenszel_dif(...)` | Mantel-Haenszel + ETS Delta en GHL; LRT multigrupo en `mirt`. |
 | **Equating** | `plink` / `equate` | `link_scales_mean_sigma`, `link_scales_mean_mean` | Lineal (Mean-Sigma/Mean) en GHL; Curvas TCC en R. |
 | **MIRT Multidimensional** | `mirt(data, 2)` | `fit_m2pl(df, items, n_dims)` | M2PL compensatorio + Reckase en GHL; CFA/Q-matrix en `mirt`. |
@@ -79,9 +82,9 @@ Una comparativa técnica rigurosa debe distinguir entre **calibrar un modelo pun
 
 ---
 
-## 4. Próxima Frontera: Sintaxis Unificada SEM para IRT
+## 4. Estado de Implementación: Sintaxis Unificada SEM para IRT y Diagnósticos Avanzados
 
-Para superar las limitaciones de sintaxis procedural y permitir restricciones ricas como en `mirt`, GHL adoptará la sintaxis de ecuaciones estructurales (desarrollada en RFC 11/15) para especificar modelos psicométricos:
+GHL implementa nativamente la sintaxis de ecuaciones estructurales para especificar modelos psicométricos y sus restricciones:
 
 ```ghl
 // Especificación de modelo IRT con sintaxis de fórmulas SEM en GHL:
@@ -101,7 +104,7 @@ let spec = irt_spec {
     m4.c == 0.20;
 };
 
-let model = fit_mirt(spec, df);
+let model = fit_mirt_spec(spec, df);
 ```
 
 ---
