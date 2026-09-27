@@ -416,6 +416,10 @@ impl TypeChecker {
                 }
             }
             StmtKind::Use(use_stmt) => {
+                if use_stmt.path.first().map(|s| s != "std").unwrap_or(false) {
+                    // External package imports are resolved and inlined during the module resolution phase
+                    return;
+                }
                 if !crate::modules::is_valid_module_path(&use_stmt.path) {
                     self.diagnostics.push(
                         Diagnostic::compute_error(

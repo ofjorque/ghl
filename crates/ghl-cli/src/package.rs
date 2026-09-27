@@ -3,7 +3,7 @@
 //! Provides `ghl new`, `ghl fetch`, `ghl test`, and cryptographic SHA-256
 //! lockfile generation (`ghl.lock`) for reproducible statistical pipelines.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
@@ -643,6 +643,160 @@ fn discover_gh_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Searches for the root directory of a package named `pkg_name`.
+pub fn find_package_root(pkg_name: &str, start_dir: &Path) -> Option<PathBuf> {
+    let mut cur = if start_dir.is_file() {
+        start_dir.parent().unwrap_or(Path::new(".")).to_path_buf()
+    } else {
+        start_dir.to_path_buf()
+    };
+
+    for _ in 0..7 {
+        // Check `packages/<pkg_name>`
+        let p1 = cur.join("packages").join(pkg_name);
+        if p1.exists() && (p1.join("src").exists() || p1.join("ghl.toml").exists()) {
+            return Some(p1);
+        }
+        // Check `<pkg_name>` directly
+        let p2 = cur.join(pkg_name);
+        if p2.exists() && (p2.join("src").exists() || p2.join("ghl.toml").exists()) {
+            return Some(p2);
+        }
+        // Check `ghl.toml` dependencies
+        let manifest_path = cur.join("ghl.toml");
+        if manifest_path.exists() {
+            if let Ok(manifest_content) = fs::read_to_string(&manifest_path) {
+                if let Ok(manifest) = parse_manifest(&manifest_content) {
+                    if let Some(spec) = manifest.dependencies.get(pkg_name) {
+                        if let Some(ref path_str) = spec.path {
+                            let dep_path = cur.join(path_str);
+                            if dep_path.exists() {
+                                return Some(dep_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(parent) = cur.parent() {
+            cur = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+
+    // Check current working directory
+    if let Ok(cwd) = std::env::current_dir() {
+        let p1 = cwd.join("packages").join(pkg_name);
+        if p1.exists() && (p1.join("src").exists() || p1.join("ghl.toml").exists()) {
+            return Some(p1);
+        }
+        let p2 = cwd.join(pkg_name);
+        if p2.exists() && (p2.join("src").exists() || p2.join("ghl.toml").exists()) {
+            return Some(p2);
+        }
+    }
+
+    None
+}
+
+/// Recursively resolves external `use <package>::...` statements in an AST `Program`.
+pub fn resolve_package_imports(
+    program: &mut ghl_syntax::ast::Program,
+    script_path: &Path,
+) -> Result<(), Diagnostic> {
+    let mut loaded_packages: HashSet<String> = HashSet::new();
+    let mut resolved_any = true;
+
+    while resolved_any {
+        resolved_any = false;
+        let mut new_statements = Vec::new();
+
+        for stmt in &program.statements {
+            if let ghl_syntax::ast::StmtKind::Use(ref use_stmt) = stmt.kind {
+                if let Some(pkg_name) = use_stmt.path.first() {
+                    if pkg_name != "std" && !loaded_packages.contains(pkg_name) {
+                        let pkg_dir = find_package_root(pkg_name, script_path).ok_or_else(|| {
+                            Diagnostic::compute_error(
+                                "C0105",
+                                format!("Cannot find package or module `{}`", pkg_name),
+                            )
+                            .with_help(format!(
+                                "Verify that package `{}` exists in `packages/` or is declared in `ghl.toml`.",
+                                pkg_name
+                            ))
+                        })?;
+
+                        loaded_packages.insert(pkg_name.clone());
+                        resolved_any = true;
+
+                        let src_dir = pkg_dir.join("src");
+                        let mut lib_files = Vec::new();
+
+                        if use_stmt.path.len() >= 2 {
+                            let submod = &use_stmt.path[1];
+                            let candidate_gh = src_dir.join(format!("{submod}.gh"));
+                            let candidate_ghl = src_dir.join(format!("{submod}.ghl"));
+                            if candidate_gh.exists() {
+                                lib_files.push(candidate_gh);
+                            } else if candidate_ghl.exists() {
+                                lib_files.push(candidate_ghl);
+                            }
+                        }
+
+                        if lib_files.is_empty() && src_dir.exists() && src_dir.is_dir() {
+                            if let Ok(entries) = fs::read_dir(&src_dir) {
+                                for entry in entries.flatten() {
+                                    let p = entry.path();
+                                    if p.is_file()
+                                        && p.extension().map(|e| e == "gh" || e == "ghl").unwrap_or(false)
+                                    {
+                                        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                                            if name != "main.gh"
+                                                && name != "main.ghl"
+                                                && !name.ends_with("_test.gh")
+                                                && !name.ends_with("_test.ghl")
+                                            {
+                                                lib_files.push(p);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            lib_files.sort();
+                        }
+
+                        for lib_file in &lib_files {
+                            let content = fs::read_to_string(lib_file).map_err(|e| {
+                                Diagnostic::compute_error(
+                                    "C0004",
+                                    format!("Failed to read package file `{}`: {e}", lib_file.display()),
+                                )
+                            })?;
+                            let parsed = ghl_syntax::parse_spanned(&content).map_err(|errs| {
+                                let msg = errs.into_iter().map(|e| e.message).collect::<Vec<_>>().join("; ");
+                                Diagnostic::compute_error(
+                                    "C0100",
+                                    format!("Syntax error in package file `{}`: {msg}", lib_file.display()),
+                                )
+                            })?;
+                            new_statements.extend(parsed.statements);
+                        }
+                    }
+                }
+            }
+        }
+
+        if resolved_any {
+            new_statements.extend(program.statements.drain(..));
+            program.statements = new_statements;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -758,5 +912,71 @@ struct WeightedModel {
         assert!(html_content.contains("Haru Docs"));
 
         let _ = std::fs::remove_dir_all(&proj_dir);
+    }
+
+    #[test]
+    fn test_resolve_package_imports_resolution() {
+        let temp_dir = std::env::temp_dir();
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let pkg_dir = temp_dir.join(format!("test_resolve_pkg_{pid}_{nanos}"));
+        let src_dir = pkg_dir.join("src");
+        std::fs::create_dir_all(&src_dir).expect("create pkg src");
+
+        let pkg_code = r#"
+fn package_helper(x: f64) -> f64 {
+    x * 2.0
+}
+"#;
+        std::fs::write(src_dir.join("math.gh"), pkg_code).expect("write math.gh");
+        std::fs::write(pkg_dir.join("ghl.toml"), "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n").expect("write ghl.toml");
+
+        // Script that imports this package
+        let script_dir = temp_dir.join(format!("test_resolve_script_{pid}_{nanos}"));
+        std::fs::create_dir_all(&script_dir).expect("create script dir");
+        let script_file = script_dir.join("main.gh");
+
+        let script_code = format!(
+            r#"
+use my_pkg::*;
+
+let val = package_helper(21.0);
+"#
+        );
+
+        // Put a ghl.toml in script_dir with dependency on my_pkg
+        let manifest = format!(
+            r#"[package]
+name = "script_proj"
+version = "0.1.0"
+
+[dependencies]
+my_pkg = {{ path = "{}" }}
+"#,
+            pkg_dir.to_str().unwrap().replace('\\', "/")
+        );
+        std::fs::write(script_dir.join("ghl.toml"), manifest).expect("write script ghl.toml");
+
+        let mut program = ghl_syntax::parse(&script_code).expect("syntax ok");
+        assert_eq!(program.statements.len(), 2);
+
+        let res = resolve_package_imports(&mut program, &script_file);
+        assert!(res.is_ok(), "resolve_package_imports should succeed: {:?}", res.err());
+
+        // Now program statements should include the function definition from package
+        let has_fn = program.statements.iter().any(|s| {
+            if let ghl_syntax::ast::StmtKind::Fn { name, .. } = &s.kind {
+                name == "package_helper"
+            } else {
+                false
+            }
+        });
+        assert!(has_fn, "package_helper should be imported into AST");
+
+        let _ = std::fs::remove_dir_all(&pkg_dir);
+        let _ = std::fs::remove_dir_all(&script_dir);
     }
 }

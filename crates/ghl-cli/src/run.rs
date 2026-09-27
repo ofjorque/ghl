@@ -76,7 +76,7 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
     let step_mark = SemanticCode::PipelineStep.glyph(caps);
 
     // 1. Parsing phase
-    let program = match ghl_syntax::parse_spanned(&content) {
+    let mut program = match ghl_syntax::parse_spanned(&content) {
         Ok(prog) => prog,
         Err(errors) => {
             let index = SourceIndex::new(&content);
@@ -89,6 +89,12 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
             std::process::exit(1);
         }
     };
+
+    // 1b. Module & Package Resolution Phase (RFC 06)
+    if let Err(diag) = crate::package::resolve_package_imports(&mut program, std::path::Path::new(&filename)) {
+        eprintln!("{}", diag.render_with_caps(caps));
+        std::process::exit(1);
+    }
 
     // 2. Semantic and type checking
     if let Err(diags) = ghl_types::check(&program, &filename, &content) {

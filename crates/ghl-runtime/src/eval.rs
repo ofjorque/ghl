@@ -149,6 +149,10 @@ impl Interpreter {
                 Ok(val)
             }
             StmtKind::Use(use_stmt) => {
+                if use_stmt.path.first().map(|s| s != "std").unwrap_or(false) {
+                    // External package imports are resolved and inlined during the module resolution phase
+                    return Ok(Value::Unit);
+                }
                 if !crate::modules::is_valid_module_path(&use_stmt.path) {
                     return Err(Diagnostic::compute_error(
                         "C0105",

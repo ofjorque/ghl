@@ -14,7 +14,11 @@ pub fn cmd_check(args: &[String], caps: &RenderCaps) {
     match std::fs::read_to_string(file) {
         Ok(content) => {
             match ghl_syntax::parse_spanned(&content) {
-                Ok(program) => {
+                Ok(mut program) => {
+                    if let Err(diag) = crate::package::resolve_package_imports(&mut program, std::path::Path::new(file)) {
+                        eprintln!("{}", diag.render_with_caps(caps));
+                        std::process::exit(1);
+                    }
                     let parse_stat = format!("Parsed {} top-level statements", program.statements.len());
                     match ghl_types::check(&program, file, &content) {
                         Ok(_) => {

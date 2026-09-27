@@ -1,0 +1,140 @@
+// benchmarks/scripts/suite_07_irt/bench_irt_main.gh
+// Benchmark execution driver for ghl_irt
+
+use ghl_irt::*;
+
+println("=== GHL IRT BENCHMARK EXECUTION ===");
+
+// 1. Load LSAT7 raw data
+let lsat7_df = read_csv("benchmarks/data/lsat7_raw.csv");
+let n_lsat = 1000;
+let j_lsat = 5;
+
+let c1 = lsat7_df["Item.1"];
+let c2 = lsat7_df["Item.2"];
+let c3 = lsat7_df["Item.3"];
+let c4 = lsat7_df["Item.4"];
+let c5 = lsat7_df["Item.5"];
+
+let mut lsat7_responses = [];
+for i in 0..n_lsat {
+    lsat7_responses = append(lsat7_responses, c1[i]);
+    lsat7_responses = append(lsat7_responses, c2[i]);
+    lsat7_responses = append(lsat7_responses, c3[i]);
+    lsat7_responses = append(lsat7_responses, c4[i]);
+    lsat7_responses = append(lsat7_responses, c5[i]);
+}
+
+// -----------------------------------------------------------------------------
+// Task 1: 1PL (Rasch) Model on LSAT7
+// -----------------------------------------------------------------------------
+let t0_1pl = clock_now();
+let res_1pl = fit_1pl(lsat7_responses, n_lsat, j_lsat);
+let t1_1pl = clock_now();
+let elapsed_1pl_ms = (t1_1pl - t0_1pl) * 1000.0;
+
+println("TASK_1PL_TIME_MS: " + format("{:.2}", elapsed_1pl_ms));
+let mut str_b1 = "";
+for j in 0..j_lsat {
+    str_b1 = str_b1 + (if j > 0 { ", " } else { "" }) + format("{:.4}", res_1pl.b_params[j]);
+}
+println("TASK_1PL_B: " + str_b1);
+println("TASK_1PL_LOGLIK: " + format("{:.2}", res_1pl.log_likelihood));
+
+// -----------------------------------------------------------------------------
+// Task 2: 2PL Model on LSAT7
+// -----------------------------------------------------------------------------
+let t0_2pl = clock_now();
+let res_2pl = fit_2pl(lsat7_responses, n_lsat, j_lsat);
+let t1_2pl = clock_now();
+let elapsed_2pl_ms = (t1_2pl - t0_2pl) * 1000.0;
+
+println("TASK_2PL_TIME_MS: " + format("{:.2}", elapsed_2pl_ms));
+let mut str_a2 = "";
+let mut str_b2 = "";
+for j in 0..j_lsat {
+    str_a2 = str_a2 + (if j > 0 { ", " } else { "" }) + format("{:.4}", res_2pl.a_params[j]);
+    str_b2 = str_b2 + (if j > 0 { ", " } else { "" }) + format("{:.4}", res_2pl.b_params[j]);
+}
+println("TASK_2PL_A: " + str_a2);
+println("TASK_2PL_B: " + str_b2);
+println("TASK_2PL_LOGLIK: " + format("{:.2}", res_2pl.log_likelihood));
+
+// -----------------------------------------------------------------------------
+// Task 3: Graded Response Model (GRM) on Science
+// -----------------------------------------------------------------------------
+let science_df = read_csv("benchmarks/data/science.csv");
+let n_science = 392;
+let j_science = 4;
+let k_science = 4;
+
+let s1 = science_df["Comfort"];
+let s2 = science_df["Work"];
+let s3 = science_df["Future"];
+let s4 = science_df["Benefit"];
+
+let mut science_responses = [];
+for i in 0..n_science {
+    science_responses = append(science_responses, s1[i] - 1.0);
+    science_responses = append(science_responses, s2[i] - 1.0);
+    science_responses = append(science_responses, s3[i] - 1.0);
+    science_responses = append(science_responses, s4[i] - 1.0);
+}
+
+let t0_grm = clock_now();
+let res_grm = fit_graded_response(science_responses, n_science, j_science, k_science);
+let t1_grm = clock_now();
+let elapsed_grm_ms = (t1_grm - t0_grm) * 1000.0;
+
+println("TASK_GRM_TIME_MS: " + format("{:.2}", elapsed_grm_ms));
+let mut str_agrm = "";
+for j in 0..j_science {
+    str_agrm = str_agrm + (if j > 0 { ", " } else { "" }) + format("{:.4}", res_grm.a_params[j]);
+}
+println("TASK_GRM_A: " + str_agrm);
+println("TASK_GRM_LOGLIK: " + format("{:.2}", res_grm.log_likelihood));
+
+// -----------------------------------------------------------------------------
+// Task 4: High-Dimensional MIRT (MHRM, D = 6)
+// -----------------------------------------------------------------------------
+let n_mhrm = 500;
+let j_mhrm = 12;
+let d_mhrm = 6;
+let mut mhrm_responses = [];
+for i in 0..n_mhrm {
+    for j in 0..j_mhrm {
+        let val = if ((i + j) % 2) == 0 { 1.0 } else { 0.0 };
+        mhrm_responses = append(mhrm_responses, val);
+    }
+}
+
+let t0_mhrm = clock_now();
+let res_mhrm = fit_mhrm_configured(mhrm_responses, n_mhrm, j_mhrm, d_mhrm, 10, 3, 4, 3);
+let t1_mhrm = clock_now();
+let elapsed_mhrm_ms = (t1_mhrm - t0_mhrm) * 1000.0;
+
+println("TASK_MHRM_TIME_MS: " + format("{:.2}", elapsed_mhrm_ms));
+println("TASK_MHRM_LOGLIK: " + format("{:.2}", res_mhrm.log_likelihood));
+
+// -----------------------------------------------------------------------------
+// Task 5: Multigroup LRT DIF on LSAT7
+// -----------------------------------------------------------------------------
+let mut grp_membership = [];
+for i in 0..n_lsat {
+    grp_membership = append(grp_membership, if i >= 500 { 1.0 } else { 0.0 });
+}
+
+let t0_dif = clock_now();
+let audit_dif = compute_multigroup_lrt_dif(lsat7_responses, grp_membership, n_lsat, j_lsat);
+let t1_dif = clock_now();
+let elapsed_dif_ms = (t1_dif - t0_dif) * 1000.0;
+
+println("TASK_DIF_TIME_MS: " + format("{:.2}", elapsed_dif_ms));
+let mut str_dif = "";
+for j in 0..j_lsat {
+    let it = audit_dif.items[j];
+    str_dif = str_dif + (if j > 0 { ", " } else { "" }) + format("{:.2}", it.lrt_uniform);
+}
+println("TASK_DIF_CHISQ: " + str_dif);
+
+println("=== GHL IRT BENCHMARK COMPLETED ===");

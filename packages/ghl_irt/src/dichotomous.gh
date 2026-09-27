@@ -26,132 +26,192 @@ fn prob_3pl(theta: f64, a: f64, b: f64, c: f64) -> f64 {
     prob_4pl(theta, a, b, c, 1.0)
 }
 
+use std::arena::{scope, alloc_vector, reset};
+
 fn fit_dichotomous_irt(
     responses: Vector,
     n_persons: i64,
     n_items: i64,
     model_type: String
 ) -> DichotomousIrtResult {
-    let quad = get_standard_quadrature();
-    let q_nodes = quad.nodes;
-    let q_weights = quad.weights;
-    let n_q = quad.n_points;
+    arena::scope(|arena| {
+        let quad = get_standard_quadrature();
+        let q_nodes = quad.nodes;
+        let q_weights = quad.weights;
+        let n_q = quad.n_points;
 
-    // 1. Initial parameter estimates based on classical item p-values
-    let mut a_params = [];
-    let mut b_params = [];
-    let mut c_params = [];
-    let mut d_params = [];
+        // Bock-Aitkin Pattern Aggregation:
+        // Condense binary examinee vectors into unique response patterns with frequency counts
+        let mut pattern_weights = [];
+        let mut pattern_responses = [];
+        let mut n_patterns = 0;
 
-    for j in 0..n_items {
-        let mut sum_correct = 0.0;
-        for i in 0..n_persons {
-            let resp = responses[(i * n_items) + j];
-            if resp > 0.5 {
-                sum_correct = sum_correct + 1.0;
+        if n_items <= 12 {
+            let mut pow2 = [];
+            let mut curr_pow = 1;
+            for j in 0..n_items {
+                pow2 = append(pow2, curr_pow);
+                curr_pow = curr_pow * 2;
             }
-        }
-        let p_val = (sum_correct + 0.5) / ((0.0 + n_persons) + 1.0);
-        let logit_p = ln(p_val / (1.0 - p_val));
-        let init_b = 0.0 - logit_p;
+            let total_patterns = curr_pow;
+            let mut pattern_counts = arena.alloc_vector(total_patterns, 0.0);
 
-        let init_a = 1.0;
-        let init_c = if model_type == "3PL" || model_type == "4PL" { 0.20 } else { 0.0 };
-        let init_d = if model_type == "4PL" { 0.96 } else { 1.00 };
-
-        a_params = append(a_params, init_a);
-        b_params = append(b_params, init_b);
-        c_params = append(c_params, init_c);
-        d_params = append(d_params, init_d);
-    }
-
-    let max_iter = 40;
-    let tol = 0.015;
-    let mut converged = false;
-    let mut iter_count = 0.0;
-    let mut final_loglik = 0.0;
-
-    let mut iter = 0;
-    while !converged && iter < max_iter {
-        iter = iter + 1;
-        iter_count = iter_count + 1.0;
-
-        // --- E-STEP: Compute posterior person distribution across quadrature nodes ---
-        // r_table[j * n_q + q]: expected correct endorsements
-        // n_table[q]: expected test-takers at node q
-        let mut r_table = [];
-        for idx in 0..(n_items * n_q) {
-            r_table = append(r_table, 0.0);
-        }
-        let mut n_table = [];
-        for q in 0..n_q {
-            n_table = append(n_table, 0.0);
-        }
-
-        let mut current_loglik = 0.0;
-
-        for i in 0..n_persons {
-            // Compute log-likelihood for person i at each node q
-            let mut log_p_node = [];
-            let mut max_log_p = -1.0e10;
-
-            for q in 0..n_q {
-                let theta_q = q_nodes[q];
-                let mut log_l = 0.0;
-
+            for i in 0..n_persons {
+                let mut code = 0;
                 for j in 0..n_items {
-                    let a_j = a_params[j];
-                    let b_j = b_params[j];
-                    let c_j = c_params[j];
+                    let resp = responses[(i * n_items) + j];
+                    if resp > 0.5 {
+                        code = code + pow2[j];
+                    }
+                }
+                pattern_counts = set(pattern_counts, code, pattern_counts[code] + 1.0);
+            }
+
+            for k in 0..total_patterns {
+                let cnt = pattern_counts[k];
+                if cnt > 0.0 {
+                    pattern_weights = append(pattern_weights, cnt);
+                    n_patterns = n_patterns + 1;
+                    for j in 0..n_items {
+                        let bit = floor(k / pow2[j]) % 2;
+                        pattern_responses = append(pattern_responses, if bit > 0.5 { 1.0 } else { 0.0 });
+                    }
+                }
+            }
+        } else {
+            n_patterns = n_persons;
+            for i in 0..n_persons {
+                pattern_weights = append(pattern_weights, 1.0);
+            }
+            pattern_responses = responses;
+        }
+
+        // 1. Initial parameter estimates based on classical item p-values
+        let mut a_params = [];
+        let mut b_params = [];
+        let mut c_params = [];
+        let mut d_params = [];
+
+        for j in 0..n_items {
+            let mut sum_correct = 0.0;
+            for p in 0..n_patterns {
+                let resp = pattern_responses[(p * n_items) + j];
+                if resp > 0.5 {
+                    sum_correct = sum_correct + pattern_weights[p];
+                }
+            }
+            let p_val = (sum_correct + 0.5) / ((0.0 + n_persons) + 1.0);
+            let logit_p = ln(p_val / (1.0 - p_val));
+            let init_b = 0.0 - logit_p;
+
+            let init_a = 1.0;
+            let init_c = if model_type == "3PL" || model_type == "4PL" { 0.20 } else { 0.0 };
+            let init_d = if model_type == "4PL" { 0.96 } else { 1.00 };
+
+            a_params = append(a_params, init_a);
+            b_params = append(b_params, init_b);
+            c_params = append(c_params, init_c);
+            d_params = append(d_params, init_d);
+        }
+
+        let max_iter = 40;
+        let tol = 0.015;
+        let mut converged = false;
+        let mut iter_count = 0.0;
+        let mut final_loglik = 0.0;
+
+        let mut iter = 0;
+        while !converged && iter < max_iter {
+            iter = iter + 1;
+            iter_count = iter_count + 1.0;
+
+            // --- E-STEP: Compute posterior pattern distribution across quadrature nodes ---
+            let mut log_p_mat = [];
+            let mut log_q_mat = [];
+            for j in 0..n_items {
+                let a_j = a_params[j];
+                let b_j = b_params[j];
+                let c_j = c_params[j];
+                for q in 0..n_q {
+                    let theta_q = q_nodes[q];
                     let p_jq = prob_3pl(theta_q, a_j, b_j, c_j);
                     let safe_p = if p_jq < 0.0001 { 0.0001 } else { if p_jq > 0.9999 { 0.9999 } else { p_jq } };
+                    log_p_mat = append(log_p_mat, ln(safe_p));
+                    log_q_mat = append(log_q_mat, ln(1.0 - safe_p));
+                }
+            }
 
-                    let y_ij = responses[(i * n_items) + j];
-                    if y_ij > 0.5 {
-                        log_l = log_l + ln(safe_p);
-                    } else {
-                        log_l = log_l + ln(1.0 - safe_p);
+            let mut post_all = [];
+            let mut current_loglik = 0.0;
+
+            for p in 0..n_patterns {
+                let mut log_p_node = [];
+                let mut max_log_p = -1.0e10;
+
+                for q in 0..n_q {
+                    let mut log_l = 0.0;
+                    for j in 0..n_items {
+                        let jq_idx = (j * n_q) + q;
+                        let y_pj = pattern_responses[(p * n_items) + j];
+                        if y_pj > 0.5 {
+                            log_l = log_l + log_p_mat[jq_idx];
+                        } else {
+                            log_l = log_l + log_q_mat[jq_idx];
+                        }
+                    }
+
+                    log_p_node = append(log_p_node, log_l);
+                    if log_l > max_log_p {
+                        max_log_p = log_l;
                     }
                 }
 
-                log_p_node = append(log_p_node, log_l);
-                if log_l > max_log_p {
-                    max_log_p = log_l;
+                // Exponentiate with max-subtraction and multiply by prior weight
+                let mut post_weights = [];
+                let mut sum_post = 0.0;
+                for q in 0..n_q {
+                    let unnorm = exp(log_p_node[q] - max_log_p) * q_weights[q];
+                    post_weights = append(post_weights, unnorm);
+                    sum_post = sum_post + unnorm;
+                }
+
+                // Normalize posterior distribution
+                let p_p_marginal = sum_post * exp(max_log_p);
+                if p_p_marginal > 0.0000000001 {
+                    current_loglik = current_loglik + (pattern_weights[p] * ln(p_p_marginal));
+                }
+
+                for q in 0..n_q {
+                    let post_q = if sum_post > 0.0 { post_weights[q] / sum_post } else { 0.0 };
+                    post_all = append(post_all, post_q);
                 }
             }
 
-            // Exponentiate with max-subtraction and multiply by prior weight
-            let mut post_weights = [];
-            let mut sum_post = 0.0;
+            final_loglik = current_loglik;
+
+            // 2. Accumulate expected test-takers n_q and correct endorsements r_jq
+            let mut n_table = [];
             for q in 0..n_q {
-                let unnorm = exp(log_p_node[q] - max_log_p) * q_weights[q];
-                post_weights = append(post_weights, unnorm);
-                sum_post = sum_post + unnorm;
+                let mut sum_nq = 0.0;
+                for p in 0..n_patterns {
+                    sum_nq = sum_nq + (pattern_weights[p] * post_all[(p * n_q) + q]);
+                }
+                n_table = append(n_table, sum_nq);
             }
 
-            // Normalize posterior distribution
-            let p_i_marginal = sum_post * exp(max_log_p);
-            if p_i_marginal > 0.0000000001 {
-                current_loglik = current_loglik + ln(p_i_marginal);
-            }
-
-            for q in 0..n_q {
-                let post_q = if sum_post > 0.0 { post_weights[q] / sum_post } else { 0.0 };
-                let old_n = n_table[q];
-                n_table = set(n_table, q, old_n + post_q);
-
-                for j in 0..n_items {
-                    let y_ij = responses[(i * n_items) + j];
-                    if y_ij > 0.5 {
-                        let r_idx = (j * n_q) + q;
-                        let old_r = r_table[r_idx];
-                        r_table = set(r_table, r_idx, old_r + post_q);
+            let mut r_table = [];
+            for j in 0..n_items {
+                for q in 0..n_q {
+                    let mut sum_rjq = 0.0;
+                    for p in 0..n_patterns {
+                        let y_pj = pattern_responses[(p * n_items) + j];
+                        if y_pj > 0.5 {
+                            sum_rjq = sum_rjq + (pattern_weights[p] * post_all[(p * n_q) + q]);
+                        }
                     }
+                    r_table = append(r_table, sum_rjq);
                 }
             }
-        }
-
-        final_loglik = current_loglik;
 
         // --- M-STEP: Update item parameters based on expected counts r_{jq} and n_q ---
         let mut max_param_change = 0.0;
@@ -219,6 +279,8 @@ fn fit_dichotomous_irt(
             b_params = set(b_params, j, new_b);
         }
 
+        arena.reset();
+
         if max_param_change < tol {
             converged = true;
         }
@@ -237,6 +299,7 @@ fn fit_dichotomous_irt(
         n_items: n_items,
         n_persons: n_persons
     }
+    })
 }
 
 fn fit_1pl(responses: Vector, n_persons: i64, n_items: i64) -> DichotomousIrtResult {

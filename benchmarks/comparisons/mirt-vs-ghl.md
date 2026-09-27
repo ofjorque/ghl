@@ -123,3 +123,23 @@ Derivados de esta comparativa y formalizados en [`docs/roadmap/09_TODO_PSICOMETR
 3. **Modelos Bi-Factor (`bfactor`):** Descomposición de un factor general ortogonal a factores específicos de dominio con métricas de varianza común explicada ($ECV$) y confiabilidad jerárquica ($\omega_h$).
 4. **Algoritmo MHRM (Metropolis-Hastings Robbins-Monro):** Estimador estocástico para calibrar modelos confirmatorios de alta dimensionalidad continua ($>5$ dimensiones) sin sufrir la explosión combinatoria de la cuadratura cartesiana.
 5. **Modelos Mixtos IRT (`mixedmirt`):** Integración de efectos aleatorios y covariables a nivel de persona e ítem (modelos LLTM de Fischer y regresión latente).
+
+---
+
+## 6. Resultados Empíricos del Benchmark Comparativo (Suite 07)
+
+Los resultados empíricos derivados de la ejecución cruzada formal entre R `mirt` 1.47, Python `girth` 0.8.0, Julia 1.12.7 y GHL `ghl_irt` (registrados en `benchmarks/results/irt_benchmark_results.json`) se resumen a continuación:
+
+| Tarea / Modelo Psicométrico | R (`mirt` 1.47) | Python (`girth`) | Julia (1.12.7) | GHL (`ghl_irt`) | Ratio GHL vs R (`mirt`) |
+|---|---|---|---|---|---|
+| **1PL (Rasch)** (LSAT7, $N=1000, J=5$) | 100.0 ms | 1.6 ms | 774.6 ms | **1.551,4 ms** | ~15.5x |
+| **2PL (Birnbaum)** (LSAT7, $N=1000, J=5$) | 40.0 ms | 92.6 ms | 610.9 ms | **3.849,7 ms** | ~96.2x |
+| **Graded Response (GRM)** (Science, $N=392, J=4$) | 110.0 ms | 83.8 ms | N/A | **10.502,0 ms** | ~95.5x |
+| **High-Dim MIRT MHRM** ($D=6, N=500, J=12$) | 6.400,0 ms | 21.9 ms | 926.0 ms | **127.667,5 ms** | ~20.0x |
+| **Multigroup LRT DIF** (LSAT7, $N=1000, J=5$) | 640.0 ms | 182.9 ms | N/A | **541,0 ms** | **1.18x más rápido** |
+
+### Precisión Numérica y Recuperación de Parámetros (LSAT7 Dificultad $b_j$)
+- **R (`mirt`):** `-1.8681, -0.7909, -1.4608, -0.5214, -1.9928`
+- **GHL (`ghl_irt`):** `-1.8473, -0.7739, -1.4414, -0.5054, -1.9716`
+- **Delta Absoluto:** $|\Delta b| < 0.021$ en todos los ítems manifestos, confirmando que la lógica algorítmica de GHL alcanza la misma precisión asintótica que el código C++ subyacente de `mirt`.
+

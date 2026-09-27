@@ -433,7 +433,7 @@ impl ReplSession {
 
     fn eval_input(&mut self, code: &str) {
         // 1. Parse
-        let program = match ghl_syntax::parse(code) {
+        let mut program = match ghl_syntax::parse(code) {
             Ok(prog) => prog,
             Err(errors) => {
                 for err_msg in errors {
@@ -443,6 +443,12 @@ impl ReplSession {
                 return;
             }
         };
+
+        // 1b. Module & Package Resolution Phase (RFC 06)
+        if let Err(diag) = crate::package::resolve_package_imports(&mut program, std::path::Path::new(".")) {
+            eprintln!("{}", diag.render_with_caps(&self.caps));
+            return;
+        }
 
         // If user simply typed a documented standard library function name (e.g. `mean`, `ols`)
         // like in R, show its documentation and mathematical formula directly!

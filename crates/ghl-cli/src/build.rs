@@ -65,7 +65,7 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
     };
 
     // 1. Parsing
-    let program = match ghl_syntax::parse_spanned(&content) {
+    let mut program = match ghl_syntax::parse_spanned(&content) {
         Ok(p) => p,
         Err(errors) => {
             let index = SourceIndex::new(&content);
@@ -78,6 +78,12 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
             std::process::exit(1);
         }
     };
+
+    // 1b. Module & Package Resolution Phase (RFC 06)
+    if let Err(diag) = crate::package::resolve_package_imports(&mut program, std::path::Path::new(&file)) {
+        eprintln!("{}", diag.render_with_caps(caps));
+        std::process::exit(1);
+    }
 
     // 2. Collect exported FFI functions
     let mut exported_fns: Vec<(String, Vec<ghl_syntax::FnParam>, Option<ghl_syntax::TypeAnnotation>)> = Vec::new();
