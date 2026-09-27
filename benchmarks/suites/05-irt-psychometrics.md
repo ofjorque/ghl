@@ -101,8 +101,15 @@ arena::scope(|arena| {
 
 ---
 
-## 5. Conclusiones y Roadmap
+## 5. Conclusiones y Plan de Optimización (Roadmap 09 Parte G)
 
 1. **Paridad de Precisión Plena:** `ghl_irt` replica los parámetros de referencia de R `mirt` con error $|\Delta| < 0.02$, demostrando que la formulación numérica en GHL es formalmente correcta y rigurosa.
-2. **Ventaja en Tareas de Lógica Estructural (DIF):** En pruebas que requieren múltiples re-estimaciones como el LRT DIF multigrupo, la ligereza del runtime de GHL supera a R `mirt` en hasta **2,7x** de velocidad.
-3. **Optimizaciones Futuras (Cranelift JIT para Bucle EM):** A medida que la reducción a HIR de Cranelift incorpore vectorización directa de funciones trascendentales (`exp`, `ln`) en matrices contiguas, el bucle EM de GHL alcanzará paridad de velocidad nativa directa con los núcleos C++ de `RcppArmadillo`.
+2. **Ventaja en Tareas de Lógica Estructural (DIF):** En pruebas que requieren múltiples re-estimaciones como el LRT DIF multigrupo, la ligereza del runtime de GHL supera a R `mirt` en hasta **2,7x** de velocidad (238 ms vs 640 ms).
+3. **Plan de Paridad de Velocidad en Calibración EM (Roadmap 09 Parte G):**
+   - Para cerrar la brecha observada en el ciclo EM frente a los binarios C++ de `mirt` (`RcppArmadillo` con AVX2/OpenMP), se definió un plan de aceleración en 4 pilares:
+     - **Pilar 1 (Vectorización GEMM):** Expresar el paso E de Bock-Aitkin como multiplicaciones matriciales $\mathbf{Y} \cdot \log\mathbf{P}$ y $\mathbf{Y}^T \cdot \mathbf{Post}$, delegando directamente en el motor BLAS multihilo `faer` de GHL (`A * B`).
+     - **Pilar 2 (Aceleración de Aitken $\Delta^2$):** Extrapolación cuadrática de parámetros para reducir las iteraciones EM de 40 a 15 ciclos.
+     - **Pilar 3 (Arenas `std::arena`):** Buffers de probabilidad reutilizados con mutación zero-copy in-place.
+     - **Pilar 4 (Kernel Capa 0 Opcional):** Primitiva SIMD/Rayon en Rust para integraciones de alta dimensión extrema.
+   - Detalle técnico completo registrado en [`docs/roadmap/09_TODO_PSICOMETRIA_AVANZADA_MIRT_Y_PARIDAD.md`](../../docs/roadmap/09_TODO_PSICOMETRIA_AVANZADA_MIRT_Y_PARIDAD.md) y [`packages/ghl_irt/TODO.md`](../../packages/ghl_irt/TODO.md).
+

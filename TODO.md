@@ -105,6 +105,11 @@ Backlog temático activo detallado en [`docs/roadmap/09_TODO_PSICOMETRIA_AVANZAD
   - [x] Modelo Logístico Lineal de Test (LLTM de Fischer) para predecir dificultades a partir de la matriz de diseño de operaciones cognitivas ($\mathbf{Q}$).
   - [x] Regresión latente conjunta (*Latent Regression IRT*) con covariables de examinado ($\mathbf{X}$), eliminando el sesgo de atenuación de dos etapas.
   - [x] Cockpit Deck interactivo `render_mixed_irt_cockpit` con tabla de coeficientes $\beta_p$ y $\gamma_k$, $R^2$ cognitivo y certificación de validez de constructo.
+- [ ] **Optimización de Rendimiento y Paridad de Velocidad frente a C++ / `mirt` (Parte G):**
+  - [ ] Vectorización del E-Step mediante productos matriciales GEMM (`faer` multihilo) en `dichotomous.gh` y `mirt.gh`.
+  - [ ] Aceleración de convergencia EM de Aitken ($\Delta^2$ / SQUAREM) reduciendo iteraciones de 40 a 15.
+  - [ ] Adopción generalizada de memoria arena (`std::arena`) en bucles de calibración para mutación in-place zero-copy.
+  - [ ] Targets empíricos Suite 07: 1PL < 100 ms (paridad total con `mirt`), 2PL < 200 ms, MHRM < 10 s. Detalle completo en [`docs/roadmap/09_TODO_PSICOMETRIA_AVANZADA_MIRT_Y_PARIDAD.md`](docs/roadmap/09_TODO_PSICOMETRIA_AVANZADA_MIRT_Y_PARIDAD.md).
 
 ---
 

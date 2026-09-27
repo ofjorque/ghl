@@ -106,3 +106,50 @@ Integración del parser de fórmulas SEM (`=~` y `~~`) en la definición de espe
   - [x] Incorporación de predictores a nivel de examinado (género, nivel educativo, escuela) en la distribución latente de habilidad (*Latent Regression IRT*), eliminando el sesgo de atenuación de dos etapas.
   - [x] Cálculo automático de $R^2_{\text{LLTM}}$ (proporción de varianza de dificultad explicada por las operaciones cognitivas) y errores estándar para pesos $\beta_p$ y $\gamma_k$.
   - [x] Cockpit Deck interactivo `render_mixed_irt_cockpit` con tablas formateadas de coeficientes, significancia estadística y certificación de validez de constructo.
+
+---
+
+## Parte G: Optimización de Rendimiento, Vectorización GEMM (`faer`) y Paridad de Velocidad frente a C++ (`mirt`)
+
+> **Diagnóstico del Benchmark Suite 07:**
+> En tareas estructurales como DIF Multigrupo LRT, GHL superó a R `mirt` (541 ms vs 640 ms, y 238 ms en baja contención). Sin embargo, en la calibración iterativa EM clásica (1PL/2PL/GRM), `mirt` resultó más veloz (100 ms vs 1.551 ms en 1PL; 40 ms vs 3.849 ms en 2PL).
+> **Causa:** `mirt` delega el bucle interno de cuadratura a rutinas C++ (`RcppArmadillo`) precompiladas con `-O3`, vectorización AVX2 y multi-threading OpenMP. En contraste, `ghl_irt` ejecutó bucles escalares anidados ($\sum_{p=1}^P \sum_{q=1}^Q \sum_{j=1}^J$) en el evaluador AST de GHL (~200.000 nodos AST por calibración).
+> **Objetivo:** Llevar la calibración de `ghl_irt` a paridad directa con C++ (< 100 ms en 1PL, < 200 ms en 2PL) aprovechando el motor BLAS multihilo `faer` de GHL, aceleración matemática de convergencia y memoria arena.
+
+- [ ] **Pilar 1: Vectorización Matricial con GEMM Nativo (`faer`) en GHL (Capa 1):**
+  - [ ] **Formulación Matricial del E-Step de Bock-Aitkin:**
+    - Representar los $P$ patrones únicos observados como matriz binaria $\mathbf{Y}_{P \times J}$ y su complemento $(\mathbf{1} - \mathbf{Y})_{P \times J}$.
+    - Construir en cada iteración la matriz de log-probabilidades por ítem y cuadratura $\log \mathbf{P}_{J \times Q}$ y $\log(\mathbf{1} - \mathbf{P})_{J \times Q}$.
+    - Calcular la matriz completa de log-verosimilitudes condicionales $\log \mathbf{L}_{P \times Q}$ mediante dos productos de matrices BLAS:
+      $$\log \mathbf{L}_{P \times Q} = \mathbf{Y}_{P \times J} \cdot (\log \mathbf{P})_{J \times Q} + (\mathbf{1} - \mathbf{Y})_{P \times J} \cdot (\log(\mathbf{1} - \mathbf{P}))_{J \times Q}$$
+    - Calcular los conteos de endoso esperados por ítem y nodo ($\mathbf{R}_{J \times Q}$) mediante un único GEMM con la transpuesta:
+      $$\mathbf{R}_{J \times Q} = \mathbf{Y}^T_{J \times P} \cdot \mathbf{Post}_{P \times Q}$$
+  - [ ] **Reemplazo en `packages/ghl_irt/src/dichotomous.gh` y `mirt.gh`:**
+    - Sustituir los bucles anidados por operadores matriciales nativos `A * B` y `t(A)` que delegan a `faer` multihilo.
+    - Ejecutar el E-step completo en microsegundos dentro de GHL puro sin tocar el compilador Rust.
+
+- [ ] **Pilar 2: Aceleración de Convergencia EM de Aitken ($\Delta^2$ / SQUAREM):**
+  - [ ] **Extrapolación de Parámetros en el M-Step:**
+    - Implementar el estimador de aceleración cuadrática de Aitken sobre la secuencia de parámetros de dificultad $\boldsymbol{b}^{(k)}$:
+      $$\boldsymbol{b}^{(k+1)}_{\text{accel}} = \boldsymbol{b}^{(k)} - \frac{(\boldsymbol{b}^{(k)} - \boldsymbol{b}^{(k-1)})^{\odot 2}}{\boldsymbol{b}^{(k)} - 2\boldsymbol{b}^{(k-1)} + \boldsymbol{b}^{(k-2)}}$$
+    - Intercalar pasos de aceleración cada 2–3 ciclos EM convencionales para evitar inestabilidad en etapas tempranas.
+  - [ ] **Reducción de Ciclos de Calibración:**
+    - Recortar las iteraciones EM necesarias para convergencia ($\epsilon < 10^{-4}$) de 35–45 ciclos a solo 12–16 ciclos, reduciendo el tiempo total en $2\times$ a $3\times$.
+
+- [ ] **Pilar 3: Gestión de Memoria Regional y Buffers Zero-Copy (`std::arena`):**
+  - [ ] **Adopción de Arenas en Calibración Dicotómica y Politómica:**
+    - Extender el patrón de `std::arena::scope` (ya validado en `packages/ghl_irt/src/mhrm.gh`) a `dichotomous.gh` y `polytomous.gh`.
+    - Asignar $\mathbf{P}$, $\log\mathbf{P}$, $\mathbf{Post}$ y $\mathbf{R}$ dentro del arena regional, mutándolos con `set()` y `Arc::make_mut`.
+    - Eliminar la presión sobre el allocator del sistema (`malloc`/`free`) en cada iteración del bucle EM.
+
+- [ ] **Pilar 4: Kernel Numérico Opcional de Alta Dimensión en Rust (Capa 0):**
+  - [ ] **Primitiva `irt_em_quadrature_kernel` en `crates/ghl-runtime`:**
+    - Si para modelos multidimensionales densos ($D \ge 3, Q^D \ge 3.375$ nodos) se requiere rendimiento extremo, exponer un kernel nativo en `crates/ghl-runtime/src/native_neko_ops.rs` paralelizado con Rayon (`par_iter`) y vectorización SIMD para la integración de cuadratura.
+
+- [ ] **Metas y Verificación de Rendimiento (Suite 07):**
+  - [ ] **1PL (Rasch, LSAT7):** Reducir de $1.551\text{ ms}$ a $< 100\text{ ms}$ ($\le$ R `mirt`).
+  - [ ] **2PL (Birnbaum, LSAT7):** Reducir de $3.850\text{ ms}$ a $< 200\text{ ms}$.
+  - [ ] **GRM (Samejima, Science):** Reducir de $10.502\text{ ms}$ a $< 350\text{ ms}$.
+  - [ ] **MHRM ($D=6, N=500$):** Reducir de $127\text{ s}$ a $< 10\text{ s}$.
+  - [ ] **Preservación de Precisión:** Mantener discrepancia $|\Delta b| < 0.02$ respecto a `mirt` en todos los ítems.
+
