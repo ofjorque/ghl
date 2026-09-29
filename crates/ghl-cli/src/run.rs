@@ -13,6 +13,7 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
     }
 
     let mut quiet = false;
+    let mut verbose = false;
     let mut eval_code: Option<String> = None;
     let mut file_target: Option<String> = None;
 
@@ -20,6 +21,7 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
     while idx < args.len() {
         match args[idx].as_str() {
             "-q" | "--quiet" => quiet = true,
+            "-v" | "--verbose" => verbose = true,
             "-e" | "-c" => {
                 if idx + 1 < args.len() {
                     eval_code = Some(args[idx + 1].clone());
@@ -126,8 +128,8 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
         format!("({} functions compiled in {:.2}ms)", hir.functions.len(), elapsed)
     });
 
-    // Telemetry indicator for interactive users
-    if caps.is_tty && !quiet {
+    // Telemetry indicator for verbose users (-v / --verbose)
+    if caps.is_tty && verbose && !quiet {
         let jit_label = if let Some(info) = &jit_info {
             format!("{} {}", caps.cyan("CRANELIFT JIT ▶"), caps.dim(info))
         } else {

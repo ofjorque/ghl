@@ -29,7 +29,7 @@ fn print_help(caps: &RenderCaps) {
 
 Commands:
     run <file|options>         Execute a GHL script with fast Cranelift JIT
-                               (Options: -e "code" for inline, - for stdin, -q for quiet)
+                               (Options: -e "code" for inline, - for stdin, -q for quiet, -v for verbose)
     repl                       Launch the interactive shell
     check <file.gh|file.ghl>   Validate syntax, types, and Cranelift HIR lowering
     new <name>                 Create a new structured GHL project (RFC 06 §4)
