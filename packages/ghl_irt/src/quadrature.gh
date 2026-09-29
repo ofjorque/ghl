@@ -38,3 +38,21 @@ fn get_standard_quadrature() -> QuadratureGrid {
         n_points: 15
     }
 }
+
+struct MultidimensionalGrid {
+    nodes: Matrix,
+    weights: Vector,
+    n_points: i64,
+    n_dimensions: i64
+}
+
+fn get_multidimensional_quadrature(n_dimensions: i64, points_per_dim: i64) -> MultidimensionalGrid {
+    let grid = irt_quadrature_grid(n_dimensions, points_per_dim, 3.5);
+    MultidimensionalGrid {
+        nodes: grid.nodes,
+        weights: grid.weights,
+        n_points: grid.n_points,
+        n_dimensions: grid.n_dimensions
+    }
+}
+

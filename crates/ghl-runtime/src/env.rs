@@ -282,6 +282,10 @@ impl RuntimeEnv {
         env.set("elastic_net".into(), Value::NativeFn(crate::regularized::native_elastic_net));
         env.set("cv_glmnet".into(), Value::NativeFn(crate::regularized::native_cv_glmnet));
 
+        // Psychometrics & IRT Kernels (Pilar 4)
+        env.set("irt_em_quadrature_kernel".into(), Value::NativeFn(native_irt_em_quadrature_kernel));
+        env.set("irt_quadrature_grid".into(), Value::NativeFn(native_irt_quadrature_grid));
+
         // Grammar of Graphics (RFC 09) Verbs
         env.set("plot".into(), Value::NativeFn(native_plot));
         env.set("aes".into(), Value::NativeFn(native_aes));
@@ -688,3 +692,4 @@ use crate::native_io_ops::*;
 use crate::native_dataframe_ext::*;
 use crate::native_arena_ops::*;
 use crate::native_distributions::*;
+use crate::native_irt::*;

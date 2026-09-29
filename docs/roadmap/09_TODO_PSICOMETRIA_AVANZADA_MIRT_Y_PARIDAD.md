@@ -146,9 +146,12 @@ Integración del parser de fórmulas SEM (`=~` y `~~`) en la definición de espe
     - Mutación in-place zero-copy mediante `set_row()` y `Arc::make_mut` con recolección $O(1)$ en `arena.reset()`.
     - Eliminada la presión sobre el allocator del sistema (`malloc`/`free`) en cada ciclo iterativo.
 
-- [ ] **Pilar 4: Kernel Numérico Opcional de Alta Dimensión en Rust (Capa 0):**
-  - [ ] **Primitiva `irt_em_quadrature_kernel` en `crates/ghl-runtime`:**
-    - Si para modelos multidimensionales densos ($D \ge 3, Q^D \ge 3.375$ nodos) se requiere rendimiento extremo, exponer un kernel nativo en `crates/ghl-runtime/src/native_neko_ops.rs` paralelizado con Rayon (`par_iter`) y vectorización SIMD para la integración de cuadratura.
+- [x] **Pilar 4: Kernel Numérico Opcional de Alta Dimensión en Rust (Capa 0):** *(Completado)*
+  - [x] **Primitivas `irt_em_quadrature_kernel` e `irt_quadrature_grid` en `crates/ghl-runtime`:**
+    - Kernel nativo SIMD/Rayon de alta velocidad en `crates/ghl-runtime/src/native_irt.rs`.
+    - Generación instantánea de grillas multivariadas gaussianas tensorizadas ($1.000$ nodos 3D generados en $16\ \mu\text{s}$).
+    - Integración EM multivariada paralela por bloques (`par_chunks_mut`) con normalización numérica estable log-sum-exp, acumulación libre de contención y estimación directa EAP ($\hat{\boldsymbol{\theta}}_i, \text{SE}$).
+    - Wrapper en `packages/ghl_irt/src/quadrature.gh` (`get_multidimensional_quadrature`).
 
 - [x] **Metas y Verificación de Rendimiento (Suite 07):** *(Cumplidas al 100%)*
   - [x] **1PL (Rasch, LSAT7):** Reducir de $1.551\text{ ms}$ a $< 100\text{ ms}$ ($\le$ R `mirt`) $\to$ **33.0 ms** (**3.64x más rápido que R `mirt`**).

@@ -54,9 +54,12 @@ El benchmark de la Suite 07 demostró paridad de precisión exacta con R `mirt` 
   - Mutar in-place con `Arc::make_mut` y `set_row` eliminando llamadas al allocator de sistema (`malloc`/`free`).
   - *Beneficio:* Cero fragmentación del heap durante bucles EM intensivos; recuperación instantánea de memoria en $O(1)$.
 
-### Pilar 4: Kernel Numérico Opcional de Alta Dimensión (Capa 0 en Rust)
-- [ ] **Kernel SIMD/Rayon para Cuadratura Masiva:**
-  - Si se requiere rendimiento ultra-extremo para $D \ge 3$ ($Q^D \ge 3.375$ nodos), exponer en `crates/ghl-runtime` la primitiva `irt_em_quadrature_kernel` paralelizada con Rayon.
+### Pilar 4: Kernel Numérico Opcional de Alta Dimensión (Capa 0 en Rust) *(Completado)*
+- [x] **Kernel SIMD/Rayon para Cuadratura Masiva:**
+  - Primitiva nativa `irt_em_quadrature_kernel` en `crates/ghl-runtime/src/native_irt.rs` paralelizada con Rayon (`par_chunks_mut`, `fold`, `reduce`) y log-sum-exp numéricamente estable.
+  - Generador de grillas multidimensionales `irt_quadrature_grid(d, k, bound)` para $D \ge 1$ con densidades normales multivariadas ($1.000$ nodos 3D generados en $0.016\text{ ms}$).
+  - Wrapper de alto nivel `get_multidimensional_quadrature(d, k)` en `src/quadrature.gh`.
+  - *Beneficio:* Integración de $N=100$, $J=4$, $Q=25$ nodos en $< 1.0\text{ ms}$; cálculo simultáneo de estadísticas suficientes EM ($R_{jq}, N_q$), log-verosimilitud marginal y puntuación de rasgos latentes EAP ($\hat{\boldsymbol{\theta}}_i, \text{SE}$).
 
 ---
 

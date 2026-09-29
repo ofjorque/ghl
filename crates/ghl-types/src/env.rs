@@ -921,6 +921,7 @@ impl TypeEnv {
             "poisson_pmf", "poisson_cdf", "poisson_quantile", "random_poisson",
             "normal_quantile", "gamma_quantile",
             "feols", "iv_regress", "ridge", "lasso", "elastic_net",
+            "irt_em_quadrature_kernel", "irt_quadrature_grid",
             "sem", "decompose_spec", "optim", "sample_cov", "anova", "t_test", "t_test_one_sample", "chisq_test",
             "normal", "student_t", "fisher_f", "chisq", "gamma_dist", "beta_dist",
             "uniform", "exponential", "binomial", "poisson_dist",
