@@ -153,10 +153,17 @@ Integración del parser de fórmulas SEM (`=~` y `~~`) en la definición de espe
     - Integración EM multivariada paralela por bloques (`par_chunks_mut`) con normalización numérica estable log-sum-exp, acumulación libre de contención y estimación directa EAP ($\hat{\boldsymbol{\theta}}_i, \text{SE}$).
     - Wrapper en `packages/ghl_irt/src/quadrature.gh` (`get_multidimensional_quadrature`).
 
+- [ ] **Pilar 5: Próxima Generación de Rendimiento Global (Paridad con NumPy / Julia):**
+  - [ ] **Operaciones Tensoriales Fusionadas (*Fused Kernels* en Stdlib):**
+    - Incorporar primitivas fusionadas en un solo paso (`sigmoid_matmul`, `log_sum_exp(matrix, axis)`) sin materializar matrices intermedias en RAM, ejecutando en registros AVX2 de la CPU.
+  - [ ] **JIT de Cranelift Profundo para Bucles de Calibración:**
+    - Bajar bucles iterativos cerrados (`while`/`for`) con variables mutables directamente a código máquina nativo x86-64 en memoria (`ghl-codegen`), eliminando la sobrecarga de evaluación AST para alcanzar el rango de sub-milisegundos ($\le 1.5\text{ ms}$).
+
 - [x] **Metas y Verificación de Rendimiento (Suite 07):** *(Cumplidas al 100%)*
   - [x] **1PL (Rasch, LSAT7):** Reducir de $1.551\text{ ms}$ a $< 100\text{ ms}$ ($\le$ R `mirt`) $\to$ **33.0 ms** (**3.64x más rápido que R `mirt`**).
   - [x] **2PL (Birnbaum, LSAT7):** Reducir de $3.850\text{ ms}$ a $< 200\text{ ms}$ $\to$ **61.9 ms** (Paridad directa con C++ OpenMP `mirt` a 50 ms).
   - [x] **GRM (Samejima, Science):** Reducir de $10.502\text{ ms}$ a $< 350\text{ ms}$ $\to$ **149.4 ms** (Paridad directa con C++ `mirt` a 110 ms).
   - [x] **MHRM ($D=6, N=500$):** Reducir de $127\text{ s}$ a $< 10\text{ s}$ $\to$ **1.99 s – 4.3 s** (**2.77x más rápido que R `mirt`** a 11.9 s).
   - [x] **Preservación de Precisión:** Mantener discrepancia $|\Delta b| < 0.02$ respecto a `mirt` en todos los ítems $\to$ Discrepancia máxima $|\Delta b| = 0.0208$, log-verosimilitud idéntica.
+
 

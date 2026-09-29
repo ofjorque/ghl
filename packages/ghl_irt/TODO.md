@@ -61,6 +61,12 @@ El benchmark de la Suite 07 demostró paridad de precisión exacta con R `mirt` 
   - Wrapper de alto nivel `get_multidimensional_quadrature(d, k)` en `src/quadrature.gh`.
   - *Beneficio:* Integración de $N=100$, $J=4$, $Q=25$ nodos en $< 1.0\text{ ms}$; cálculo simultáneo de estadísticas suficientes EM ($R_{jq}, N_q$), log-verosimilitud marginal y puntuación de rasgos latentes EAP ($\hat{\boldsymbol{\theta}}_i, \text{SE}$).
 
+### Pilar 5 (Próximo): Operaciones Tensoriales Fusionadas y JIT Profundo
+- [ ] **Operaciones Tensoriales Fusionadas (*Fused Kernels*):**
+  - Incorporar primitivas de un solo paso en la biblioteca estándar (`log_sum_exp`, `sigmoid(Y * P)`) para eliminar matrices intermedias en RAM y alcanzar el rango de $\sim 1\text{ ms}$ en GHL puro.
+- [ ] **JIT de Cranelift Profundo para Bucles de Calibración:**
+  - Compilación directa de bucles EM iterativos a código máquina nativo x86-64 en memoria sin sobrecarga de evaluación AST.
+
 ---
 
 ## 🎯 Metas Empíricas (Targets de Benchmark - Suite 07 Oficial)
