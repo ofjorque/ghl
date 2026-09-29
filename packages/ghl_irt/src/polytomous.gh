@@ -122,10 +122,16 @@ fn fit_graded_response(
     let mut iter_count = 0.0;
     let mut final_loglik = 0.0;
 
+    let mut t_prev_1 = [];
+    let mut t_prev_2 = [];
+
     let mut iter = 0;
     while !converged && iter < max_iter {
         iter = iter + 1;
         iter_count = iter_count + 1.0;
+
+        t_prev_2 = t_prev_1;
+        t_prev_1 = thresholds;
 
         // --- E-STEP: Vectorized GEMM formulation for category log-likelihoods ---
         let mut log_l_total = zeros(n_persons, n_q);
@@ -260,6 +266,27 @@ fn fit_graded_response(
                 }
 
                 thresholds = set(thresholds, t_idx, new_b);
+            }
+        }
+
+        // --- AITKEN ACCELERATION STEP FOR THRESHOLDS ---
+        if iter >= 3 && ((iter % 3) == 0) {
+            for t_idx in 0..total_thresh {
+                let t0 = t_prev_2[t_idx];
+                let t1 = t_prev_1[t_idx];
+                let t2 = thresholds[t_idx];
+                let d1 = t1 - t0;
+                let d2 = t2 - t1;
+                let d2_diff = d2 - d1;
+                if (d1 * d2) > 0.0 && abs(d2_diff) > 0.0001 {
+                    let accel_step = (d2 * d2) / d2_diff;
+                    if abs(accel_step) < 0.50 {
+                        let mut accel_t = t2 - accel_step;
+                        if accel_t < -3.5 { accel_t = -3.5; }
+                        if accel_t > 3.5 { accel_t = 3.5; }
+                        thresholds = set(thresholds, t_idx, accel_t);
+                    }
+                }
             }
         }
 

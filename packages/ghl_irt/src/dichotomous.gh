@@ -136,10 +136,20 @@ fn fit_dichotomous_irt(
         let mut iter_count = 0.0;
         let mut final_loglik = 0.0;
 
+        let mut b_prev_1 = [];
+        let mut b_prev_2 = [];
+        let mut a_prev_1 = [];
+        let mut a_prev_2 = [];
+
         let mut iter = 0;
         while !converged && iter < max_iter {
             iter = iter + 1;
             iter_count = iter_count + 1.0;
+
+            b_prev_2 = b_prev_1;
+            b_prev_1 = b_params;
+            a_prev_2 = a_prev_1;
+            a_prev_1 = a_params;
 
             // --- E-STEP: Vectorized GEMM formulation backed by faer ---
             let mut log_p_mat = zeros(n_items, n_q);
@@ -288,6 +298,45 @@ fn fit_dichotomous_irt(
 
                 a_params = set(a_params, j, new_a);
                 b_params = set(b_params, j, new_b);
+            }
+
+            // --- AITKEN ACCELERATION STEP (every 3 iterations when monotonic) ---
+            if iter >= 3 && ((iter % 3) == 0) {
+                for j in 0..n_items {
+                    let b0 = b_prev_2[j];
+                    let b1 = b_prev_1[j];
+                    let b2 = b_params[j];
+                    let d1_b = b1 - b0;
+                    let d2_b = b2 - b1;
+                    let d2_diff_b = d2_b - d1_b;
+                    if (d1_b * d2_b) > 0.0 && abs(d2_diff_b) > 0.0001 {
+                        let accel_step_b = (d2_b * d2_b) / d2_diff_b;
+                        if abs(accel_step_b) < 0.50 {
+                            let mut accel_b = b2 - accel_step_b;
+                            if accel_b < -3.5 { accel_b = -3.5; }
+                            if accel_b > 3.5 { accel_b = 3.5; }
+                            b_params = set(b_params, j, accel_b);
+                        }
+                    }
+
+                    if model_type != "1PL" {
+                        let a0 = a_prev_2[j];
+                        let a1 = a_prev_1[j];
+                        let a2 = a_params[j];
+                        let d1_a = a1 - a0;
+                        let d2_a = a2 - a1;
+                        let d2_diff_a = d2_a - d1_a;
+                        if (d1_a * d2_a) > 0.0 && abs(d2_diff_a) > 0.0001 {
+                            let accel_step_a = (d2_a * d2_a) / d2_diff_a;
+                            if abs(accel_step_a) < 0.40 {
+                                let mut accel_a = a2 - accel_step_a;
+                                if accel_a < 0.20 { accel_a = 0.20; }
+                                if accel_a > 3.00 { accel_a = 3.00; }
+                                a_params = set(a_params, j, accel_a);
+                            }
+                        }
+                    }
+                }
             }
 
             arena.reset();

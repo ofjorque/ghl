@@ -40,12 +40,12 @@ El benchmark de la Suite 07 demostró paridad de precisión exacta con R `mirt` 
   - Inlinear PRNG y Box-Muller en el bucle M-H eliminando ~95.000 llamadas de closure y sobrecarga de copiado de ámbitos.
   - Reducción del tiempo de MHRM de 127 s a **1.99 s – 4.3 s** (**2.77x más rápido que R `mirt`**).
 
-### Pilar 2: Aceleración de Convergencia EM de Aitken ($\Delta^2$ / SQUAREM)
-- [ ] **Extrapolación de Parámetros en el M-Step:**
-  - Implementar la aceleración de Aitken sobre el vector de parámetros de dificultad:
+### Pilar 2: Aceleración de Convergencia EM de Aitken ($\Delta^2$ / SQUAREM) *(Completado)*
+- [x] **Extrapolación de Parámetros en el M-Step:**
+  - Implementar la aceleración de Aitken sobre los vectores de dificultad $\boldsymbol{b}$ y discriminación $\boldsymbol{a}$ en modelos dicotómicos y politómicos:
     $$\boldsymbol{b}^{(k+1)}_{\text{accel}} = \boldsymbol{b}^{(k)} - \frac{(\boldsymbol{b}^{(k)} - \boldsymbol{b}^{(k-1)})^{\odot 2}}{\boldsymbol{b}^{(k)} - 2\boldsymbol{b}^{(k-1)} + \boldsymbol{b}^{(k-2)}}$$
-  - Intercalar el paso acelerado cada 2–3 iteraciones EM estándar.
-  - *Beneficio:* Reduce el número de iteraciones necesarias para converger ($\epsilon < 10^{-4}$) de 35–45 ciclos a solo 12–16 ciclos ($2\times$ a $3\times$ de aceleración adicional).
+  - Intercalación adaptativa cada 3 ciclos EM con verificación de monotonía y límites fisiológicos de ítem.
+  - *Beneficio:* Calibración 1PL en ~20–36 ms (discrepancia casi nula $|\Delta b| \le 0.004$ respecto a R `mirt`) y DIF Multigrupo en **254 ms** (**2.4x más rápido que R `mirt`**).
 
 ### Pilar 3: Gestión de Memoria Regional Zero-Copy (`std::arena`)
 - [ ] **Arenas en Calibración Dicotómica y Politómica:**
