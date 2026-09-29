@@ -60,8 +60,40 @@ fn fit_graded_response(
     let n_q = quad.n_points;
 
     let n_thresh = n_categories - 1;
+    let total_thresh = n_items * n_thresh;
 
-    // 1. Initial parameter estimates based on cumulative response proportions
+    // 1. Precompute Boundary Matrix B (total_thresh x n_persons) for GEMM endorsement accumulation
+    let mut mat_b = zeros(total_thresh, n_persons);
+    for j in 0..n_items {
+        for k in 0..n_thresh {
+            let m_idx = (j * n_thresh) + k;
+            let fk = 0.0 + (k + 1);
+            let mut row_b = [];
+            for i in 0..n_persons {
+                let y_ij = responses[(i * n_items) + j];
+                row_b = append(row_b, if y_ij >= fk { 1.0 } else { 0.0 });
+            }
+            mat_b = set_row(mat_b, m_idx, row_b);
+        }
+    }
+
+    // 2. Precompute One-Hot response matrices for each item: O_j (n_persons x n_categories)
+    let mut one_hot_list = [];
+    for j in 0..n_items {
+        let mut mat_oj = zeros(n_persons, n_categories);
+        for i in 0..n_persons {
+            let y_ij = responses[(i * n_items) + j];
+            let k_val = to_int(y_ij);
+            let mut row_o = [];
+            for k in 0..n_categories {
+                row_o = append(row_o, if k == k_val { 1.0 } else { 0.0 });
+            }
+            mat_oj = set_row(mat_oj, i, row_o);
+        }
+        one_hot_list = append(one_hot_list, mat_oj);
+    }
+
+    // 3. Initial parameter estimates based on cumulative response proportions
     let mut a_params = [];
     let mut thresholds = [];
 
@@ -72,8 +104,8 @@ fn fit_graded_response(
             let fk = 0.0 + (k + 1);
             let mut sum_ge = 0.0;
             for i in 0..n_persons {
-                let resp = responses[(i * n_items) + j];
-                if resp >= fk {
+                let y_ij = responses[(i * n_items) + j];
+                if y_ij >= fk {
                     sum_ge = sum_ge + 1.0;
                 }
             }
@@ -95,48 +127,67 @@ fn fit_graded_response(
         iter = iter + 1;
         iter_count = iter_count + 1.0;
 
-        // --- E-STEP: Compute person posterior distributions ---
-        // 1. Precompute category probabilities for all (j, k_val, q) once per EM cycle
-        let mut log_p_cat_mat = [];
+        // --- E-STEP: Vectorized GEMM formulation for category log-likelihoods ---
+        let mut log_l_total = zeros(n_persons, n_q);
+
         for j in 0..n_items {
             let a_j = a_params[j];
+            let mut log_p_cat = zeros(n_categories, n_q);
+
             for k_val in 0..n_categories {
+                let mut row_lp = [];
                 for q in 0..n_q {
                     let theta_q = q_nodes[q];
-                    let p_cat = grm_category_prob(theta_q, a_j, thresholds, j, n_categories, k_val);
-                    log_p_cat_mat = append(log_p_cat_mat, ln(p_cat));
+
+                    let p_upper = if k_val == 0 {
+                        1.0
+                    } else {
+                        let b_val = thresholds[(j * n_thresh) + (k_val - 1)];
+                        let z = a_j * (theta_q - b_val);
+                        let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
+                        exp_z / (1.0 + exp_z)
+                    };
+
+                    let p_lower = if k_val == n_categories - 1 {
+                        0.0
+                    } else {
+                        let b_val = thresholds[(j * n_thresh) + k_val];
+                        let z = a_j * (theta_q - b_val);
+                        let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
+                        exp_z / (1.0 + exp_z)
+                    };
+
+                    let diff_p = p_upper - p_lower;
+                    let safe_p = if diff_p < 0.0001 { 0.0001 } else { if diff_p > 0.9999 { 0.9999 } else { diff_p } };
+                    row_lp = append(row_lp, ln(safe_p));
                 }
+                log_p_cat = set_row(log_p_cat, k_val, row_lp);
             }
+
+            let mat_oj = one_hot_list[j];
+            let log_l_item = mat_oj * log_p_cat; // (n_persons x n_q) faer GEMM
+            log_l_total = log_l_total .+ log_l_item;
         }
 
-        let mut post_all = [];
+        // Compute person posterior distributions
+        let mut post_mat = zeros(n_persons, n_q);
         let mut current_loglik = 0.0;
 
         for i in 0..n_persons {
-            let mut log_p_node = [];
+            let log_row = get_row(log_l_total, i);
             let mut max_log_p = -1.0e10;
-
             for q in 0..n_q {
-                let mut log_l = 0.0;
-
-                for j in 0..n_items {
-                    let y_ij = responses[(i * n_items) + j];
-                    let k_val = to_int(y_ij);
-                    let cat_idx = (j * n_categories * n_q) + (k_val * n_q) + q;
-                    log_l = log_l + log_p_cat_mat[cat_idx];
-                }
-
-                log_p_node = append(log_p_node, log_l);
-                if log_l > max_log_p {
-                    max_log_p = log_l;
+                let val = log_row[q];
+                if val > max_log_p {
+                    max_log_p = val;
                 }
             }
 
-            let mut post_weights = [];
+            let mut unnorm_row = [];
             let mut sum_post = 0.0;
             for q in 0..n_q {
-                let unnorm = exp(log_p_node[q] - max_log_p) * q_weights[q];
-                post_weights = append(post_weights, unnorm);
+                let unnorm = exp(log_row[q] - max_log_p) * q_weights[q];
+                unnorm_row = append(unnorm_row, unnorm);
                 sum_post = sum_post + unnorm;
             }
 
@@ -145,40 +196,28 @@ fn fit_graded_response(
                 current_loglik = current_loglik + ln(p_i_marginal);
             }
 
+            let inv_sum = if sum_post > 0.0 { 1.0 / sum_post } else { 0.0 };
+            let mut post_row = [];
             for q in 0..n_q {
-                let post_q = if sum_post > 0.0 { post_weights[q] / sum_post } else { 0.0 };
-                post_all = append(post_all, post_q);
+                post_row = append(post_row, unnorm_row[q] * inv_sum);
             }
+            post_mat = set_row(post_mat, i, post_row);
         }
 
         final_loglik = current_loglik;
 
-        // 2. Accumulate expected test-takers and endorsements without vector `set`
+        // Accumulate expected test-takers from posterior column sums
         let mut n_table = [];
         for q in 0..n_q {
             let mut sum_nq = 0.0;
             for i in 0..n_persons {
-                sum_nq = sum_nq + post_all[(i * n_q) + q];
+                sum_nq = sum_nq + post_mat[i, q];
             }
             n_table = append(n_table, sum_nq);
         }
 
-        let mut r_counts = [];
-        for j in 0..n_items {
-            for k in 0..n_thresh {
-                let fk = 0.0 + (k + 1);
-                for q in 0..n_q {
-                    let mut sum_rq = 0.0;
-                    for i in 0..n_persons {
-                        let y_ij = responses[(i * n_items) + j];
-                        if y_ij >= fk {
-                            sum_rq = sum_rq + post_all[(i * n_q) + q];
-                        }
-                    }
-                    r_counts = append(r_counts, sum_rq);
-                }
-            }
-        }
+        // R = B * Post (total_thresh x n_q) in ONE faer GEMM multiplication!
+        let r_mat = mat_b * post_mat;
 
         // --- M-STEP: Update thresholds b_{jk} and discrimination a_j ---
         let mut max_change = 0.0;
@@ -195,11 +234,12 @@ fn fit_graded_response(
 
                 for q in 0..n_q {
                     let theta_q = q_nodes[q];
-                    let p_star = grm_boundary_prob(theta_q, old_a, old_b);
-                    let safe_p = if p_star < 0.0001 { 0.0001 } else { if p_star > 0.9999 { 0.9999 } else { p_star } };
+                    let z = old_a * (theta_q - old_b);
+                    let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
+                    let safe_p = exp_z / (1.0 + exp_z);
 
                     let n_q_val = n_table[q];
-                    let r_val = r_counts[(j * n_thresh * n_q) + (k * n_q) + q];
+                    let r_val = r_mat[t_idx, q];
                     let exp_diff = r_val - (n_q_val * safe_p);
 
                     let dp_db = 0.0 - (old_a * safe_p * (1.0 - safe_p));

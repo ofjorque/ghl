@@ -86,6 +86,22 @@ fn fit_dichotomous_irt(
             pattern_responses = responses;
         }
 
+        // Precompute Pattern Matrices Y, Y_inv, and Y_t (constant across EM iterations)
+        let mut mat_y = zeros(n_patterns, n_items);
+        let mut mat_y_inv = zeros(n_patterns, n_items);
+        for p in 0..n_patterns {
+            let mut row_y = [];
+            let mut row_y_inv = [];
+            for j in 0..n_items {
+                let y_val = pattern_responses[(p * n_items) + j];
+                row_y = append(row_y, y_val);
+                row_y_inv = append(row_y_inv, 1.0 - y_val);
+            }
+            mat_y = set_row(mat_y, p, row_y);
+            mat_y_inv = set_row(mat_y_inv, p, row_y_inv);
+        }
+        let mat_y_t = t(mat_y);
+
         // 1. Initial parameter estimates based on classical item p-values
         let mut a_params = [];
         let mut b_params = [];
@@ -125,168 +141,163 @@ fn fit_dichotomous_irt(
             iter = iter + 1;
             iter_count = iter_count + 1.0;
 
-            // --- E-STEP: Compute posterior pattern distribution across quadrature nodes ---
-            let mut log_p_mat = [];
-            let mut log_q_mat = [];
+            // --- E-STEP: Vectorized GEMM formulation backed by faer ---
+            let mut log_p_mat = zeros(n_items, n_q);
+            let mut log_q_mat = zeros(n_items, n_q);
             for j in 0..n_items {
                 let a_j = a_params[j];
                 let b_j = b_params[j];
                 let c_j = c_params[j];
+                let d_j = d_params[j];
+                let mut row_lp = [];
+                let mut row_lq = [];
                 for q in 0..n_q {
                     let theta_q = q_nodes[q];
-                    let p_jq = prob_3pl(theta_q, a_j, b_j, c_j);
+                    let z = a_j * (theta_q - b_j);
+                    let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
+                    let p_logit = exp_z / (1.0 + exp_z);
+                    let p_jq = c_j + ((d_j - c_j) * p_logit);
                     let safe_p = if p_jq < 0.0001 { 0.0001 } else { if p_jq > 0.9999 { 0.9999 } else { p_jq } };
-                    log_p_mat = append(log_p_mat, ln(safe_p));
-                    log_q_mat = append(log_q_mat, ln(1.0 - safe_p));
+                    row_lp = append(row_lp, ln(safe_p));
+                    row_lq = append(row_lq, ln(1.0 - safe_p));
                 }
+                log_p_mat = set_row(log_p_mat, j, row_lp);
+                log_q_mat = set_row(log_q_mat, j, row_lq);
             }
 
-            let mut post_all = [];
+            // Two GEMM multiplications in faer to get conditional log-likelihood matrix (P x Q) in microseconds
+            let log_l_mat = (mat_y * log_p_mat) .+ (mat_y_inv * log_q_mat);
+
+            // Compute posterior pattern distribution and build w_post_mat (P x Q)
+            let mut w_post_mat = zeros(n_patterns, n_q);
             let mut current_loglik = 0.0;
 
             for p in 0..n_patterns {
-                let mut log_p_node = [];
+                let log_row = get_row(log_l_mat, p);
                 let mut max_log_p = -1.0e10;
-
                 for q in 0..n_q {
-                    let mut log_l = 0.0;
-                    for j in 0..n_items {
-                        let jq_idx = (j * n_q) + q;
-                        let y_pj = pattern_responses[(p * n_items) + j];
-                        if y_pj > 0.5 {
-                            log_l = log_l + log_p_mat[jq_idx];
-                        } else {
-                            log_l = log_l + log_q_mat[jq_idx];
-                        }
-                    }
-
-                    log_p_node = append(log_p_node, log_l);
-                    if log_l > max_log_p {
-                        max_log_p = log_l;
+                    let val = log_row[q];
+                    if val > max_log_p {
+                        max_log_p = val;
                     }
                 }
 
-                // Exponentiate with max-subtraction and multiply by prior weight
-                let mut post_weights = [];
+                let mut unnorm_row = [];
                 let mut sum_post = 0.0;
                 for q in 0..n_q {
-                    let unnorm = exp(log_p_node[q] - max_log_p) * q_weights[q];
-                    post_weights = append(post_weights, unnorm);
+                    let unnorm = exp(log_row[q] - max_log_p) * q_weights[q];
+                    unnorm_row = append(unnorm_row, unnorm);
                     sum_post = sum_post + unnorm;
                 }
 
-                // Normalize posterior distribution
                 let p_p_marginal = sum_post * exp(max_log_p);
+                let pw = pattern_weights[p];
                 if p_p_marginal > 0.0000000001 {
-                    current_loglik = current_loglik + (pattern_weights[p] * ln(p_p_marginal));
+                    current_loglik = current_loglik + (pw * ln(p_p_marginal));
                 }
 
+                let inv_sum = if sum_post > 0.0 { 1.0 / sum_post } else { 0.0 };
+                let mut w_post_row = [];
                 for q in 0..n_q {
-                    let post_q = if sum_post > 0.0 { post_weights[q] / sum_post } else { 0.0 };
-                    post_all = append(post_all, post_q);
+                    let post_q = unnorm_row[q] * inv_sum;
+                    w_post_row = append(w_post_row, pw * post_q);
                 }
+                w_post_mat = set_row(w_post_mat, p, w_post_row);
             }
 
             final_loglik = current_loglik;
 
-            // 2. Accumulate expected test-takers n_q and correct endorsements r_jq
+            // Accumulate expected test-takers n_q from posterior column sums
             let mut n_table = [];
             for q in 0..n_q {
                 let mut sum_nq = 0.0;
                 for p in 0..n_patterns {
-                    sum_nq = sum_nq + (pattern_weights[p] * post_all[(p * n_q) + q]);
+                    sum_nq = sum_nq + w_post_mat[p, q];
                 }
                 n_table = append(n_table, sum_nq);
             }
 
-            let mut r_table = [];
+            // GEMM product to compute r_table (J x Q) in ONE step: R = Y^T * W_Post
+            let r_mat = mat_y_t * w_post_mat;
+
+            // --- M-STEP: Update item parameters based on expected counts r_{jq} and n_q ---
+            let mut max_param_change = 0.0;
+
             for j in 0..n_items {
+                let old_a = a_params[j];
+                let old_b = b_params[j];
+                let old_c = c_params[j];
+                let old_d = d_params[j];
+
+                let mut grad_b = 0.0;
+                let mut info_b = 0.0;
+                let mut grad_a = 0.0;
+                let mut info_a = 0.0;
+
                 for q in 0..n_q {
-                    let mut sum_rjq = 0.0;
-                    for p in 0..n_patterns {
-                        let y_pj = pattern_responses[(p * n_items) + j];
-                        if y_pj > 0.5 {
-                            sum_rjq = sum_rjq + (pattern_weights[p] * post_all[(p * n_q) + q]);
-                        }
-                    }
-                    r_table = append(r_table, sum_rjq);
+                    let theta_q = q_nodes[q];
+                    let z = old_a * (theta_q - old_b);
+                    let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
+                    let p_logit = exp_z / (1.0 + exp_z);
+                    let p_jq = old_c + ((old_d - old_c) * p_logit);
+                    let safe_p = if p_jq < 0.0001 { 0.0001 } else { if p_jq > 0.9999 { 0.9999 } else { p_jq } };
+
+                    let n_q_val = n_table[q];
+                    let r_jq_val = r_mat[j, q];
+                    let exp_diff = r_jq_val - (n_q_val * safe_p);
+
+                    // Logistic derivative components
+                    let w_factor = if old_d > old_c { (safe_p - old_c) / (old_d - old_c) } else { 1.0 };
+                    let dp_db = 0.0 - (old_a * w_factor * (1.0 - p_logit) * (old_d - old_c));
+                    let dp_da = (theta_q - old_b) * w_factor * (1.0 - p_logit) * (old_d - old_c);
+
+                    let var_inv = 1.0 / (safe_p * (1.0 - safe_p));
+
+                    grad_b = grad_b + (exp_diff * var_inv * dp_db);
+                    info_b = info_b + (n_q_val * var_inv * dp_db * dp_db);
+
+                    grad_a = grad_a + (exp_diff * var_inv * dp_da);
+                    info_a = info_a + (n_q_val * var_inv * dp_da * dp_da);
                 }
+
+                // Update difficulty b_j
+                let raw_step_b = if info_b > 0.0000000001 { grad_b / info_b } else { 0.0 };
+                let clip_step_b = if raw_step_b > 0.40 { 0.40 } else { if raw_step_b < -0.40 { -0.40 } else { raw_step_b } };
+                let step_b = clip_step_b * 0.75;
+                let mut new_b = old_b + step_b;
+                if new_b < -3.5 { new_b = -3.5; }
+                if new_b > 3.5 { new_b = 3.5; }
+
+                // Update discrimination a_j (if 2PL, 3PL or 4PL)
+                let mut new_a = old_a;
+                if model_type != "1PL" {
+                    let raw_step_a = if info_a > 0.0000000001 { grad_a / info_a } else { 0.0 };
+                    let clip_step_a = if raw_step_a > 0.35 { 0.35 } else { if raw_step_a < -0.35 { -0.35 } else { raw_step_a } };
+                    let step_a = clip_step_a * 0.75;
+                    new_a = old_a + step_a;
+                    if new_a < 0.20 { new_a = 0.20; }
+                    if new_a > 3.00 { new_a = 3.00; }
+                }
+
+                let change_b = abs(new_b - old_b);
+                let change_a = abs(new_a - old_a);
+                let change_j = if change_b > change_a { change_b } else { change_a };
+                if change_j > max_param_change {
+                    max_param_change = change_j;
+                }
+
+                a_params = set(a_params, j, new_a);
+                b_params = set(b_params, j, new_b);
             }
 
-        // --- M-STEP: Update item parameters based on expected counts r_{jq} and n_q ---
-        let mut max_param_change = 0.0;
+            arena.reset();
 
-        for j in 0..n_items {
-            let old_a = a_params[j];
-            let old_b = b_params[j];
-            let old_c = c_params[j];
-
-            let mut grad_b = 0.0;
-            let mut info_b = 0.0;
-            let mut grad_a = 0.0;
-            let mut info_a = 0.0;
-
-            for q in 0..n_q {
-                let theta_q = q_nodes[q];
-                let p_jq = prob_3pl(theta_q, old_a, old_b, old_c);
-                let safe_p = if p_jq < 0.0001 { 0.0001 } else { if p_jq > 0.9999 { 0.9999 } else { p_jq } };
-
-                let n_q_val = n_table[q];
-                let r_jq_val = r_table[(j * n_q) + q];
-                let exp_diff = r_jq_val - (n_q_val * safe_p);
-
-                // Logistic derivative components
-                let w_factor = (safe_p - old_c) / (1.0 - old_c);
-                let dp_db = 0.0 - (old_a * w_factor * (1.0 - safe_p));
-                let dp_da = (theta_q - old_b) * w_factor * (1.0 - safe_p);
-
-                let var_inv = 1.0 / (safe_p * (1.0 - safe_p));
-
-                grad_b = grad_b + (exp_diff * var_inv * dp_db);
-                info_b = info_b + (n_q_val * var_inv * dp_db * dp_db);
-
-                grad_a = grad_a + (exp_diff * var_inv * dp_da);
-                info_a = info_a + (n_q_val * var_inv * dp_da * dp_da);
+            if max_param_change < tol {
+                converged = true;
             }
-
-            // Update difficulty b_j
-            let raw_step_b = if info_b > 0.0000000001 { grad_b / info_b } else { 0.0 };
-            let clip_step_b = if raw_step_b > 0.40 { 0.40 } else { if raw_step_b < -0.40 { -0.40 } else { raw_step_b } };
-            let step_b = clip_step_b * 0.75;
-            let mut new_b = old_b + step_b;
-            if new_b < -3.5 { new_b = -3.5; }
-            if new_b > 3.5 { new_b = 3.5; }
-
-            // Update discrimination a_j (if 2PL or 3PL)
-            let mut new_a = old_a;
-            if model_type != "1PL" {
-                let raw_step_a = if info_a > 0.0000000001 { grad_a / info_a } else { 0.0 };
-                let clip_step_a = if raw_step_a > 0.35 { 0.35 } else { if raw_step_a < -0.35 { -0.35 } else { raw_step_a } };
-                let step_a = clip_step_a * 0.75;
-                new_a = old_a + step_a;
-                if new_a < 0.20 { new_a = 0.20; }
-                if new_a > 3.00 { new_a = 3.00; }
-            }
-
-            let change_b = abs(new_b - old_b);
-            let change_a = abs(new_a - old_a);
-            let change_j = if change_b > change_a { change_b } else { change_a };
-            if change_j > max_param_change {
-                max_param_change = change_j;
-            }
-
-            a_params = set(a_params, j, new_a);
-            b_params = set(b_params, j, new_b);
         }
 
-        arena.reset();
-
-        if max_param_change < tol {
-            converged = true;
-        }
-    }
-
-    DichotomousIrtResult {
+        DichotomousIrtResult {
         model_type: model_type,
         a_params: a_params,
         b_params: b_params,

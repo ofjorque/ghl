@@ -135,11 +135,25 @@ fn fit_mhrm_configured(
                 // Propose new theta via Gaussian Random Walk
                 let mut prop_th = [];
                 for d in 0..n_dimensions {
-                    prng_state = mhrm_prng_next(prng_state);
+                    // Inlined PRNG 1
+                    let nxt1 = (prng_state * 16807.0) + 11.0;
+                    let div1 = floor(nxt1 / 2147483647.0);
+                    let rem1 = nxt1 - (div1 * 2147483647.0);
+                    prng_state = if rem1 < 1.0 { 1.0 } else { rem1 };
                     let u1 = prng_state / 2147483647.0;
-                    prng_state = mhrm_prng_next(prng_state);
+
+                    // Inlined PRNG 2
+                    let nxt2 = (prng_state * 16807.0) + 11.0;
+                    let div2 = floor(nxt2 / 2147483647.0);
+                    let rem2 = nxt2 - (div2 * 2147483647.0);
+                    prng_state = if rem2 < 1.0 { 1.0 } else { rem2 };
                     let u2 = prng_state / 2147483647.0;
-                    let z = mhrm_box_muller(u1, u2);
+
+                    // Inlined Box-Muller transform
+                    let safe_u1 = if u1 < 0.000001 { 0.000001 } else { if u1 > 0.999999 { 0.999999 } else { u1 } };
+                    let radius = sqrt(-2.0 * ln(safe_u1));
+                    let z = radius * cos(6.28318530718 * u2);
+
                     let step = prop_sd * z;
                     prop_th = append(prop_th, theta_matrix[i, d] + step);
                 }
@@ -190,8 +204,13 @@ fn fit_mhrm_configured(
 
                 let delta_log = (log_p_prop - prior_prop) - (log_p_curr - prior_curr);
 
-                prng_state = mhrm_prng_next(prng_state);
+                // Inlined PRNG for acceptance check
+                let nxt_a = (prng_state * 16807.0) + 11.0;
+                let div_a = floor(nxt_a / 2147483647.0);
+                let rem_a = nxt_a - (div_a * 2147483647.0);
+                prng_state = if rem_a < 1.0 { 1.0 } else { rem_a };
                 let u_accept = prng_state / 2147483647.0;
+
                 let do_accept = if delta_log >= 0.0 { true } else { ln(u_accept) < delta_log };
 
                 if do_accept {

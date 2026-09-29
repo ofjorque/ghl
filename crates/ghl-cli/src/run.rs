@@ -112,8 +112,13 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
             return None;
         }
         let mut jit = ghl_codegen::JitEngine::new().ok()?;
-        jit.compile_module(&hir_module).ok()?;
-        Some((std::sync::Arc::new(jit), hir_module))
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            jit.compile_module(&hir_module).is_ok()
+        }));
+        match res {
+            Ok(true) => Some((std::sync::Arc::new(jit), hir_module)),
+            _ => None,
+        }
     })();
 
     let jit_info = opt_jit.as_ref().map(|(_jit, hir)| {
