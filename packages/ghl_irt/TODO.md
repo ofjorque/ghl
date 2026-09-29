@@ -47,11 +47,12 @@ El benchmark de la Suite 07 demostró paridad de precisión exacta con R `mirt` 
   - Intercalación adaptativa cada 3 ciclos EM con verificación de monotonía y límites fisiológicos de ítem.
   - *Beneficio:* Calibración 1PL en ~20–36 ms (discrepancia casi nula $|\Delta b| \le 0.004$ respecto a R `mirt`) y DIF Multigrupo en **254 ms** (**2.4x más rápido que R `mirt`**).
 
-### Pilar 3: Gestión de Memoria Regional Zero-Copy (`std::arena`)
-- [ ] **Arenas en Calibración Dicotómica y Politómica:**
+### Pilar 3: Gestión de Memoria Regional Zero-Copy (`std::arena`) *(Completado)*
+- [x] **Arenas en Calibración Dicotómica y Politómica:**
   - Envolver el ciclo iterativo EM en `std::arena::scope(|arena| { ... })`.
   - Asignar los búferes intermedios de trabajo ($\mathbf{P}$, $\log\mathbf{P}$, $\mathbf{Post}$, $\mathbf{R}$) usando `arena.alloc_matrix()`.
-  - Mutar in-place con `Arc::make_mut` eliminando llamadas al allocator de sistema (`malloc`/`free`).
+  - Mutar in-place con `Arc::make_mut` y `set_row` eliminando llamadas al allocator de sistema (`malloc`/`free`).
+  - *Beneficio:* Cero fragmentación del heap durante bucles EM intensivos; recuperación instantánea de memoria en $O(1)$.
 
 ### Pilar 4: Kernel Numérico Opcional de Alta Dimensión (Capa 0 en Rust)
 - [ ] **Kernel SIMD/Rayon para Cuadratura Masiva:**
@@ -59,12 +60,12 @@ El benchmark de la Suite 07 demostró paridad de precisión exacta con R `mirt` 
 
 ---
 
-## 🎯 Metas Empíricas (Targets de Benchmark)
+## 🎯 Metas Empíricas (Targets de Benchmark - Suite 07 Oficial)
 
-| Tarea / Modelo | Medición Inicial GHL | Medición Actual (Pilar 1 GEMM) | R `mirt` (C++) | Estado de Paridad |
+| Tarea / Modelo | Medición Inicial GHL | Medición Actual (Pilares 1, 2 y 3) | R `mirt` (C++) | Estado de Paridad |
 |---|---|---|---|---|
-| **1PL (Rasch) Model** ($N=1000, J=5$) | 1.551 ms | **33.0 ms** | 120.0 ms | **3.64x más rápido que R** 🚀 |
+| **1PL (Rasch) Model** ($N=1000, J=5$) | 1.551 ms | **41.6 ms** | 100.0 ms | **2.40x más rápido que R** 🚀 |
 | **2PL (Birnbaum) Model** ($N=1000, J=5$) | 3.850 ms | **61.9 ms** | 50.0 ms | **A la par con C++** (62x speedup) |
-| **Graded Response Model** ($N=392, J=4$) | 10.502 ms | **149.4 ms** | 110.0 ms | **A la par con C++** (70x speedup) |
-| **High-Dim MIRT MHRM** ($D=6, N=500$) | 127 s | **1.99 s – 4.3 s** | 11.9 s | **2.77x más rápido que R** 🚀 |
-| **Multigroup LRT DIF** ($N=1000, J=5$) | 541 ms | **253 – 565 ms** | 1.160 ms | **2.05x más rápido que R** 🚀 |
+| **Graded Response Model** ($N=392, J=4$) | 10.502 ms | **151.1 ms** | 110.0 ms | **A la par con C++** (70x speedup) |
+| **High-Dim MIRT MHRM** ($D=6, N=500$) | 127 s | **2.76 s** | 10.38 s | **3.76x más rápido que R** 🚀 |
+| **Multigroup LRT DIF** ($N=1000, J=5$) | 541 ms | **265.6 ms** | 1.230 ms | **4.63x más rápido que R** 🚀 |

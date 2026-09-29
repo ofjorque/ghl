@@ -1,49 +1,49 @@
 {
-  "timestamp": "2026-09-28 22:26:18",
+  "timestamp": "2026-09-28 22:48:54",
   "table": [
     {
       "task": "1PL (Rasch) Model (LSAT7, N=1000, J=5)",
       "key": "TASK_1PL_TIME_MS",
-      "r_ms": 90.0,
-      "python_ms": 1.84,
-      "julia_ms": 769.19,
-      "ghl_ms": 36.48
+      "r_ms": 100.0,
+      "python_ms": 1.53,
+      "julia_ms": 756.24,
+      "ghl_ms": 41.65
     },
     {
       "task": "2PL (Birnbaum) Model (LSAT7, N=1000, J=5)",
       "key": "TASK_2PL_TIME_MS",
       "r_ms": 50.0,
-      "python_ms": 93.6,
-      "julia_ms": 609.02,
-      "ghl_ms": 65.16
+      "python_ms": 91.46,
+      "julia_ms": 597.44,
+      "ghl_ms": 61.88
     },
     {
       "task": "Graded Response Model (Science, N=392, J=4)",
       "key": "TASK_GRM_TIME_MS",
       "r_ms": 110.0,
-      "python_ms": 82.64,
+      "python_ms": 81.17,
       "julia_ms": NaN,
-      "ghl_ms": 142.14
+      "ghl_ms": 151.1
     },
     {
       "task": "High-Dim MIRT MHRM (D=6, N=500, J=12)",
       "key": "TASK_MHRM_TIME_MS",
-      "r_ms": 6400.0,
-      "python_ms": 22.29,
-      "julia_ms": 917.45,
-      "ghl_ms": 2016.61
+      "r_ms": 10380.0,
+      "python_ms": 21.7,
+      "julia_ms": 907.62,
+      "ghl_ms": 2762.1
     },
     {
       "task": "Multigroup LRT DIF (LSAT7, N=1000, J=5)",
       "key": "TASK_DIF_TIME_MS",
-      "r_ms": 610.0,
-      "python_ms": 191.51,
+      "r_ms": 1230.0,
+      "python_ms": 175.4,
       "julia_ms": NaN,
-      "ghl_ms": 254.45
+      "ghl_ms": 265.59
     }
   ],
   "r": {
-    "TASK_1PL_TIME_MS": "90.00",
+    "TASK_1PL_TIME_MS": "100.00",
     "TASK_1PL_B": "-1.8681, -0.7909, -1.4608, -0.5214, -1.9928",
     "TASK_1PL_LOGLIK": "-2664.90",
     "TASK_2PL_TIME_MS": "50.00",
@@ -53,44 +53,44 @@
     "TASK_GRM_TIME_MS": "110.00",
     "TASK_GRM_A": "1.0418, 1.226, 2.2934, 1.0949",
     "TASK_GRM_LOGLIK": "-1608.87",
-    "TASK_MHRM_TIME_MS": "6400.00",
+    "TASK_MHRM_TIME_MS": "10380.00",
     "TASK_MHRM_LOGLIK": "NaN",
-    "TASK_DIF_TIME_MS": "610.00",
+    "TASK_DIF_TIME_MS": "1230.00",
     "TASK_DIF_CHISQ": "0, 0, 0, 0, 0"
   },
   "python": {
-    "TASK_1PL_TIME_MS": "1.84",
+    "TASK_1PL_TIME_MS": "1.53",
     "TASK_1PL_B": "-1.8625, -0.7886, -1.4564, -0.5200, -1.9868",
-    "TASK_2PL_TIME_MS": "93.60",
+    "TASK_2PL_TIME_MS": "91.46",
     "TASK_2PL_A": "0.9876, 1.0809, 1.7074, 0.7650, 0.7357",
     "TASK_2PL_B": "-1.8793, -0.7476, -1.0575, -0.6354, -2.5208",
-    "TASK_GRM_TIME_MS": "82.64",
+    "TASK_GRM_TIME_MS": "81.17",
     "TASK_GRM_A": "1.0338, 1.2173, 2.2847, 1.0859",
-    "TASK_MHRM_TIME_MS": "22.29",
-    "TASK_DIF_TIME_MS": "191.51"
+    "TASK_MHRM_TIME_MS": "21.70",
+    "TASK_DIF_TIME_MS": "175.40"
   },
   "julia": {
-    "TASK_1PL_TIME_MS": "769.19",
+    "TASK_1PL_TIME_MS": "756.24",
     "TASK_1PL_B": "8.3496, 9.0266, 8.6625, 8.9455, 8.2507",
-    "TASK_2PL_TIME_MS": "609.02",
+    "TASK_2PL_TIME_MS": "597.44",
     "TASK_2PL_A": "0.2, 0.2, 0.2, 0.2, 0.2",
     "TASK_2PL_B": "17.3496, 18.0266, 17.6625, 17.9455, 17.2507",
-    "TASK_MHRM_TIME_MS": "917.45"
+    "TASK_MHRM_TIME_MS": "907.62"
   },
   "ghl": {
-    "TASK_1PL_TIME_MS": "36.48",
+    "TASK_1PL_TIME_MS": "41.65",
     "TASK_1PL_B": "-1.8681, -0.7876, -1.4657, -0.5224, -1.9925",
     "TASK_1PL_LOGLIK": "-2664.95",
-    "TASK_2PL_TIME_MS": "65.16",
+    "TASK_2PL_TIME_MS": "61.88",
     "TASK_2PL_A": "1.0526, 1.0453, 1.4345, 0.7867, 0.9160",
     "TASK_2PL_B": "-1.7974, -0.7662, -1.1660, -0.6227, -2.1042",
     "TASK_2PL_LOGLIK": "-2659.91",
-    "TASK_GRM_TIME_MS": "142.14",
+    "TASK_GRM_TIME_MS": "151.10",
     "TASK_GRM_A": "1.2000, 1.2000, 1.2000, 1.2000",
     "TASK_GRM_LOGLIK": "-1617.76",
-    "TASK_MHRM_TIME_MS": "2016.61",
+    "TASK_MHRM_TIME_MS": "2762.10",
     "TASK_MHRM_LOGLIK": "-2081.73",
-    "TASK_DIF_TIME_MS": "254.45",
+    "TASK_DIF_TIME_MS": "265.59",
     "TASK_DIF_CHISQ": "99.00, 99.00, 99.00, 5.62, 1.35"
   }
 }

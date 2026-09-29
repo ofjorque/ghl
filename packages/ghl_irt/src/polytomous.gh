@@ -1,6 +1,8 @@
 // packages/ghl_irt/src/polytomous.gh
 // Polytomous IRT: Samejima's Graded Response Model (GRM, 1969) via MMLE-EM Algorithm
 
+use std::arena::{scope, alloc_vector, alloc_matrix, reset};
+
 struct GradedResponseResult {
     a_params: Vector,
     thresholds: Vector,
@@ -54,91 +56,99 @@ fn fit_graded_response(
     n_items: i64,
     n_categories: i64
 ) -> GradedResponseResult {
-    let quad = get_standard_quadrature();
-    let q_nodes = quad.nodes;
-    let q_weights = quad.weights;
-    let n_q = quad.n_points;
+    arena::scope(|arena| {
+        let quad = get_standard_quadrature();
+        let q_nodes = quad.nodes;
+        let q_weights = quad.weights;
+        let n_q = quad.n_points;
 
-    let n_thresh = n_categories - 1;
-    let total_thresh = n_items * n_thresh;
+        let n_thresh = n_categories - 1;
+        let total_thresh = n_items * n_thresh;
 
-    // 1. Precompute Boundary Matrix B (total_thresh x n_persons) for GEMM endorsement accumulation
-    let mut mat_b = zeros(total_thresh, n_persons);
-    for j in 0..n_items {
-        for k in 0..n_thresh {
-            let m_idx = (j * n_thresh) + k;
-            let fk = 0.0 + (k + 1);
-            let mut row_b = [];
-            for i in 0..n_persons {
-                let y_ij = responses[(i * n_items) + j];
-                row_b = append(row_b, if y_ij >= fk { 1.0 } else { 0.0 });
-            }
-            mat_b = set_row(mat_b, m_idx, row_b);
-        }
-    }
-
-    // 2. Precompute One-Hot response matrices for each item: O_j (n_persons x n_categories)
-    let mut one_hot_list = [];
-    for j in 0..n_items {
-        let mut mat_oj = zeros(n_persons, n_categories);
-        for i in 0..n_persons {
-            let y_ij = responses[(i * n_items) + j];
-            let k_val = to_int(y_ij);
-            let mut row_o = [];
-            for k in 0..n_categories {
-                row_o = append(row_o, if k == k_val { 1.0 } else { 0.0 });
-            }
-            mat_oj = set_row(mat_oj, i, row_o);
-        }
-        one_hot_list = append(one_hot_list, mat_oj);
-    }
-
-    // 3. Initial parameter estimates based on cumulative response proportions
-    let mut a_params = [];
-    let mut thresholds = [];
-
-    for j in 0..n_items {
-        a_params = append(a_params, 1.2);
-
-        for k in 0..n_thresh {
-            let fk = 0.0 + (k + 1);
-            let mut sum_ge = 0.0;
-            for i in 0..n_persons {
-                let y_ij = responses[(i * n_items) + j];
-                if y_ij >= fk {
-                    sum_ge = sum_ge + 1.0;
+        // 1. Precompute Boundary Matrix B (total_thresh x n_persons) for GEMM endorsement accumulation
+        let mut mat_b = arena.alloc_matrix(total_thresh, n_persons, 0.0);
+        for j in 0..n_items {
+            for k in 0..n_thresh {
+                let m_idx = (j * n_thresh) + k;
+                let fk = 0.0 + (k + 1);
+                let mut row_b = [];
+                for i in 0..n_persons {
+                    let y_ij = responses[(i * n_items) + j];
+                    row_b = append(row_b, if y_ij >= fk { 1.0 } else { 0.0 });
                 }
+                mat_b = set_row(mat_b, m_idx, row_b);
             }
-            let cp = (sum_ge + 0.5) / ((0.0 + n_persons) + 1.0);
-            let logit_cp = ln(cp / (1.0 - cp));
-            let init_b = 0.0 - logit_cp;
-            thresholds = append(thresholds, init_b);
         }
-    }
 
-    let max_iter = 20;
-    let tol = 0.005;
-    let mut converged = false;
-    let mut iter_count = 0.0;
-    let mut final_loglik = 0.0;
+        // 2. Precompute One-Hot response matrices for each item: O_j (n_persons x n_categories)
+        let mut one_hot_list = [];
+        for j in 0..n_items {
+            let mut mat_oj = arena.alloc_matrix(n_persons, n_categories, 0.0);
+            for i in 0..n_persons {
+                let y_ij = responses[(i * n_items) + j];
+                let k_val = to_int(y_ij);
+                let mut row_o = [];
+                for k in 0..n_categories {
+                    row_o = append(row_o, if k == k_val { 1.0 } else { 0.0 });
+                }
+                mat_oj = set_row(mat_oj, i, row_o);
+            }
+            one_hot_list = append(one_hot_list, mat_oj);
+        }
 
-    let mut t_prev_1 = [];
-    let mut t_prev_2 = [];
-
-    let mut iter = 0;
-    while !converged && iter < max_iter {
-        iter = iter + 1;
-        iter_count = iter_count + 1.0;
-
-        t_prev_2 = t_prev_1;
-        t_prev_1 = thresholds;
-
-        // --- E-STEP: Vectorized GEMM formulation for category log-likelihoods ---
-        let mut log_l_total = zeros(n_persons, n_q);
+        // 3. Initial parameter estimates based on cumulative response proportions
+        let mut a_params = [];
+        let mut thresholds = [];
 
         for j in 0..n_items {
-            let a_j = a_params[j];
-            let mut log_p_cat = zeros(n_categories, n_q);
+            a_params = append(a_params, 1.2);
+
+            for k in 0..n_thresh {
+                let fk = 0.0 + (k + 1);
+                let mut sum_ge = 0.0;
+                for i in 0..n_persons {
+                    let y_ij = responses[(i * n_items) + j];
+                    if y_ij >= fk {
+                        sum_ge = sum_ge + 1.0;
+                    }
+                }
+                let cp = (sum_ge + 0.5) / ((0.0 + n_persons) + 1.0);
+                let logit_cp = ln(cp / (1.0 - cp));
+                let init_b = 0.0 - logit_cp;
+                thresholds = append(thresholds, init_b);
+            }
+        }
+
+        let max_iter = 20;
+        let tol = 0.005;
+        let mut converged = false;
+        let mut iter_count = 0.0;
+        let mut final_loglik = 0.0;
+
+        let mut t_prev_1 = [];
+        let mut t_prev_2 = [];
+
+        // Pre-allocate regional working buffers in Arena (reused zero-copy across EM cycles)
+        let mut log_p_cat_list = [];
+        for j in 0..n_items {
+            log_p_cat_list = append(log_p_cat_list, arena.alloc_matrix(n_categories, n_q, 0.0));
+        }
+        let mut post_mat = arena.alloc_matrix(n_persons, n_q, 0.0);
+
+        let mut iter = 0;
+        while !converged && iter < max_iter {
+            iter = iter + 1;
+            iter_count = iter_count + 1.0;
+
+            t_prev_2 = t_prev_1;
+            t_prev_1 = thresholds;
+
+            // --- E-STEP: Vectorized GEMM formulation for category log-likelihoods ---
+            let mut log_l_total = arena.alloc_matrix(n_persons, n_q, 0.0);
+
+            for j in 0..n_items {
+                let a_j = a_params[j];
+                let mut log_p_cat = log_p_cat_list[j];
 
             for k_val in 0..n_categories {
                 let mut row_lp = [];
@@ -169,14 +179,14 @@ fn fit_graded_response(
                 }
                 log_p_cat = set_row(log_p_cat, k_val, row_lp);
             }
+            log_p_cat_list = set(log_p_cat_list, j, log_p_cat);
 
             let mat_oj = one_hot_list[j];
             let log_l_item = mat_oj * log_p_cat; // (n_persons x n_q) faer GEMM
             log_l_total = log_l_total .+ log_l_item;
         }
 
-        // Compute person posterior distributions
-        let mut post_mat = zeros(n_persons, n_q);
+        // Compute person posterior distributions in-place (reusing arena post_mat)
         let mut current_loglik = 0.0;
 
         for i in 0..n_persons {
@@ -295,17 +305,18 @@ fn fit_graded_response(
         }
     }
 
-    GradedResponseResult {
-        a_params: a_params,
-        thresholds: thresholds,
-        coefficients: thresholds,
-        n_categories: n_categories,
-        n_items: n_items,
-        n_persons: n_persons,
-        log_likelihood: final_loglik,
-        iterations: iter_count,
-        converged: converged
-    }
+        GradedResponseResult {
+            a_params: a_params,
+            thresholds: thresholds,
+            coefficients: thresholds,
+            n_categories: n_categories,
+            n_items: n_items,
+            n_persons: n_persons,
+            log_likelihood: final_loglik,
+            iterations: iter_count,
+            converged: converged
+        }
+    })
 }
 
 fn coef_graded_irt(result: GradedResponseResult) -> DataFrame {

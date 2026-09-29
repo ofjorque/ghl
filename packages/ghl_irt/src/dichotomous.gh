@@ -87,8 +87,8 @@ fn fit_dichotomous_irt(
         }
 
         // Precompute Pattern Matrices Y, Y_inv, and Y_t (constant across EM iterations)
-        let mut mat_y = zeros(n_patterns, n_items);
-        let mut mat_y_inv = zeros(n_patterns, n_items);
+        let mut mat_y = arena.alloc_matrix(n_patterns, n_items, 0.0);
+        let mut mat_y_inv = arena.alloc_matrix(n_patterns, n_items, 0.0);
         for p in 0..n_patterns {
             let mut row_y = [];
             let mut row_y_inv = [];
@@ -141,6 +141,11 @@ fn fit_dichotomous_irt(
         let mut a_prev_1 = [];
         let mut a_prev_2 = [];
 
+        // Pre-allocate regional working buffers in Arena (reused zero-copy across EM cycles)
+        let mut log_p_mat = arena.alloc_matrix(n_items, n_q, 0.0);
+        let mut log_q_mat = arena.alloc_matrix(n_items, n_q, 0.0);
+        let mut w_post_mat = arena.alloc_matrix(n_patterns, n_q, 0.0);
+
         let mut iter = 0;
         while !converged && iter < max_iter {
             iter = iter + 1;
@@ -152,8 +157,6 @@ fn fit_dichotomous_irt(
             a_prev_1 = a_params;
 
             // --- E-STEP: Vectorized GEMM formulation backed by faer ---
-            let mut log_p_mat = zeros(n_items, n_q);
-            let mut log_q_mat = zeros(n_items, n_q);
             for j in 0..n_items {
                 let a_j = a_params[j];
                 let b_j = b_params[j];
@@ -178,8 +181,7 @@ fn fit_dichotomous_irt(
             // Two GEMM multiplications in faer to get conditional log-likelihood matrix (P x Q) in microseconds
             let log_l_mat = (mat_y * log_p_mat) .+ (mat_y_inv * log_q_mat);
 
-            // Compute posterior pattern distribution and build w_post_mat (P x Q)
-            let mut w_post_mat = zeros(n_patterns, n_q);
+            // Compute posterior pattern distribution and build w_post_mat (P x Q) in-place
             let mut current_loglik = 0.0;
 
             for p in 0..n_patterns {

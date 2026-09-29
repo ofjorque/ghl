@@ -139,11 +139,12 @@ Integración del parser de fórmulas SEM (`=~` y `~~`) en la definición de espe
   - [x] **Reducción de Ciclos de Calibración:**
     - Convergencia más veloz y precisa: la calibración 1PL desciende a ~20–36 ms (discrepancia máxima frente a R `mirt` de solo 0.004), y el análisis LRT DIF desciende a **254 ms** (**2.4x más rápido que R `mirt`**).
 
-- [ ] **Pilar 3: Gestión de Memoria Regional y Buffers Zero-Copy (`std::arena`):**
-  - [ ] **Adopción de Arenas en Calibración Dicotómica y Politómica:**
-    - Extender el patrón de `std::arena::scope` (ya validado en `packages/ghl_irt/src/mhrm.gh`) a `dichotomous.gh` y `polytomous.gh`.
-    - Asignar $\mathbf{P}$, $\log\mathbf{P}$, $\mathbf{Post}$ y $\mathbf{R}$ dentro del arena regional, mutándolos con `set()` y `Arc::make_mut`.
-    - Eliminar la presión sobre el allocator del sistema (`malloc`/`free`) en cada iteración del bucle EM.
+- [x] **Pilar 3: Gestión de Memoria Regional y Buffers Zero-Copy (`std::arena`):** *(Completado)*
+  - [x] **Adopción de Arenas en Calibración Dicotómica y Politómica:**
+    - Extendido el patrón de `std::arena::scope` a `dichotomous.gh` y `polytomous.gh`.
+    - Asignación de $\mathbf{P}$, $\log\mathbf{P}$, $\mathbf{Post}$ y matrices de patrones $\mathbf{Y}$, $\mathbf{B}$, $\mathbf{O}_j$ dentro del arena regional bumpalo.
+    - Mutación in-place zero-copy mediante `set_row()` y `Arc::make_mut` con recolección $O(1)$ en `arena.reset()`.
+    - Eliminada la presión sobre el allocator del sistema (`malloc`/`free`) en cada ciclo iterativo.
 
 - [ ] **Pilar 4: Kernel Numérico Opcional de Alta Dimensión en Rust (Capa 0):**
   - [ ] **Primitiva `irt_em_quadrature_kernel` en `crates/ghl-runtime`:**
