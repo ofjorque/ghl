@@ -28,6 +28,25 @@ pub struct Interpreter {
     pub loop_continue: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum DimSelection {
+    Scalar(usize),
+    Range(usize, usize),
+    Indices(Vec<usize>),
+    All,
+}
+
+impl DimSelection {
+    pub(crate) fn to_indices(&self, dim_len: usize) -> Vec<usize> {
+        match self {
+            DimSelection::Scalar(i) => vec![*i],
+            DimSelection::Range(s, e) => (*s..*e).collect(),
+            DimSelection::Indices(idx) => idx.clone(),
+            DimSelection::All => (0..dim_len).collect(),
+        }
+    }
+}
+
 impl Interpreter {
     pub fn new() -> Self {
         Self {
@@ -147,6 +166,10 @@ impl Interpreter {
                     ));
                 }
                 Ok(val)
+            }
+            StmtKind::IndexAssign { target, indices, value } => {
+                let val = self.eval_expr(value)?;
+                self.eval_index_assign(target, indices, val, false)
             }
             StmtKind::Use(use_stmt) => {
                 if use_stmt.path.first().map(|s| s != "std").unwrap_or(false) {
@@ -1311,130 +1334,8 @@ impl Interpreter {
                     ));
                 }
 
-                enum DimSelection {
-                    Scalar(usize),
-                    Range(usize, usize),
-                    Indices(Vec<usize>),
-                    All,
-                }
-
-                impl DimSelection {
-                    fn to_indices(&self, dim_len: usize) -> Vec<usize> {
-                        match self {
-                            DimSelection::Scalar(i) => vec![*i],
-                            DimSelection::Range(s, e) => (*s..*e).collect(),
-                            DimSelection::Indices(idx) => idx.clone(),
-                            DimSelection::All => (0..dim_len).collect(),
-                        }
-                    }
-                }
-
-                let resolve_dim = |interp: &mut Self, spec: &IndexSpec, dim_len: usize, dim_name: &str| -> Result<DimSelection, Diagnostic> {
-                    match spec {
-                        IndexSpec::All => Ok(DimSelection::All),
-                        IndexSpec::Expr(e) => {
-                            let val = interp.eval_expr_ctx(e, col_ctx)?;
-                            match val {
-                                Value::I64(i) => {
-                                    if i < 0 || (i as usize) >= dim_len {
-                                        return Err(Diagnostic::compute_error(
-                                            "C0203",
-                                            format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
-                                        ));
-                                    }
-                                    Ok(DimSelection::Scalar(i as usize))
-                                }
-                                Value::F64(f) if f.fract() == 0.0 => {
-                                    let i = f as i64;
-                                    if i < 0 || (i as usize) >= dim_len {
-                                        return Err(Diagnostic::compute_error(
-                                            "C0203",
-                                            format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
-                                        ));
-                                    }
-                                    Ok(DimSelection::Scalar(i as usize))
-                                }
-                                Value::Vector(vd) => {
-                                    if vd.column().dtype() == &DataType::Boolean {
-                                        if vd.len() != dim_len {
-                                            return Err(Diagnostic::compute_error(
-                                                "C0202",
-                                                format!(
-                                                    "Boolean mask length ({}) must match matrix {dim_name} count ({})",
-                                                    vd.len(),
-                                                    dim_len
-                                                ),
-                                            ));
-                                        }
-                                        let mut indices = Vec::new();
-                                        if let Ok(ca) = vd.column().bool() {
-                                            for i in 0..vd.len() {
-                                                if ca.get(i) == Some(true) {
-                                                    indices.push(i);
-                                                }
-                                            }
-                                        } else {
-                                            for (i, it) in vd.iter().enumerate() {
-                                                if it.as_bool() == Some(true) {
-                                                    indices.push(i);
-                                                }
-                                            }
-                                        }
-                                        Ok(DimSelection::Indices(indices))
-                                    } else {
-                                        let mut indices = Vec::with_capacity(vd.len());
-                                        for it in vd.iter() {
-                                            let i = it.as_i64().ok_or_else(|| {
-                                                Diagnostic::compute_error("C0201", format!("Matrix {dim_name} index vector must contain integers or booleans"))
-                                            })?;
-                                            if i < 0 || (i as usize) >= dim_len {
-                                                return Err(Diagnostic::compute_error(
-                                                    "C0203",
-                                                    format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
-                                                ));
-                                            }
-                                            indices.push(i as usize);
-                                        }
-                                        Ok(DimSelection::Indices(indices))
-                                    }
-                                }
-                                other => Err(Diagnostic::compute_error(
-                                    "C0201",
-                                    format!("Matrix {dim_name} index must be an integer, range, or boolean mask, found `{}`", other.type_name()),
-                                )),
-                            }
-                        }
-                        IndexSpec::Range { start, end, inclusive } => {
-                            let s = if let Some(st) = start {
-                                let val = interp.eval_expr_ctx(st, col_ctx)?;
-                                val.as_i64().ok_or_else(|| {
-                                    Diagnostic::compute_error("C0201", format!("Matrix {dim_name} range start must be an integer"))
-                                })?
-                            } else {
-                                0
-                            };
-                            let e = if let Some(ed) = end {
-                                let val = interp.eval_expr_ctx(ed, col_ctx)?;
-                                let ed_i = val.as_i64().ok_or_else(|| {
-                                    Diagnostic::compute_error("C0201", format!("Matrix {dim_name} range end must be an integer"))
-                                })?;
-                                if *inclusive { ed_i + 1 } else { ed_i }
-                            } else {
-                                dim_len as i64
-                            };
-                            if s < 0 || (s as usize) > dim_len || e < 0 || (e as usize) > dim_len || s > e {
-                                return Err(Diagnostic::compute_error(
-                                    "C0203",
-                                    format!("Matrix {dim_name} slice [{s}..{e}] out of bounds for dimension of size {dim_len}"),
-                                ));
-                            }
-                            Ok(DimSelection::Range(s as usize, e as usize))
-                        }
-                    }
-                };
-
-                let r_sel = resolve_dim(self, &indices[0], rows, "row")?;
-                let c_sel = resolve_dim(self, &indices[1], cols, "col")?;
+                let r_sel = self.resolve_dim_selection(&indices[0], rows, "row", col_ctx)?;
+                let c_sel = self.resolve_dim_selection(&indices[1], cols, "col", col_ctx)?;
 
                 match (&r_sel, &c_sel) {
                     (DimSelection::Scalar(r), DimSelection::Scalar(c)) => {
@@ -1535,6 +1436,456 @@ impl Interpreter {
             other => Err(Diagnostic::compute_error(
                 "C0202",
                 format!("Cannot index value of type `{}` with `[...]`", other.type_name()),
+            )),
+        }
+    }
+
+    pub(crate) fn resolve_dim_selection(
+        &mut self,
+        spec: &IndexSpec,
+        dim_len: usize,
+        dim_name: &str,
+        col_ctx: bool,
+    ) -> Result<DimSelection, Diagnostic> {
+        match spec {
+            IndexSpec::All => Ok(DimSelection::All),
+            IndexSpec::Expr(e) => {
+                let val = self.eval_expr_ctx(e, col_ctx)?;
+                match val {
+                    Value::I64(i) => {
+                        if i < 0 || (i as usize) >= dim_len {
+                            return Err(Diagnostic::compute_error(
+                                "C0203",
+                                format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
+                            ));
+                        }
+                        Ok(DimSelection::Scalar(i as usize))
+                    }
+                    Value::F64(f) if f.fract() == 0.0 => {
+                        let i = f as i64;
+                        if i < 0 || (i as usize) >= dim_len {
+                            return Err(Diagnostic::compute_error(
+                                "C0203",
+                                format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
+                            ));
+                        }
+                        Ok(DimSelection::Scalar(i as usize))
+                    }
+                    Value::Vector(vd) => {
+                        if vd.column().dtype() == &DataType::Boolean {
+                            if vd.len() != dim_len {
+                                return Err(Diagnostic::compute_error(
+                                    "C0202",
+                                    format!(
+                                        "Boolean mask length ({}) must match matrix {dim_name} count ({})",
+                                        vd.len(),
+                                        dim_len
+                                    ),
+                                ));
+                            }
+                            let mut indices = Vec::new();
+                            if let Ok(ca) = vd.column().bool() {
+                                for i in 0..vd.len() {
+                                    if ca.get(i) == Some(true) {
+                                        indices.push(i);
+                                    }
+                                }
+                            } else {
+                                for (i, it) in vd.iter().enumerate() {
+                                    if it.as_bool() == Some(true) {
+                                        indices.push(i);
+                                    }
+                                }
+                            }
+                            Ok(DimSelection::Indices(indices))
+                        } else {
+                            let mut indices = Vec::with_capacity(vd.len());
+                            for it in vd.iter() {
+                                let i = it.as_i64().ok_or_else(|| {
+                                    Diagnostic::compute_error(
+                                        "C0201",
+                                        format!("Matrix {dim_name} index vector must contain integers or booleans"),
+                                    )
+                                })?;
+                                if i < 0 || (i as usize) >= dim_len {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0203",
+                                        format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
+                                    ));
+                                }
+                                indices.push(i as usize);
+                            }
+                            Ok(DimSelection::Indices(indices))
+                        }
+                    }
+                    other => Err(Diagnostic::compute_error(
+                        "C0201",
+                        format!(
+                            "Matrix {dim_name} index must be an integer, range, or boolean mask, found `{}`",
+                            other.type_name()
+                        ),
+                    )),
+                }
+            }
+            IndexSpec::Range { start, end, inclusive } => {
+                let s = if let Some(st) = start {
+                    let val = self.eval_expr_ctx(st, col_ctx)?;
+                    val.as_i64().ok_or_else(|| {
+                        Diagnostic::compute_error("C0201", format!("Matrix {dim_name} range start must be an integer"))
+                    })?
+                } else {
+                    0
+                };
+                let e = if let Some(ed) = end {
+                    let val = self.eval_expr_ctx(ed, col_ctx)?;
+                    let ed_i = val.as_i64().ok_or_else(|| {
+                        Diagnostic::compute_error("C0201", format!("Matrix {dim_name} range end must be an integer"))
+                    })?;
+                    if *inclusive { ed_i + 1 } else { ed_i }
+                } else {
+                    dim_len as i64
+                };
+                if s < 0 || (s as usize) > dim_len || e < 0 || (e as usize) > dim_len || s > e {
+                    return Err(Diagnostic::compute_error(
+                        "C0203",
+                        format!("Matrix {dim_name} slice [{s}..{e}] out of bounds for dimension of size {dim_len}"),
+                    ));
+                }
+                Ok(DimSelection::Range(s as usize, e as usize))
+            }
+        }
+    }
+
+    pub(crate) fn eval_index_assign(
+        &mut self,
+        target: &str,
+        indices: &[IndexSpec],
+        rhs_val: Value,
+        col_ctx: bool,
+    ) -> Result<Value, Diagnostic> {
+        let target_val = self.env.get(target).ok_or_else(|| {
+            Diagnostic::compute_error(
+                "C0101",
+                format!("Cannot assign to undefined variable `{}`", target),
+            )
+        })?;
+
+        match target_val {
+            Value::Vector(vd) => {
+                if indices.len() != 1 {
+                    return Err(Diagnostic::compute_error(
+                        "C0201",
+                        format!("Vector indexing requires exactly 1 index, got {}", indices.len()),
+                    ));
+                }
+
+                let mut items = vd.to_vec();
+                match &indices[0] {
+                    IndexSpec::Expr(e) => {
+                        let idx_val = self.eval_expr_ctx(e, col_ctx)?;
+                        match idx_val {
+                            Value::I64(i) => {
+                                if i < 0 || (i as usize) >= items.len() {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0203",
+                                        format!("Index out of bounds: index {i} for vector of length {}", items.len()),
+                                    ));
+                                }
+                                items[i as usize] = rhs_val.clone();
+                            }
+                            Value::F64(f) if f.fract() == 0.0 => {
+                                let i = f as i64;
+                                if i < 0 || (i as usize) >= items.len() {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0203",
+                                        format!("Index out of bounds: index {i} for vector of length {}", items.len()),
+                                    ));
+                                }
+                                items[i as usize] = rhs_val.clone();
+                            }
+                            Value::Vector(idx_vd) => {
+                                if idx_vd.column().dtype() == &DataType::Boolean {
+                                    if idx_vd.len() != items.len() {
+                                        return Err(Diagnostic::compute_error(
+                                            "C0202",
+                                            format!(
+                                                "Boolean mask length ({}) must match vector length ({})",
+                                                idx_vd.len(),
+                                                items.len()
+                                            ),
+                                        ));
+                                    }
+                                    let mut selected = Vec::new();
+                                    if let Ok(ca) = idx_vd.column().bool() {
+                                        for i in 0..items.len() {
+                                            if ca.get(i) == Some(true) {
+                                                selected.push(i);
+                                            }
+                                        }
+                                    } else {
+                                        for (i, it) in idx_vd.iter().enumerate() {
+                                            if it.as_bool() == Some(true) {
+                                                selected.push(i);
+                                            }
+                                        }
+                                    }
+                                    if let Value::Vector(rhs_v) = &rhs_val {
+                                        if rhs_v.len() != selected.len() {
+                                            return Err(Diagnostic::compute_error(
+                                                "C0202",
+                                                format!(
+                                                    "Replacement vector length ({}) does not match index selection count ({})",
+                                                    rhs_v.len(),
+                                                    selected.len()
+                                                ),
+                                            ));
+                                        }
+                                        for (k, &idx) in selected.iter().enumerate() {
+                                            items[idx] = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                        }
+                                    } else {
+                                        for &idx in &selected {
+                                            items[idx] = rhs_val.clone();
+                                        }
+                                    }
+                                } else {
+                                    let mut selected = Vec::with_capacity(idx_vd.len());
+                                    for it in idx_vd.iter() {
+                                        let i = it.as_i64().ok_or_else(|| {
+                                            Diagnostic::compute_error("C0201", "Vector index must be an integer or boolean mask")
+                                        })?;
+                                        if i < 0 || (i as usize) >= items.len() {
+                                            return Err(Diagnostic::compute_error(
+                                                "C0203",
+                                                format!("Index out of bounds: index {i} for vector of length {}", items.len()),
+                                            ));
+                                        }
+                                        selected.push(i as usize);
+                                    }
+                                    if let Value::Vector(rhs_v) = &rhs_val {
+                                        if rhs_v.len() != selected.len() {
+                                            return Err(Diagnostic::compute_error(
+                                                "C0202",
+                                                format!(
+                                                    "Replacement vector length ({}) does not match index selection count ({})",
+                                                    rhs_v.len(),
+                                                    selected.len()
+                                                ),
+                                            ));
+                                        }
+                                        for (k, &idx) in selected.iter().enumerate() {
+                                            items[idx] = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                        }
+                                    } else {
+                                        for &idx in &selected {
+                                            items[idx] = rhs_val.clone();
+                                        }
+                                    }
+                                }
+                            }
+                            other => {
+                                return Err(Diagnostic::compute_error(
+                                    "C0202",
+                                    format!("Cannot index vector with `{}`", other.type_name()),
+                                ));
+                            }
+                        }
+                    }
+                    IndexSpec::Range { start, end, inclusive } => {
+                        let s = if let Some(st) = start {
+                            let val = self.eval_expr_ctx(st, col_ctx)?;
+                            val.as_i64().ok_or_else(|| {
+                                Diagnostic::compute_error("C0201", "Range start must be an integer")
+                            })?
+                        } else {
+                            0
+                        };
+                        let e = if let Some(ed) = end {
+                            let val = self.eval_expr_ctx(ed, col_ctx)?;
+                            let ed_i = val.as_i64().ok_or_else(|| {
+                                Diagnostic::compute_error("C0201", "Range end must be an integer")
+                            })?;
+                            if *inclusive { ed_i + 1 } else { ed_i }
+                        } else {
+                            items.len() as i64
+                        };
+                        if s < 0 || (s as usize) > items.len() || e < 0 || (e as usize) > items.len() || s > e {
+                            return Err(Diagnostic::compute_error(
+                                "C0203",
+                                format!("Range slice [{s}..{e}] out of bounds for vector of length {}", items.len()),
+                            ));
+                        }
+                        let start_u = s as usize;
+                        let len_u = (e - s) as usize;
+                        if let Value::Vector(rhs_v) = &rhs_val {
+                            if rhs_v.len() != len_u {
+                                return Err(Diagnostic::compute_error(
+                                    "C0202",
+                                    format!(
+                                        "Replacement vector length ({}) does not match range slice length ({})",
+                                        rhs_v.len(),
+                                        len_u
+                                    ),
+                                ));
+                            }
+                            for k in 0..len_u {
+                                items[start_u + k] = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                            }
+                        } else {
+                            for k in 0..len_u {
+                                items[start_u + k] = rhs_val.clone();
+                            }
+                        }
+                    }
+                    IndexSpec::All => {
+                        if let Value::Vector(rhs_v) = &rhs_val {
+                            if rhs_v.len() != items.len() {
+                                return Err(Diagnostic::compute_error(
+                                    "C0202",
+                                    format!(
+                                        "Replacement vector length ({}) does not match vector length ({})",
+                                        rhs_v.len(),
+                                        items.len()
+                                    ),
+                                ));
+                            }
+                            for k in 0..items.len() {
+                                items[k] = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                            }
+                        } else {
+                            for k in 0..items.len() {
+                                items[k] = rhs_val.clone();
+                            }
+                        }
+                    }
+                }
+
+                self.env.assign(target, Value::Vector(VectorData::from_values(items)));
+                Ok(rhs_val)
+            }
+
+            Value::Matrix { rows, cols, .. } => {
+                if indices.len() != 2 {
+                    return Err(Diagnostic::compute_error(
+                        "C0201",
+                        format!("Matrix indexing requires exactly 2 indices [row, col], got {}", indices.len()),
+                    ));
+                }
+
+                let r_sel = self.resolve_dim_selection(&indices[0], rows, "row", col_ctx)?;
+                let c_sel = self.resolve_dim_selection(&indices[1], cols, "col", col_ctx)?;
+
+                let target_ref = self.env.get_mut(target).unwrap();
+                if let Value::Matrix { rows: m_rows, cols: m_cols, data } = target_ref {
+                    let cols_len = *m_cols;
+                    let rows_len = *m_rows;
+                    let data_mut = std::sync::Arc::make_mut(data);
+                    match (&r_sel, &c_sel) {
+                        (DimSelection::Scalar(r), DimSelection::Scalar(c)) => {
+                            let val_f64 = rhs_val.as_f64().ok_or_else(|| {
+                                Diagnostic::compute_error("C0202", "Matrix element must be a numeric value")
+                            })?;
+                            data_mut[*r * cols_len + *c] = val_f64;
+                        }
+                        (DimSelection::Scalar(r), c_spec) => {
+                            let c_indices = c_spec.to_indices(cols_len);
+                            if let Value::Vector(vd) = &rhs_val {
+                                if vd.len() != c_indices.len() {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0202",
+                                        format!(
+                                            "Replacement vector length ({}) does not match row slice length ({})",
+                                            vd.len(),
+                                            c_indices.len()
+                                        ),
+                                    ));
+                                }
+                                for (k, &c) in c_indices.iter().enumerate() {
+                                    let cell_val = vd.value_at(k).and_then(|v| v.as_f64()).ok_or_else(|| {
+                                        Diagnostic::compute_error("C0202", "Matrix element must be a numeric value")
+                                    })?;
+                                    data_mut[*r * cols_len + c] = cell_val;
+                                }
+                            } else if let Some(s) = rhs_val.as_f64() {
+                                for &c in &c_indices {
+                                    data_mut[*r * cols_len + c] = s;
+                                }
+                            } else {
+                                return Err(Diagnostic::compute_error(
+                                    "C0202",
+                                    "Cannot assign non-numeric value to matrix row",
+                                ));
+                            }
+                        }
+                        (r_spec, DimSelection::Scalar(c)) => {
+                            let r_indices = r_spec.to_indices(rows_len);
+                            if let Value::Vector(vd) = &rhs_val {
+                                if vd.len() != r_indices.len() {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0202",
+                                        format!(
+                                            "Replacement vector length ({}) does not match column slice length ({})",
+                                            vd.len(),
+                                            r_indices.len()
+                                        ),
+                                    ));
+                                }
+                                for (k, &r) in r_indices.iter().enumerate() {
+                                    let cell_val = vd.value_at(k).and_then(|v| v.as_f64()).ok_or_else(|| {
+                                        Diagnostic::compute_error("C0202", "Matrix element must be a numeric value")
+                                    })?;
+                                    data_mut[r * cols_len + *c] = cell_val;
+                                }
+                            } else if let Some(s) = rhs_val.as_f64() {
+                                for &r in &r_indices {
+                                    data_mut[r * cols_len + *c] = s;
+                                }
+                            } else {
+                                return Err(Diagnostic::compute_error(
+                                    "C0202",
+                                    "Cannot assign non-numeric value to matrix column",
+                                ));
+                            }
+                        }
+                        (r_spec, c_spec) => {
+                            let r_indices = r_spec.to_indices(rows_len);
+                            let c_indices = c_spec.to_indices(cols_len);
+                            if let Value::Matrix { rows: sub_r, cols: sub_c, data: sub_data } = &rhs_val {
+                                if *sub_r != r_indices.len() || *sub_c != c_indices.len() {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0202",
+                                        format!(
+                                            "Replacement matrix dimensions ([{}, {}]) do not match target submatrix ([{}, {}])",
+                                            sub_r, sub_c, r_indices.len(), c_indices.len()
+                                        ),
+                                    ));
+                                }
+                                for (i, &r) in r_indices.iter().enumerate() {
+                                    for (j, &c) in c_indices.iter().enumerate() {
+                                        data_mut[r * cols_len + c] = sub_data[i * sub_c + j];
+                                    }
+                                }
+                            } else if let Some(s) = rhs_val.as_f64() {
+                                for &r in &r_indices {
+                                    for &c in &c_indices {
+                                        data_mut[r * cols_len + c] = s;
+                                    }
+                                }
+                            } else {
+                                return Err(Diagnostic::compute_error(
+                                    "C0202",
+                                    "Cannot assign non-numeric value to submatrix",
+                                ));
+                            }
+                        }
+                    }
+                }
+                Ok(rhs_val)
+            }
+
+            other => Err(Diagnostic::compute_error(
+                "C0201",
+                format!("Type `{}` does not support indexed assignment", other.type_name()),
             )),
         }
     }

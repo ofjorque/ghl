@@ -105,6 +105,67 @@ pub fn fn_param_parser() -> impl Parser<Token, FnParam, Error = Simple<Token>> +
     self_param.or(regular_param)
 }
 
+pub fn index_spec_parser<E>(expr: E) -> impl Parser<Token, IndexSpec, Error = Simple<Token>> + Clone
+where
+    E: Parser<Token, Expr, Error = Simple<Token>> + Clone,
+{
+    let colon_wildcard = just(Token::Colon).to(IndexSpec::All);
+    let range_starts_with_dotdot_eq = just(Token::DotDotEq)
+        .ignore_then(expr.clone())
+        .map(|e| IndexSpec::Range {
+            start: None,
+            end: Some(Box::new(e)),
+            inclusive: true,
+        });
+    let range_starts_with_dotdot = just(Token::DotDot)
+        .ignore_then(expr.clone().or_not())
+        .map(|opt_e| match opt_e {
+            Some(e) => IndexSpec::Range {
+                start: None,
+                end: Some(Box::new(e)),
+                inclusive: false,
+            },
+            None => IndexSpec::All,
+        });
+    let index_from_expr = expr.clone()
+        .then(
+            just(Token::DotDotEq).ignore_then(expr.clone()).map(|e| Some((true, Some(e))))
+                .or(just(Token::DotDot).ignore_then(expr.clone().or_not()).map(|opt_e| Some((false, opt_e))))
+                .or(empty().to(None))
+        )
+        .map(|(first, opt_range)| match opt_range {
+            None => match first.kind {
+                ExprKind::Range { start, end, inclusive } => IndexSpec::Range {
+                    start: Some(start),
+                    end: Some(end),
+                    inclusive,
+                },
+                _ => IndexSpec::Expr(first),
+            },
+            Some((inclusive, end)) => IndexSpec::Range {
+                start: Some(Box::new(first)),
+                end: end.map(Box::new),
+                inclusive,
+            },
+        });
+
+    colon_wildcard
+        .or(range_starts_with_dotdot_eq)
+        .or(range_starts_with_dotdot)
+        .or(index_from_expr)
+}
+
+pub fn index_bracket_parser<E>(expr: E) -> impl Parser<Token, Vec<IndexSpec>, Error = Simple<Token>> + Clone
+where
+    E: Parser<Token, Expr, Error = Simple<Token>> + Clone,
+{
+    index_spec_parser(expr)
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .at_least(1)
+        .delimited_by(just(Token::LBracket), just(Token::RBracket))
+}
+
 pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone {
     recursive(|expr| {
         let path_segment = select! {
@@ -382,6 +443,19 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 .then_ignore(just(Token::Semicolon).or_not())
                 .map_with_span(|(name, value), span| Stmt::new(StmtKind::Assign { name, value }, span));
 
+            // `target[indices...] = value;` -- in-place mutation of a collection or slice.
+            let index_assign_stmt = select! {
+                Token::Ident(name) => name,
+                Token::Col => "col".to_string(),
+            }
+            .then(index_bracket_parser(expr.clone()))
+            .then_ignore(just(Token::Eq))
+            .then(expr.clone())
+            .then_ignore(just(Token::Semicolon).or_not())
+            .map_with_span(|((target, indices), value), span| {
+                Stmt::new(StmtKind::IndexAssign { target, indices, value }, span)
+            });
+
             let expr_stmt = expr
                 .clone()
                 .then(
@@ -413,6 +487,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 .or(return_stmt)
                 .or(break_stmt)
                 .or(continue_stmt)
+                .or(index_assign_stmt)
                 .or(assign_stmt)
                 .or(expr_stmt)
         };
@@ -589,57 +664,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             })
             .map_with_span(Postfix::Field);
 
-        let colon_wildcard = just(Token::Colon).to(IndexSpec::All);
-        let range_starts_with_dotdot_eq = just(Token::DotDotEq)
-            .ignore_then(expr.clone())
-            .map(|e| IndexSpec::Range {
-                start: None,
-                end: Some(Box::new(e)),
-                inclusive: true,
-            });
-        let range_starts_with_dotdot = just(Token::DotDot)
-            .ignore_then(expr.clone().or_not())
-            .map(|opt_e| match opt_e {
-                Some(e) => IndexSpec::Range {
-                    start: None,
-                    end: Some(Box::new(e)),
-                    inclusive: false,
-                },
-                None => IndexSpec::All,
-            });
-        let index_from_expr = expr.clone()
-            .then(
-                just(Token::DotDotEq).ignore_then(expr.clone()).map(|e| Some((true, Some(e))))
-                    .or(just(Token::DotDot).ignore_then(expr.clone().or_not()).map(|opt_e| Some((false, opt_e))))
-                    .or(empty().to(None))
-            )
-            .map(|(first, opt_range)| match opt_range {
-                None => match first.kind {
-                    ExprKind::Range { start, end, inclusive } => IndexSpec::Range {
-                        start: Some(start),
-                        end: Some(end),
-                        inclusive,
-                    },
-                    _ => IndexSpec::Expr(first),
-                },
-                Some((inclusive, end)) => IndexSpec::Range {
-                    start: Some(Box::new(first)),
-                    end: end.map(Box::new),
-                    inclusive,
-                },
-            });
-
-        let index_spec = colon_wildcard
-            .or(range_starts_with_dotdot_eq)
-            .or(range_starts_with_dotdot)
-            .or(index_from_expr);
-
-        let postfix_index = index_spec
-            .separated_by(just(Token::Comma))
-            .allow_trailing()
-            .at_least(1)
-            .delimited_by(just(Token::LBracket), just(Token::RBracket))
-            .map_with_span(Postfix::Index);
+        let postfix_index = index_bracket_parser(expr.clone()).map_with_span(Postfix::Index);
 
         let postfix = postfix_call.or(postfix_field).or(postfix_index);
 
@@ -1013,6 +1038,18 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         .then_ignore(just(Token::Semicolon).or_not())
         .map_with_span(|(name, value), span| Stmt::new(StmtKind::Assign { name, value }, span));
 
+    let index_assign_stmt = select! {
+        Token::Ident(name) => name,
+        Token::Col => "col".to_string(),
+    }
+    .then(index_bracket_parser(expr_parser()))
+    .then_ignore(just(Token::Eq))
+    .then(expr_parser())
+    .then_ignore(just(Token::Semicolon).or_not())
+    .map_with_span(|((target, indices), value), span| {
+        Stmt::new(StmtKind::IndexAssign { target, indices, value }, span)
+    });
+
     let expr_stmt = expr_parser()
         .then_ignore(just(Token::Semicolon).or_not())
         .map_with_span(|expr, span| Stmt::new(StmtKind::Expr(expr), span));
@@ -1160,6 +1197,7 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         .or(return_stmt)
         .or(break_stmt)
         .or(continue_stmt)
+        .or(index_assign_stmt)
         .or(assign_stmt)
         .or(expr_stmt)
 }

@@ -415,6 +415,86 @@ impl TypeChecker {
                     }
                 }
             }
+            StmtKind::IndexAssign { target, indices, value } => {
+                let value_ty = self.check_expr(value);
+                for idx in indices {
+                    match idx {
+                        IndexSpec::Expr(e) => {
+                            self.check_expr(e);
+                        }
+                        IndexSpec::Range { start, end, .. } => {
+                            if let Some(s) = start {
+                                self.check_expr(s);
+                            }
+                            if let Some(e) = end {
+                                self.check_expr(e);
+                            }
+                        }
+                        IndexSpec::All => {}
+                    }
+                }
+
+                match self.env.lookup(target) {
+                    None => {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0101",
+                                format!("Cannot assign to undefined variable `{}`", target),
+                            )
+                            .locate(&self.source_index, &self.source_file, &stmt.span)
+                            .with_help("Declare it first with `let mut`."),
+                        );
+                    }
+                    Some(info) if !info.is_mut => {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0104",
+                                format!("Cannot assign to `{}`: not declared as `mut`", target),
+                            )
+                            .locate(&self.source_index, &self.source_file, &stmt.span)
+                            .with_help(format!("Declare it as `let mut {} = ...;` to allow in-place mutation.", target)),
+                        );
+                    }
+                    Some(info) => {
+                        let declared_ty = info.ty.clone();
+                        match declared_ty {
+                            Type::Vector(elem) => {
+                                if value_ty != Type::Any && value_ty != *elem && value_ty != Type::Vector(elem.clone()) {
+                                    self.diagnostics.push(
+                                        Diagnostic::compute_error(
+                                            "C0102",
+                                            format!(
+                                                "Type mismatch assigning to vector `{}`: expected `{}` or `Vector[{}]`, found `{}`",
+                                                target, elem, elem, value_ty
+                                            ),
+                                        )
+                                        .locate(&self.source_index, &self.source_file, &stmt.span),
+                                    );
+                                }
+                            }
+                            Type::Matrix { elem, .. } => {
+                                if value_ty != Type::Any
+                                    && value_ty != *elem
+                                    && value_ty != Type::Vector(elem.clone())
+                                    && !matches!(value_ty, Type::Matrix { .. })
+                                {
+                                    self.diagnostics.push(
+                                        Diagnostic::compute_error(
+                                            "C0102",
+                                            format!(
+                                                "Type mismatch assigning to matrix `{}`: expected `{}`, `Vector[{}]`, or `Matrix`, found `{}`",
+                                                target, elem, elem, value_ty
+                                            ),
+                                        )
+                                        .locate(&self.source_index, &self.source_file, &stmt.span),
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
             StmtKind::Use(use_stmt) => {
                 if use_stmt.path.first().map(|s| s != "std").unwrap_or(false) {
                     // External package imports are resolved and inlined during the module resolution phase

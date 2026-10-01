@@ -76,6 +76,35 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             format_expr(out, value, level);
             out.push(';');
         }
+        StmtKind::IndexAssign { target, indices, value } => {
+            out.push_str(target);
+            out.push('[');
+            for (i, idx) in indices.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                match idx {
+                    IndexSpec::Expr(e) => format_expr(out, e, level),
+                    IndexSpec::All => out.push_str(".."),
+                    IndexSpec::Range { start, end, inclusive } => {
+                        if let Some(s) = start {
+                            format_expr(out, s, level);
+                        }
+                        if *inclusive {
+                            out.push_str("..=");
+                        } else {
+                            out.push_str("..");
+                        }
+                        if let Some(e) = end {
+                            format_expr(out, e, level);
+                        }
+                    }
+                }
+            }
+            out.push_str("] = ");
+            format_expr(out, value, level);
+            out.push(';');
+        }
         StmtKind::Return(val) => {
             out.push_str("return");
             if let Some(e) = val {

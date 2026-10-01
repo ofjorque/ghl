@@ -676,6 +676,15 @@ impl RuntimeEnv {
         None
     }
 
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut Value> {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(val) = scope.get_mut(name) {
+                return Some(val);
+            }
+        }
+        None
+    }
+
     pub fn remove(&mut self, name: &str) -> Option<Value> {
         for scope in self.scopes.iter_mut().rev() {
             if let Some(val) = scope.remove(name) {

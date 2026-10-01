@@ -26,8 +26,11 @@ Backlog temático para consolidar la ergonomía de última generación del lengu
   - Indexación arbitraria por vectores de enteros: `mat[[2, 0], ..]` y `mat[.., [1, 3]]`.
   - Validación dimensional estricta con diagnóstico `C0202` en discrepancias de longitud.
   - Verificado en suite de integración [`eval_boolean_mask_indexing.rs`](crates/ghl-runtime/tests/eval_boolean_mask_indexing.rs).
-- [ ] **Asignación Indexada Mutable Directa:**
-  - Sintaxis de actualización en-sitio `vec[i] = val` y `mat[i, j] = val` para variables mutables (`let mut`), eliminando la necesidad de llamar a `vec = set(vec, i, val)`.
+- [ ] **Sistema Unificado de Asignación Mutable In-Place (*Generalized L-Values*):**
+  - [x] **Fase 1 (Colecciones Base):** Actualización en-sitio `vec[i] = val`, `mat[r, c] = val` y reemplazo de rebanadas/filas/columnas `mat[r, ..] = row_vec`, `mat[.., c] = col_vec` para variables declaradas `let mut`. Chequeo estricto de mutabilidad `C0104` en `ghl-types` y modelo CoW con `Arc::make_mut` en runtime.
+  - [x] **Fase 2 (Máscaras Condicionales):** Asignación/clamping por máscara booleana `vec[vec < 0.0] = 0.0` y `mat[bool_mask, ..] = submat`, con difusión escalar (*scalar broadcast*) integrada. Verificado en [`eval_mutable_indexing.rs`](crates/ghl-runtime/tests/eval_mutable_indexing.rs).
+  - [ ] **Fase 3 (Campos y DataFrames):** Mutación directa de campos en structs/records `target.field = val`, columnas de DataFrame `df["col"] = vec` y celdas condicionales `df[mask, col] = val`.
+  - [ ] **Fase 4 (Operadores Compuestos):** Soporte unificado de asignación compuesta `+=`, `-=`, `*=`, `/=` aplicable a todos los L-values anteriores.
 
 ### Parte B: Visualización Científica Nativa (`ghl_plot` / Grammar of Graphics)
 - [ ] **Diseño del DSL de Gráficos:**

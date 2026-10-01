@@ -301,6 +301,29 @@ pub enum IndexSpec {
     All, // `:` or `..`
 }
 
+impl std::fmt::Display for IndexSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IndexSpec::Expr(e) => write!(f, "{e}"),
+            IndexSpec::Range { start, end, inclusive } => {
+                if let Some(s) = start {
+                    write!(f, "{s}")?;
+                }
+                if *inclusive {
+                    write!(f, "..=")?;
+                } else {
+                    write!(f, "..")?;
+                }
+                if let Some(e) = end {
+                    write!(f, "{e}")?;
+                }
+                Ok(())
+            }
+            IndexSpec::All => write!(f, ".."),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UseItem {
     pub name: String,
@@ -357,6 +380,12 @@ pub enum StmtKind {
     /// (`RuntimeEnv::assign`), not a new declaration.
     Assign {
         name: String,
+        value: Expr,
+    },
+    /// `target[indices...] = value;` -- in-place mutation of a collection / slice.
+    IndexAssign {
+        target: String,
+        indices: Vec<IndexSpec>,
         value: Expr,
     },
     Use(UseStmt),
@@ -650,6 +679,14 @@ impl std::fmt::Display for Stmt {
                 }
             }
             StmtKind::Assign { name, value } => write!(f, "{name} = {value};"),
+            StmtKind::IndexAssign { target, indices, value } => {
+                write!(f, "{target}[")?;
+                for (i, idx) in indices.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{idx}")?;
+                }
+                write!(f, "] = {value};")
+            }
             StmtKind::Use(u) => write!(f, "use {};", u.path.join("::")),
             _ => write!(f, "<stmt>"),
         }
