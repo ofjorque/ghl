@@ -3,6 +3,7 @@
 
 use std::arena::{scope, alloc_vector, alloc_matrix, reset};
 
+/// Result of Samejima's Graded Response Model (GRM) parameter calibration.
 struct GradedResponseResult {
     a_params: Vector,
     thresholds: Vector,
@@ -15,12 +16,31 @@ struct GradedResponseResult {
     converged: bool
 }
 
+/// Calculates the cumulative boundary probability P*(theta) for the Graded Response Model.
+///
+/// Computes the probability of scoring in category k or higher on item j.
+///
+/// @formula P_{jk}^*(\theta) = \frac{1}{1 + e^{-a_j(\theta - b_{jk})}}
+/// @param theta Latent trait ability of examinee (\theta)
+/// @param a Discrimination slope parameter for item j
+/// @param b_k Category boundary difficulty threshold b_{jk}
+/// @return Cumulative boundary probability in [0, 1]
 fn grm_boundary_prob(theta: f64, a: f64, b_k: f64) -> f64 {
     let z = a * (theta - b_k);
     let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
     exp_z / (1.0 + exp_z)
 }
 
+/// Calculates category response probability for the Graded Response Model by boundary subtraction.
+///
+/// @formula P_{jk}(\theta) = P_{jk}^*(\theta) - P_{j,k+1}^*(\theta)
+/// @param theta Latent trait ability of examinee (\theta)
+/// @param a Item discrimination slope
+/// @param thresh_vec Flattened item threshold vector
+/// @param j_idx Item index (0-based)
+/// @param n_cat Total response categories K
+/// @param k_resp Chosen response category (0 <= k < K)
+/// @return Discrete probability of category selection P(Y_j = k | \theta)
 fn grm_category_prob(
     theta: f64,
     a: f64,
@@ -50,6 +70,17 @@ fn grm_category_prob(
     if diff < 0.0001 { 0.0001 } else { if diff > 0.9999 { 0.9999 } else { diff } }
 }
 
+/// Calibrates Samejima's Graded Response Model (GRM) using vector-accelerated MMLE-EM.
+///
+/// Utilizes fused log-sum-exp posterior evaluations and BLAS GEMM expected count accumulations
+/// with Aitken acceleration on category boundary thresholds.
+///
+/// @formula P_{jk}(\theta) = \frac{1}{1 + e^{-a_j(\theta - b_{jk})}} - \frac{1}{1 + e^{-a_j(\theta - b_{j,k+1})}}
+/// @param responses Flattened N * J vector of polytomous responses (0 to K-1)
+/// @param n_persons Total number of examinees (N)
+/// @param n_items Total number of items (J)
+/// @param n_categories Number of ordered response categories (K)
+/// @return GradedResponseResult containing item slopes a_j, thresholds b_jk, and log-likelihood
 fn fit_graded_response(
     responses: Vector,
     n_persons: i64,
@@ -312,6 +343,10 @@ fn fit_graded_response(
     })
 }
 
+/// Extracts calibrated item discrimination slopes from a Graded Response Model into a DataFrame.
+///
+/// @param result Calibrated GradedResponseResult
+/// @return DataFrame with columns: item, a
 fn coef_graded_irt(result: GradedResponseResult) -> DataFrame {
     let mut item_indices = [];
     for j in 0..result.n_items {
@@ -327,6 +362,7 @@ fn coef_graded_irt(result: GradedResponseResult) -> DataFrame {
 // 2. Generalized Partial Credit Model (GPCM - Muraki, 1992) & PCM (Masters)
 // =========================================================================
 
+/// Result object containing parameters for Generalized Partial Credit (GPCM) and Partial Credit (PCM) models.
 struct GpcmResult {
     a_params: Vector,
     step_difficulties: Vector,
@@ -339,6 +375,16 @@ struct GpcmResult {
     converged: bool
 }
 
+/// Computes category response probability under the Generalized Partial Credit Model (GPCM).
+///
+/// @formula P_{jk}(\theta) = \frac{\exp \sum_{m=0}^k a_j(\theta - b_{jm})}{\sum_{h=0}^{K-1} \exp \sum_{m=0}^h a_j(\theta - b_{jm})}
+/// @param theta Latent trait ability of examinee (\theta)
+/// @param a Item discrimination slope
+/// @param step_vec Flattened vector of step difficulty thresholds b_{jm}
+/// @param j_idx Item index (0-based)
+/// @param n_cat Number of categories K
+/// @param k_resp Selected category k
+/// @return Probability P(Y_j = k | \theta)
 fn gpcm_category_prob(
     theta: f64,
     a: f64,
@@ -379,6 +425,13 @@ fn gpcm_category_prob(
     if p < 0.0001 { 0.0001 } else { if p > 0.9999 { 0.9999 } else { p } }
 }
 
+/// Fits the Generalized Partial Credit Model (GPCM - Muraki, 1992) with free item discrimination.
+///
+/// @param responses Flattened N * J vector of polytomous responses
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param n_categories Number of ordered score categories
+/// @return GpcmResult containing item slopes a_j and step difficulties b_{jk}
 fn fit_gpcm(
     responses: Vector,
     n_persons: i64,
@@ -419,6 +472,13 @@ fn fit_gpcm(
     }
 }
 
+/// Fits Masters' Partial Credit Model (PCM, 1982) with fixed unit discrimination a = 1.0.
+///
+/// @param responses Flattened N * J vector of polytomous responses
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param n_categories Number of ordered score categories
+/// @return GpcmResult with unit discrimination and calibrated step difficulties
 fn fit_pcm(
     responses: Vector,
     n_persons: i64,
@@ -447,6 +507,7 @@ fn fit_pcm(
 // 3. Rating Scale Model (RSM - Andrich, 1978)
 // =========================================================================
 
+/// Result of Andrich's Rating Scale Model (RSM) with common rating scale thresholds.
 struct RsmResult {
     b_params: Vector,
     tau_thresholds: Vector,
@@ -457,6 +518,14 @@ struct RsmResult {
     converged: bool
 }
 
+/// Fits Andrich's Rating Scale Model (RSM, 1978) decomposing step difficulty into item location b_j and common threshold tau_k.
+///
+/// @formula b_{jk} = b_j + \tau_k
+/// @param responses Flattened N * J response vector
+/// @param n_persons Number of examinees
+/// @param n_items Number of items
+/// @param n_categories Number of rating scale categories
+/// @return RsmResult containing item locations b_j and shared scale thresholds tau_k
 fn fit_rsm(
     responses: Vector,
     n_persons: i64,
@@ -500,6 +569,7 @@ fn fit_rsm(
 // 4. Nominal Response Model (NRM - Bock, 1972)
 // =========================================================================
 
+/// Result of Bock's Nominal Response Model (NRM) for unordered polytomous categories.
 struct NrmResult {
     a_slopes: Vector,
     c_intercepts: Vector,
@@ -510,6 +580,16 @@ struct NrmResult {
     converged: bool
 }
 
+/// Computes category response probability under the Nominal Response Model (NRM).
+///
+/// @formula P_{jk}(\theta) = \frac{\exp(a_{jk} \theta + c_{jk})}{\sum_{h=0}^{K-1} \exp(a_{jh} \theta + c_{jh})}
+/// @param theta Latent trait ability of examinee (\theta)
+/// @param a_slopes Category slope parameters
+/// @param c_intercepts Category intercept parameters
+/// @param j_idx Item index
+/// @param n_cat Number of nominal categories
+/// @param k_resp Response category index
+/// @return Category response probability
 fn nrm_category_prob(
     theta: f64,
     a_slopes: Vector,
@@ -547,6 +627,13 @@ fn nrm_category_prob(
     if p < 0.0001 { 0.0001 } else { if p > 0.9999 { 0.9999 } else { p } }
 }
 
+/// Fits Bock's Nominal Response Model (NRM, 1972) for multiple-choice distractor analysis.
+///
+/// @param responses Flattened N * J polytomous response vector
+/// @param n_persons Number of examinees
+/// @param n_items Number of items
+/// @param n_categories Number of nominal categories
+/// @return NrmResult with category slopes a_{jk} and intercepts c_{jk}
 fn fit_nrm(
     responses: Vector,
     n_persons: i64,

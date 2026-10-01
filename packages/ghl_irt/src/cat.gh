@@ -1,6 +1,7 @@
 // packages/ghl_irt/src/cat.gh
 // Computerized Adaptive Testing (CAT) Engine: Maximum Fisher Information (MFI) & Dynamic Theta Scoring
 
+/// State of an active Computerized Adaptive Testing (CAT) session.
 struct CatSession {
     current_theta: f64,
     current_sem: f64,
@@ -11,6 +12,10 @@ struct CatSession {
     is_terminated: bool
 }
 
+/// Initializes a new CAT session with a standard normal ability prior \theta_0 = 0.0, SEM_0 = 1.0.
+///
+/// @param n_bank_items Total number of available items in the calibrated pool
+/// @return Freshly initialized CatSession
 fn init_cat_session(n_bank_items: i64) -> CatSession {
     CatSession {
         current_theta: 0.0,
@@ -23,6 +28,16 @@ fn init_cat_session(n_bank_items: i64) -> CatSession {
     }
 }
 
+/// Selects the optimal next test item using the Maximum Fisher Information (MFI) criterion.
+///
+/// Finds the unadministered item maximizing test information at the examinee's current provisional ability \hat{\theta}.
+///
+/// @formula j^* = \arg\max_{j \notin \text{Administered}} I_j(\hat{\theta})
+/// @param session Current CatSession
+/// @param a_bank Pool of item discriminations
+/// @param b_bank Pool of item difficulties
+/// @param c_bank Pool of item guessing parameters
+/// @return Index of the most informative item to administer next
 fn select_next_item_mfi(
     session: CatSession,
     a_bank: Vector,
@@ -63,6 +78,20 @@ fn select_next_item_mfi(
     best_item
 }
 
+/// Updates a CAT session with an examinee's response and re-estimates ability via Bayesian MAP.
+///
+/// Uses standard normal prior shrinkage and checks termination criteria (target SEM reached or test length cap).
+///
+/// @formula \hat{\theta}^{(k+1)} = \hat{\theta}^{(k)} + \frac{\sum_{j=1}^k \frac{\partial P_j}{\partial \theta} \frac{y_j - P_j}{P_j Q_j} - \hat{\theta}^{(k)}}{\sum_{j=1}^k I_j(\hat{\theta}^{(k)}) + 1}
+/// @param session Current CatSession
+/// @param item_idx Index of item administered
+/// @param response Examinee response (0.0 or 1.0)
+/// @param a_bank Pool discriminations
+/// @param b_bank Pool difficulties
+/// @param c_bank Pool guessing parameters
+/// @param target_sem Target standard error stopping threshold (e.g. 0.30)
+/// @param max_items Maximum test length stopping threshold
+/// @return Updated CatSession with new ability, reduced SEM, and termination status
 fn update_cat_session(
     session: CatSession,
     item_idx: i64,
@@ -129,6 +158,18 @@ fn update_cat_session(
     }
 }
 
+/// Simulates a full Computerized Adaptive Test (CAT) session for a synthetic examinee.
+///
+/// Dynamically administers items selecting by MFI until the precision stopping criterion
+/// SEM \le target_sem or max_items is satisfied.
+///
+/// @param a_bank Pool discriminations
+/// @param b_bank Pool difficulties
+/// @param c_bank Pool guessing parameters
+/// @param true_theta True underlying ability (\theta)
+/// @param max_items Maximum test length
+/// @param target_sem Target standard error threshold
+/// @return Final CatSession with full administration history and ability trajectory
 fn simulate_cat(
     a_bank: Vector,
     b_bank: Vector,

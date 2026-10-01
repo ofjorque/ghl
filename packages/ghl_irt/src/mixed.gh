@@ -2,6 +2,7 @@
 // Mixed-Effects IRT (mixedmirt): Linear Logistic Test Model (LLTM) & Latent Regression IRT
 // Combines item cognitive design features (Fischer, 1973) with person-level covariates (De Boeck & Wilson, 2004)
 
+/// Estimated weight and significance for an item cognitive design feature in LLTM.
 struct LltmFeatureResult {
     feature_index: i64,
     name: String,
@@ -11,6 +12,7 @@ struct LltmFeatureResult {
     p_value: f64
 }
 
+/// Estimated latent regression coefficient for a person-level background covariate.
 struct PersonCovariateResult {
     covariate_index: i64,
     name: String,
@@ -20,6 +22,7 @@ struct PersonCovariateResult {
     p_value: f64
 }
 
+/// Full results of joint explanatory mixed-effects IRT model (LLTM + Latent Regression).
 struct MixedIrtResult {
     n_persons: i64,
     n_items: i64,
@@ -35,6 +38,7 @@ struct MixedIrtResult {
     converged: bool
 }
 
+/// Audit report certifying cognitive construct validity and R^2 variance explained by Q-matrix.
 struct MixedIrtAudit {
     model: MixedIrtResult,
     cognitive_validity_certified: bool,
@@ -53,7 +57,20 @@ fn mixed_z_tail_p(z: f64) -> f64 {
     }
 }
 
-// Calibrate Joint Mixed-Effects IRT Model (LLTM + Latent Regression)
+/// Calibrates a joint Explanatory Mixed-Effects IRT Model (Fischer's LLTM + Latent Regression).
+///
+/// Simultaneously decomposes item difficulties into cognitive operation weights (\beta_p) via Q-matrix,
+/// and models latent examinee abilities as a function of person-level background covariates (\gamma_k).
+///
+/// @formula P(Y_{ij} = 1) = \frac{1}{1 + \exp\left( - \left[ \left(\mathbf{Z}_i \boldsymbol{\gamma} + \epsilon_i\right) - \left(c_0 + \sum_{p=1}^P \beta_p Q_{jp}\right) \right] \right)}
+/// @param responses Flattened N * J binary response vector
+/// @param person_covariates Flattened N * K person covariate matrix (Z)
+/// @param item_q_matrix Flattened J * P cognitive feature design matrix (Q)
+/// @param n_persons Total number of examinees (N)
+/// @param n_items Total number of items (J)
+/// @param n_covariates Number of person covariates (K)
+/// @param n_features Number of cognitive item features (P)
+/// @return MixedIrtResult containing feature weights, covariate coefficients, and R^2
 fn fit_mixed_irt(
     responses: Vector,               // Flattened N * J binary responses
     person_covariates: Vector,       // Flattened N * K person covariates matrix
@@ -404,6 +421,18 @@ fn fit_mixed_irt(
     }
 }
 
+/// Performs a cognitive construct validity audit on an explanatory mixed-effects IRT calibration.
+///
+/// Evaluates whether the Q-matrix explains at least 50% of the total variance in item difficulties.
+///
+/// @param responses Flattened N * J binary response vector
+/// @param person_covariates Flattened N * K person covariate matrix
+/// @param item_q_matrix Flattened J * P cognitive feature design matrix
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param n_covariates Number of person covariates
+/// @param n_features Number of cognitive item features
+/// @return MixedIrtAudit report with validity verdict and diagnostic recommendation
 fn audit_mixed_irt(
     responses: Vector,
     person_covariates: Vector,

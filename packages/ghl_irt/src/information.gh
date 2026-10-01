@@ -1,6 +1,7 @@
 // packages/ghl_irt/src/information.gh
 // Psychometric Information Functions, Test Standard Error (SEM), and Infit/Outfit MNSQ Fit Diagnostics
 
+/// Diagnostic summary of scale information, measurement error curves, and item fit statistics.
 struct IrtScaleDiagnostics {
     infit_mnsq: Vector,
     outfit_mnsq: Vector,
@@ -12,6 +13,17 @@ struct IrtScaleDiagnostics {
     items_well_fitted: bool
 }
 
+/// Computes Fisher Information I_j(\theta) for a dichotomous item (1PL, 2PL, or 3PL).
+///
+/// Under 1PL and 2PL models (c = 0), information simplifies to a_j^2 P_j Q_j.
+/// Under the 3PL model, guessing reduces information in the lower ability range.
+///
+/// @formula I_j(\theta) = a_j^2 \frac{(P_j(\theta) - c_j)^2}{(1 - c_j)^2} \frac{1 - P_j(\theta)}{P_j(\theta)}
+/// @param theta Latent trait evaluation point (\theta)
+/// @param a Item discrimination
+/// @param b Item difficulty
+/// @param c Pseudo-guessing lower asymptote
+/// @return Fisher item information value I_j(\theta) >= 0
 fn compute_item_info_dichotomous(theta: f64, a: f64, b: f64, c: f64) -> f64 {
     let p = prob_3pl(theta, a, b, c);
     let safe_p = if p < 0.0001 { 0.0001 } else { if p > 0.9999 { 0.9999 } else { p } };
@@ -26,6 +38,20 @@ fn compute_item_info_dichotomous(theta: f64, a: f64, b: f64, c: f64) -> f64 {
     }
 }
 
+/// Evaluates Wright & Masters (1982) Infit/Outfit mean-squares and Test Information Function (TIF).
+///
+/// Computes item residual variances, Infit MNSQ (information-weighted fit), Outfit MNSQ (outlier-sensitive fit),
+/// and the conditional Standard Error of Measurement (SEM) curve across \theta \in [-3.0, +3.0].
+///
+/// @formula \text{Infit}_j = \frac{\sum_{i=1}^N (y_{ij} - P_{ij})^2}{\sum_{i=1}^N W_{ij}}, \quad \text{SEM}(\theta) = \frac{1}{\sqrt{\sum_{j=1}^J I_j(\theta)}}
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param a_params Calibrated item discriminations
+/// @param b_params Calibrated item difficulties
+/// @param c_params Calibrated item guessing parameters
+/// @param thetas Vector of examinee ability scores (\theta)
+/// @return IrtScaleDiagnostics containing Infit/Outfit vectors, TIF curve, and peak reliability metrics
 fn compute_dichotomous_diagnostics(
     responses: Vector,
     n_persons: i64,

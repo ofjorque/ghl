@@ -1,6 +1,7 @@
 // packages/ghl_irt/src/mirt.gh
 // Multidimensional Item Response Theory (MIRT): Compensatory M2PL Model & Multidimensional EAP Scoring
 
+/// Results of Multidimensional 2-Parameter Logistic (M2PL) calibration, including MDISC and MDIFF metrics.
 struct MirtResult {
     n_dimensions: i64,
     n_items: i64,
@@ -13,12 +14,20 @@ struct MirtResult {
     converged: bool
 }
 
+/// Person ability estimates in multidimensional latent space.
 struct MirtScoreResult {
     theta_matrix: Vector, // N * D flattened latent trait estimates
     n_persons: i64,
     n_dimensions: i64
 }
 
+/// Calculates response probability under the compensatory Multidimensional 2PL (M2PL) model.
+///
+/// @formula P_j(\boldsymbol{\theta}) = \frac{1}{1 + \exp\left( - \left[ \mathbf{a}_j^T \boldsymbol{\theta} + d_j \right] \right)}
+/// @param theta_vec Vector of latent trait abilities (\boldsymbol{\theta})
+/// @param a_slopes Vector of discrimination slopes (\mathbf{a}_j)
+/// @param d_intercept Item intercept parameter (d_j)
+/// @return Endorsement probability in [0, 1]
 fn prob_m2pl(theta_vec: Vector, a_slopes: Vector, d_intercept: f64) -> f64 {
     let mut dot = 0.0;
     let n_dim = length(theta_vec);
@@ -30,6 +39,17 @@ fn prob_m2pl(theta_vec: Vector, a_slopes: Vector, d_intercept: f64) -> f64 {
     exp_z / (1.0 + exp_z)
 }
 
+/// Calibrates compensatory Multidimensional 2PL (M2PL) item parameters.
+///
+/// Computes item discrimination vectors \mathbf{a}_j, intercepts d_j, multidimensional discrimination
+/// \text{MDISC}_j = \|\mathbf{a}_j\|_2, and multidimensional difficulty \text{MDIFF}_j = -d_j / \|\mathbf{a}_j\|_2.
+///
+/// @formula \text{MDISC}_j = \sqrt{\sum_{d=1}^D a_{jd}^2}, \quad \text{MDIFF}_j = -\frac{d_j}{\text{MDISC}_j}
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param n_dimensions Number of latent trait dimensions (D)
+/// @return MirtResult with discrimination matrix, intercepts, and multidimensional metrics
 fn fit_m2pl(
     responses: Vector,
     n_persons: i64,
@@ -80,6 +100,16 @@ fn fit_m2pl(
     }
 }
 
+/// Computes multidimensional Expected A Posteriori (EAP) ability estimates across multivariate latent traits.
+///
+/// @formula \hat{\boldsymbol{\theta}}_i = \int \dots \int \boldsymbol{\theta} \, p(\boldsymbol{\theta} \mid \mathbf{Y}_i) \, d\boldsymbol{\theta}
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param n_dimensions Latent dimensionality D
+/// @param a_matrix Flattened J * D discrimination slopes
+/// @param d_intercepts Item intercepts vector
+/// @return MirtScoreResult containing N * D matrix of latent trait scores
 fn score_persons_mirt(
     responses: Vector,
     n_persons: i64,

@@ -2,6 +2,7 @@
 // Multigroup IRT & Formal Likelihood Ratio Test (LRT) for Differential Item Functioning (DIF)
 // Evaluates Uniform DIF (delta-d), Non-Uniform DIF (delta-a), and Omnibus LRT (Thissen, Steinberg & Wainer, 1993)
 
+/// Likelihood Ratio Test (LRT) statistics and DIF classification for a single test item.
 struct LrtDifItemResult {
     item_index: i64,
     lrt_uniform: f64,        // Chi-square stat (df = 1) for difficulty differences
@@ -15,6 +16,7 @@ struct LrtDifItemResult {
     is_flagged: bool
 }
 
+/// Baseline multigroup 2PL calibration results with latent group distribution parameters.
 struct MultigroupIrtResult {
     n_items: i64,
     n_reference: i64,
@@ -29,6 +31,7 @@ struct MultigroupIrtResult {
     converged: bool
 }
 
+/// Comprehensive audit report of item measurement invariance across reference and focal groups.
 struct LrtDifAudit {
     model: MultigroupIrtResult,
     items: Vector,           // Vector of LrtDifItemResult
@@ -59,7 +62,18 @@ fn chi_square_tail_p(stat: f64, df: i64) -> f64 {
     }
 }
 
-// Simultaneous Multigroup 2PL Calibration and Candidate LRT Evaluation
+/// Performs multigroup IRT calibration and Likelihood Ratio Tests (LRT) for Differential Item Functioning (DIF).
+///
+/// Implements the Thissen, Steinberg & Wainer (1993) framework by comparing compact (invariant)
+/// versus augmented (freed) models for each candidate item, detecting Uniform DIF (difficulty shift),
+/// Non-Uniform DIF (slope difference), and Omnibus DIF (joint shift) while controlling for latent group mean impact.
+///
+/// @formula G^2 = -2 (\log L_C - \log L_A) \sim \chi^2(\Delta \text{df})
+/// @param responses Flattened N * J binary response vector
+/// @param group_membership Vector indicating group (0.0 = Reference, 1.0 = Focal)
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of test items
+/// @return LrtDifAudit containing item-level chi-square statistics, p-values, and invariance certification
 fn compute_multigroup_lrt_dif(
     responses: Vector,
     group_membership: Vector, // 0.0 = Reference, 1.0 = Focal

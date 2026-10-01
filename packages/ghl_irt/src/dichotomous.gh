@@ -1,6 +1,7 @@
 // packages/ghl_irt/src/dichotomous.gh
 // Dichotomous IRT Models: 1PL (Rasch), 2PL, and 3PL Calibration via MMLE-EM Algorithm
 
+/// Result object containing calibrated item parameters and convergence diagnostics for dichotomous IRT models.
 struct DichotomousIrtResult {
     model_type: String,
     a_params: Vector,
@@ -15,6 +16,18 @@ struct DichotomousIrtResult {
     n_persons: i64
 }
 
+/// Calculates the 4-Parameter Logistic (4PL) item response probability.
+///
+/// Computes the probability that an examinee with ability \theta endorses or correctly answers
+/// an item with discrimination a, difficulty b, guessing c, and inattention d.
+///
+/// @formula P(\theta) = c + (d - c) \frac{1}{1 + e^{-a(\theta - b)}}
+/// @param theta Latent trait ability of examinee (\theta)
+/// @param a Item discrimination parameter (slope)
+/// @param b Item difficulty parameter (threshold/location)
+/// @param c Pseudo-guessing parameter (lower asymptote)
+/// @param d Inattention/slipping parameter (upper asymptote)
+/// @return Probability of endorsed response in [c, d]
 fn prob_4pl(theta: f64, a: f64, b: f64, c: f64, d: f64) -> f64 {
     let z = a * (theta - b);
     let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
@@ -22,12 +35,33 @@ fn prob_4pl(theta: f64, a: f64, b: f64, c: f64, d: f64) -> f64 {
     c + ((d - c) * p_logit)
 }
 
+/// Calculates the 3-Parameter Logistic (3PL) item response probability.
+///
+/// Special case of the 4PL model with fixed upper asymptote d = 1.0.
+///
+/// @formula P(\theta) = c + (1 - c) \frac{1}{1 + e^{-a(\theta - b)}}
+/// @param theta Latent trait ability of examinee (\theta)
+/// @param a Item discrimination parameter (slope)
+/// @param b Item difficulty parameter (threshold/location)
+/// @param c Pseudo-guessing parameter (lower asymptote)
+/// @return Probability of endorsed response in [c, 1.0]
 fn prob_3pl(theta: f64, a: f64, b: f64, c: f64) -> f64 {
     prob_4pl(theta, a, b, c, 1.0)
 }
 
 use std::arena::{scope, alloc_vector, reset};
 
+/// Calibrates dichotomous IRT models (1PL, 2PL, 3PL, 4PL) using Marginal Maximum Likelihood Estimation via EM (MMLE-EM).
+///
+/// Employs Bock-Aitkin pattern aggregation, Gauss-Hermite quadrature, Aitken acceleration,
+/// and vector-accelerated log-sum-exp posterior evaluations.
+///
+/// @formula \log L = \sum_{p=1}^S r_p \log \int_{-\infty}^\infty \prod_{j=1}^J P_j(\theta)^{u_{pj}} (1 - P_j(\theta))^{1 - u_{pj}} \phi(\theta) d\theta
+/// @param responses Flattened N * J vector of binary responses (0.0 or 1.0)
+/// @param n_persons Total number of examinees (N)
+/// @param n_items Total number of items (J)
+/// @param model_type IRT model specification: "1PL", "2PL", "3PL", or "4PL"
+/// @return DichotomousIrtResult containing item parameters (a, b, c, d), log-likelihood, and convergence status
 fn fit_dichotomous_irt(
     responses: Vector,
     n_persons: i64,
@@ -327,22 +361,54 @@ fn fit_dichotomous_irt(
     })
 }
 
+/// Fits a 1-Parameter Logistic (Rasch) IRT model with fixed unit discrimination a = 1.0.
+///
+/// @formula P_j(\theta) = \frac{1}{1 + e^{-(\theta - b_j)}}
+/// @param responses Flattened N * J vector of binary responses
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @return Calibrated DichotomousIrtResult with item difficulties b_j
 fn fit_1pl(responses: Vector, n_persons: i64, n_items: i64) -> DichotomousIrtResult {
     fit_dichotomous_irt(responses, n_persons, n_items, "1PL")
 }
 
+/// Fits a 2-Parameter Logistic (2PL) Birnbaum IRT model with free discrimination and difficulty.
+///
+/// @formula P_j(\theta) = \frac{1}{1 + e^{-a_j(\theta - b_j)}}
+/// @param responses Flattened N * J vector of binary responses
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @return Calibrated DichotomousIrtResult with item parameters a_j and b_j
 fn fit_2pl(responses: Vector, n_persons: i64, n_items: i64) -> DichotomousIrtResult {
     fit_dichotomous_irt(responses, n_persons, n_items, "2PL")
 }
 
+/// Fits a 3-Parameter Logistic (3PL) IRT model with pseudo-guessing lower asymptote.
+///
+/// @formula P_j(\theta) = c_j + (1 - c_j) \frac{1}{1 + e^{-a_j(\theta - b_j)}}
+/// @param responses Flattened N * J vector of binary responses
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @return Calibrated DichotomousIrtResult with item parameters a_j, b_j, and c_j
 fn fit_3pl(responses: Vector, n_persons: i64, n_items: i64) -> DichotomousIrtResult {
     fit_dichotomous_irt(responses, n_persons, n_items, "3PL")
 }
 
+/// Fits a 4-Parameter Logistic (4PL) IRT model with upper slipping asymptote.
+///
+/// @formula P_j(\theta) = c_j + (d_j - c_j) \frac{1}{1 + e^{-a_j(\theta - b_j)}}
+/// @param responses Flattened N * J vector of binary responses
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @return Calibrated DichotomousIrtResult with item parameters a_j, b_j, c_j, and d_j
 fn fit_4pl(responses: Vector, n_persons: i64, n_items: i64) -> DichotomousIrtResult {
     fit_dichotomous_irt(responses, n_persons, n_items, "4PL")
 }
 
+/// Extracts calibrated item parameters into a tidy DataFrame.
+///
+/// @param result Calibrated DichotomousIrtResult
+/// @return DataFrame with columns: item, a, b, c, d
 fn coef_irt(result: DichotomousIrtResult) -> DataFrame {
     let mut item_indices = [];
     for j in 0..result.n_items {

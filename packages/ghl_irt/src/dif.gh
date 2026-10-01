@@ -1,6 +1,7 @@
 // packages/ghl_irt/src/dif.gh
 // Differential Item Functioning (DIF) Analysis: Mantel-Haenszel & Lord's Wald Test
 
+/// DIF metrics and Educational Testing Service (ETS) classification for an item.
 struct DifItemResult {
     item_index: i64,
     alpha_mh: f64,
@@ -10,6 +11,7 @@ struct DifItemResult {
     is_flagged: bool
 }
 
+/// Overall DIF analysis summary across all test items.
 struct DifAnalysisResult {
     items: Vector, // Vector of DifItemResult or DataFrame
     n_flagged_moderate: i64,
@@ -18,6 +20,19 @@ struct DifAnalysisResult {
     focal_count: i64
 }
 
+/// Evaluates Differential Item Functioning using the Mantel-Haenszel odds-ratio method and ETS classification.
+///
+/// Matches examinees on ability strata and computes the common odds ratio \alpha_{\text{MH}} and the ETS
+/// effect size metric \Delta_{\text{MH}} = -2.35 \ln(\alpha_{\text{MH}}). Categorizes items into ETS Class A (negligible),
+/// Class B (moderate), or Class C (severe DIF).
+///
+/// @formula \alpha_{\text{MH}} = \frac{\sum_m A_m D_m / T_m}{\sum_m B_m C_m / T_m}, \quad \Delta_{\text{MH}} = -2.35 \ln(\alpha_{\text{MH}})
+/// @param responses Flattened N * J binary response vector
+/// @param group_membership Group indicator vector (0 = Reference, 1 = Focal)
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param thetas Ability matching scores (\theta)
+/// @return DifAnalysisResult with item-level odds ratios, ETS classifications, and flagged counts
 fn compute_mantel_haenszel_dif(
     responses: Vector,
     group_membership: Vector, // 0 for Reference group, 1 for Focal group

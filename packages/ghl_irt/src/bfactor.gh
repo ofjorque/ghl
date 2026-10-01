@@ -1,7 +1,8 @@
 // packages/ghl_irt/src/bfactor.gh
 // Canonical Bi-Factor IRT Model: Gibbons & Hedeker (1992) Dimension Reduction,
-// Explained Common Variance (ECV), and Omega Hierarchical (ω_h)
+// Explained Common Variance (ECV), and Omega Hierarchical (\omega_h)
 
+/// Results of Full-Information Item Bifactor Analysis, including general and specific factor loadings, ECV, and \omega_h.
 struct BfactorResult {
     n_items: i64,
     n_persons: i64,
@@ -20,13 +21,24 @@ struct BfactorResult {
     essentially_unidimensional: bool // ecv_total >= 0.70 && omega_hierarchical >= 0.80
 }
 
+/// Bifactor structural audit certifying whether the scale is essentially unidimensional.
 struct BfactorAudit {
     model: BfactorResult,
     recommendation: String,
     scale_certified: bool
 }
 
-// Probability of positive response under the Bi-Factor model
+/// Probability of positive response under the canonical Bi-Factor IRT model.
+///
+/// Each item loads on one general target trait \theta_G and at most one orthogonal group/specific factor \theta_s.
+///
+/// @formula P_j(\theta_G, \theta_s) = \frac{1}{1 + \exp\left( - \left[ a_{jG} \theta_G + a_{js} \theta_s + d_j \right] \right)}
+/// @param theta_g General latent trait value (\theta_G)
+/// @param theta_s Specific/group latent trait value (\theta_s)
+/// @param a_g Loading on general factor
+/// @param a_s Loading on specific factor
+/// @param d Item intercept
+/// @return Response probability in [0, 1]
 fn prob_bfactor(
     theta_g: f64,
     theta_s: f64,
@@ -39,7 +51,18 @@ fn prob_bfactor(
     exp_z / (1.0 + exp_z)
 }
 
-// Fit Canonical Bi-Factor IRT model via Gibbons & Hedeker (1992) Dimension Reduction
+/// Calibrates the canonical Bi-Factor IRT model via Gibbons & Hedeker (1992) dimension reduction.
+///
+/// Reduces the (K+1)-dimensional numerical integration to a series of two-dimensional quadratures,
+/// enabling high-dimensional bifactor calibration in linear time.
+/// Also calculates Explained Common Variance (ECV) and McDonald's hierarchical omega (\omega_h).
+///
+/// @formula \text{ECV} = \frac{\sum_j a_{jG}^2}{\sum_j (a_{jG}^2 + a_{js}^2)}, \quad \omega_h = \frac{(\sum_j a_{jG})^2}{\text{Var}(\text{Total})}
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of test items
+/// @param specific_factor_map Vector of length J mapping each item to its specific subfactor (1 to K)
+/// @return BfactorResult with general/specific loadings, item ECV, \omega_h, and unidimensionality verdict
 fn fit_bfactor(
     responses: Vector,
     n_persons: i64,
@@ -267,7 +290,15 @@ fn fit_bfactor(
     }
 }
 
-// Executive Bi-Factor Audit
+/// Executive bifactor audit certifying essential unidimensionality (ECV >= 0.70 and \omega_h >= 0.80).
+///
+/// Determines whether reporting a single total score is justified or if subscale/group factor scores are required.
+///
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param specific_factor_map Subfactor assignment vector
+/// @return BfactorAudit with certification status and diagnostic recommendation
 fn audit_bfactor_model(
     responses: Vector,
     n_persons: i64,

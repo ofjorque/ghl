@@ -1,6 +1,7 @@
 // packages/ghl_irt/src/equating.gh
 // Test Equating & Scale Linking: Linear Transformation via Mean-Sigma & Mean-Mean Methods
 
+/// Linear equating constants slope (A) and intercept (B) linking Form 1 scale to Form 2 scale.
 struct EquatingCoefficients {
     slope_A: f64,
     intercept_B: f64,
@@ -8,6 +9,7 @@ struct EquatingCoefficients {
     n_anchors: i64
 }
 
+/// Transformed item parameters under target equated scale.
 struct EquatedScaleResult {
     coefficients: EquatingCoefficients,
     equated_a: Vector,
@@ -33,6 +35,15 @@ fn compute_variance(vec: Vector, mean_val: f64) -> f64 {
     if n > 1 { sum_sq / ((0.0 + n) - 1.0) } else { 0.0001 }
 }
 
+/// Computes linear equating coefficients via the Mean-Sigma method (Marco, 1977).
+///
+/// Uses means and standard deviations of common anchor item difficulties to establish scale conversion:
+/// \theta_2 = A \theta_1 + B.
+///
+/// @formula A = \frac{\sigma(b_2)}{\sigma(b_1)}, \quad B = \mu(b_2) - A \mu(b_1)
+/// @param anchor_b_form1 Anchor item difficulties on Form 1
+/// @param anchor_b_form2 Anchor item difficulties on Form 2
+/// @return EquatingCoefficients containing slope A and intercept B
 fn link_scales_mean_sigma(
     anchor_b_form1: Vector,
     anchor_b_form2: Vector
@@ -58,6 +69,16 @@ fn link_scales_mean_sigma(
     }
 }
 
+/// Computes linear equating coefficients via the Mean-Mean method (Loyd & Hoover, 1980).
+///
+/// Uses means of discrimination slopes and difficulties of common anchor items.
+///
+/// @formula A = \frac{\mu(a_1)}{\mu(a_2)}, \quad B = \mu(b_2) - A \mu(b_1)
+/// @param anchor_a_form1 Anchor item discriminations on Form 1
+/// @param anchor_b_form1 Anchor item difficulties on Form 1
+/// @param anchor_a_form2 Anchor item discriminations on Form 2
+/// @param anchor_b_form2 Anchor item difficulties on Form 2
+/// @return EquatingCoefficients containing slope A and intercept B
 fn link_scales_mean_mean(
     anchor_a_form1: Vector,
     anchor_b_form1: Vector,

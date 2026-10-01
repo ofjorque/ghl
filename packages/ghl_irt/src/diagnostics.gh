@@ -1,6 +1,7 @@
 // packages/ghl_irt/src/diagnostics.gh
 // Advanced Psychometric Diagnostics: Limited-Information M2 Global Fit, Yen Q3 Local Item Dependence (LID), and Residual Auditing
 
+/// Limited-information M2 goodness-of-fit test and approximate fit indices (RMSEA, CFI, TLI).
 struct M2FitResult {
     m2_stat: f64,
     df: i64,
@@ -12,6 +13,7 @@ struct M2FitResult {
     fit_acceptable: bool
 }
 
+/// Yen's Q3 inter-item residual correlation matrix and Local Item Dependence (LID) flags.
 struct Q3ResidualResult {
     q3_matrix: Vector,      // Flattened J x J correlation matrix
     mean_q3: f64,
@@ -25,6 +27,7 @@ struct Q3ResidualResult {
     has_local_dependence: bool
 }
 
+/// Combined audit certifying global scale fit (M2) and absence of local item dependence (Q3).
 struct AdvancedFitAudit {
     m2: M2FitResult,
     q3: Q3ResidualResult,
@@ -130,7 +133,20 @@ fn compute_expected_bivariate_margins(
     exp_margins
 }
 
-// Limited Information Fit Statistic M2 (Maydeu-Olivares & Joe, 2005, 2006)
+/// Computes the Maydeu-Olivares & Joe (2005, 2006) M2 limited-information goodness-of-fit statistic.
+///
+/// Bypasses the sparseness of 2^J contingency tables by testing observed vs expected
+/// univariate and bivariate margins. Also computes M2-based RMSEA, CFI, and TLI.
+///
+/// @formula M_2 = N (\mathbf{p}_2 - \boldsymbol{\pi}_2(\hat{\boldsymbol{\gamma}}))^T \mathbf{C}_2 (\mathbf{p}_2 - \boldsymbol{\pi}_2(\hat{\boldsymbol{\gamma}}))
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Total number of examinees (N)
+/// @param n_items Total number of items (J)
+/// @param a_params Item discrimination parameters
+/// @param b_params Item difficulty parameters
+/// @param c_params Item pseudo-guessing parameters
+/// @param model_type Model specification ("1PL", "2PL", or "3PL")
+/// @return M2FitResult containing M2 statistic, p-value, RMSEA, CFI, and TLI
 fn compute_m2_statistic(
     responses: Vector,
     n_persons: i64,
@@ -229,7 +245,20 @@ fn compute_m2_statistic(
     }
 }
 
-// Yen's Q3 Statistic for Local Item Dependence (LID) (Yen, 1984)
+/// Computes Yen's (1984) Q3 statistic for detecting Local Item Dependence (LID).
+///
+/// Evaluates inter-item Pearson correlations among person-level score residuals e_ij = Y_ij - P_j(\theta_i).
+/// Flagged item pairs violate the local independence assumption of unidimensional IRT.
+///
+/// @formula Q_3(j, k) = \frac{\sum_{i=1}^N (e_{ij} - \bar{e}_j)(e_{ik} - \bar{e}_k)}{\sqrt{\sum_{i=1}^N (e_{ij} - \bar{e}_j)^2 \sum_{i=1}^N (e_{ik} - \bar{e}_k)^2}}
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of test items
+/// @param a_params Item discriminations
+/// @param b_params Item difficulties
+/// @param c_params Item guessing parameters
+/// @param thetas Vector of examinee ability scores (\theta)
+/// @return Q3ResidualResult containing J x J correlation matrix, mean Q3, and flagged LID pairs
 fn compute_q3_residuals(
     responses: Vector,
     n_persons: i64,
@@ -355,7 +384,20 @@ fn compute_q3_residuals(
     }
 }
 
-// Executive Scale Fit & Local Independence Audit
+/// Performs an executive psychometric audit of global model fit and local independence.
+///
+/// Combines the Maydeu-Olivares M2 test with Yen's Q3 residual correlation analysis to certify
+/// whether the measurement scale satisfies fundamental psychometric quality benchmarks.
+///
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param a_params Item discriminations
+/// @param b_params Item difficulties
+/// @param c_params Item guessing parameters
+/// @param thetas Ability scores (\theta)
+/// @param model_type IRT model specification ("1PL", "2PL", "3PL")
+/// @return AdvancedFitAudit with certification verdict and diagnostic statistics
 fn audit_advanced_scale_fit(
     responses: Vector,
     n_persons: i64,

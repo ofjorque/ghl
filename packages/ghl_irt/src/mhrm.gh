@@ -3,6 +3,7 @@
 // Reference: Cai, L. (2010). High-Dimensional Exploratory Item Factor Analysis by a
 // Metropolis-Hastings Robbins-Monro Algorithm. Psychometrika, 75(1), 33-57.
 
+/// Item parameter estimates and multidimensional metrics from MHRM calibration.
 struct MhrmItemResult {
     item_index: i64,
     slopes: Vector,          // Discrimination slopes a_jd for d in 0..D
@@ -11,6 +12,7 @@ struct MhrmItemResult {
     mdiff: f64               // Multidimensional difficulty -c_j / ||a_j||_2
 }
 
+/// Full results of high-dimensional MIRT model fitted via Metropolis-Hastings Robbins-Monro.
 struct MhrmIrtResult {
     n_dimensions: i64,
     n_items: i64,
@@ -27,6 +29,7 @@ struct MhrmIrtResult {
     converged: bool
 }
 
+/// Audit report certifying stochastic convergence, chain acceptance rates, and quadrature savings.
 struct MhrmAudit {
     model: MhrmIrtResult,
     quadrature_nodes_avoided: f64,
@@ -45,13 +48,24 @@ fn mhrm_prng_next(state: f64) -> f64 {
 
 // Convert two uniform random numbers to standard normal via Box-Muller transform
 fn mhrm_box_muller(u1: f64, u2: f64) -> f64 {
-    let safe_u1 = clamp(u1, 0.000001, 0.999999);
+    let safe_u1 = clamp(u1, 1e-6, 1.0 - 1e-6);
     let radius = sqrt(-2.0 * ln(safe_u1));
     let angle = 6.28318530718 * u2;
     radius * cos(angle)
 }
 
-// Calibrate High-Dimensional MIRT with Metropolis-Hastings Robbins-Monro (MHRM)
+/// Calibrates high-dimensional exploratory or confirmatory MIRT via Metropolis-Hastings Robbins-Monro (MHRM).
+///
+/// Bypasses the curse of dimensionality of numerical quadrature (which scales as Q^D)
+/// by replacing Cartesian integration with a three-stage stochastic approximation scheme:
+/// (1) M-H burn-in, (2) Robbins-Monro stochastic approximation with gain decay, and (3) Polyak-Ruppert averaging.
+///
+/// @formula P_j(\boldsymbol{\theta}) = \frac{1}{1 + e^{-(\mathbf{a}_j^T \boldsymbol{\theta} + c_j)}}
+/// @param responses Flattened N * J vector of binary responses (0.0 or 1.0)
+/// @param n_persons Total number of examinees (N)
+/// @param n_items Total number of test items (J)
+/// @param n_dimensions Number of latent trait dimensions (D)
+/// @return MhrmIrtResult with multidimensional slopes a_jd, intercepts c_j, and convergence diagnostics
 fn fit_mhrm(
     responses: Vector,
     n_persons: i64,
@@ -61,6 +75,18 @@ fn fit_mhrm(
     fit_mhrm_configured(responses, n_persons, n_items, n_dimensions, 45, 15, 18, 12)
 }
 
+/// Calibrates high-dimensional MIRT with custom cycle counts per MHRM stage.
+///
+/// @formula \boldsymbol{\gamma}^{(t+1)} = \boldsymbol{\gamma}^{(t)} + \epsilon_t [\Gamma^{(t)}]^{-1} \mathbf{s}(\boldsymbol{\gamma}^{(t)}; \mathbf{Y}, \boldsymbol{\Theta}^{(t)})
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Number of examinees
+/// @param n_items Number of items
+/// @param n_dimensions Number of latent trait dimensions (D)
+/// @param max_cycles Maximum total MHRM iterations
+/// @param stage1_cycles Number of burn-in cycles (constant gain)
+/// @param stage2_cycles Number of stochastic approximation cycles (gain ~ 1/t)
+/// @param stage3_cycles Number of Polyak-Ruppert averaging cycles
+/// @return MhrmIrtResult containing item parameters and stochastic approximation state
 fn fit_mhrm_configured(
     responses: Vector,
     n_persons: i64,
@@ -237,6 +263,16 @@ fn fit_mhrm_configured(
     }
 }
 
+/// Evaluates high-dimensional MIRT calibration performance and computes quadrature efficiency metrics.
+///
+/// Assesses Markov chain mixing against the theoretical Robbins-Rosenthal 20%-40% acceptance window
+/// and reports the exponential Cartesian quadrature nodes avoided (15^D).
+///
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param n_dimensions Latent trait dimensionality
+/// @return MhrmAudit report with certification status and recommendations
 fn audit_mhrm(
     responses: Vector,
     n_persons: i64,

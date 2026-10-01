@@ -1,6 +1,7 @@
 // packages/ghl_irt/src/scoring.gh
 // Robust Person Ability Scoring via Expected A Posteriori (EAP) Integration
 
+/// Ability score estimates, posterior standard errors, and empirical reliability.
 struct PersonScoreResult {
     thetas: Vector,
     standard_errors: Vector,
@@ -9,6 +10,19 @@ struct PersonScoreResult {
     reliability: f64
 }
 
+/// Computes Expected A Posteriori (EAP) latent ability estimates and posterior standard errors for dichotomous items.
+///
+/// Integrates over the standard normal prior \phi(\theta) \sim \mathcal{N}(0, 1) using Gauss-Hermite quadrature.
+/// Also calculates empirical reliability \rho_{xx} = \frac{\text{Var}(\hat{\theta})}{\text{Var}(\hat{\theta}) + \overline{\text{SE}^2}}.
+///
+/// @formula \hat{\theta}_i^{\text{EAP}} = \int_{-\infty}^\infty \theta \, p(\theta \mid \mathbf{Y}_i) \, d\theta, \quad \text{SE}(\hat{\theta}_i) = \sqrt{\text{Var}(\theta \mid \mathbf{Y}_i)}
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param a_params Calibrated item discriminations
+/// @param b_params Calibrated item difficulties
+/// @param c_params Calibrated item guessing parameters
+/// @return PersonScoreResult containing ability estimates (\hat{\theta}), standard errors, and scale reliability
 fn score_persons_dichotomous(
     responses: Vector,
     n_persons: i64,
@@ -109,6 +123,16 @@ fn score_persons_dichotomous(
     }
 }
 
+/// Computes Expected A Posteriori (EAP) ability estimates and standard errors for Samejima's Graded Response Model (GRM).
+///
+/// @formula \hat{\theta}_i = \int_{-\infty}^\infty \theta \prod_{j=1}^J P_{j,y_{ij}}(\theta) \phi(\theta) d\theta
+/// @param responses Flattened N * J polytomous response vector (0 to K-1)
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param n_categories Number of score categories K
+/// @param a_params Item discrimination slopes
+/// @param thresholds Flattened category boundary thresholds
+/// @return PersonScoreResult containing ability estimates (\hat{\theta}) and empirical reliability
 fn score_persons_graded(
     responses: Vector,
     n_persons: i64,
@@ -203,6 +227,7 @@ fn score_persons_graded(
 // 3. Person Fit Diagnostics: Drasgow's Standardized Statistic (Zh, 1985)
 // =========================================================================
 
+/// Person-fit diagnostics containing standardized log-likelihood z_h statistics and aberrant response flags.
 struct PersonFitResult {
     zh_scores: Vector,
     aberrant_flags: Vector,
@@ -210,6 +235,21 @@ struct PersonFitResult {
     n_aberrant: i64
 }
 
+/// Computes Drasgow, Levine & Williams (1985) standardized person-fit statistic (z_h).
+///
+/// Detects aberrant response behavior such as random guessing, cheating, or inattention.
+/// Under appropriate fit, z_h follows an approximate standard normal \mathcal{N}(0, 1) distribution;
+/// examinees with z_h < -2.0 are flagged as aberrant.
+///
+/// @formula z_h = \frac{l_0 - \mathbb{E}[l_0]}{\sqrt{\text{Var}(l_0)}}
+/// @param responses Flattened N * J binary response vector
+/// @param n_persons Total number of examinees
+/// @param n_items Total number of items
+/// @param a_params Calibrated item discriminations
+/// @param b_params Calibrated item difficulties
+/// @param c_params Calibrated item guessing parameters
+/// @param thetas Estimated person ability scores (\theta)
+/// @return PersonFitResult containing z_h vectors, aberrant examinee flags, and aberration counts
 fn compute_person_fit_zh(
     responses: Vector,
     n_persons: i64,
