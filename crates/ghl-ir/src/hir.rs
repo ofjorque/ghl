@@ -94,6 +94,18 @@ pub enum HirExpr {
         result: Option<Box<HirExpr>>,
         ty: HirType,
     },
+    While {
+        cond: Box<HirExpr>,
+        body: Box<HirExpr>,
+        ty: HirType,
+    },
+    For {
+        var: String,
+        start: Box<HirExpr>,
+        end: Box<HirExpr>,
+        body: Box<HirExpr>,
+        ty: HirType,
+    },
 }
 
 impl HirExpr {
@@ -106,6 +118,8 @@ impl HirExpr {
             Self::Call { ty, .. } => *ty,
             Self::IfElse { ty, .. } => *ty,
             Self::Block { ty, .. } => *ty,
+            Self::While { ty, .. } => *ty,
+            Self::For { ty, .. } => *ty,
         }
     }
 }
@@ -123,6 +137,8 @@ pub enum HirStatement {
     },
     Expr(HirExpr),
     Return(Option<HirExpr>),
+    Break,
+    Continue,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

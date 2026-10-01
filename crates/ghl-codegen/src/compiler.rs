@@ -6,11 +6,19 @@ use cranelift_module::{FuncId, Module};
 use ghl_diagnostics::Diagnostic;
 use ghl_ir::{HirBinaryOp, HirExpr, HirFunction, HirLiteral, HirStatement, HirType, HirUnaryOp};
 
+#[derive(Clone, Copy)]
+pub struct LoopBlocks {
+    pub header: Block,
+    pub step: Block,
+    pub exit: Block,
+}
+
 pub struct FunctionCompiler<'a, M: Module> {
     pub builder: FunctionBuilder<'a>,
     pub module: &'a mut M,
     pub func_ids: &'a HashMap<String, FuncId>,
     pub var_map: HashMap<String, Variable>,
+    pub loop_stack: Vec<LoopBlocks>,
 }
 
 impl<'a, M: Module> FunctionCompiler<'a, M> {
@@ -24,6 +32,7 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
             module,
             func_ids,
             var_map: HashMap::new(),
+            loop_stack: Vec::new(),
         }
     }
 
@@ -279,10 +288,115 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                     Ok(self.builder.ins().iconst(types::I64, 0))
                 }
             }
+            HirExpr::While { cond, body, .. } => {
+                let header_block = self.builder.create_block();
+                let body_block = self.builder.create_block();
+                let exit_block = self.builder.create_block();
+
+                if !self.is_current_block_terminated() {
+                    self.builder.ins().jump(header_block, &[]);
+                }
+
+                self.builder.switch_to_block(header_block);
+                let cond_val = self.compile_expr(cond)?;
+                self.builder.ins().brif(cond_val, body_block, &[], exit_block, &[]);
+
+                self.builder.switch_to_block(body_block);
+                self.builder.seal_block(body_block);
+
+                self.loop_stack.push(LoopBlocks {
+                    header: header_block,
+                    step: header_block,
+                    exit: exit_block,
+                });
+
+                self.compile_expr(body)?;
+
+                self.loop_stack.pop();
+
+                if !self.is_current_block_terminated() {
+                    self.builder.ins().jump(header_block, &[]);
+                }
+
+                self.builder.seal_block(header_block);
+
+                self.builder.switch_to_block(exit_block);
+                self.builder.seal_block(exit_block);
+
+                Ok(self.builder.ins().iconst(types::I64, 0))
+            }
+            HirExpr::For { var, start, end, body, .. } => {
+                let start_val = self.compile_expr(start)?;
+                let end_val = self.compile_expr(end)?;
+
+                let clif_ty = types::I64;
+                let loop_var = self.builder.declare_var(clif_ty);
+                self.builder.def_var(loop_var, start_val);
+                let old_var = self.var_map.insert(var.clone(), loop_var);
+
+                let end_var = self.builder.declare_var(clif_ty);
+                self.builder.def_var(end_var, end_val);
+
+                let header_block = self.builder.create_block();
+                let body_block = self.builder.create_block();
+                let step_block = self.builder.create_block();
+                let exit_block = self.builder.create_block();
+
+                if !self.is_current_block_terminated() {
+                    self.builder.ins().jump(header_block, &[]);
+                }
+
+                self.builder.switch_to_block(header_block);
+                let cur_i = self.builder.use_var(loop_var);
+                let cur_end = self.builder.use_var(end_var);
+                let cond_val = self.builder.ins().icmp(IntCC::SignedLessThan, cur_i, cur_end);
+                self.builder.ins().brif(cond_val, body_block, &[], exit_block, &[]);
+
+                self.builder.switch_to_block(body_block);
+                self.builder.seal_block(body_block);
+
+                self.loop_stack.push(LoopBlocks {
+                    header: header_block,
+                    step: step_block,
+                    exit: exit_block,
+                });
+
+                self.compile_expr(body)?;
+
+                self.loop_stack.pop();
+
+                if !self.is_current_block_terminated() {
+                    self.builder.ins().jump(step_block, &[]);
+                }
+
+                self.builder.switch_to_block(step_block);
+                self.builder.seal_block(step_block);
+                let cur_i = self.builder.use_var(loop_var);
+                let one = self.builder.ins().iconst(types::I64, 1);
+                let next_i = self.builder.ins().iadd(cur_i, one);
+                self.builder.def_var(loop_var, next_i);
+                self.builder.ins().jump(header_block, &[]);
+
+                self.builder.seal_block(header_block);
+
+                self.builder.switch_to_block(exit_block);
+                self.builder.seal_block(exit_block);
+
+                if let Some(prev) = old_var {
+                    self.var_map.insert(var.clone(), prev);
+                } else {
+                    self.var_map.remove(var);
+                }
+
+                Ok(self.builder.ins().iconst(types::I64, 0))
+            }
         }
     }
 
     pub fn compile_stmt(&mut self, stmt: &HirStatement) -> Result<(), Diagnostic> {
+        if self.is_current_block_terminated() {
+            return Ok(());
+        }
         match stmt {
             HirStatement::Let { name, ty, value } => {
                 let clif_ty = Self::to_clif_type(*ty);
@@ -308,6 +422,34 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
             HirStatement::Expr(expr) => {
                 self.compile_expr(expr)?;
                 Ok(())
+            }
+            HirStatement::Break => {
+                if let Some(target) = self.loop_stack.last() {
+                    let exit_block = target.exit;
+                    if !self.is_current_block_terminated() {
+                        self.builder.ins().jump(exit_block, &[]);
+                    }
+                    let dead_block = self.builder.create_block();
+                    self.builder.switch_to_block(dead_block);
+                    self.builder.seal_block(dead_block);
+                    Ok(())
+                } else {
+                    Err(Diagnostic::compute_error("C0404", "`break` outside of loop in JIT"))
+                }
+            }
+            HirStatement::Continue => {
+                if let Some(target) = self.loop_stack.last() {
+                    let step_block = target.step;
+                    if !self.is_current_block_terminated() {
+                        self.builder.ins().jump(step_block, &[]);
+                    }
+                    let dead_block = self.builder.create_block();
+                    self.builder.switch_to_block(dead_block);
+                    self.builder.seal_block(dead_block);
+                    Ok(())
+                } else {
+                    Err(Diagnostic::compute_error("C0405", "`continue` outside of loop in JIT"))
+                }
             }
             HirStatement::Return(expr_opt) => {
                 if self.is_current_block_terminated() {

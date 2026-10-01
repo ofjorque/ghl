@@ -109,7 +109,8 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
     // 3. JIT Native Compilation (Cranelift)
     let jit_start = Instant::now();
     let opt_jit: Option<(std::sync::Arc<ghl_codegen::JitEngine>, ghl_ir::HirModule)> = (|| {
-        let hir_module = ghl_ir::lower_ast(&program).ok()?;
+        let mut hir_module = ghl_ir::lower_ast(&program).ok()?;
+        hir_module.functions.remove("__ghl_main");
         if hir_module.functions.is_empty() {
             return None;
         }

@@ -245,5 +245,117 @@ mod tests {
         let res = hypot_fn(3.0, 4.0);
         assert!((res - 5.0).abs() < 1e-6, "sqrt(3^2 + 4^2) must equal 5.0");
     }
+
+    #[test]
+    fn test_jit_compile_while_loop() {
+        let code = r#"
+            fn sum_while(n: i64) -> i64 {
+                let mut total = 0;
+                let mut i = 1;
+                while i <= n {
+                    total = total + i;
+                    i = i + 1;
+                }
+                total
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let hir_module = lower_ast(&program).expect("hir ok");
+
+        let mut jit = JitEngine::new().expect("jit init ok");
+        jit.compile_module(&hir_module).expect("jit compilation ok");
+
+        let sum_fn = jit.get_fn_i64_1("sum_while").expect("compiled sum_while");
+        assert_eq!(sum_fn(10), 55);
+        assert_eq!(sum_fn(100), 5050);
+
+        let t0 = std::time::Instant::now();
+        let res = sum_fn(1_000_000);
+        let elapsed = t0.elapsed();
+
+        assert_eq!(res, 500000500000);
+        assert!(elapsed.as_millis() < 50, "1M iteration while-loop in native Cranelift must run in <50ms (took {:?})", elapsed);
+    }
+
+    #[test]
+    fn test_jit_compile_for_loop() {
+        let code = r#"
+            fn sum_for(n: i64) -> i64 {
+                let mut total = 0;
+                for i in 1..n + 1 {
+                    total = total + i;
+                }
+                total
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let hir_module = lower_ast(&program).expect("hir ok");
+
+        let mut jit = JitEngine::new().expect("jit init ok");
+        jit.compile_module(&hir_module).expect("jit compilation ok");
+
+        let sum_fn = jit.get_fn_i64_1("sum_for").expect("compiled sum_for");
+        assert_eq!(sum_fn(10), 55);
+        assert_eq!(sum_fn(100), 5050);
+        assert_eq!(sum_fn(1000), 500500);
+    }
+
+    #[test]
+    fn test_jit_compile_loop_with_break_and_continue() {
+        let code = r#"
+            fn sum_evens_until(limit: i64) -> i64 {
+                let mut total = 0;
+                let mut i = 0;
+                while i < 1000 {
+                    i = i + 1;
+                    if i % 2 != 0 {
+                        continue;
+                    }
+                    if total + i > limit {
+                        break;
+                    }
+                    total = total + i;
+                }
+                total
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let hir_module = lower_ast(&program).expect("hir ok");
+
+        let mut jit = JitEngine::new().expect("jit init ok");
+        jit.compile_module(&hir_module).expect("jit compilation ok");
+
+        let sum_fn = jit.get_fn_i64_1("sum_evens_until").expect("compiled sum_evens_until");
+        // evens: 2, 4, 6, 8, 10
+        // cumsums: 2, 6, 12, 20, 30
+        assert_eq!(sum_fn(15), 12);
+        assert_eq!(sum_fn(25), 20);
+        assert_eq!(sum_fn(35), 30);
+    }
+
+    #[test]
+    fn test_jit_numerical_floating_point_solver() {
+        let code = r#"
+            fn newton_sqrt(x: f64) -> f64 {
+                let mut guess = x / 2.0;
+                let mut iter = 0;
+                while iter < 25 {
+                    guess = 0.5 * (guess + x / guess);
+                    iter = iter + 1;
+                }
+                guess
+            }
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let hir_module = lower_ast(&program).expect("hir ok");
+
+        let mut jit = JitEngine::new().expect("jit init ok");
+        jit.compile_module(&hir_module).expect("jit compilation ok");
+
+        let sqrt_fn = jit.get_fn_f64_1("newton_sqrt").expect("compiled newton_sqrt");
+        assert!((sqrt_fn(2.0) - std::f64::consts::SQRT_2).abs() < 1e-10);
+        assert!((sqrt_fn(144.0) - 12.0).abs() < 1e-10);
+        assert!((sqrt_fn(625.0) - 25.0).abs() < 1e-10);
+    }
 }
 

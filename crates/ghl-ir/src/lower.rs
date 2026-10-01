@@ -316,6 +316,31 @@ impl LoweringContext {
                     ty,
                 })
             }
+            ExprKind::While { cond, body } => {
+                let cond_hir = self.lower_expr(cond)?;
+                let body_hir = self.lower_expr(body)?;
+                Ok(HirExpr::While {
+                    cond: Box::new(cond_hir),
+                    body: Box::new(body_hir),
+                    ty: HirType::Unit,
+                })
+            }
+            ExprKind::For { var, start, end, body } => {
+                let start_hir = self.lower_expr(start)?;
+                let end_hir = self.lower_expr(end)?;
+                self.push_scope();
+                self.insert_var(var.clone(), HirType::I64);
+                let body_hir = self.lower_expr(body)?;
+                self.pop_scope();
+
+                Ok(HirExpr::For {
+                    var: var.clone(),
+                    start: Box::new(start_hir),
+                    end: Box::new(end_hir),
+                    body: Box::new(body_hir),
+                    ty: HirType::Unit,
+                })
+            }
             _ => Err(Diagnostic::compute_error(
                 "C0304",
                 "Expression not currently eligible for scalar JIT lowering",
@@ -351,6 +376,8 @@ impl LoweringContext {
                 };
                 Ok(HirStatement::Return(val))
             }
+            StmtKind::Break => Ok(HirStatement::Break),
+            StmtKind::Continue => Ok(HirStatement::Continue),
             StmtKind::Assign { name, value } => {
                 let value_hir = self.lower_expr(value)?;
                 Ok(HirStatement::Assign {
