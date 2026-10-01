@@ -18,6 +18,7 @@ pub struct FunctionCompiler<'a, M: Module> {
     pub module: &'a mut M,
     pub func_ids: &'a HashMap<String, FuncId>,
     pub var_map: HashMap<String, Variable>,
+    pub var_types: HashMap<String, Type>,
     pub loop_stack: Vec<LoopBlocks>,
 }
 
@@ -32,6 +33,7 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
             module,
             func_ids,
             var_map: HashMap::new(),
+            var_types: HashMap::new(),
             loop_stack: Vec::new(),
         }
     }
@@ -69,6 +71,7 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
             let param_val = self.builder.block_params(entry_block)[i];
             self.builder.def_var(var, param_val);
             self.var_map.insert(param.name.clone(), var);
+            self.var_types.insert(param.name.clone(), clif_ty);
             param_vars.push(var);
         }
 
@@ -326,13 +329,21 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                 Ok(self.builder.ins().iconst(types::I64, 0))
             }
             HirExpr::For { var, start, end, body, .. } => {
-                let start_val = self.compile_expr(start)?;
-                let end_val = self.compile_expr(end)?;
+                let mut start_val = self.compile_expr(start)?;
+                let mut end_val = self.compile_expr(end)?;
+
+                if self.builder.func.dfg.value_type(start_val) == types::F64 {
+                    start_val = self.builder.ins().fcvt_to_sint(types::I64, start_val);
+                }
+                if self.builder.func.dfg.value_type(end_val) == types::F64 {
+                    end_val = self.builder.ins().fcvt_to_sint(types::I64, end_val);
+                }
 
                 let clif_ty = types::I64;
                 let loop_var = self.builder.declare_var(clif_ty);
                 self.builder.def_var(loop_var, start_val);
                 let old_var = self.var_map.insert(var.clone(), loop_var);
+                let old_ty = self.var_types.insert(var.clone(), clif_ty);
 
                 let end_var = self.builder.declare_var(clif_ty);
                 self.builder.def_var(end_var, end_val);
@@ -388,6 +399,12 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                     self.var_map.remove(var);
                 }
 
+                if let Some(prev_ty) = old_ty {
+                    self.var_types.insert(var.clone(), prev_ty);
+                } else {
+                    self.var_types.remove(var);
+                }
+
                 Ok(self.builder.ins().iconst(types::I64, 0))
             }
         }
@@ -402,14 +419,37 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                 let clif_ty = Self::to_clif_type(*ty);
                 let var = self.builder.declare_var(clif_ty);
 
-                let val = self.compile_expr(value)?;
+                let mut val = self.compile_expr(value)?;
+                let val_ty = self.builder.func.dfg.value_type(val);
+                if val_ty != clif_ty {
+                    if clif_ty == types::F64 && (val_ty == types::I64 || val_ty == types::I8) {
+                        val = self.builder.ins().fcvt_from_sint(types::F64, val);
+                    } else if clif_ty == types::I64 && val_ty == types::F64 {
+                        val = self.builder.ins().fcvt_to_sint(types::I64, val);
+                    } else if clif_ty == types::I8 && val_ty == types::I64 {
+                        val = self.builder.ins().ireduce(types::I8, val);
+                    }
+                }
                 self.builder.def_var(var, val);
                 self.var_map.insert(name.clone(), var);
+                self.var_types.insert(name.clone(), clif_ty);
                 Ok(())
             }
             HirStatement::Assign { name, value } => {
-                let val = self.compile_expr(value)?;
+                let mut val = self.compile_expr(value)?;
                 if let Some(&var) = self.var_map.get(name) {
+                    if let Some(&var_ty) = self.var_types.get(name) {
+                        let val_ty = self.builder.func.dfg.value_type(val);
+                        if val_ty != var_ty {
+                            if var_ty == types::F64 && (val_ty == types::I64 || val_ty == types::I8) {
+                                val = self.builder.ins().fcvt_from_sint(types::F64, val);
+                            } else if var_ty == types::I64 && val_ty == types::F64 {
+                                val = self.builder.ins().fcvt_to_sint(types::I64, val);
+                            } else if var_ty == types::I8 && val_ty == types::I64 {
+                                val = self.builder.ins().ireduce(types::I8, val);
+                            }
+                        }
+                    }
                     self.builder.def_var(var, val);
                     Ok(())
                 } else {
