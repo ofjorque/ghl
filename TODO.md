@@ -20,8 +20,12 @@ Backlog temático para consolidar la ergonomía de última generación del lengu
   - Soporte sintáctico dual (separador por coma `,` estilo Julia y por `for` estilo Python).
   - Aislamiento léxico estricto de variables iteradoras (anti-leak de Python) y preservación de tipado/NA homogéneo sin coerciones silenciosas (anti-R).
   - Pipeline completo verificado: `ghl-syntax` (AST, parser, fmt), `ghl-types` (inferencia estricta y chequeo de tipos), `ghl-runtime` (evaluación y pre-reserva) y suite de integración `eval_comprehensions.rs`.
-- [ ] **Indexación por Máscaras Booleanas (*Boolean Mask Indexing*):**
-  - Extracción directa mediante vectores de booleanos: `vec[vec > 0.0]` y filtrado de matrices por filas `mat[bool_mask, ..]`.
+- [x] **Indexación por Máscaras Booleanas y Vectores de Índices (*Boolean Mask & Fancy Indexing*):**
+  - Extracción directa en vectores: `vec[vec > 0.0]` y `vec[bool_mask]` con respaldo Arrow/Polars y preservación de razones `NA`.
+  - Filtrado multidimensional en matrices: `mat[bool_mask, ..]` (filas), `mat[.., bool_mask]` (columnas), `mat[bool_mask, col]` (extracción a Vector) y `mat[bool_mask_r, bool_mask_c]` (submatriz).
+  - Indexación arbitraria por vectores de enteros: `mat[[2, 0], ..]` y `mat[.., [1, 3]]`.
+  - Validación dimensional estricta con diagnóstico `C0202` en discrepancias de longitud.
+  - Verificado en suite de integración [`eval_boolean_mask_indexing.rs`](crates/ghl-runtime/tests/eval_boolean_mask_indexing.rs).
 - [ ] **Asignación Indexada Mutable Directa:**
   - Sintaxis de actualización en-sitio `vec[i] = val` y `mat[i, j] = val` para variables mutables (`let mut`), eliminando la necesidad de llamar a `vec = set(vec, i, val)`.
 

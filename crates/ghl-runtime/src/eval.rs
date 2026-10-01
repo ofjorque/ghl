@@ -1311,21 +1311,98 @@ impl Interpreter {
                     ));
                 }
 
-                let resolve_dim = |interp: &mut Self, spec: &IndexSpec, dim_len: usize, dim_name: &str| -> Result<(bool, usize, usize), Diagnostic> {
+                enum DimSelection {
+                    Scalar(usize),
+                    Range(usize, usize),
+                    Indices(Vec<usize>),
+                    All,
+                }
+
+                impl DimSelection {
+                    fn to_indices(&self, dim_len: usize) -> Vec<usize> {
+                        match self {
+                            DimSelection::Scalar(i) => vec![*i],
+                            DimSelection::Range(s, e) => (*s..*e).collect(),
+                            DimSelection::Indices(idx) => idx.clone(),
+                            DimSelection::All => (0..dim_len).collect(),
+                        }
+                    }
+                }
+
+                let resolve_dim = |interp: &mut Self, spec: &IndexSpec, dim_len: usize, dim_name: &str| -> Result<DimSelection, Diagnostic> {
                     match spec {
-                        IndexSpec::All => Ok((false, 0, dim_len)),
+                        IndexSpec::All => Ok(DimSelection::All),
                         IndexSpec::Expr(e) => {
                             let val = interp.eval_expr_ctx(e, col_ctx)?;
-                            let i = val.as_i64().ok_or_else(|| {
-                                Diagnostic::compute_error("C0201", format!("Matrix {dim_name} index must be an integer"))
-                            })?;
-                            if i < 0 || (i as usize) >= dim_len {
-                                return Err(Diagnostic::compute_error(
-                                    "C0203",
-                                    format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
-                                ));
+                            match val {
+                                Value::I64(i) => {
+                                    if i < 0 || (i as usize) >= dim_len {
+                                        return Err(Diagnostic::compute_error(
+                                            "C0203",
+                                            format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
+                                        ));
+                                    }
+                                    Ok(DimSelection::Scalar(i as usize))
+                                }
+                                Value::F64(f) if f.fract() == 0.0 => {
+                                    let i = f as i64;
+                                    if i < 0 || (i as usize) >= dim_len {
+                                        return Err(Diagnostic::compute_error(
+                                            "C0203",
+                                            format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
+                                        ));
+                                    }
+                                    Ok(DimSelection::Scalar(i as usize))
+                                }
+                                Value::Vector(vd) => {
+                                    if vd.column().dtype() == &DataType::Boolean {
+                                        if vd.len() != dim_len {
+                                            return Err(Diagnostic::compute_error(
+                                                "C0202",
+                                                format!(
+                                                    "Boolean mask length ({}) must match matrix {dim_name} count ({})",
+                                                    vd.len(),
+                                                    dim_len
+                                                ),
+                                            ));
+                                        }
+                                        let mut indices = Vec::new();
+                                        if let Ok(ca) = vd.column().bool() {
+                                            for i in 0..vd.len() {
+                                                if ca.get(i) == Some(true) {
+                                                    indices.push(i);
+                                                }
+                                            }
+                                        } else {
+                                            for (i, it) in vd.iter().enumerate() {
+                                                if it.as_bool() == Some(true) {
+                                                    indices.push(i);
+                                                }
+                                            }
+                                        }
+                                        Ok(DimSelection::Indices(indices))
+                                    } else {
+                                        let mut indices = Vec::with_capacity(vd.len());
+                                        for it in vd.iter() {
+                                            let i = it.as_i64().ok_or_else(|| {
+                                                Diagnostic::compute_error("C0201", format!("Matrix {dim_name} index vector must contain integers or booleans"))
+                                            })?;
+                                            if i < 0 || (i as usize) >= dim_len {
+                                                return Err(Diagnostic::compute_error(
+                                                    "C0203",
+                                                    format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
+                                                ));
+                                            }
+                                            indices.push(i as usize);
+                                        }
+                                        Ok(DimSelection::Indices(indices))
+                                    }
+                                }
+                                other => Err(Diagnostic::compute_error(
+                                    "C0201",
+                                    format!("Matrix {dim_name} index must be an integer, range, or boolean mask, found `{}`", other.type_name()),
+                                )),
                             }
-                            Ok((true, i as usize, (i as usize) + 1))
                         }
                         IndexSpec::Range { start, end, inclusive } => {
                             let s = if let Some(st) = start {
@@ -1351,40 +1428,54 @@ impl Interpreter {
                                     format!("Matrix {dim_name} slice [{s}..{e}] out of bounds for dimension of size {dim_len}"),
                                 ));
                             }
-                            Ok((false, s as usize, e as usize))
+                            Ok(DimSelection::Range(s as usize, e as usize))
                         }
                     }
                 };
 
-                let (r_scalar, r_start, r_end) = resolve_dim(self, &indices[0], rows, "row")?;
-                let (c_scalar, c_start, c_end) = resolve_dim(self, &indices[1], cols, "col")?;
+                let r_sel = resolve_dim(self, &indices[0], rows, "row")?;
+                let c_sel = resolve_dim(self, &indices[1], cols, "col")?;
 
-                if r_scalar && c_scalar {
-                    Ok(Value::F64(data[r_start * cols + c_start]))
-                } else if r_scalar {
-                    // Row vector
-                    let row_data = data[r_start * cols + c_start .. r_start * cols + c_end].to_vec();
-                    Ok(Value::Vector(VectorData::from_f64(row_data)))
-                } else if c_scalar {
-                    // Column vector
-                    let mut col_data = Vec::with_capacity(r_end - r_start);
-                    for r in r_start..r_end {
-                        col_data.push(data[r * cols + c_start]);
+                match (&r_sel, &c_sel) {
+                    (DimSelection::Scalar(r), DimSelection::Scalar(c)) => {
+                        Ok(Value::F64(data[*r * cols + *c]))
                     }
-                    Ok(Value::Vector(VectorData::from_f64(col_data)))
-                } else {
-                    // Sub-matrix
-                    let new_rows = r_end - r_start;
-                    let new_cols = c_end - c_start;
-                    let mut sub_data = Vec::with_capacity(new_rows * new_cols);
-                    for r in r_start..r_end {
-                        sub_data.extend_from_slice(&data[r * cols + c_start .. r * cols + c_end]);
+                    (DimSelection::Scalar(r), c_spec) => {
+                        // Extract single row across selected columns -> Vector
+                        let c_indices = c_spec.to_indices(cols);
+                        let mut row_data = Vec::with_capacity(c_indices.len());
+                        for c in c_indices {
+                            row_data.push(data[*r * cols + c]);
+                        }
+                        Ok(Value::Vector(VectorData::from_f64(row_data)))
                     }
-                    Ok(Value::Matrix {
-                        rows: new_rows,
-                        cols: new_cols,
-                        data: std::sync::Arc::new(sub_data),
-                    })
+                    (r_spec, DimSelection::Scalar(c)) => {
+                        // Extract single column across selected rows -> Vector
+                        let r_indices = r_spec.to_indices(rows);
+                        let mut col_data = Vec::with_capacity(r_indices.len());
+                        for r in r_indices {
+                            col_data.push(data[r * cols + *c]);
+                        }
+                        Ok(Value::Vector(VectorData::from_f64(col_data)))
+                    }
+                    (r_spec, c_spec) => {
+                        // Sub-matrix
+                        let r_indices = r_spec.to_indices(rows);
+                        let c_indices = c_spec.to_indices(cols);
+                        let new_rows = r_indices.len();
+                        let new_cols = c_indices.len();
+                        let mut sub_data = Vec::with_capacity(new_rows * new_cols);
+                        for &r in &r_indices {
+                            for &c in &c_indices {
+                                sub_data.push(data[r * cols + c]);
+                            }
+                        }
+                        Ok(Value::Matrix {
+                            rows: new_rows,
+                            cols: new_cols,
+                            data: std::sync::Arc::new(sub_data),
+                        })
+                    }
                 }
             }
 
