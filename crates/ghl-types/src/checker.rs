@@ -541,6 +541,61 @@ impl TypeChecker {
                 Type::Vector(Box::new(unified_elem))
             }
 
+            ExprKind::Comprehension { expr, clauses, condition } => {
+                // Lexical scope protection: variables bound in comprehension do NOT leak into outer scope!
+                self.env.push_scope();
+
+                for clause in clauses {
+                    let iter_ty = self.check_expr_ctx(&clause.iter, col_ctx);
+                    let elem_ty = match &iter_ty {
+                        Type::Vector(inner) => (**inner).clone(),
+                        Type::I64 => Type::I64,
+                        Type::Custom(name) if name == "Range" => Type::I64,
+                        Type::Any => Type::Any,
+                        _ => {
+                            self.diagnostics.push(
+                                Diagnostic::compute_error(
+                                    "C0103",
+                                    format!("Comprehension iterable must be `Range` or `Vector`, found `{}`", iter_ty),
+                                )
+                                .locate(&self.source_index, &self.source_file, &clause.iter.span)
+                                .with_help("Provide a range (e.g. `0..10`) or a `Vector` collection to iterate over."),
+                            );
+                            Type::Any
+                        }
+                    };
+                    self.env.insert(clause.var.clone(), elem_ty, false);
+                }
+
+                if let Some(cond) = condition {
+                    let cond_ty = self.check_expr_ctx(cond, col_ctx);
+                    if cond_ty != Type::Bool && cond_ty != Type::Any {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0103",
+                                format!("Comprehension `if` condition must evaluate to `Bool`, found `{}`", cond_ty),
+                            )
+                            .locate(&self.source_index, &self.source_file, &cond.span),
+                        );
+                    }
+                }
+
+                let body_ty = self.check_expr_ctx(expr, col_ctx);
+
+                self.env.pop_scope();
+
+                // 2D comprehension without `if` and with numeric body produces Matrix (row-major [fila, columna])
+                if clauses.len() == 2 && condition.is_none() && (body_ty == Type::F64 || body_ty == Type::I64) {
+                    Type::Matrix {
+                        elem: Box::new(Type::F64),
+                        rows: Dim::Dynamic,
+                        cols: Dim::Dynamic,
+                    }
+                } else {
+                    Type::Vector(Box::new(body_ty))
+                }
+            }
+
             ExprKind::DataFrameLit(cols) => {
                 let mut col_types = Vec::new();
                 for (name, col_expr) in cols {

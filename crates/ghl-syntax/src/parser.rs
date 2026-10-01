@@ -167,12 +167,76 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .clone()
             .delimited_by(just(Token::LParen), just(Token::RParen));
 
-        let vector_literal = expr
+        let comp_var = select! {
+            Token::Ident(name) => name,
+            Token::Col => "col".to_string(),
+        };
+
+        let first_comp_clause = just(Token::For)
+            .ignore_then(comp_var.clone())
+            .then_ignore(just(Token::In))
+            .then(expr.clone())
+            .map_with_span(|(var, iter), span| ComprehensionClause { var, iter, span });
+
+        let subsequent_comp_clause = just(Token::Comma)
+            .or(just(Token::For))
+            .ignore_then(comp_var)
+            .then_ignore(just(Token::In))
+            .then(expr.clone())
+            .map_with_span(|(var, iter), span| ComprehensionClause { var, iter, span });
+
+        let comp_tail = first_comp_clause
+            .then(subsequent_comp_clause.repeated())
+            .then_ignore(just(Token::Comma).or_not())
+            .then(just(Token::If).ignore_then(expr.clone()).or_not())
+            .map(|((first_clause, rest_clauses), condition)| {
+                let mut clauses = Vec::with_capacity(1 + rest_clauses.len());
+                clauses.push(first_clause);
+                clauses.extend(rest_clauses);
+                (clauses, condition)
+            });
+
+        #[derive(Clone)]
+        enum BracketTail {
+            Comp(Vec<ComprehensionClause>, Option<Expr>),
+            Vec(Vec<Expr>),
+        }
+
+        let non_empty_bracket = expr
             .clone()
-            .separated_by(just(Token::Comma))
-            .allow_trailing()
+            .then(
+                comp_tail
+                    .map(|(clauses, cond)| BracketTail::Comp(clauses, cond))
+                    .or(
+                        just(Token::Comma)
+                            .ignore_then(expr.clone().separated_by(just(Token::Comma)).allow_trailing())
+                            .or_not()
+                            .map(|rest| BracketTail::Vec(rest.unwrap_or_default()))
+                    )
+            )
             .delimited_by(just(Token::LBracket), just(Token::RBracket))
-            .map_with_span(|items, span| Expr::new(ExprKind::VectorLit(items), span));
+            .map_with_span(|(first, tail), span| match tail {
+                BracketTail::Comp(clauses, condition) => Expr::new(
+                    ExprKind::Comprehension {
+                        expr: Box::new(first),
+                        clauses,
+                        condition: condition.map(Box::new),
+                    },
+                    span,
+                ),
+                BracketTail::Vec(rest) => {
+                    let mut items = Vec::with_capacity(1 + rest.len());
+                    items.push(first);
+                    items.extend(rest);
+                    Expr::new(ExprKind::VectorLit(items), span)
+                }
+            });
+
+        let empty_bracket = just(Token::LBracket)
+            .then_ignore(just(Token::RBracket))
+            .map_with_span(|_, span| Expr::new(ExprKind::VectorLit(Vec::new()), span));
+
+        let vector_or_comprehension = empty_bracket.or(non_empty_bracket);
 
         // DataFrame literal: dataframe { col_name: [expr, ...], ... }
         let df_entry = select! {
@@ -480,7 +544,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
 
         let atom = val
             .or(parenthesized)
-            .or(vector_literal)
+            .or(vector_or_comprehension)
             .or(dataframe_literal)
             .or(matrix_literal)
             .or(sem_spec_literal)
@@ -2008,6 +2072,73 @@ mod tests {
             matches!(expr.as_deref().map(|e| &e.kind), Some(ExprKind::Binary { .. })),
             "`a + b` must be the block's trailing value"
         );
+    }
+
+    #[test]
+    fn test_parse_vector_and_matrix_comprehensions() {
+        let code = r#"
+            let v1 = [x * 2.0 for x in 0..10];
+            let v2 = [x for x in 0..10 if x > 5];
+            let m1 = [r * 10.0 + c for r in 0..3, c in 0..4];
+            let m2 = [r * 10.0 + c for r in 0..3 for c in 0..4];
+            let v3 = [r * 10.0 + c for r in 0..3, c in 0..4 if r != c];
+            let cube = [x + y + z for x in 0..2, y in 0..2, z in 0..2];
+        "#;
+        let program = parse(code).expect("comprehensions must parse successfully");
+        assert_eq!(program.statements.len(), 6);
+
+        // v1: 1D without if
+        if let StmtKind::Let { init, .. } = &program.statements[0].kind {
+            if let ExprKind::Comprehension { clauses, condition, .. } = &init.kind {
+                assert_eq!(clauses.len(), 1);
+                assert_eq!(clauses[0].var, "x");
+                assert!(condition.is_none());
+            } else { panic!("expected comprehension for v1"); }
+        }
+
+        // v2: 1D with if
+        if let StmtKind::Let { init, .. } = &program.statements[1].kind {
+            if let ExprKind::Comprehension { clauses, condition, .. } = &init.kind {
+                assert_eq!(clauses.len(), 1);
+                assert_eq!(clauses[0].var, "x");
+                assert!(condition.is_some());
+            } else { panic!("expected comprehension for v2"); }
+        }
+
+        // m1: 2D comma-separated
+        if let StmtKind::Let { init, .. } = &program.statements[2].kind {
+            if let ExprKind::Comprehension { clauses, condition, .. } = &init.kind {
+                assert_eq!(clauses.len(), 2);
+                assert_eq!(clauses[0].var, "r");
+                assert_eq!(clauses[1].var, "c");
+                assert!(condition.is_none());
+            } else { panic!("expected comprehension for m1"); }
+        }
+
+        // m2: 2D for-separated
+        if let StmtKind::Let { init, .. } = &program.statements[3].kind {
+            if let ExprKind::Comprehension { clauses, condition, .. } = &init.kind {
+                assert_eq!(clauses.len(), 2);
+                assert_eq!(clauses[0].var, "r");
+                assert_eq!(clauses[1].var, "c");
+                assert!(condition.is_none());
+            } else { panic!("expected comprehension for m2"); }
+        }
+
+        // v3: 2D with if
+        if let StmtKind::Let { init, .. } = &program.statements[4].kind {
+            if let ExprKind::Comprehension { clauses, condition, .. } = &init.kind {
+                assert_eq!(clauses.len(), 2);
+                assert!(condition.is_some());
+            } else { panic!("expected comprehension for v3"); }
+        }
+
+        // cube: 3D
+        if let StmtKind::Let { init, .. } = &program.statements[5].kind {
+            if let ExprKind::Comprehension { clauses, .. } = &init.kind {
+                assert_eq!(clauses.len(), 3);
+            } else { panic!("expected comprehension for cube"); }
+        }
     }
 }
 

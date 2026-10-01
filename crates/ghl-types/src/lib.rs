@@ -439,4 +439,36 @@ mod tests {
         let res = check(&program, "test.gh", code);
         assert!(res.is_err());
     }
+
+    #[test]
+    fn test_typecheck_vector_and_matrix_comprehensions() {
+        let code = r#"
+            let v = [x * 2.0 for x in 0..10];
+            let m = [r * 10.0 + c for r in 0..3, c in 0..4];
+            let filtered = [r * 10.0 + c for r in 0..3, c in 0..4 if r != c];
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let env = check(&program, "test.gh", code).expect("typecheck ok");
+        
+        // 1D comprehension produces Vector[f64]
+        assert_eq!(env.lookup("v").unwrap().ty, Type::Vector(Box::new(Type::F64)));
+        
+        // 2D comprehension without `if` produces Matrix
+        assert!(matches!(env.lookup("m").unwrap().ty, Type::Matrix { .. }));
+
+        // 2D comprehension with `if` produces Vector[f64] (flattens)
+        assert_eq!(env.lookup("filtered").unwrap().ty, Type::Vector(Box::new(Type::F64)));
+    }
+
+    #[test]
+    fn test_typecheck_comprehension_scope_protection() {
+        let code = r#"
+            let v = [x for x in 0..10];
+            let leaked = x;
+        "#;
+        let program = parse(code).expect("syntax ok");
+        let res = check(&program, "test.gh", code);
+        // `x` must not leak into outer scope!
+        assert!(res.is_err());
+    }
 }

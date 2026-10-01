@@ -230,6 +230,107 @@ impl Interpreter {
                 Ok(Value::Vector(VectorData::from_values(evaluated)))
             }
 
+            ExprKind::Comprehension { expr, clauses, condition } => {
+                self.env.push_scope();
+
+                // If 2D comprehension without `if`, track rows and columns for Matrix construction
+                let is_2d_matrix_candidate = clauses.len() == 2 && condition.is_none();
+                let mut col_counts = Vec::new();
+                let mut results = Vec::new();
+
+                let eval_res = if is_2d_matrix_candidate {
+                    let first = &clauses[0];
+                    let second = &clauses[1];
+                    let r_iter = self.eval_expr_ctx(&first.iter, col_ctx)?;
+                    let mut res_ok = Ok(());
+
+                    let run_inner = |this: &mut Self, var_val: Value, col_counts: &mut Vec<usize>, results: &mut Vec<Value>| -> Result<(), Diagnostic> {
+                        this.env.set(first.var.clone(), var_val);
+                        let before = results.len();
+                        this.eval_comprehension_clause(expr, std::slice::from_ref(second), None, col_ctx, results)?;
+                        let row_len = results.len() - before;
+                        col_counts.push(row_len);
+                        Ok(())
+                    };
+
+                    match r_iter {
+                        Value::Range { start, end, inclusive } => {
+                            let s = start;
+                            let e = if inclusive { end + 1 } else { end };
+                            for i in s..e {
+                                if let Err(e) = run_inner(self, Value::I64(i), &mut col_counts, &mut results) {
+                                    res_ok = Err(e);
+                                    break;
+                                }
+                                if self.pending_return.is_some() || self.loop_break {
+                                    break;
+                                }
+                            }
+                        }
+                        Value::Vector(vd) => {
+                            for item in vd.iter() {
+                                if let Err(e) = run_inner(self, item.clone(), &mut col_counts, &mut results) {
+                                    res_ok = Err(e);
+                                    break;
+                                }
+                                if self.pending_return.is_some() || self.loop_break {
+                                    break;
+                                }
+                            }
+                        }
+                        other => {
+                            res_ok = Err(Diagnostic::compute_error(
+                                "C0104",
+                                format!(
+                                    "Comprehension iterable `{}` must be Range or Vector, found `{}`",
+                                    first.var,
+                                    other.type_name()
+                                ),
+                            ));
+                        }
+                    }
+                    res_ok
+                } else {
+                    self.eval_comprehension_clause(
+                        expr,
+                        clauses,
+                        condition.as_deref(),
+                        col_ctx,
+                        &mut results,
+                    )
+                };
+
+                self.env.pop_scope();
+                eval_res?;
+
+                // Check if 2D matrix candidate produced a rectangular numeric matrix
+                if is_2d_matrix_candidate && !col_counts.is_empty() {
+                    let first_cols = col_counts[0];
+                    let is_rectangular = first_cols > 0 && col_counts.iter().all(|&c| c == first_cols);
+                    if is_rectangular {
+                        let mut all_numeric = true;
+                        let mut mat_data = Vec::with_capacity(results.len());
+                        for v in &results {
+                            if let Some(f) = v.as_f64() {
+                                mat_data.push(f);
+                            } else {
+                                all_numeric = false;
+                                break;
+                            }
+                        }
+                        if all_numeric {
+                            return Ok(Value::Matrix {
+                                rows: col_counts.len(),
+                                cols: first_cols,
+                                data: std::sync::Arc::new(mat_data),
+                            });
+                        }
+                    }
+                }
+
+                Ok(Value::Vector(VectorData::from_values(results)))
+            }
+
             ExprKind::NamedArg { name, value } => {
                 let v = self.eval_expr_ctx(value, col_ctx)?;
                 Ok(Value::NamedArg(name.clone(), Box::new(v)))
@@ -747,6 +848,66 @@ impl Interpreter {
                 }
             }
         }
+    }
+
+    fn eval_comprehension_clause(
+        &mut self,
+        expr: &Expr,
+        clauses: &[ComprehensionClause],
+        condition: Option<&Expr>,
+        col_ctx: bool,
+        results: &mut Vec<Value>,
+    ) -> Result<(), Diagnostic> {
+        if clauses.is_empty() {
+            if let Some(cond) = condition {
+                let cond_val = self.eval_expr_ctx(cond, col_ctx)?;
+                if !cond_val.as_bool().unwrap_or(false) {
+                    return Ok(());
+                }
+            }
+            let val = self.eval_expr_ctx(expr, col_ctx)?;
+            results.push(val);
+            return Ok(());
+        }
+
+        let first = &clauses[0];
+        let rest = &clauses[1..];
+        let iter_val = self.eval_expr_ctx(&first.iter, col_ctx)?;
+
+        match iter_val {
+            Value::Range { start, end, inclusive } => {
+                let s = start;
+                let e = if inclusive { end + 1 } else { end };
+                for i in s..e {
+                    self.env.set(first.var.clone(), Value::I64(i));
+                    self.eval_comprehension_clause(expr, rest, condition, col_ctx, results)?;
+                    if self.pending_return.is_some() || self.loop_break {
+                        break;
+                    }
+                }
+            }
+            Value::Vector(vd) => {
+                for item in vd.iter() {
+                    self.env.set(first.var.clone(), item.clone());
+                    self.eval_comprehension_clause(expr, rest, condition, col_ctx, results)?;
+                    if self.pending_return.is_some() || self.loop_break {
+                        break;
+                    }
+                }
+            }
+            other => {
+                return Err(Diagnostic::compute_error(
+                    "C0104",
+                    format!(
+                        "Comprehension iterable `{}` must be Range or Vector, found `{}`",
+                        first.var,
+                        other.type_name()
+                    ),
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     /// Evaluates `expr` knowing its value will become the enclosing function call's own

@@ -93,6 +93,13 @@ pub enum Pattern {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ComprehensionClause {
+    pub var: String,
+    pub iter: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
     pub pattern: Pattern,
     pub guard: Option<Expr>,
@@ -166,6 +173,11 @@ pub enum ExprKind {
         body: Box<Expr>,
     },
     VectorLit(Vec<Expr>),
+    Comprehension {
+        expr: Box<Expr>,
+        clauses: Vec<ComprehensionClause>,
+        condition: Option<Box<Expr>>,
+    },
     Placeholder, // _
     /// `name = expr` inside a call's argument list, e.g. `summarize(n = count())`.
     NamedArg {
@@ -525,6 +537,20 @@ impl std::fmt::Display for ExprKind {
                         write!(f, ", ")?;
                     }
                     write!(f, "{item}")?;
+                }
+                write!(f, "]")
+            }
+            ExprKind::Comprehension { expr, clauses, condition } => {
+                write!(f, "[{expr}")?;
+                for (i, clause) in clauses.iter().enumerate() {
+                    if i == 0 {
+                        write!(f, " for {} in {}", clause.var, clause.iter)?;
+                    } else {
+                        write!(f, ", {} in {}", clause.var, clause.iter)?;
+                    }
+                }
+                if let Some(cond) = condition {
+                    write!(f, " if {cond}")?;
                 }
                 write!(f, "]")
             }

@@ -15,9 +15,11 @@ Este documento es el índice activo del trabajo pendiente de GHL. Se mantiene de
 Backlog temático para consolidar la ergonomía de última generación del lenguaje, gráficos científicos nativos y computación reproducible:
 
 ### Parte A: Ergonomía Sintáctica de Colecciones *(En Desarrollo Prioritario)*
-- [ ] **Comprensión de Vectores / Listas (*Vector Comprehensions*):**
-  - Sintaxis canónica `[expr for var in iterable]` y `[expr for var in iterable if condition]`.
-  - Soporte en `ghl-syntax` (parser de corchetes diferenciando literales de comprensión), AST (`ExprKind::Comprehension`), `ghl-types` (inferencia de tipo elemento) y `ghl-runtime` (evaluación eficiente con pre-reserva de capacidad).
+- [x] **Comprensión Multidimensional de Vectores y Matrices (*Vector & Matrix Comprehensions*):**
+  - Soporte canónico $N$-dimensional: 1D `[expr for var in iterable (if cond)?]` (Vector), 2D `[expr for r in rows, c in cols]` (Matriz en estándar `[fila, columna]` row-major), 2D filtrado con `if` (aplana a Vector para evitar matrices deformes), y $N \ge 3$ (producto cartesiano).
+  - Soporte sintáctico dual (separador por coma `,` estilo Julia y por `for` estilo Python).
+  - Aislamiento léxico estricto de variables iteradoras (anti-leak de Python) y preservación de tipado/NA homogéneo sin coerciones silenciosas (anti-R).
+  - Pipeline completo verificado: `ghl-syntax` (AST, parser, fmt), `ghl-types` (inferencia estricta y chequeo de tipos), `ghl-runtime` (evaluación y pre-reserva) y suite de integración `eval_comprehensions.rs`.
 - [ ] **Indexación por Máscaras Booleanas (*Boolean Mask Indexing*):**
   - Extracción directa mediante vectores de booleanos: `vec[vec > 0.0]` y filtrado de matrices por filas `mat[bool_mask, ..]`.
 - [ ] **Asignación Indexada Mutable Directa:**

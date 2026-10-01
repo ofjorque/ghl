@@ -433,6 +433,25 @@ fn format_expr(out: &mut String, expr: &Expr, level: usize) {
             }
             out.push(']');
         }
+        ExprKind::Comprehension { expr, clauses, condition } => {
+            out.push('[');
+            format_expr(out, expr, level);
+            for (idx, clause) in clauses.iter().enumerate() {
+                if idx == 0 {
+                    out.push_str(" for ");
+                } else {
+                    out.push_str(", ");
+                }
+                out.push_str(&clause.var);
+                out.push_str(" in ");
+                format_expr(out, &clause.iter, level);
+            }
+            if let Some(cond) = condition {
+                out.push_str(" if ");
+                format_expr(out, cond, level);
+            }
+            out.push(']');
+        }
         ExprKind::DataFrameLit(cols) => {
             out.push_str("dataframe {\n");
             for (idx, (name, expr)) in cols.iter().enumerate() {
