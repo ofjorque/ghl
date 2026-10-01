@@ -1388,18 +1388,26 @@ impl Interpreter {
                     }
                 }
 
-                // True matrix product `A * B` (Caso 1.2, Suite 01) -- distinct from the
-                // element-wise `.+`/`.-`/`.*`/`./` handled separately below under
-                // `BinaryOp::DotMul` etc. `MatrixOps::mul` dispatches to faer's `*`
-                // operator, which uses its own blocked multithreaded GEMM kernel.
-                if op == BinaryOp::Mul {
-                    if let (
-                        Value::Matrix { rows: r1, cols: c1, data: d1 },
-                        Value::Matrix { rows: r2, cols: c2, data: d2 },
-                    ) = (&left, &right)
-                    {
-                        let (r, c, d) = MatrixOps::mul(*r1, *c1, d1, *r2, *c2, d2)?;
-                        return Ok(Value::Matrix { rows: r, cols: c, data: std::sync::Arc::new(d) });
+                // True matrix product `A * B` (Caso 1.2, Suite 01) and element-wise `+`/`-`
+                if let (
+                    Value::Matrix { rows: r1, cols: c1, data: d1 },
+                    Value::Matrix { rows: r2, cols: c2, data: d2 },
+                ) = (&left, &right)
+                {
+                    match op {
+                        BinaryOp::Mul => {
+                            let (r, c, d) = MatrixOps::mul(*r1, *c1, d1, *r2, *c2, d2)?;
+                            return Ok(Value::Matrix { rows: r, cols: c, data: std::sync::Arc::new(d) });
+                        }
+                        BinaryOp::Add => {
+                            let (r, c, d) = MatrixOps::elementwise(*r1, *c1, d1, *r2, *c2, d2, |a, b| a + b, "matrix add")?;
+                            return Ok(Value::Matrix { rows: r, cols: c, data: std::sync::Arc::new(d) });
+                        }
+                        BinaryOp::Sub => {
+                            let (r, c, d) = MatrixOps::elementwise(*r1, *c1, d1, *r2, *c2, d2, |a, b| a - b, "matrix sub")?;
+                            return Ok(Value::Matrix { rows: r, cols: c, data: std::sync::Arc::new(d) });
+                        }
+                        _ => {}
                     }
                 }
 
@@ -1490,6 +1498,116 @@ impl Interpreter {
                             }
                         }
                         return Ok(Value::Vector(VectorData::from_values(res)));
+                    }
+                }
+
+                // Matrix with scalar broadcasting
+                if let (Value::Matrix { rows, cols, data }, scalar) = (&left, &right) {
+                    if let Some(s) = scalar.as_f64() {
+                        let slice = data.as_slice();
+                        let op_fn: fn(f64, f64) -> f64 = match op {
+                            BinaryOp::Add => |x, s| x + s,
+                            BinaryOp::Sub => |x, s| x - s,
+                            BinaryOp::Mul => |x, s| x * s,
+                            BinaryOp::Div => |x, s| x / s,
+                            _ => |x, _| x,
+                        };
+                        let out: Vec<f64> = slice.iter().map(|&x| op_fn(x, s)).collect();
+                        return Ok(Value::matrix(*rows, *cols, out));
+                    }
+                }
+
+                // Scalar with Matrix broadcasting (reversed order)
+                if let (scalar, Value::Matrix { rows, cols, data }) = (&left, &right) {
+                    if let Some(s) = scalar.as_f64() {
+                        let slice = data.as_slice();
+                        let op_fn: fn(f64, f64) -> f64 = match op {
+                            BinaryOp::Add => |s, x| s + x,
+                            BinaryOp::Sub => |s, x| s - x,
+                            BinaryOp::Mul => |s, x| s * x,
+                            BinaryOp::Div => |s, x| s / x,
+                            _ => |_, x| x,
+                        };
+                        let out: Vec<f64> = slice.iter().map(|&x| op_fn(s, x)).collect();
+                        return Ok(Value::matrix(*rows, *cols, out));
+                    }
+                }
+
+                // Matrix with Vector broadcasting
+                if let (Value::Matrix { rows, cols, data }, Value::Vector(vd)) = (&left, &right) {
+                    let m = *rows;
+                    let n = *cols;
+                    let v_len = vd.len();
+                    if v_len == n || v_len == m {
+                        let vec_data: Vec<f64> = if let Ok(view) = vd.as_f64_view() {
+                            view.as_slice().to_vec()
+                        } else {
+                            vd.iter().map(|it| it.as_f64().unwrap_or(0.0)).collect()
+                        };
+                        let mat_slice = data.as_slice();
+                        let op_fn: fn(f64, f64) -> f64 = match op {
+                            BinaryOp::Add => |a, b| a + b,
+                            BinaryOp::Sub => |a, b| a - b,
+                            BinaryOp::Mul => |a, b| a * b,
+                            BinaryOp::Div => |a, b| a / b,
+                            _ => |a, _| a,
+                        };
+                        let mut out = vec![0.0f64; m * n];
+                        if v_len == n {
+                            // Column broadcast: right[j] to column j
+                            for i in 0..m {
+                                for j in 0..n {
+                                    out[i * n + j] = op_fn(mat_slice[i * n + j], vec_data[j]);
+                                }
+                            }
+                        } else {
+                            // Row broadcast: right[i] to row i
+                            for i in 0..m {
+                                let vi = vec_data[i];
+                                for j in 0..n {
+                                    out[i * n + j] = op_fn(mat_slice[i * n + j], vi);
+                                }
+                            }
+                        }
+                        return Ok(Value::matrix(m, n, out));
+                    }
+                }
+
+                // Vector with Matrix broadcasting (reversed)
+                if let (Value::Vector(vd), Value::Matrix { rows, cols, data }) = (&left, &right) {
+                    let m = *rows;
+                    let n = *cols;
+                    let v_len = vd.len();
+                    if v_len == n || v_len == m {
+                        let vec_data: Vec<f64> = if let Ok(view) = vd.as_f64_view() {
+                            view.as_slice().to_vec()
+                        } else {
+                            vd.iter().map(|it| it.as_f64().unwrap_or(0.0)).collect()
+                        };
+                        let mat_slice = data.as_slice();
+                        let op_fn: fn(f64, f64) -> f64 = match op {
+                            BinaryOp::Add => |a, b| a + b,
+                            BinaryOp::Sub => |a, b| a - b,
+                            BinaryOp::Mul => |a, b| a * b,
+                            BinaryOp::Div => |a, b| a / b,
+                            _ => |a, _| a,
+                        };
+                        let mut out = vec![0.0f64; m * n];
+                        if v_len == n {
+                            for i in 0..m {
+                                for j in 0..n {
+                                    out[i * n + j] = op_fn(vec_data[j], mat_slice[i * n + j]);
+                                }
+                            }
+                        } else {
+                            for i in 0..m {
+                                let vi = vec_data[i];
+                                for j in 0..n {
+                                    out[i * n + j] = op_fn(vi, mat_slice[i * n + j]);
+                                }
+                            }
+                        }
+                        return Ok(Value::matrix(m, n, out));
                     }
                 }
 

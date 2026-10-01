@@ -145,6 +145,7 @@ fn fit_dichotomous_irt(
         let mut log_p_mat = arena.alloc_matrix(n_items, n_q, 0.0);
         let mut log_q_mat = arena.alloc_matrix(n_items, n_q, 0.0);
         let mut w_post_mat = arena.alloc_matrix(n_patterns, n_q, 0.0);
+        let ln_q_weights = ln(q_weights);
 
         let mut iter = 0;
         while !converged && iter < max_iter {
@@ -181,53 +182,15 @@ fn fit_dichotomous_irt(
             // Two GEMM multiplications in faer to get conditional log-likelihood matrix (P x Q) in microseconds
             let log_l_mat = (mat_y * log_p_mat) .+ (mat_y_inv * log_q_mat);
 
-            // Compute posterior pattern distribution and build w_post_mat (P x Q) in-place
-            let mut current_loglik = 0.0;
-
-            for p in 0..n_patterns {
-                let log_row = get_row(log_l_mat, p);
-                let mut max_log_p = -1.0e10;
-                for q in 0..n_q {
-                    let val = log_row[q];
-                    if val > max_log_p {
-                        max_log_p = val;
-                    }
-                }
-
-                let mut unnorm_row = [];
-                let mut sum_post = 0.0;
-                for q in 0..n_q {
-                    let unnorm = exp(log_row[q] - max_log_p) * q_weights[q];
-                    unnorm_row = append(unnorm_row, unnorm);
-                    sum_post = sum_post + unnorm;
-                }
-
-                let p_p_marginal = sum_post * exp(max_log_p);
-                let pw = pattern_weights[p];
-                if p_p_marginal > 0.0000000001 {
-                    current_loglik = current_loglik + (pw * ln(p_p_marginal));
-                }
-
-                let inv_sum = if sum_post > 0.0 { 1.0 / sum_post } else { 0.0 };
-                let mut w_post_row = [];
-                for q in 0..n_q {
-                    let post_q = unnorm_row[q] * inv_sum;
-                    w_post_row = append(w_post_row, pw * post_q);
-                }
-                w_post_mat = set_row(w_post_mat, p, w_post_row);
-            }
-
-            final_loglik = current_loglik;
+            // Compute posterior pattern distribution using fused log_sum_exp and softmax
+            let log_post = log_l_mat + ln_q_weights;
+            let log_marg = log_sum_exp(log_post);
+            final_loglik = sum(pattern_weights * log_marg);
+            let post_mat = softmax(log_post);
+            let w_post_mat = post_mat * pattern_weights;
 
             // Accumulate expected test-takers n_q from posterior column sums
-            let mut n_table = [];
-            for q in 0..n_q {
-                let mut sum_nq = 0.0;
-                for p in 0..n_patterns {
-                    sum_nq = sum_nq + w_post_mat[p, q];
-                }
-                n_table = append(n_table, sum_nq);
-            }
+            let n_table = col_sums(w_post_mat);
 
             // GEMM product to compute r_table (J x Q) in ONE step: R = Y^T * W_Post
             let r_mat = mat_y_t * w_post_mat;

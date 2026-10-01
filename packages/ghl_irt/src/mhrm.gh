@@ -3,8 +3,6 @@
 // Reference: Cai, L. (2010). High-Dimensional Exploratory Item Factor Analysis by a
 // Metropolis-Hastings Robbins-Monro Algorithm. Psychometrika, 75(1), 33-57.
 
-use std::arena::{scope, alloc_vector, alloc_matrix, reset};
-
 struct MhrmItemResult {
     item_index: i64,
     slopes: Vector,          // Discrimination slopes a_jd for d in 0..D
@@ -73,311 +71,170 @@ fn fit_mhrm_configured(
     sa_cycles: i64,
     polyak_cycles: i64
 ) -> MhrmIrtResult {
-    arena::scope(|arena| {
-        // 1. Initialize item parameters
-        let mut c_vec = arena.alloc_vector(n_items, 0.0);
-        let mut a_matrix = arena.alloc_matrix(n_items, n_dimensions, 0.0);
+    // 0. Convert flat responses to Matrix (n_persons x n_items)
+    let data_mhrm = matrix(responses, n_persons, n_items);
 
-        for j in 0..n_items {
-            let mut sum_corr = 0.0;
-            for i in 0..n_persons {
-                if responses[(i * n_items) + j] > 0.5 {
-                    sum_corr = sum_corr + 1.0;
-                }
-            }
-            let p_bar = clamp((sum_corr + 0.5) / ((0.0 + n_persons) + 1.0), 0.05, 0.95);
-            let c_init = ln(p_bar / (1.0 - p_bar));
-            c_vec = set(c_vec, j, c_init);
+    // 1. Initialize item parameters
+    let fn_p = 0.0 + n_persons;
+    let sum_corr = col_sums(data_mhrm);
+    let p_bar = clamp((sum_corr + 0.5) / (fn_p + 1.0), 0.05, 0.95);
+    let mut c_vec = ln(p_bar / (1.0 - p_bar));
 
-            for d in 0..n_dimensions {
-                // Factor loading structure: primary dimension receives heavier initial weight
-                let primary_dim = j % n_dimensions;
-                let a_val = if d == primary_dim { 1.20 } else { 0.35 };
-                a_matrix = set(a_matrix, j, d, a_val);
-            }
+    let mut a_matrix = matrix(n_items, n_dimensions, 0.35);
+    for j in 0..n_items {
+        let primary_dim = j % n_dimensions;
+        a_matrix = set(a_matrix, j, primary_dim, 1.20);
+    }
+
+    // 2. Initialize latent traits Theta (n_persons x n_dimensions)
+    let mut theta_matrix = matrix(n_persons, n_dimensions, 0.0);
+
+    // 3. Setup M-H sampler state and Polyak averaging
+    let mut prop_sd = 0.45;
+    let mut total_accepts = 0.0;
+    let mut total_proposals = 0.0;
+
+    let mut polyak_a = matrix(n_items, n_dimensions, 0.0);
+    let mut polyak_c = zeros(n_items);
+    let mut polyak_count = 0.0;
+
+    let mut current_gain = 0.20;
+
+    // 4. Main MHRM Stochastic Iteration Loop
+    for cycle in 0..total_cycles {
+        let is_burnin = cycle < burnin_cycles;
+        let is_polyak = cycle >= (total_cycles - polyak_cycles);
+
+        // Update Robbins-Monro gain sequence gamma_k
+        if is_burnin {
+            current_gain = 0.18; // Constant gain in Stage 1
+        } else {
+            let k_active = 1.0 + (cycle - burnin_cycles);
+            current_gain = 0.18 / pow(k_active, 0.75);
         }
 
-        // 2. Initialize latent trait vectors Theta (N * D) as Arena Matrix
-        let mut theta_matrix = arena.alloc_matrix(n_persons, n_dimensions, 0.0);
+        // --- STAGE 1/2 E-STEP: Vectorized Metropolis-Hastings Imputation ---
+        let noise = matrix(random_normal(n_persons * n_dimensions, 0.0, prop_sd), n_persons, n_dimensions);
+        let prop_theta = theta_matrix + noise;
 
-        // 3. Setup M-H sampler state and Robbins-Monro gain parameters
-        let mut prop_sd = 0.45;
-        let mut prng_state = 1234567.0;
-        let mut total_accepts = 0.0;
-        let mut total_proposals = 0.0;
+        let a_t = t(a_matrix);
+        let p_curr = sigmoid_matmul(theta_matrix, a_t, c_vec);
+        let p_prop = sigmoid_matmul(prop_theta, a_t, c_vec);
 
-        let mut polyak_a = arena.alloc_matrix(n_items, n_dimensions, 0.0);
-        let mut polyak_c = arena.alloc_vector(n_items, 0.0);
-        let mut polyak_count = 0.0;
+        let safe_pc = clamp(p_curr, 0.0001, 0.9999);
+        let safe_pp = clamp(p_prop, 0.0001, 0.9999);
 
-        let mut current_gain = 0.20;
+        let ll_curr_mat = (data_mhrm .* ln(safe_pc)) .+ ((1.0 - data_mhrm) .* ln(1.0 - safe_pc));
+        let ll_prop_mat = (data_mhrm .* ln(safe_pp)) .+ ((1.0 - data_mhrm) .* ln(1.0 - safe_pp));
 
-        // Temporary scratch matrices allocated in the regional arena
-        let mut rw = arena.alloc_matrix(2, n_persons, 0.0);
+        let row_ll_curr = row_sums(ll_curr_mat);
+        let row_ll_prop = row_sums(ll_prop_mat);
 
-        // 4. Main MHRM Stochastic Iteration Loop
-        for cycle in 0..total_cycles {
-            let is_burnin = cycle < burnin_cycles;
-            let is_polyak = cycle >= (total_cycles - polyak_cycles);
+        let prior_curr = 0.5 * row_sums(theta_matrix .* theta_matrix);
+        let prior_prop = 0.5 * row_sums(prop_theta .* prop_theta);
 
-            // Update Robbins-Monro gain sequence gamma_k
-            if is_burnin {
-                current_gain = 0.18; // Constant gain in Stage 1
-            } else {
-                let k_active = 1.0 + (cycle - burnin_cycles);
-                current_gain = 0.18 / pow(k_active, 0.75);
+        let delta_log = (row_ll_prop - prior_prop) - (row_ll_curr - prior_curr);
+
+        let u_accept = random_uniform(n_persons);
+        let log_u = ln(u_accept);
+        let acc = log_u < delta_log;
+
+        theta_matrix = if_else(acc, prop_theta, theta_matrix);
+
+        let acc_numeric = if_else(acc, 1.0, 0.0);
+        let cycle_accepts = sum(acc_numeric);
+        let cycle_rate = cycle_accepts / fn_p;
+        total_accepts = total_accepts + cycle_accepts;
+        total_proposals = total_proposals + fn_p;
+
+        // Adaptive proposal tuning in Stage 1
+        if is_burnin && ((cycle % 5) == 4) {
+            if cycle_rate < 0.23 {
+                prop_sd = prop_sd * 0.90;
+            } else if cycle_rate > 0.38 {
+                prop_sd = prop_sd * 1.10;
             }
-
-            // --- STAGE 1/2 E-STEP: Metropolis-Hastings Imputation of Latent Traits ---
-            let mut cycle_accepts = 0.0;
-
-            for i in 0..n_persons {
-                // Propose new theta via Gaussian Random Walk
-                let mut prop_th = [];
-                for d in 0..n_dimensions {
-                    // Inlined PRNG 1
-                    let nxt1 = (prng_state * 16807.0) + 11.0;
-                    let div1 = floor(nxt1 / 2147483647.0);
-                    let rem1 = nxt1 - (div1 * 2147483647.0);
-                    prng_state = if rem1 < 1.0 { 1.0 } else { rem1 };
-                    let u1 = prng_state / 2147483647.0;
-
-                    // Inlined PRNG 2
-                    let nxt2 = (prng_state * 16807.0) + 11.0;
-                    let div2 = floor(nxt2 / 2147483647.0);
-                    let rem2 = nxt2 - (div2 * 2147483647.0);
-                    prng_state = if rem2 < 1.0 { 1.0 } else { rem2 };
-                    let u2 = prng_state / 2147483647.0;
-
-                    // Inlined Box-Muller transform
-                    let safe_u1 = if u1 < 0.000001 { 0.000001 } else { if u1 > 0.999999 { 0.999999 } else { u1 } };
-                    let radius = sqrt(-2.0 * ln(safe_u1));
-                    let z = radius * cos(6.28318530718 * u2);
-
-                    let step = prop_sd * z;
-                    prop_th = append(prop_th, theta_matrix[i, d] + step);
-                }
-
-                // Evaluate log-posterior difference
-                let mut log_p_curr = 0.0;
-                let mut log_p_prop = 0.0;
-
-                for j in 0..n_items {
-                    let y = responses[(i * n_items) + j];
-                    let c_j = c_vec[j];
-
-                    let mut dot_curr = 0.0;
-                    let mut dot_prop = 0.0;
-                    for d in 0..n_dimensions {
-                        let a_jd = a_matrix[j, d];
-                        dot_curr = dot_curr + (a_jd * theta_matrix[i, d]);
-                        dot_prop = dot_prop + (a_jd * prop_th[d]);
-                    }
-
-                    let z_curr = dot_curr + c_j;
-                    let z_prop = dot_prop + c_j;
-
-                    let p_curr = 1.0 / (1.0 + exp(if z_curr < -20.0 { 20.0 } else { if z_curr > 20.0 { -20.0 } else { -z_curr } }));
-                    let p_prop = 1.0 / (1.0 + exp(if z_prop < -20.0 { 20.0 } else { if z_prop > 20.0 { -20.0 } else { -z_prop } }));
-
-                    let safe_p_curr = clamp(p_curr, 0.0001, 0.9999);
-                    let safe_p_prop = clamp(p_prop, 0.0001, 0.9999);
-
-                    if y > 0.5 {
-                        log_p_curr = log_p_curr + ln(safe_p_curr);
-                        log_p_prop = log_p_prop + ln(safe_p_prop);
-                    } else {
-                        log_p_curr = log_p_curr + ln(1.0 - safe_p_curr);
-                        log_p_prop = log_p_prop + ln(1.0 - safe_p_prop);
-                    }
-                }
-
-                // Standard normal prior penalty: -0.5 * ||theta||^2
-                let mut prior_curr = 0.0;
-                let mut prior_prop = 0.0;
-                for d in 0..n_dimensions {
-                    let th_curr = theta_matrix[i, d];
-                    let th_prop = prop_th[d];
-                    prior_curr = prior_curr + (0.5 * th_curr * th_curr);
-                    prior_prop = prior_prop + (0.5 * th_prop * th_prop);
-                }
-
-                let delta_log = (log_p_prop - prior_prop) - (log_p_curr - prior_curr);
-
-                // Inlined PRNG for acceptance check
-                let nxt_a = (prng_state * 16807.0) + 11.0;
-                let div_a = floor(nxt_a / 2147483647.0);
-                let rem_a = nxt_a - (div_a * 2147483647.0);
-                prng_state = if rem_a < 1.0 { 1.0 } else { rem_a };
-                let u_accept = prng_state / 2147483647.0;
-
-                let do_accept = if delta_log >= 0.0 { true } else { ln(u_accept) < delta_log };
-
-                if do_accept {
-                    cycle_accepts = cycle_accepts + 1.0;
-                    for d in 0..n_dimensions {
-                        theta_matrix = set(theta_matrix, i, d, prop_th[d]);
-                    }
-                }
-            }
-
-            let fn_persons = 0.0 + n_persons;
-            let cycle_rate = cycle_accepts / fn_persons;
-            total_accepts = total_accepts + cycle_accepts;
-            total_proposals = total_proposals + fn_persons;
-
-            // Adaptive proposal tuning in Stage 1 to maintain optimal 25% - 35% acceptance rate
-            if is_burnin && ((cycle % 5) == 4) {
-                if cycle_rate < 0.23 {
-                    prop_sd = prop_sd * 0.90;
-                } else if cycle_rate > 0.38 {
-                    prop_sd = prop_sd * 1.10;
-                }
-                if prop_sd < 0.15 { prop_sd = 0.15; }
-                if prop_sd > 1.20 { prop_sd = 1.20; }
-            }
-
-            // --- STAGE 2 M-STEP: Robbins-Monro Stochastic Parameter Update ---
-            for j in 0..n_items {
-                let c_j = c_vec[j];
-
-                let mut grad_c = 0.0;
-                let mut hess_c = 0.0;
-
-                for i in 0..n_persons {
-                    let y = responses[(i * n_items) + j];
-
-                    let mut dot = 0.0;
-                    for d in 0..n_dimensions {
-                        let th_d = theta_matrix[i, d];
-                        let a_jd = a_matrix[j, d];
-                        dot = dot + (a_jd * th_d);
-                    }
-
-                    let z = dot + c_j;
-                    let exp_neg_z = if z < -20.0 { exp(20.0) } else { if z > 20.0 { exp(-20.0) } else { exp(-z) } };
-                    let p_ij = 1.0 / (1.0 + exp_neg_z);
-                    let safe_p = clamp(p_ij, 0.0001, 0.9999);
-                    let w = safe_p * (1.0 - safe_p);
-                    let resid = y - safe_p;
-
-                    grad_c = grad_c + resid;
-                    hess_c = hess_c + w;
-                    rw = set(rw, 0, i, resid);
-                    rw = set(rw, 1, i, w);
-                }
-
-                let mut grad_a = [];
-                let mut hess_a = [];
-                for d in 0..n_dimensions {
-                    let mut sum_ga = 0.0;
-                    let mut sum_ha = 0.0;
-                    for i in 0..n_persons {
-                        let th_d = theta_matrix[i, d];
-                        sum_ga = sum_ga + (rw[0, i] * th_d);
-                        sum_ha = sum_ha + (rw[1, i] * th_d * th_d);
-                    }
-                    grad_a = append(grad_a, sum_ga);
-                    hess_a = append(hess_a, sum_ha);
-                }
-
-                // Damped Fisher preconditioning (Levenberg-Marquardt style)
-                let lambda_damp = 0.50;
-                let step_c = clamp(grad_c / (hess_c + lambda_damp), -0.50, 0.50);
-                let new_c = clamp(c_j + (current_gain * step_c), -3.5, 3.5);
-                c_vec = set(c_vec, j, new_c);
-
-                for d in 0..n_dimensions {
-                    let a_old = a_matrix[j, d];
-                    let step_a = clamp(grad_a[d] / (hess_a[d] + lambda_damp), -0.40, 0.40);
-                    let new_a = clamp(a_old + (current_gain * step_a), 0.15, 3.00);
-                    a_matrix = set(a_matrix, j, d, new_a);
-                }
-            }
-
-            // --- STAGE 3: Polyak-Ruppert Averaging ---
-            if is_polyak {
-                polyak_count = polyak_count + 1.0;
-                for j in 0..n_items {
-                    let curr_c = c_vec[j];
-                    let old_pc = polyak_c[j];
-                    polyak_c = set(polyak_c, j, old_pc + curr_c);
-
-                    for d in 0..n_dimensions {
-                        let curr_a = a_matrix[j, d];
-                        let old_pa = polyak_a[j, d];
-                        polyak_a = set(polyak_a, j, d, old_pa + curr_a);
-                    }
-                }
-            }
+            if prop_sd < 0.15 { prop_sd = 0.15; }
+            if prop_sd > 1.20 { prop_sd = 1.20; }
         }
 
-        // 5. Finalize parameter estimates using Polyak-Ruppert smoothing if available
-        let use_polyak = polyak_count > 0.0;
-        let mut final_items = [];
+        // --- STAGE 2 M-STEP: Vectorized Robbins-Monro Parameter Update ---
+        let p_rm = sigmoid_matmul(theta_matrix, a_t, c_vec);
+        let resid = data_mhrm - p_rm;
+        let w = p_rm .* (1.0 - p_rm);
 
-        for j in 0..n_items {
-            let final_c = if use_polyak { polyak_c[j] / polyak_count } else { c_vec[j] };
+        // Update item intercepts c_j
+        let grad_c = col_sums(resid);
+        let hess_c = col_sums(w) + 0.5;
+        let step_c = clamp(grad_c / hess_c, -0.50, 0.50);
+        c_vec = clamp(c_vec + (current_gain * step_c), -3.5, 3.5);
 
-            let mut final_slopes = [];
-            let mut sum_sq_a = 0.0;
+        // Update item discrimination slopes A_jd
+        let grad_a = t(resid) * theta_matrix;
+        let theta_sq = theta_matrix .* theta_matrix;
+        let hess_a = (t(w) * theta_sq) + 0.5;
+        let step_a = clamp(grad_a ./ hess_a, -0.40, 0.40);
+        a_matrix = clamp(a_matrix + (current_gain * step_a), 0.15, 3.00);
 
-            for d in 0..n_dimensions {
-                let val_a = if use_polyak { polyak_a[j, d] / polyak_count } else { a_matrix[j, d] };
-                final_slopes = append(final_slopes, val_a);
-                sum_sq_a = sum_sq_a + (val_a * val_a);
-            }
-
-            let mdisc = sqrt(sum_sq_a);
-            let mdiff = if mdisc > 0.0001 { (0.0 - final_c) / mdisc } else { 0.0 };
-
-            let it_res = MhrmItemResult {
-                item_index: j + 1,
-                slopes: final_slopes,
-                intercept: final_c,
-                mdisc: mdisc,
-                mdiff: mdiff
-            };
-            final_items = append(final_items, it_res);
+        // --- STAGE 3: Polyak-Ruppert Averaging ---
+        if is_polyak {
+            polyak_count = polyak_count + 1.0;
+            polyak_c = polyak_c + c_vec;
+            polyak_a = polyak_a + a_matrix;
         }
+    }
 
-        // 6. Compute final log-likelihood
-        let mut final_loglik = 0.0;
-        for i in 0..n_persons {
-            for j in 0..n_items {
-                let y = responses[(i * n_items) + j];
-                let it = final_items[j];
+    // 5. Finalize parameter estimates
+    let use_polyak = polyak_count > 0.0;
+    let final_c = if use_polyak { polyak_c / polyak_count } else { c_vec };
+    let final_a = if use_polyak { polyak_a / polyak_count } else { a_matrix };
 
-                let mut dot = 0.0;
-                for d in 0..n_dimensions {
-                    let th = theta_matrix[i, d];
-                    dot = dot + (it.slopes[d] * th);
-                }
-                let z = dot + it.intercept;
-                let p_val = 1.0 / (1.0 + exp(if z < -20.0 { 20.0 } else { if z > 20.0 { -20.0 } else { -z } }));
-                let safe_p = clamp(p_val, 0.0001, 0.9999);
-                final_loglik = final_loglik + (if y > 0.5 { ln(safe_p) } else { ln(1.0 - safe_p) });
-            }
+    let mut final_items = [];
+    for j in 0..n_items {
+        let c_val = final_c[j];
+        let mut final_slopes = [];
+        let mut sum_sq_a = 0.0;
+        for d in 0..n_dimensions {
+            let val_a = final_a[j, d];
+            final_slopes = append(final_slopes, val_a);
+            sum_sq_a = sum_sq_a + (val_a * val_a);
         }
+        let mdisc = sqrt(sum_sq_a);
+        let mdiff = if mdisc > 0.0001 { (0.0 - c_val) / mdisc } else { 0.0 };
 
-        let overall_acceptance = if total_proposals > 0.0 { total_accepts / total_proposals } else { 0.0 };
+        let it_res = MhrmItemResult {
+            item_index: j + 1,
+            slopes: final_slopes,
+            intercept: c_val,
+            mdisc: mdisc,
+            mdiff: mdiff
+        };
+        final_items = append(final_items, it_res);
+    }
 
-        MhrmIrtResult {
-            n_dimensions: n_dimensions,
-            n_items: n_items,
-            n_persons: n_persons,
-            items: final_items,
-            total_cycles: total_cycles,
-            stage1_burnin_cycles: burnin_cycles,
-            stage2_sa_cycles: sa_cycles,
-            stage3_polyak_cycles: polyak_cycles,
-            final_gain: current_gain,
-            acceptance_rate: overall_acceptance,
-            proposal_sd: prop_sd,
-            log_likelihood: final_loglik,
-            converged: true
-        }
-    })
+    // 6. Compute final log-likelihood
+    let p_final = sigmoid_matmul(theta_matrix, t(final_a), final_c);
+    let safe_pf = clamp(p_final, 0.0001, 0.9999);
+    let final_ll_mat = (data_mhrm .* ln(safe_pf)) .+ ((1.0 - data_mhrm) .* ln(1.0 - safe_pf));
+    let final_loglik = sum(final_ll_mat);
+
+    let overall_acceptance = if total_proposals > 0.0 { total_accepts / total_proposals } else { 0.0 };
+
+    MhrmIrtResult {
+        n_dimensions: n_dimensions,
+        n_items: n_items,
+        n_persons: n_persons,
+        items: final_items,
+        total_cycles: total_cycles,
+        stage1_burnin_cycles: burnin_cycles,
+        stage2_sa_cycles: sa_cycles,
+        stage3_polyak_cycles: polyak_cycles,
+        final_gain: current_gain,
+        acceptance_rate: overall_acceptance,
+        proposal_sd: prop_sd,
+        log_likelihood: final_loglik,
+        converged: true
+    }
 }
 
 fn audit_mhrm(

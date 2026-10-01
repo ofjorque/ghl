@@ -924,6 +924,7 @@ impl TypeEnv {
             "irt_em_quadrature_kernel", "irt_quadrature_grid",
             "sigmoid_matmul", "sigmoid", "log_sum_exp", "softmax", "fused_mul_add",
             "row_sums", "col_sums", "row_means", "col_means", "row_maxs", "col_maxs", "row_mins", "col_mins",
+            "matrix", "as_matrix",
             "sem", "decompose_spec", "optim", "sample_cov", "anova", "t_test", "t_test_one_sample", "chisq_test",
             "normal", "student_t", "fisher_f", "chisq", "gamma_dist", "beta_dist",
             "uniform", "exponential", "binomial", "poisson_dist",

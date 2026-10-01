@@ -508,6 +508,8 @@ impl RuntimeEnv {
         env.set("eigen_values".into(), Value::NativeFn(native_eigen_values));
         env.set("eigen_vectors".into(), Value::NativeFn(native_eigen_vectors));
         env.set("zeros".into(),        Value::NativeFn(native_zeros));
+        env.set("matrix".into(),       Value::NativeFn(native_matrix));
+        env.set("as_matrix".into(),    Value::NativeFn(native_matrix));
         env.set("len".into(),          Value::NativeFn(native_len));
         env.set("get".into(),          Value::NativeFn(native_get));
         env.set("set".into(),          Value::NativeFn(native_set));

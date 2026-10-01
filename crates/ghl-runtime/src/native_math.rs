@@ -43,6 +43,19 @@ pub(crate) fn map_numeric_fn(v: &Value, f: impl Fn(f64) -> f64 + Clone + Sync) -
             }
         }
         Value::Vector(vd) => Value::Vector(VectorData::from_values(vd.iter().map(|it| map_numeric_fn(it, f.clone())).collect())),
+        Value::Matrix { rows, cols, data } => {
+            let slice = data.as_slice();
+            let compute = |&x: &f64| -> f64 {
+                let y = f(x);
+                if y.is_nan() { 0.0 } else { y }
+            };
+            let out_data: Vec<f64> = if slice.len() >= crate::eval::PARALLEL_THRESHOLD {
+                slice.par_iter().map(compute).collect()
+            } else {
+                slice.iter().map(compute).collect()
+            };
+            Value::matrix(*rows, *cols, out_data)
+        }
         other => match other.as_f64() {
             Some(x) => {
                 let y = f(x);

@@ -276,6 +276,83 @@ pub(crate) fn native_zeros(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 }
 
+pub(crate) fn native_matrix(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.len() {
+        2 => {
+            // matrix(rows, cols) -> zeros(rows, cols)
+            let r = args[0].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`matrix(rows, cols)` requires integer dimensions")
+            })?;
+            let c = args[1].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`matrix(rows, cols)` requires integer dimensions")
+            })?;
+            if r < 0 || c < 0 {
+                return Err(Diagnostic::compute_error("C0201", format!("`matrix()` dimensions must be non-negative, found ({r}, {c})")));
+            }
+            Ok(Value::matrix(r as usize, c as usize, vec![0.0; (r * c) as usize]))
+        }
+        3 => {
+            // Case A: matrix(rows, cols, default_fill)
+            if let (Some(r), Some(c)) = (args[0].as_i64(), args[1].as_i64()) {
+                if r < 0 || c < 0 {
+                    return Err(Diagnostic::compute_error("C0201", format!("`matrix()` dimensions must be non-negative, found ({r}, {c})")));
+                }
+                let fill = args[2].as_f64().ok_or_else(|| Diagnostic::compute_error("C0201", "`matrix(rows, cols, default)` requires numeric default value"))?;
+                return Ok(Value::matrix(r as usize, c as usize, vec![fill; (r * c) as usize]));
+            }
+
+            // Case B: matrix(data, rows, cols)
+            let r = args[1].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`matrix(data, rows, cols)` requires integer row dimension")
+            })?;
+            let c = args[2].as_i64().ok_or_else(|| {
+                Diagnostic::compute_error("C0201", "`matrix(data, rows, cols)` requires integer col dimension")
+            })?;
+            if r < 0 || c < 0 {
+                return Err(Diagnostic::compute_error("C0201", format!("`matrix()` dimensions must be non-negative, found ({r}, {c})")));
+            }
+            let rows = r as usize;
+            let cols = c as usize;
+            let required_len = rows * cols;
+
+            match &args[0] {
+                Value::Vector(vd) => {
+                    if vd.len() != required_len {
+                        return Err(Diagnostic::compute_error(
+                            "C0201",
+                            format!("`matrix()` size mismatch: Vector has {} elements, but requested shape ({rows}x{cols}) requires {}", vd.len(), required_len),
+                        ));
+                    }
+                    if let Ok(view) = vd.as_f64_view() {
+                        Ok(Value::matrix(rows, cols, view.as_slice().to_vec()))
+                    } else {
+                        let data: Vec<f64> = vd.iter().map(|it| it.as_f64().unwrap_or(0.0)).collect();
+                        Ok(Value::matrix(rows, cols, data))
+                    }
+                }
+                Value::Matrix { data, .. } => {
+                    if data.len() != required_len {
+                        return Err(Diagnostic::compute_error(
+                            "C0201",
+                            format!("`matrix()` reshape size mismatch: Matrix has {} elements, but requested shape ({rows}x{cols}) requires {}", data.len(), required_len),
+                        ));
+                    }
+                    Ok(Value::matrix(rows, cols, data.as_slice().to_vec()))
+                }
+                scalar if scalar.as_f64().is_some() => {
+                    let fill = scalar.as_f64().unwrap();
+                    Ok(Value::matrix(rows, cols, vec![fill; required_len]))
+                }
+                other => Err(Diagnostic::compute_error(
+                    "C0202",
+                    format!("`matrix(data, rows, cols)` expects Vector, Matrix, or scalar as first argument, found `{}`", other.type_name()),
+                )),
+            }
+        }
+        _ => Err(Diagnostic::compute_error("C0201", "`matrix()` expects 2 arguments (rows, cols) or 3 arguments (data, rows, cols)")),
+    }
+}
+
 pub(crate) fn native_len(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let val = args.first().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`len()` requires 1 argument")

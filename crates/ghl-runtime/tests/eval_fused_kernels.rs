@@ -150,3 +150,52 @@ fn test_eval_fused_mul_add() {
         panic!("Expected Matrix for R");
     }
 }
+
+#[test]
+fn test_matrix_arithmetic_and_row_selection() {
+    let code = r#"
+        let v = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let M = matrix(v, 2, 3);
+        let M2 = M + M;
+        let M_sub = M - M;
+        let M_plus_1 = M + 10.0;
+        let one_minus_M = 10.0 - M;
+        let M_scaled = M * 2.0;
+        let M_clamped = clamp(M, 2.0, 5.0);
+
+        let M_alt = matrix(2, 3, 99.0);
+        let cond = [true, false];
+        let selected = if_else(cond, M, M_alt);
+    "#;
+    let program = parse(code).expect("syntax ok");
+    let mut interp = Interpreter::new();
+    interp.eval_program(&program).expect("evaluation ok");
+
+    if let Some(Value::Matrix { rows, cols, data }) = interp.env.get("M2") {
+        assert_eq!((rows, cols), (2, 3));
+        assert_eq!(data.as_slice(), &[2.0, 4.0, 6.0, 8.0, 10.0, 12.0]);
+    } else { panic!("M2"); }
+
+    if let Some(Value::Matrix { data, .. }) = interp.env.get("M_sub") {
+        assert_eq!(data.as_slice(), &[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    } else { panic!("M_sub"); }
+
+    if let Some(Value::Matrix { data, .. }) = interp.env.get("M_plus_1") {
+        assert_eq!(data.as_slice(), &[11.0, 12.0, 13.0, 14.0, 15.0, 16.0]);
+    } else { panic!("M_plus_1"); }
+
+    if let Some(Value::Matrix { data, .. }) = interp.env.get("one_minus_M") {
+        assert_eq!(data.as_slice(), &[9.0, 8.0, 7.0, 6.0, 5.0, 4.0]);
+    } else { panic!("one_minus_M"); }
+
+    if let Some(Value::Matrix { data, .. }) = interp.env.get("M_clamped") {
+        assert_eq!(data.as_slice(), &[2.0, 2.0, 3.0, 4.0, 5.0, 5.0]);
+    } else { panic!("M_clamped"); }
+
+    if let Some(Value::Matrix { rows, cols, data }) = interp.env.get("selected") {
+        assert_eq!((rows, cols), (2, 3));
+        // Row 0 from M (cond=true): [1, 2, 3]; Row 1 from M_alt (cond=false): [99, 99, 99]
+        assert_eq!(data.as_slice(), &[1.0, 2.0, 3.0, 99.0, 99.0, 99.0]);
+    } else { panic!("selected"); }
+}
+

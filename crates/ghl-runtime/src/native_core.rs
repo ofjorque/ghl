@@ -138,6 +138,10 @@ pub(crate) fn native_sum(args: Vec<Value>) -> Result<Value, Diagnostic> {
             }
             vector_native_reduce(vd, "sum")
         }
+        Value::Matrix { data, .. } => {
+            let total: f64 = data.iter().sum();
+            Ok(Value::F64(total))
+        }
         _ => Err(Diagnostic::compute_error(
             "C0202",
             format!("`sum()` expects a Vector, found `{}`", vec_val.type_name()),

@@ -187,6 +187,44 @@ pub(crate) fn native_if_else(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Value::NA(r) => Ok(Value::NA(r.clone())),
         Value::Vector(cond_data) => {
             let len = cond_data.len();
+
+            // Matrix row-wise selection: cond is Vector of length M, yes/no are Matrix(M, N)
+            if let (
+                Value::Matrix { rows: r1, cols: c1, data: d1 },
+                Value::Matrix { rows: r2, cols: c2, data: d2 },
+            ) = (yes, no) {
+                if *r1 == *r2 && *c1 == *c2 && len == *r1 {
+                    let m = *r1;
+                    let n = *c1;
+                    let mut out = vec![0.0f64; m * n];
+                    if let Ok(bool_ca) = cond_data.column().bool() {
+                        for i in 0..m {
+                            let take_yes = bool_ca.get(i).unwrap_or(false);
+                            let src = if take_yes {
+                                &d1[i * n..(i + 1) * n]
+                            } else {
+                                &d2[i * n..(i + 1) * n]
+                            };
+                            out[i * n..(i + 1) * n].copy_from_slice(src);
+                        }
+                    } else {
+                        for i in 0..m {
+                            let take_yes = match cond_data.value_at(i) {
+                                Some(Value::Bool(b)) => b,
+                                _ => false,
+                            };
+                            let src = if take_yes {
+                                &d1[i * n..(i + 1) * n]
+                            } else {
+                                &d2[i * n..(i + 1) * n]
+                            };
+                            out[i * n..(i + 1) * n].copy_from_slice(src);
+                        }
+                    }
+                    return Ok(Value::matrix(m, n, out));
+                }
+            }
+
             // Fast-path: numeric yes/no, cond has no NAs and is boolean
             if cond_data.null_count() == 0 {
                 if let (Some(yes_src), Some(no_src)) = (as_numeric_source(yes, len), as_numeric_source(no, len)) {
