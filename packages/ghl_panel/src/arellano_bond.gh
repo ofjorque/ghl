@@ -169,11 +169,11 @@ fn fit_arellano_bond(y: Vector, x: Vector, n_units: i64, n_time: i64) -> Arellan
         sum_b2 = sum_b2 + (b_i * b_i);
     }
 
-    let ar1_z = if sum_a2 > 0.0000000001 { sum_a / sqrt(sum_a2) } else { 0.0 };
+    let ar1_z = if sum_a2 > 1e-10 { sum_a / sqrt(sum_a2) } else { 0.0 };
     let abs_ar1 = if ar1_z < 0.0 { 0.0 - ar1_z } else { ar1_z };
     let ar1_p = 2.0 * (1.0 - normal_cdf(abs_ar1, 0.0, 1.0));
 
-    let ar2_z = if sum_b2 > 0.0000000001 { sum_b / sqrt(sum_b2) } else { 0.0 };
+    let ar2_z = if sum_b2 > 1e-10 { sum_b / sqrt(sum_b2) } else { 0.0 };
     let abs_ar2 = if ar2_z < 0.0 { 0.0 - ar2_z } else { ar2_z };
     let ar2_p = 2.0 * (1.0 - normal_cdf(abs_ar2, 0.0, 1.0));
 

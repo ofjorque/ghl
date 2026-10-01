@@ -95,7 +95,7 @@ fn fit_cox_ph(times: Vector, events: Vector, x: Vector) -> CoxResult {
                     }
                 }
 
-                if s0 > 0.0000000001 {
+                if s0 > 1e-10 {
                     let mean_x = s1 / s0;
                     score = score + (x_j - mean_x);
                     let var_x = (s2 / s0) - (mean_x * mean_x);
@@ -112,7 +112,7 @@ fn fit_cox_ph(times: Vector, events: Vector, x: Vector) -> CoxResult {
         if abs_score < tol {
             converged = true;
         } else {
-            if info > 0.0000000001 {
+            if info > 1e-10 {
                 let step = score / info;
                 beta = beta + step;
                 let abs_step = if step < 0.0 { 0.0 - step } else { step };
@@ -126,7 +126,7 @@ fn fit_cox_ph(times: Vector, events: Vector, x: Vector) -> CoxResult {
         }
     }
 
-    let se = if final_info > 0.0000000001 {
+    let se = if final_info > 1e-10 {
         sqrt(1.0 / final_info)
     } else {
         999.0

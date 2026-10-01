@@ -208,7 +208,7 @@ fn fit_graded_response(
             }
 
             let p_i_marginal = sum_post * exp(max_log_p);
-            if p_i_marginal > 0.0000000001 {
+            if p_i_marginal > 1e-10 {
                 current_loglik = current_loglik + ln(p_i_marginal);
             }
 
@@ -223,14 +223,7 @@ fn fit_graded_response(
         final_loglik = current_loglik;
 
         // Accumulate expected test-takers from posterior column sums
-        let mut n_table = [];
-        for q in 0..n_q {
-            let mut sum_nq = 0.0;
-            for i in 0..n_persons {
-                sum_nq = sum_nq + post_mat[i, q];
-            }
-            n_table = append(n_table, sum_nq);
-        }
+        let n_table = col_sums(post_mat);
 
         // R = B * Post (total_thresh x n_q) in ONE faer GEMM multiplication!
         let r_mat = mat_b * post_mat;
@@ -265,7 +258,7 @@ fn fit_graded_response(
                     info_b = info_b + (n_q_val * var_inv * dp_db * dp_db);
                 }
 
-                let step_b = if info_b > 0.0000000001 { grad_b / info_b } else { 0.0 };
+                let step_b = if info_b > 1e-10 { grad_b / info_b } else { 0.0 };
                 let mut new_b = old_b + step_b;
                 if new_b < -3.5 { new_b = -3.5; }
                 if new_b > 3.5 { new_b = 3.5; }

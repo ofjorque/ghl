@@ -44,17 +44,17 @@ fn chi_square_tail_p(stat: f64, df: i64) -> f64 {
     if df == 2 {
         // Exact closed form for Chi-square with 2 degrees of freedom: exp(-s / 2)
         let p = exp(-0.5 * s);
-        clamp(p, 0.000001, 1.0)
+        clamp(p, 1e-6, 1.0)
     } else {
         // df = 1: p = 2 * (1 - Phi(sqrt(s)))
         let z = sqrt(s);
         if z > 8.0 {
-            0.000001
+            1e-6
         } else {
             let exp_term = exp(-0.5 * z * z);
             let norm_tail = (1.0 / (1.0 + (0.33267 * z))) * (exp_term / 2.506628);
             let two_tail = norm_tail * 2.0;
-            clamp(two_tail, 0.000001, 1.0)
+            clamp(two_tail, 1e-6, 1.0)
         }
     }
 }

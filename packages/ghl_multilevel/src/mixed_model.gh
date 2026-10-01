@@ -40,7 +40,7 @@ fn fit_mixed_model(y: Vector, x: Vector, groups: Vector, n_groups: i64) -> Mixed
 
     let fn_obs = 0.0 + n;
     let denom_ols = (fn_obs * sum_xx) - (sum_x * sum_x);
-    let mut b1 = if abs(denom_ols) > 0.0000000001 {
+    let mut b1 = if abs(denom_ols) > 1e-10 {
         ((fn_obs * sum_xy) - (sum_x * sum_y)) / denom_ols
     } else {
         0.0

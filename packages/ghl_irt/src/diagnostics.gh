@@ -275,7 +275,7 @@ fn compute_q3_residuals(
             let dev = e_ij - mean_j;
             sum_sq = sum_sq + (dev * dev);
         }
-        let s_j = if sum_sq > 0.0000000001 { sqrt(sum_sq) } else { 1.0 };
+        let s_j = if sum_sq > 1e-10 { sqrt(sum_sq) } else { 1.0 };
         std_residuals = append(std_residuals, s_j);
     }
 
@@ -304,7 +304,7 @@ fn compute_q3_residuals(
                 }
 
                 let den = std_j * std_k;
-                let raw_r = if den > 0.0000000001 { sum_prod / den } else { 0.0 };
+                let raw_r = if den > 1e-10 { sum_prod / den } else { 0.0 };
                 let r_val = clamp(raw_r, -1.0, 1.0);
 
                 q3_matrix = append(q3_matrix, r_val);

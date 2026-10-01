@@ -111,10 +111,14 @@ pub enum Token {
     Ident(String),
 
     // Numeric Literals
-    #[regex(r"([0-9]+\.[0-9]+([eE][+-]?[0-9]+)?)|([0-9]+[eE][+-]?[0-9]+)", |lex| lex.slice().to_string())]
+    #[regex(r"([0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?)|([0-9][0-9_]*[eE][+-]?[0-9_]+)", |lex| {
+        lex.slice().replace('_', "")
+    })]
     FloatLit(String),
 
-    #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
+    #[regex(r"[0-9][0-9_]*", |lex| {
+        lex.slice().replace('_', "").parse::<i64>().ok()
+    })]
     IntLit(i64),
 
     // String Literals
@@ -383,6 +387,27 @@ mod tests {
                 Token::OrOr,
                 Token::Pipe,
                 Token::VBar,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_lex_scientific_and_underscored_numbers() {
+        let src = r#"1e-10 1.0e-10 1e4 2.5e+3 1_000_000 1_000.5_000"#;
+        let tokens: Vec<Token> = lex(src)
+            .into_iter()
+            .map(|(r, _)| r.unwrap())
+            .collect();
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::FloatLit("1e-10".into()),
+                Token::FloatLit("1.0e-10".into()),
+                Token::FloatLit("1e4".into()),
+                Token::FloatLit("2.5e+3".into()),
+                Token::IntLit(1_000_000),
+                Token::FloatLit("1000.5000".into()),
             ]
         );
     }

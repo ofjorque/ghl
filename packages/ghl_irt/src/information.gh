@@ -62,13 +62,13 @@ fn compute_dichotomous_diagnostics(
             sum_sq_err = sum_sq_err + err2;
             sum_var = sum_var + w_ij;
 
-            let std_sq = if w_ij > 0.0000000001 { err2 / w_ij } else { 1.0 };
+            let std_sq = if w_ij > 1e-10 { err2 / w_ij } else { 1.0 };
             sum_std_sq = sum_std_sq + std_sq;
         }
 
         let fn_p = 0.0 + n_persons;
         let outfit = sum_std_sq / fn_p;
-        let infit = if sum_var > 0.0000000001 { sum_sq_err / sum_var } else { 1.0 };
+        let infit = if sum_var > 1e-10 { sum_sq_err / sum_var } else { 1.0 };
 
         infit_vec = append(infit_vec, infit);
         outfit_vec = append(outfit_vec, outfit);
@@ -96,7 +96,7 @@ fn compute_dichotomous_diagnostics(
             info_total = info_total + info_j;
         }
 
-        let sem = if info_total > 0.0000000001 { 1.0 / sqrt(info_total) } else { 999.0 };
+        let sem = if info_total > 1e-10 { 1.0 / sqrt(info_total) } else { 999.0 };
 
         tif_curve = append(tif_curve, info_total);
         sem_curve = append(sem_curve, sem);

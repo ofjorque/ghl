@@ -236,7 +236,7 @@ fn fit_dichotomous_irt(
                 }
 
                 // Update difficulty b_j
-                let raw_step_b = if info_b > 0.0000000001 { grad_b / info_b } else { 0.0 };
+                let raw_step_b = if info_b > 1e-10 { grad_b / info_b } else { 0.0 };
                 let clip_step_b = if raw_step_b > 0.40 { 0.40 } else { if raw_step_b < -0.40 { -0.40 } else { raw_step_b } };
                 let step_b = clip_step_b * 0.75;
                 let mut new_b = old_b + step_b;
@@ -246,7 +246,7 @@ fn fit_dichotomous_irt(
                 // Update discrimination a_j (if 2PL, 3PL or 4PL)
                 let mut new_a = old_a;
                 if model_type != "1PL" {
-                    let raw_step_a = if info_a > 0.0000000001 { grad_a / info_a } else { 0.0 };
+                    let raw_step_a = if info_a > 1e-10 { grad_a / info_a } else { 0.0 };
                     let clip_step_a = if raw_step_a > 0.35 { 0.35 } else { if raw_step_a < -0.35 { -0.35 } else { raw_step_a } };
                     let step_a = clip_step_a * 0.75;
                     new_a = old_a + step_a;

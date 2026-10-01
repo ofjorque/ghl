@@ -45,11 +45,11 @@ struct MixedIrtAudit {
 fn mixed_z_tail_p(z: f64) -> f64 {
     let az = abs(z);
     if az > 8.0 {
-        0.000001
+        1e-6
     } else {
         let exp_term = exp(-0.5 * az * az);
         let norm_tail = (1.0 / (1.0 + (0.33267 * az))) * (exp_term / 2.506628);
-        clamp(norm_tail * 2.0, 0.000001, 1.0)
+        clamp(norm_tail * 2.0, 1e-6, 1.0)
     }
 }
 
@@ -247,7 +247,7 @@ fn fit_mixed_irt(
 
         for p in 0..n_features {
             let hb = hess_beta[p];
-            let se_p = if hb > 0.000001 { 1.0 / sqrt(hb) } else { 0.15 };
+            let se_p = if hb > 1e-6 { 1.0 / sqrt(hb) } else { 0.15 };
             last_se_beta = set(last_se_beta, p, se_p);
 
             let step_bp = clamp((0.0 - grad_beta[p]) / (hb + lambda_damp), -0.35, 0.35);
@@ -303,7 +303,7 @@ fn fit_mixed_irt(
 
         for k in 0..n_covariates {
             let hg = hess_gamma[k];
-            let se_k = if hg > 0.000001 { 1.0 / sqrt(hg) } else { 0.15 };
+            let se_k = if hg > 1e-6 { 1.0 / sqrt(hg) } else { 0.15 };
             last_se_gamma = set(last_se_gamma, k, se_k);
 
             let step_gk = clamp(grad_gamma[k] / (hg + lambda_damp), -0.35, 0.35);
@@ -356,7 +356,7 @@ fn fit_mixed_irt(
     for p in 0..n_features {
         let b_val = beta[p];
         let se = last_se_beta[p];
-        let z = if se > 0.000001 { b_val / se } else { 0.0 };
+        let z = if se > 1e-6 { b_val / se } else { 0.0 };
         let p_val = mixed_z_tail_p(z);
 
         let feat = LltmFeatureResult {
@@ -374,7 +374,7 @@ fn fit_mixed_irt(
     for k in 0..n_covariates {
         let g_val = gamma[k];
         let se = last_se_gamma[k];
-        let z = if se > 0.000001 { g_val / se } else { 0.0 };
+        let z = if se > 1e-6 { g_val / se } else { 0.0 };
         let p_val = mixed_z_tail_p(z);
 
         let cov = PersonCovariateResult {
