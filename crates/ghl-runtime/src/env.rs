@@ -286,6 +286,21 @@ impl RuntimeEnv {
         env.set("irt_em_quadrature_kernel".into(), Value::NativeFn(native_irt_em_quadrature_kernel));
         env.set("irt_quadrature_grid".into(), Value::NativeFn(native_irt_quadrature_grid));
 
+        // Fused Tensor Operations & Axis Reductions (Roadmap 09 Parte H / Pilar 5)
+        env.set("sigmoid_matmul".into(), Value::NativeFn(native_sigmoid_matmul));
+        env.set("sigmoid".into(), Value::NativeFn(native_sigmoid));
+        env.set("log_sum_exp".into(), Value::NativeFn(native_log_sum_exp));
+        env.set("softmax".into(), Value::NativeFn(native_softmax));
+        env.set("fused_mul_add".into(), Value::NativeFn(native_fused_mul_add));
+        env.set("row_sums".into(), Value::NativeFn(native_row_sums));
+        env.set("col_sums".into(), Value::NativeFn(native_col_sums));
+        env.set("row_means".into(), Value::NativeFn(native_row_means));
+        env.set("col_means".into(), Value::NativeFn(native_col_means));
+        env.set("row_maxs".into(), Value::NativeFn(native_row_maxs));
+        env.set("col_maxs".into(), Value::NativeFn(native_col_maxs));
+        env.set("row_mins".into(), Value::NativeFn(native_row_mins));
+        env.set("col_mins".into(), Value::NativeFn(native_col_mins));
+
         // Grammar of Graphics (RFC 09) Verbs
         env.set("plot".into(), Value::NativeFn(native_plot));
         env.set("aes".into(), Value::NativeFn(native_aes));
@@ -504,7 +519,6 @@ impl RuntimeEnv {
         env.set("identity".into(),     Value::NativeFn(native_identity));
         env.set("eye".into(),          Value::NativeFn(native_identity));
         env.set("diag".into(),         Value::NativeFn(native_diag));
-        env.set("log_sum_exp".into(),  Value::NativeFn(native_log_sum_exp));
 
         // Vector / window helpers
         env.set("cumsum".into(),    Value::NativeFn(native_cumsum));
@@ -693,3 +707,4 @@ use crate::native_dataframe_ext::*;
 use crate::native_arena_ops::*;
 use crate::native_distributions::*;
 use crate::native_irt::*;
+use crate::native_fused::*;

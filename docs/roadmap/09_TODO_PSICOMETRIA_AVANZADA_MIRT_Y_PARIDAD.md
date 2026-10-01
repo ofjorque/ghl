@@ -154,8 +154,9 @@ Integración del parser de fórmulas SEM (`=~` y `~~`) en la definición de espe
     - Wrapper en `packages/ghl_irt/src/quadrature.gh` (`get_multidimensional_quadrature`).
 
 - [ ] **Pilar 5: Próxima Generación de Rendimiento Global (Paridad con NumPy / Julia):**
-  - [ ] **Operaciones Tensoriales Fusionadas (*Fused Kernels* en Stdlib):**
-    - Incorporar primitivas fusionadas en un solo paso (`sigmoid_matmul`, `log_sum_exp(matrix, axis)`) sin materializar matrices intermedias en RAM, ejecutando en registros AVX2 de la CPU.
+  - [x] **Operaciones Tensoriales Fusionadas (*Fused Kernels* en Stdlib):**
+    - Incorporar primitivas fusionadas en un solo paso (`sigmoid_matmul(A, B, [bias])`, `log_sum_exp(matrix, [axis])`, `softmax(matrix, [axis])`, `fused_mul_add`) sin materializar matrices intermedias en RAM, ejecutando en registros AVX2 de la CPU con soporte multihilo Rayon.
+    - Reducciones de eje matriciales zero-copy directas en memoria contigua: `row_sums`, `col_sums`, `row_means`, `col_means`, `row_maxs`, `col_maxs`, `row_mins`, `col_mins`.
   - [ ] **JIT de Cranelift Profundo para Bucles de Calibración:**
     - Bajar bucles iterativos cerrados (`while`/`for`) con variables mutables directamente a código máquina nativo x86-64 en memoria (`ghl-codegen`), eliminando la sobrecarga de evaluación AST para alcanzar el rango de sub-milisegundos ($\le 1.5\text{ ms}$).
 
