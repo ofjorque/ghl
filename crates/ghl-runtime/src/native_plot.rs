@@ -339,22 +339,64 @@ pub(crate) fn native_geom_rug(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_labs(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let mut p = match args.first() {
-        Some(Value::Plot(plot)) => (**plot).clone(),
-        _ => return Err(Diagnostic::compute_error("C0303", "`labs()` requires a Plot as first argument")),
-    };
+    let mut plot_opt: Option<PlotSpec> = None;
+    let mut title: Option<String> = None;
+    let mut subtitle: Option<String> = None;
+    let mut x_label: Option<String> = None;
+    let mut y_label: Option<String> = None;
+    let mut color_label: Option<String> = None;
+    let mut caption: Option<String> = None;
 
-    if let Some(title) = args.get(1).and_then(|v| v.as_str()) {
-        p.labels.title = Some(title.to_string());
-    }
-    if let Some(x_lab) = args.get(2).and_then(|v| v.as_str()) {
-        p.labels.x_label = Some(x_lab.to_string());
-    }
-    if let Some(y_lab) = args.get(3).and_then(|v| v.as_str()) {
-        p.labels.y_label = Some(y_lab.to_string());
+    let mut pos_args = Vec::new();
+    for arg in args {
+        match arg {
+            Value::Plot(p) => {
+                plot_opt = Some(*p);
+            }
+            Value::NamedArg(name, val) => match name.as_str() {
+                "title" => title = Some(extract_raw_string(&val)),
+                "subtitle" => subtitle = Some(extract_raw_string(&val)),
+                "x" | "x_label" | "xlab" => x_label = Some(extract_raw_string(&val)),
+                "y" | "y_label" | "ylab" => y_label = Some(extract_raw_string(&val)),
+                "color" | "colour" => color_label = Some(extract_raw_string(&val)),
+                "caption" => caption = Some(extract_raw_string(&val)),
+                _ => {}
+            },
+            other => pos_args.push(other),
+        }
     }
 
-    Ok(Value::Plot(Box::new(p)))
+    let mut pos_idx = 0;
+    if title.is_none() && pos_idx < pos_args.len() {
+        title = Some(extract_raw_string(&pos_args[pos_idx]));
+        pos_idx += 1;
+    }
+    if x_label.is_none() && pos_idx < pos_args.len() {
+        x_label = Some(extract_raw_string(&pos_args[pos_idx]));
+        pos_idx += 1;
+    }
+    if y_label.is_none() && pos_idx < pos_args.len() {
+        y_label = Some(extract_raw_string(&pos_args[pos_idx]));
+    }
+
+    if let Some(mut p) = plot_opt {
+        if let Some(t) = title { p.labels.title = Some(t); }
+        if let Some(s) = subtitle { p.labels.subtitle = Some(s); }
+        if let Some(x) = x_label { p.labels.x_label = Some(x); }
+        if let Some(y) = y_label { p.labels.y_label = Some(y); }
+        if let Some(c) = color_label { p.labels.color_label = Some(c); }
+        if let Some(cap) = caption { p.labels.caption = Some(cap); }
+        Ok(Value::Plot(Box::new(p)))
+    } else {
+        Ok(Value::Labels(ghl_plot::PlotLabels {
+            title,
+            subtitle,
+            x_label,
+            y_label,
+            color_label,
+            caption,
+        }))
+    }
 }
 
 pub(crate) fn native_scale_x_log10(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -379,31 +421,141 @@ pub(crate) fn native_scale_y_log10(args: Vec<Value>) -> Result<Value, Diagnostic
     }
 }
 
+pub(crate) fn native_theme(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut plot_opt: Option<PlotSpec> = None;
+    let mut font_family: Option<String> = None;
+    let mut theme_style: Option<ghl_plot::PlotTheme> = None;
+
+    let mut remaining = Vec::new();
+    for arg in args {
+        match arg {
+            Value::Plot(p) => {
+                plot_opt = Some(*p);
+            }
+            Value::NamedArg(name, val) => match name.as_str() {
+                "font" | "font_family" | "family" => {
+                    font_family = Some(extract_raw_string(&val));
+                }
+                "theme" | "style" => {
+                    let s = extract_raw_string(&val).to_lowercase();
+                    match s.as_str() {
+                        "minimal" => theme_style = Some(ghl_plot::PlotTheme::Minimal),
+                        "classic" => theme_style = Some(ghl_plot::PlotTheme::Classic),
+                        "dark" => theme_style = Some(ghl_plot::PlotTheme::Dark),
+                        "default" => theme_style = Some(ghl_plot::PlotTheme::Default),
+                        _ => {}
+                    }
+                }
+                _ => {}
+            },
+            other => remaining.push(other),
+        }
+    }
+
+    if font_family.is_none() && !remaining.is_empty() {
+        let s = extract_raw_string(&remaining[0]);
+        if !s.is_empty() {
+            match s.to_lowercase().as_str() {
+                "minimal" => theme_style = Some(ghl_plot::PlotTheme::Minimal),
+                "classic" => theme_style = Some(ghl_plot::PlotTheme::Classic),
+                "dark" => theme_style = Some(ghl_plot::PlotTheme::Dark),
+                "default" => theme_style = Some(ghl_plot::PlotTheme::Default),
+                _ => font_family = Some(s),
+            }
+        }
+    }
+
+    if let Some(mut p) = plot_opt {
+        if let Some(font) = font_family {
+            p.font_family = Some(font);
+        }
+        if let Some(t) = theme_style {
+            p.theme = t;
+        }
+        Ok(Value::Plot(Box::new(p)))
+    } else {
+        Ok(Value::Theme(ghl_plot::ThemeModifier {
+            theme: theme_style,
+            font_family,
+        }))
+    }
+}
+
 pub(crate) fn native_theme_minimal(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let mut p = match args.first() {
-        Some(Value::Plot(plot)) => (**plot).clone(),
-        _ => PlotSpec::new(),
-    };
-    p = p.theme_minimal();
-    Ok(Value::Plot(Box::new(p)))
+    if let Some(Value::Plot(plot)) = args.first() {
+        let mut p = (**plot).clone();
+        p = p.theme_minimal();
+        Ok(Value::Plot(Box::new(p)))
+    } else {
+        Ok(Value::Theme(ghl_plot::ThemeModifier {
+            theme: Some(ghl_plot::PlotTheme::Minimal),
+            font_family: None,
+        }))
+    }
 }
 
 pub(crate) fn native_theme_classic(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let mut p = match args.first() {
-        Some(Value::Plot(plot)) => (**plot).clone(),
-        _ => PlotSpec::new(),
-    };
-    p = p.theme_classic();
-    Ok(Value::Plot(Box::new(p)))
+    if let Some(Value::Plot(plot)) = args.first() {
+        let mut p = (**plot).clone();
+        p = p.theme_classic();
+        Ok(Value::Plot(Box::new(p)))
+    } else {
+        Ok(Value::Theme(ghl_plot::ThemeModifier {
+            theme: Some(ghl_plot::PlotTheme::Classic),
+            font_family: None,
+        }))
+    }
 }
 
 pub(crate) fn native_theme_dark(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let mut p = match args.first() {
-        Some(Value::Plot(plot)) => (**plot).clone(),
-        _ => PlotSpec::new(),
-    };
-    p = p.theme_dark();
-    Ok(Value::Plot(Box::new(p)))
+    if let Some(Value::Plot(plot)) = args.first() {
+        let mut p = (**plot).clone();
+        p = p.theme_dark();
+        Ok(Value::Plot(Box::new(p)))
+    } else {
+        Ok(Value::Theme(ghl_plot::ThemeModifier {
+            theme: Some(ghl_plot::PlotTheme::Dark),
+            font_family: None,
+        }))
+    }
+}
+
+pub(crate) fn native_beside(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error(
+            "C0322",
+            "`beside(p1, p2)` requires two Plot arguments (or `p1 |> beside(p2)`)"
+        ));
+    }
+    match (&args[0], &args[1]) {
+        (Value::Plot(p1), Value::Plot(p2)) => {
+            let comp = (**p1).clone().beside((**p2).clone());
+            Ok(Value::Plot(Box::new(comp)))
+        }
+        _ => Err(Diagnostic::compute_error(
+            "C0322",
+            "`beside()` arguments must be Plots"
+        )),
+    }
+}
+
+pub(crate) fn native_stack(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error(
+            "C0323",
+            "`stack(p1, p2)` requires two Plot arguments (or `p1 |> stack(p2)`)"
+        ));
+    }
+    match (&args[0], &args[1]) {
+        (Value::Plot(p1), Value::Plot(p2)) => {
+            let comp = (**p1).clone().stack((**p2).clone());
+            Ok(Value::Plot(Box::new(comp)))
+        }
+        _ => Err(Diagnostic::compute_error(
+            "C0323",
+            "`stack()` arguments must be Plots"
+        )),
+    }
 }
 
 pub(crate) fn native_factor(args: Vec<Value>) -> Result<Value, Diagnostic> {

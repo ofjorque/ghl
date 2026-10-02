@@ -386,3 +386,9 @@ Para evitar inconsistencias entre Plotters y Vega, **el cálculo de dimensiones 
 - [x] **Fase 4: Soporte Nativo de Factores (`Factor`)**: Mapeo directo de `Value::Factor` (con o sin `ordered: true`) a escalas de bandas discretas y boxplots comparativos.
 - [x] **Fase 5: Backend Vega Interactivo**: Emisión de especificaciones Vega JSON para visualización reactiva en Positron y notebooks.
 - [x] **Fase 6: Faceting y Álgebra de Composición**: Soporte para `facet_wrap` y `facet_grid` bidimensional, compartición de escalas (`fixed`, `free`, `free_x`, `free_y`), cálculo local de estadísticas y operadores de composición (`+`).
+- [x] **Fase 7: Composición Patchwork y Tipografía del Sistema**:
+  - Álgebra de composición para vistas independientes: `p1 | p2` (horizontal/beside), `p1 / p2` (vertical/stack), composiciones anidadas tipo dashboard `(p1 | p2) / p3`, y verbos de pipeline `beside(p1, p2)` y `stack(p1, p2)`.
+  - Desambiguación sintáctica completa con fórmulas econométricas multipartitas (`y ~ x | fe`).
+  - Soporte nativo de fuentes del sistema (`theme(font = "Fira Code", style = "minimal")`): emisión directa en SVG vectoriales (sin los dolores de cabeza de `showtext`/`extrafont` en R) y Vega-Lite v5 (`config.font`).
+  - Soporte de etiquetas flexibles: `p + labs(title = "...", x = "...", y = "...")` y `p |> labs(...)`.
+  - [ ] **TODO Futuro (Fase 7.1 - Raster OS Font Discovery)**: Indexación automática de directorios del sistema operativo (`C:\Windows\Fonts`, `/Library/Fonts`, `/usr/share/fonts`) para rasterizado pixel-perfect de fuentes TrueType/OpenType en exportaciones PNG locales.

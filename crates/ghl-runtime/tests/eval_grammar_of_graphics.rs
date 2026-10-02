@@ -329,3 +329,197 @@ fn test_grammar_of_graphics_facet_pipe_syntax() {
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
 }
+
+#[test]
+fn test_patchwork_horizontal_operator() {
+    let src = r#"
+        let df = dataframe {
+            x: [1.0, 2.0, 3.0],
+            y: [10.0, 20.0, 30.0]
+        };
+        let p1 = ggplot(df, aes("x", "y")) + geom_point() + labs(title = "Plot 1");
+        let p2 = ggplot(df, aes("x", "y")) + geom_line() + labs(title = "Plot 2");
+        let comp = p1 | p2;
+        comp
+    "#;
+    let res = eval_source(src).expect("Patchwork horizontal composition should succeed");
+    match res {
+        Value::Plot(p) => {
+            assert!(p.composite.is_some(), "Plot must contain a composite layout");
+            match p.composite.as_deref().unwrap() {
+                ghl_plot::CompositePlot::Horizontal(left, right) => {
+                    assert_eq!(left.labels.title.as_deref(), Some("Plot 1"));
+                    assert_eq!(right.labels.title.as_deref(), Some("Plot 2"));
+                }
+                _ => panic!("Expected Horizontal composite"),
+            }
+
+            // Test multi-backend rendering
+            let svg = p.to_svg(800, 400).expect("Composite SVG should render");
+            assert!(svg.contains("<svg"), "SVG must have root element");
+
+            let vega = p.to_vega_json().expect("Composite Vega-Lite should render");
+            assert!(vega.contains("\"hconcat\""), "Vega must contain hconcat operator");
+
+            let caps = ghl_diagnostics::RenderCaps::ascii_plain(80);
+            let deck = p.render(&caps);
+            assert!(!deck.is_empty(), "Terminal deck card should render");
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_patchwork_vertical_operator() {
+    let src = r#"
+        let df = dataframe {
+            x: [1.0, 2.0, 3.0],
+            y: [5.0, 15.0, 25.0]
+        };
+        let p1 = ggplot(df, aes("x", "y")) + geom_point();
+        let p2 = ggplot(df, aes("x", "y")) + geom_bar();
+        let comp = p1 / p2;
+        comp
+    "#;
+    let res = eval_source(src).expect("Patchwork vertical composition should succeed");
+    match res {
+        Value::Plot(p) => {
+            assert!(p.composite.is_some());
+            match p.composite.as_deref().unwrap() {
+                ghl_plot::CompositePlot::Vertical(_, _) => {}
+                _ => panic!("Expected Vertical composite"),
+            }
+
+            let svg = p.to_svg(600, 800).expect("Vertical composite SVG should render");
+            assert!(svg.contains("<svg"));
+
+            let vega = p.to_vega_json().expect("Vertical composite Vega should render");
+            assert!(vega.contains("\"vconcat\""), "Vega must contain vconcat operator");
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_patchwork_nested_layout_and_precedence() {
+    let src = r#"
+        let df = dataframe {
+            x: [1.0, 2.0, 3.0],
+            y: [10.0, 20.0, 30.0]
+        };
+        let p1 = ggplot(df, aes("x", "y")) + geom_point() + labs(title = "P1");
+        let p2 = ggplot(df, aes("x", "y")) + geom_line() + labs(title = "P2");
+        let p3 = ggplot(df, aes("x", "y")) + geom_smooth() + labs(title = "P3");
+
+        // Division / binds tighter than |: p1 | p2 / p3 is p1 | (p2 / p3)
+        let c1 = p1 | p2 / p3;
+
+        // Parentheses allow (p1 | p2) / p3
+        let c2 = (p1 | p2) / p3;
+
+        c2
+    "#;
+    let res = eval_source(src).expect("Nested patchwork evaluation should succeed");
+    match res {
+        Value::Plot(p) => {
+            assert!(p.composite.is_some());
+            match p.composite.as_deref().unwrap() {
+                ghl_plot::CompositePlot::Vertical(top, bottom) => {
+                    assert!(top.composite.is_some(), "Top should be composite horizontal");
+                    assert_eq!(bottom.labels.title.as_deref(), Some("P3"));
+                }
+                _ => panic!("Expected outer Vertical composite"),
+            }
+
+            let svg = p.to_svg(1000, 800).expect("Nested SVG should render");
+            assert!(svg.contains("<svg"));
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_patchwork_pipeline_verbs() {
+    let src = r#"
+        let df = dataframe {
+            x: [1.0, 2.0],
+            y: [10.0, 20.0]
+        };
+        let p1 = ggplot(df, aes("x", "y")) + geom_point();
+        let p2 = ggplot(df, aes("x", "y")) + geom_line();
+
+        let comp1 = beside(p1, p2);
+        let comp2 = p1 |> stack(p2);
+
+        comp2
+    "#;
+    let res = eval_source(src).expect("Patchwork verbs should succeed");
+    match res {
+        Value::Plot(p) => {
+            assert!(p.composite.is_some());
+            match p.composite.as_deref().unwrap() {
+                ghl_plot::CompositePlot::Vertical(_, _) => {}
+                _ => panic!("Expected Vertical composite"),
+            }
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_plot_theme_and_system_font() {
+    let src = r#"
+        let df = dataframe {
+            x: [1.0, 2.0, 3.0],
+            y: [10.0, 20.0, 30.0]
+        };
+        let p = ggplot(df, aes("x", "y")) 
+            + geom_point() 
+            + labs(title = "Custom System Font")
+            + theme(font = "Fira Code", style = "minimal");
+        p
+    "#;
+    let res = eval_source(src).expect("Theme with system font should succeed");
+    match res {
+        Value::Plot(p) => {
+            assert_eq!(p.font_family.as_deref(), Some("Fira Code"));
+            assert_eq!(p.theme, ghl_plot::PlotTheme::Minimal);
+
+            // Verify SVG embeds the system font family name
+            let svg = p.to_svg(800, 600).expect("SVG with font should render");
+            assert!(svg.contains("Fira Code"), "SVG output must include the custom font family");
+
+            // Verify Vega-Lite specification configures the font
+            let vega = p.to_vega_json().expect("Vega with font should render");
+            assert!(vega.contains("\"font\": \"Fira Code\""), "Vega config must include font");
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_patchwork_inherited_font_on_composite() {
+    let src = r#"
+        let df = dataframe {
+            x: [1.0, 2.0],
+            y: [5.0, 10.0]
+        };
+        let p1 = ggplot(df, aes("x", "y")) + geom_point();
+        let p2 = ggplot(df, aes("x", "y")) + geom_line();
+        let comp = (p1 | p2) + theme(font = "Inter");
+        comp
+    "#;
+    let res = eval_source(src).expect("Composite theme with font should succeed");
+    match res {
+        Value::Plot(p) => {
+            assert_eq!(p.font_family.as_deref(), Some("Inter"));
+
+            let svg = p.to_svg(800, 400).expect("Composite SVG with font should render");
+            assert!(svg.contains("Inter"), "Composite SVG must propagate inherited font");
+
+            let vega = p.to_vega_json().expect("Composite Vega with font should render");
+            assert!(vega.contains("\"font\": \"Inter\""), "Composite Vega must contain font config");
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}

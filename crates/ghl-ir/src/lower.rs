@@ -211,7 +211,7 @@ impl LoweringContext {
                     BinaryOp::GtEq => (HirBinaryOp::Ge, HirType::Bool),
 
                     BinaryOp::And => (HirBinaryOp::And, HirType::Bool),
-                    BinaryOp::Or => (HirBinaryOp::Or, HirType::Bool),
+                    BinaryOp::Or | BinaryOp::BitOr => (HirBinaryOp::Or, HirType::Bool),
                     _ => {
                         return Err(Diagnostic::compute_error(
                             "C0302",

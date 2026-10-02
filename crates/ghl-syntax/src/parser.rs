@@ -936,7 +936,24 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             })
             .boxed();
 
-        formula
+        // Patchwork composition: p1 | p2 (Token::VBar)
+        let patchwork = formula
+            .clone()
+            .then(just(Token::VBar).to(BinaryOp::BitOr).then(formula).repeated())
+            .foldl(|lhs, (op, rhs)| {
+                let span = lhs.span.start..rhs.span.end;
+                Expr::new(
+                    ExprKind::Binary {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    },
+                    span,
+                )
+            })
+            .boxed();
+
+        patchwork
     })
 }
 

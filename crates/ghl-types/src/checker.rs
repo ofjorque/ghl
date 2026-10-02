@@ -938,7 +938,7 @@ impl TypeChecker {
                             Type::Bool
                         }
                     }
-                    BinaryOp::And | BinaryOp::Or => Type::Bool,
+                    BinaryOp::And | BinaryOp::Or | BinaryOp::BitOr => Type::Bool,
                 }
             }
 

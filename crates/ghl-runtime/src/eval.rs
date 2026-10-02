@@ -2487,8 +2487,8 @@ impl Interpreter {
                 }
             }
 
-            // Standard Arithmetic (+, -, *, /, %, ^)
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::Pow => {
+            // Standard Arithmetic (+, -, *, /, %, ^, |)
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::Pow | BinaryOp::BitOr => {
                 // Kleene NA propagation: any operation with NA yields NA (preserving reason)
                 if let Value::NA(r) = left {
                     return Ok(Value::NA(r));
@@ -2611,13 +2611,42 @@ impl Interpreter {
                                 p.facet = Some(f);
                                 return Ok(Value::Plot(p));
                             }
+                            Value::Theme(t) => {
+                                t.apply(&mut p);
+                                return Ok(Value::Plot(p));
+                            }
+                            Value::Labels(l) => {
+                                if let Some(t) = l.title { p.labels.title = Some(t); }
+                                if let Some(s) = l.subtitle { p.labels.subtitle = Some(s); }
+                                if let Some(x) = l.x_label { p.labels.x_label = Some(x); }
+                                if let Some(y) = l.y_label { p.labels.y_label = Some(y); }
+                                if let Some(c) = l.color_label { p.labels.color_label = Some(c); }
+                                if let Some(cap) = l.caption { p.labels.caption = Some(cap); }
+                                return Ok(Value::Plot(p));
+                            }
                             other => {
                                 return Err(Diagnostic::compute_error(
                                     "C0308",
-                                    format!("Cannot add `{}` to a Plot. Expected a Geom layer or Facet (e.g. `geom_point()`, `facet_wrap()`).", other.type_name()),
+                                    format!("Cannot add `{}` to a Plot. Expected a Geom layer, Facet, Theme, or Labels (e.g. `geom_point()`, `facet_wrap()`, `theme()`, `labs()`).", other.type_name()),
                                 ));
                             }
                         }
+                    }
+                }
+
+                // Patchwork horizontal composition: p1 | p2
+                if op == BinaryOp::BitOr {
+                    if let (Value::Plot(p1), Value::Plot(p2)) = (&left, &right) {
+                        let comp = (**p1).clone().beside((**p2).clone());
+                        return Ok(Value::Plot(Box::new(comp)));
+                    }
+                }
+
+                // Patchwork vertical composition: p1 / p2
+                if op == BinaryOp::Div {
+                    if let (Value::Plot(p1), Value::Plot(p2)) = (&left, &right) {
+                        let comp = (**p1).clone().stack((**p2).clone());
+                        return Ok(Value::Plot(Box::new(comp)));
                     }
                 }
 
@@ -2653,6 +2682,7 @@ impl Interpreter {
                         BinaryOp::Div => Ok(Value::F64(*a as f64 / *b as f64)),
                         BinaryOp::Mod => Ok(Value::I64(a % b)),
                         BinaryOp::Pow => Ok(Value::I64(a.pow(*b as u32))),
+                        BinaryOp::BitOr => Ok(Value::I64(a | b)),
                         _ => unreachable!(),
                     };
                 }

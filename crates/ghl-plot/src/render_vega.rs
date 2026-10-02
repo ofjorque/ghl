@@ -18,6 +18,55 @@ impl VegaRenderer {
 
     /// Generate a `serde_json::Value` tree representing the Vega-Lite v5 spec.
     pub fn to_vega_value(spec: &PlotSpec) -> Result<Value, String> {
+        if let Some(ref comp) = spec.composite {
+            match comp.as_ref() {
+                crate::spec::CompositePlot::Horizontal(left, right) => {
+                    let mut l = (**left).clone();
+                    let mut r = (**right).clone();
+                    if l.font_family.is_none() { l.font_family = spec.font_family.clone(); }
+                    if r.font_family.is_none() { r.font_family = spec.font_family.clone(); }
+                    let mut l_val = Self::to_vega_value(&l)?;
+                    let mut r_val = Self::to_vega_value(&r)?;
+                    if let Some(obj) = l_val.as_object_mut() {
+                        obj.remove("$schema");
+                    }
+                    if let Some(obj) = r_val.as_object_mut() {
+                        obj.remove("$schema");
+                    }
+                    let mut out = json!({
+                        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+                        "hconcat": [l_val, r_val]
+                    });
+                    if let Some(ref font) = spec.font_family {
+                        out["config"] = json!({ "font": font });
+                    }
+                    return Ok(out);
+                }
+                crate::spec::CompositePlot::Vertical(top, bottom) => {
+                    let mut t = (**top).clone();
+                    let mut b = (**bottom).clone();
+                    if t.font_family.is_none() { t.font_family = spec.font_family.clone(); }
+                    if b.font_family.is_none() { b.font_family = spec.font_family.clone(); }
+                    let mut t_val = Self::to_vega_value(&t)?;
+                    let mut b_val = Self::to_vega_value(&b)?;
+                    if let Some(obj) = t_val.as_object_mut() {
+                        obj.remove("$schema");
+                    }
+                    if let Some(obj) = b_val.as_object_mut() {
+                        obj.remove("$schema");
+                    }
+                    let mut out = json!({
+                        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+                        "vconcat": [t_val, b_val]
+                    });
+                    if let Some(ref font) = spec.font_family {
+                        out["config"] = json!({ "font": font });
+                    }
+                    return Ok(out);
+                }
+            }
+        }
+
         let is_hist = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Histogram { .. }));
         let is_box = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Boxplot { .. }));
         let is_bar = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Bar));
@@ -32,6 +81,9 @@ impl VegaRenderer {
         let mut config = json!({
             "view": { "stroke": null }
         });
+        if let Some(ref font) = spec.font_family {
+            config["font"] = json!(font);
+        }
         if spec.theme == PlotTheme::Dark {
             config["background"] = json!("#18181b");
             config["axis"] = json!({

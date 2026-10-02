@@ -78,9 +78,10 @@ pub enum BinaryOp {
     LtEq,
     Gt,
     GtEq,
-    // Logic
+    // Logic & Bitwise / Composition
     And,
     Or,
+    BitOr,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -494,6 +495,7 @@ impl std::fmt::Display for BinaryOp {
             BinaryOp::GtEq => ">=",
             BinaryOp::And => "&&",
             BinaryOp::Or => "||",
+            BinaryOp::BitOr => "|",
         };
         write!(f, "{op_str}")
     }

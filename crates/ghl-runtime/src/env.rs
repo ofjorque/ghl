@@ -327,9 +327,12 @@ impl RuntimeEnv {
         env.set("hist".into(), Value::NativeFn(native_hist));
         env.set("histogram".into(), Value::NativeFn(native_hist));
         env.set("boxplot".into(), Value::NativeFn(native_boxplot));
+        env.set("theme".into(), Value::NativeFn(native_theme));
         env.set("theme_minimal".into(), Value::NativeFn(native_theme_minimal));
         env.set("theme_classic".into(), Value::NativeFn(native_theme_classic));
         env.set("theme_dark".into(), Value::NativeFn(native_theme_dark));
+        env.set("beside".into(), Value::NativeFn(native_beside));
+        env.set("stack".into(), Value::NativeFn(native_stack));
 
         // Factor & Categorical primitives
         env.set("factor".into(), Value::NativeFn(native_factor));

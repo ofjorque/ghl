@@ -12,6 +12,21 @@ pub struct TerminalRenderer;
 
 impl TerminalRenderer {
     pub fn render(spec: &PlotSpec, caps: &RenderCaps) -> String {
+        if let Some(ref comp) = spec.composite {
+            return match comp.as_ref() {
+                crate::spec::CompositePlot::Horizontal(left, right) => {
+                    let l_str = Self::render(left, caps);
+                    let r_str = Self::render(right, caps);
+                    format!("{l_str}\n\n{r_str}")
+                }
+                crate::spec::CompositePlot::Vertical(top, bottom) => {
+                    let t_str = Self::render(top, caps);
+                    let b_str = Self::render(bottom, caps);
+                    format!("{t_str}\n\n{b_str}")
+                }
+            };
+        }
+
         if spec.facet.is_some() {
             let (panels, _, _) = spec.partition_facets();
             let mut out = String::new();

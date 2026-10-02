@@ -66,11 +66,43 @@ impl NativeRenderer {
         };
         root.fill(&bg_color).map_err(|e| format!("{e}"))?;
 
+        if let Some(ref comp) = spec.composite {
+            return Self::draw_composite(comp, root, spec);
+        }
+
         if spec.facet.is_some() {
             return Self::draw_facets(spec, root);
         }
 
         Self::draw_single_panel(spec, root)
+    }
+
+    fn draw_composite<DB: DrawingBackend>(
+        comp: &crate::spec::CompositePlot,
+        root: &DrawingArea<DB, plotters::coord::Shift>,
+        parent_spec: &PlotSpec,
+    ) -> Result<(), String> {
+        match comp {
+            crate::spec::CompositePlot::Horizontal(left, right) => {
+                let areas = root.split_evenly((1, 2));
+                let mut l = (**left).clone();
+                let mut r = (**right).clone();
+                if l.font_family.is_none() { l.font_family = parent_spec.font_family.clone(); }
+                if r.font_family.is_none() { r.font_family = parent_spec.font_family.clone(); }
+                Self::draw_chart(&l, &areas[0])?;
+                Self::draw_chart(&r, &areas[1])?;
+            }
+            crate::spec::CompositePlot::Vertical(top, bottom) => {
+                let areas = root.split_evenly((2, 1));
+                let mut t = (**top).clone();
+                let mut b = (**bottom).clone();
+                if t.font_family.is_none() { t.font_family = parent_spec.font_family.clone(); }
+                if b.font_family.is_none() { b.font_family = parent_spec.font_family.clone(); }
+                Self::draw_chart(&t, &areas[0])?;
+                Self::draw_chart(&b, &areas[1])?;
+            }
+        }
+        Ok(())
     }
 
     fn draw_single_panel<DB: DrawingBackend>(spec: &PlotSpec, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
@@ -115,9 +147,11 @@ impl NativeRenderer {
         };
 
         // Top super-title if present
+        let font_name = spec.font_family.as_deref().unwrap_or("sans-serif");
+
         let grid_area = if let Some(ref title) = spec.labels.title {
             let (top, bottom) = root.split_vertically(38);
-            let title_style = ("sans-serif", 20).into_font().color(&strip_text_color);
+            let title_style = (font_name, 20).into_font().color(&strip_text_color);
             top.draw(&Text::new(title.clone(), (15, 10), title_style))
                 .map_err(|e| format!("{e}"))?;
             bottom
@@ -145,7 +179,7 @@ impl NativeRenderer {
             )).map_err(|e| format!("{e}"))?;
 
             let strip_text = &panel.label;
-            let strip_font = ("sans-serif", 13).into_font().color(&strip_text_color);
+            let strip_font = (font_name, 13).into_font().color(&strip_text_color);
             let char_width = 7;
             let text_pixel_len = strip_text.len() as i32 * char_width;
             let draw_x = ((w - text_pixel_len) / 2).max(6);
@@ -213,10 +247,11 @@ impl NativeRenderer {
         let title_opt = spec.labels.title.as_deref();
         let x_label = spec.labels.x_label.as_deref().unwrap_or("x");
         let y_label = spec.labels.y_label.as_deref().unwrap_or("y");
+        let font_name = spec.font_family.as_deref().unwrap_or("sans-serif");
 
         let mut chart_builder = ChartBuilder::on(root);
         if let Some(t) = title_opt {
-            chart_builder.caption(t, ("sans-serif", 22).into_font().color(&text_color)).margin(18);
+            chart_builder.caption(t, (font_name, 22).into_font().color(&text_color)).margin(18);
         } else {
             chart_builder.margin(10);
         }
@@ -231,8 +266,8 @@ impl NativeRenderer {
             .configure_mesh()
             .x_desc(x_label)
             .y_desc(y_label)
-            .axis_desc_style(("sans-serif", 15).into_font().color(&text_color))
-            .label_style(("sans-serif", 12).into_font().color(&text_color))
+            .axis_desc_style((font_name, 15).into_font().color(&text_color))
+            .label_style((font_name, 12).into_font().color(&text_color))
             .light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
             .bold_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
             .draw()
@@ -304,7 +339,7 @@ impl NativeRenderer {
                 .configure_series_labels()
                 .background_style(ShapeStyle::from(&bg_color).filled())
                 .border_style(ShapeStyle::from(&grid_color).stroke_width(1))
-                .label_font(("sans-serif", 12).into_font().color(&text_color))
+                .label_font((font_name, 12).into_font().color(&text_color))
                 .position(SeriesLabelPosition::UpperRight)
                 .draw()
                 .map_err(|e| format!("Legend draw error: {e}"))?;
@@ -327,9 +362,10 @@ impl NativeRenderer {
         let title = spec.labels.title.as_deref().unwrap_or("Histogram");
         let x_label = spec.labels.x_label.as_deref().unwrap_or("x");
         let y_label = spec.labels.y_label.as_deref().unwrap_or("Count");
+        let font_name = spec.font_family.as_deref().unwrap_or("sans-serif");
 
         let mut chart = ChartBuilder::on(root)
-            .caption(title, ("sans-serif", 22).into_font().color(&text_color))
+            .caption(title, (font_name, 22).into_font().color(&text_color))
             .margin(20)
             .x_label_area_size(42)
             .y_label_area_size(52)
@@ -340,8 +376,8 @@ impl NativeRenderer {
             .configure_mesh()
             .x_desc(x_label)
             .y_desc(y_label)
-            .axis_desc_style(("sans-serif", 15).into_font().color(&text_color))
-            .label_style(("sans-serif", 12).into_font().color(&text_color))
+            .axis_desc_style((font_name, 15).into_font().color(&text_color))
+            .label_style((font_name, 12).into_font().color(&text_color))
             .light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
             .draw()
             .map_err(|e| format!("Mesh draw error: {e}"))?;
@@ -394,8 +430,9 @@ impl NativeRenderer {
             let y_max = global_max + y_pad;
 
             let k = multi_stats.len();
+            let font_name = spec.font_family.as_deref().unwrap_or("sans-serif");
             let mut chart = ChartBuilder::on(root)
-                .caption(title, ("sans-serif", 22).into_font().color(&text_color))
+                .caption(title, (font_name, 22).into_font().color(&text_color))
                 .margin(20)
                 .x_label_area_size(42)
                 .y_label_area_size(52)
@@ -406,8 +443,8 @@ impl NativeRenderer {
                 .configure_mesh()
                 .x_desc(x_label)
                 .y_desc(y_label)
-                .axis_desc_style(("sans-serif", 15).into_font().color(&text_color))
-                .label_style(("sans-serif", 12).into_font().color(&text_color))
+                .axis_desc_style((font_name, 15).into_font().color(&text_color))
+                .label_style((font_name, 12).into_font().color(&text_color))
                 .light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
                 .draw()
                 .map_err(|e| format!("Mesh draw error: {e}"))?;
@@ -484,7 +521,7 @@ impl NativeRenderer {
                 .configure_series_labels()
                 .background_style(ShapeStyle::from(&bg_color).filled())
                 .border_style(ShapeStyle::from(&grid_color).stroke_width(1))
-                .label_font(("sans-serif", 12).into_font().color(&text_color))
+                .label_font((font_name, 12).into_font().color(&text_color))
                 .position(SeriesLabelPosition::UpperRight)
                 .draw()
                 .map_err(|e| format!("Legend draw error: {e}"))?;
@@ -501,6 +538,7 @@ impl NativeRenderer {
 
         let title = spec.labels.title.as_deref().unwrap_or("Boxplot");
         let y_label = spec.labels.y_label.as_deref().unwrap_or("Value");
+        let font_name = spec.font_family.as_deref().unwrap_or("sans-serif");
 
         let y_span = (stats.max - stats.min).abs().max(1.0);
         let y_pad = y_span * 0.1;
@@ -508,7 +546,7 @@ impl NativeRenderer {
         let y_max = stats.max + y_pad;
 
         let mut chart = ChartBuilder::on(root)
-            .caption(title, ("sans-serif", 22).into_font().color(&text_color))
+            .caption(title, (font_name, 22).into_font().color(&text_color))
             .margin(20)
             .x_label_area_size(42)
             .y_label_area_size(52)
@@ -518,8 +556,8 @@ impl NativeRenderer {
         chart
             .configure_mesh()
             .y_desc(y_label)
-            .axis_desc_style(("sans-serif", 15).into_font().color(&text_color))
-            .label_style(("sans-serif", 12).into_font().color(&text_color))
+            .axis_desc_style((font_name, 15).into_font().color(&text_color))
+            .label_style((font_name, 12).into_font().color(&text_color))
             .light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
             .draw()
             .map_err(|e| format!("Mesh draw error: {e}"))?;
@@ -596,12 +634,13 @@ impl NativeRenderer {
         let title = spec.labels.title.as_deref().unwrap_or("Bar Chart");
         let x_label = spec.labels.x_label.as_deref().unwrap_or("Category");
         let y_label = spec.labels.y_label.as_deref().unwrap_or("Count");
+        let font_name = spec.font_family.as_deref().unwrap_or("sans-serif");
 
         let n_cats = counts_map.len();
         let max_count = counts_map.values().copied().max().unwrap_or(1);
 
         let mut chart = ChartBuilder::on(root)
-            .caption(title, ("sans-serif", 22).into_font().color(&text_color))
+            .caption(title, (font_name, 22).into_font().color(&text_color))
             .margin(20)
             .x_label_area_size(42)
             .y_label_area_size(52)
@@ -612,8 +651,8 @@ impl NativeRenderer {
             .configure_mesh()
             .x_desc(x_label)
             .y_desc(y_label)
-            .axis_desc_style(("sans-serif", 15).into_font().color(&text_color))
-            .label_style(("sans-serif", 12).into_font().color(&text_color))
+            .axis_desc_style((font_name, 15).into_font().color(&text_color))
+            .label_style((font_name, 12).into_font().color(&text_color))
             .light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
             .draw()
             .map_err(|e| format!("Mesh draw error: {e}"))?;

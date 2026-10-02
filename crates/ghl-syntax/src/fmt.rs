@@ -658,11 +658,13 @@ fn binary_op_symbol(op: BinaryOp) -> &'static str {
         BinaryOp::GtEq => ">=",
         BinaryOp::And => "&&",
         BinaryOp::Or => "||",
+        BinaryOp::BitOr => "|",
     }
 }
 
 fn binary_op_precedence(op: BinaryOp) -> u8 {
     match op {
+        BinaryOp::BitOr => 0,
         BinaryOp::Or => 1,
         BinaryOp::And => 2,
         BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => 3,

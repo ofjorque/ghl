@@ -213,6 +213,8 @@ pub enum Value {
     Aesthetic(AestheticMap),
     Geom(GeomLayer),
     Facet(FacetSpec),
+    Theme(ghl_plot::ThemeModifier),
+    Labels(ghl_plot::PlotLabels),
     Closure {
         params: Vec<String>,
         body: Expr,
@@ -347,6 +349,8 @@ impl Value {
             Value::Aesthetic(_) => "Aesthetic",
             Value::Geom(_) => "Geom",
             Value::Facet(_) => "Facet",
+            Value::Theme(_) => "Theme",
+            Value::Labels(_) => "Labels",
             Value::Closure { .. } => "Function",
             Value::NativeFn(_) => "NativeFunction",
             Value::NativeFnCtx(_) => "NativeFunction",
@@ -415,6 +419,8 @@ impl PartialEq for Value {
             (Value::Aesthetic(a1), Value::Aesthetic(a2)) => a1 == a2,
             (Value::Geom(g1), Value::Geom(g2)) => g1 == g2,
             (Value::Facet(f1), Value::Facet(f2)) => f1 == f2,
+            (Value::Theme(t1), Value::Theme(t2)) => t1 == t2,
+            (Value::Labels(l1), Value::Labels(l2)) => l1 == l2,
             (
                 Value::GroupedDataFrame { frame: f1, na_reasons: n1, keys: k1 },
                 Value::GroupedDataFrame { frame: f2, na_reasons: n2, keys: k2 },
@@ -720,6 +726,12 @@ impl Value {
                     format!("facet_grid(rows: {row_var:?}, cols: {col_var:?}, scales: {scales:?})")
                 }
             },
+            Value::Theme(t) => {
+                format!("theme(theme: {:?}, font: {:?})", t.theme, t.font_family)
+            }
+            Value::Labels(l) => {
+                format!("labs(title: {:?}, x: {:?}, y: {:?})", l.title, l.x_label, l.y_label)
+            }
             Value::Closure { params, body, .. } => {
                 format!("fn({}) {{\n    {}\n}}", params.join(", "), body)
             }

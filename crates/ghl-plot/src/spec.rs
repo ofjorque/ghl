@@ -286,6 +286,37 @@ pub enum PlotTheme {
     Dark,
 }
 
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ThemeModifier {
+    pub theme: Option<PlotTheme>,
+    pub font_family: Option<String>,
+}
+
+impl ThemeModifier {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_theme(mut self, theme: PlotTheme) -> Self {
+        self.theme = Some(theme);
+        self
+    }
+
+    pub fn with_font(mut self, font: impl Into<String>) -> Self {
+        self.font_family = Some(font.into());
+        self
+    }
+
+    pub fn apply(&self, plot: &mut PlotSpec) {
+        if let Some(t) = self.theme {
+            plot.theme = t;
+        }
+        if let Some(ref f) = self.font_family {
+            plot.font_family = Some(f.clone());
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PlotLabels {
     pub title: Option<String>,
@@ -317,6 +348,12 @@ pub struct HistogramBins {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum CompositePlot {
+    Horizontal(Box<PlotSpec>, Box<PlotSpec>),
+    Vertical(Box<PlotSpec>, Box<PlotSpec>),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlotSpec {
     pub mapping: Option<AestheticMap>,
     pub layers: Vec<GeomLayer>,
@@ -333,6 +370,8 @@ pub struct PlotSpec {
     pub facet_data: Vec<String>,
     pub facet_row_data: Vec<String>,
     pub columns_cache: BTreeMap<String, Vec<String>>,
+    pub composite: Option<Box<CompositePlot>>,
+    pub font_family: Option<String>,
     pub width: usize,
     pub height: usize,
     pub theme: PlotTheme,
@@ -362,10 +401,32 @@ impl PlotSpec {
             facet_data: Vec::new(),
             facet_row_data: Vec::new(),
             columns_cache: BTreeMap::new(),
+            composite: None,
+            font_family: None,
             width: 58,
             height: 12,
             theme: PlotTheme::Default,
         }
+    }
+
+    /// Compose two plots horizontally side-by-side (`p1 | p2`).
+    pub fn beside(self, other: PlotSpec) -> Self {
+        let mut parent = PlotSpec::new();
+        parent.composite = Some(Box::new(CompositePlot::Horizontal(Box::new(self), Box::new(other))));
+        parent
+    }
+
+    /// Compose two plots vertically stacked (`p1 / p2`).
+    pub fn stack(self, other: PlotSpec) -> Self {
+        let mut parent = PlotSpec::new();
+        parent.composite = Some(Box::new(CompositePlot::Vertical(Box::new(self), Box::new(other))));
+        parent
+    }
+
+    /// Set font family for titles, axis text, and labels.
+    pub fn with_font(mut self, font: impl Into<String>) -> Self {
+        self.font_family = Some(font.into());
+        self
     }
 
     pub fn with_facet(mut self, facet: FacetSpec) -> Self {
