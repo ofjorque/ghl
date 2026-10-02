@@ -71,6 +71,79 @@ impl AestheticMap {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum FacetScales {
+    #[default]
+    Fixed,
+    FreeX,
+    FreeY,
+    Free,
+}
+
+impl FacetScales {
+    pub fn from_str_loose(s: &str) -> Self {
+        match s.to_lowercase().trim() {
+            "free" => FacetScales::Free,
+            "free_x" | "freex" => FacetScales::FreeX,
+            "free_y" | "freey" => FacetScales::FreeY,
+            _ => FacetScales::Fixed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FacetLayout {
+    Wrap {
+        variable: String,
+        ncol: Option<usize>,
+        nrow: Option<usize>,
+        scales: FacetScales,
+    },
+    Grid {
+        row_var: Option<String>,
+        col_var: Option<String>,
+        scales: FacetScales,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FacetSpec {
+    pub layout: FacetLayout,
+}
+
+impl FacetSpec {
+    pub fn wrap(variable: impl Into<String>, ncol: Option<usize>, nrow: Option<usize>, scales: FacetScales) -> Self {
+        Self {
+            layout: FacetLayout::Wrap {
+                variable: variable.into(),
+                ncol,
+                nrow,
+                scales,
+            },
+        }
+    }
+
+    pub fn grid(row_var: Option<String>, col_var: Option<String>, scales: FacetScales) -> Self {
+        Self {
+            layout: FacetLayout::Grid {
+                row_var,
+                col_var,
+                scales,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FacetPanel {
+    pub label: String,
+    pub row_label: Option<String>,
+    pub col_label: Option<String>,
+    pub row_idx: usize,
+    pub col_idx: usize,
+    pub spec: PlotSpec,
+}
+
 /// A simple linear regression fit (slope + intercept).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LinearFit {
@@ -254,6 +327,12 @@ pub struct PlotSpec {
     pub series: Vec<DataSeries>,
     pub x_scale: ScaleTransform,
     pub y_scale: ScaleTransform,
+    pub x_limits: Option<(f64, f64)>,
+    pub y_limits: Option<(f64, f64)>,
+    pub facet: Option<FacetSpec>,
+    pub facet_data: Vec<String>,
+    pub facet_row_data: Vec<String>,
+    pub columns_cache: BTreeMap<String, Vec<String>>,
     pub width: usize,
     pub height: usize,
     pub theme: PlotTheme,
@@ -277,10 +356,42 @@ impl PlotSpec {
             series: Vec::new(),
             x_scale: ScaleTransform::Linear,
             y_scale: ScaleTransform::Linear,
+            x_limits: None,
+            y_limits: None,
+            facet: None,
+            facet_data: Vec::new(),
+            facet_row_data: Vec::new(),
+            columns_cache: BTreeMap::new(),
             width: 58,
             height: 12,
             theme: PlotTheme::Default,
         }
+    }
+
+    pub fn with_facet(mut self, facet: FacetSpec) -> Self {
+        self.facet = Some(facet);
+        self
+    }
+
+    pub fn with_facet_data(mut self, data: Vec<String>) -> Self {
+        self.facet_data = data;
+        self
+    }
+
+    pub fn with_facet_row_data(mut self, data: Vec<String>) -> Self {
+        self.facet_row_data = data;
+        self
+    }
+
+    pub fn with_column_cache(mut self, name: impl Into<String>, data: Vec<String>) -> Self {
+        self.columns_cache.insert(name.into(), data);
+        self
+    }
+
+    pub fn with_limits(mut self, x_limits: Option<(f64, f64)>, y_limits: Option<(f64, f64)>) -> Self {
+        self.x_limits = x_limits;
+        self.y_limits = y_limits;
+        self
     }
 
     pub fn theme_minimal(mut self) -> Self {
@@ -454,4 +565,428 @@ impl PlotSpec {
         }
         Some(counts_map)
     }
+
+    /// Partition this plot specification into faceted sub-panels according to `self.facet`.
+    /// Returns the list of panels together with the grid geometry `(total_rows, total_cols)`.
+    pub fn partition_facets(&self) -> (Vec<FacetPanel>, usize, usize) {
+        let facet = match &self.facet {
+            Some(f) => f,
+            None => {
+                return (
+                    vec![FacetPanel {
+                        label: String::new(),
+                        row_label: None,
+                        col_label: None,
+                        row_idx: 0,
+                        col_idx: 0,
+                        spec: self.clone(),
+                    }],
+                    1,
+                    1,
+                );
+            }
+        };
+
+        // Compute global data limits for fixed scale sharing across all panels
+        let global_min_x = self.x_data.iter().copied().fold(f64::INFINITY, f64::min);
+        let global_max_x = self.x_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let global_min_y = self.y_data.iter().copied().fold(f64::INFINITY, f64::min);
+        let global_max_y = self.y_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+
+        let global_x_limits = if global_min_x.is_finite() && global_max_x.is_finite() {
+            Some((global_min_x, global_max_x))
+        } else {
+            None
+        };
+        let global_y_limits = if global_min_y.is_finite() && global_max_y.is_finite() {
+            Some((global_min_y, global_max_y))
+        } else {
+            None
+        };
+
+        let n_data = self.x_data.len().max(self.y_data.len()).max(self.categories.len());
+
+        match &facet.layout {
+            FacetLayout::Wrap { variable, ncol, nrow, scales } => {
+                let facet_vals: &[String] = if !self.facet_data.is_empty() {
+                    &self.facet_data
+                } else if let Some(vals) = self.columns_cache.get(variable) {
+                    vals.as_slice()
+                } else {
+                    &[]
+                };
+
+                let mut unique_levels: Vec<String> = Vec::new();
+                for val in facet_vals {
+                    if !unique_levels.contains(val) {
+                        unique_levels.push(val.clone());
+                    }
+                }
+
+                if unique_levels.is_empty() {
+                    return (
+                        vec![FacetPanel {
+                            label: String::new(),
+                            row_label: None,
+                            col_label: None,
+                            row_idx: 0,
+                            col_idx: 0,
+                            spec: self.clone(),
+                        }],
+                        1,
+                        1,
+                    );
+                }
+
+                let total_panels = unique_levels.len();
+                let cols = match ncol {
+                    Some(c) if *c > 0 => *c,
+                    _ => match nrow {
+                        Some(r) if *r > 0 => (total_panels + r - 1) / r,
+                        _ => (total_panels as f64).sqrt().ceil() as usize,
+                    },
+                }.max(1);
+                let rows = (total_panels + cols - 1) / cols;
+
+                let mut panels = Vec::new();
+                for (panel_idx, level) in unique_levels.into_iter().enumerate() {
+                    let r = panel_idx / cols;
+                    let c = panel_idx % cols;
+
+                    let indices: Vec<usize> = (0..n_data)
+                        .filter(|&i| facet_vals.get(i) == Some(&level))
+                        .collect();
+
+                    let sub_x: Vec<f64> = indices.iter().filter_map(|&i| self.x_data.get(i).copied()).collect();
+                    let sub_y: Vec<f64> = indices.iter().filter_map(|&i| self.y_data.get(i).copied()).collect();
+                    let sub_cats: Vec<String> = indices.iter().filter_map(|&i| self.categories.get(i).cloned()).collect();
+
+                    // Reconstruct series if color aesthetic is present
+                    let mut sub_series = Vec::new();
+                    if let Some(color_col_name) = self.mapping.as_ref().and_then(|m| m.color.as_ref()) {
+                        if let Some(color_vals) = self.columns_cache.get(color_col_name) {
+                            let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>)> = BTreeMap::new();
+                            for &i in &indices {
+                                if let (Some(&x), Some(&y), Some(g_key)) = (self.x_data.get(i), self.y_data.get(i), color_vals.get(i)) {
+                                    let entry = groups.entry(g_key.clone()).or_insert_with(|| (Vec::new(), Vec::new()));
+                                    entry.0.push(x);
+                                    entry.1.push(y);
+                                }
+                            }
+                            for (g_name, (g_xs, g_ys)) in groups {
+                                sub_series.push(DataSeries {
+                                    group_name: Some(g_name),
+                                    color_hex: None,
+                                    x_values: g_xs,
+                                    y_values: g_ys,
+                                    categories: Vec::new(),
+                                });
+                            }
+                        }
+                    }
+
+                    let mut sub_spec = self.clone();
+                    sub_spec.facet = None;
+                    sub_spec.x_data = sub_x;
+                    sub_spec.y_data = sub_y;
+                    sub_spec.categories = sub_cats;
+                    if !sub_series.is_empty() {
+                        sub_spec.series = sub_series;
+                    }
+
+                    match scales {
+                        FacetScales::Fixed => {
+                            sub_spec.x_limits = global_x_limits;
+                            sub_spec.y_limits = global_y_limits;
+                        }
+                        FacetScales::FreeX => {
+                            sub_spec.x_limits = None;
+                            sub_spec.y_limits = global_y_limits;
+                        }
+                        FacetScales::FreeY => {
+                            sub_spec.x_limits = global_x_limits;
+                            sub_spec.y_limits = None;
+                        }
+                        FacetScales::Free => {
+                            sub_spec.x_limits = None;
+                            sub_spec.y_limits = None;
+                        }
+                    }
+
+                    sub_spec.recompute_layer_statistics();
+
+                    panels.push(FacetPanel {
+                        label: level.clone(),
+                        row_label: None,
+                        col_label: Some(level),
+                        row_idx: r,
+                        col_idx: c,
+                        spec: sub_spec,
+                    });
+                }
+
+                (panels, rows, cols)
+            }
+            FacetLayout::Grid { row_var, col_var, scales } => {
+                let row_vals_source: &[String] = if !self.facet_row_data.is_empty() {
+                    &self.facet_row_data
+                } else if let Some(var) = row_var {
+                    self.columns_cache.get(var).map(|v| v.as_slice()).unwrap_or(&[])
+                } else {
+                    &[]
+                };
+
+                let col_vals_source: &[String] = if !self.facet_data.is_empty() {
+                    &self.facet_data
+                } else if let Some(var) = col_var {
+                    self.columns_cache.get(var).map(|v| v.as_slice()).unwrap_or(&[])
+                } else {
+                    &[]
+                };
+
+                let mut unique_rows: Vec<String> = Vec::new();
+                if row_var.is_some() {
+                    for v in row_vals_source {
+                        if !unique_rows.contains(v) {
+                            unique_rows.push(v.clone());
+                        }
+                    }
+                }
+                if unique_rows.is_empty() {
+                    unique_rows.push(String::new());
+                }
+
+                let mut unique_cols: Vec<String> = Vec::new();
+                if col_var.is_some() {
+                    for v in col_vals_source {
+                        if !unique_cols.contains(v) {
+                            unique_cols.push(v.clone());
+                        }
+                    }
+                }
+                if unique_cols.is_empty() {
+                    unique_cols.push(String::new());
+                }
+
+                let total_rows = unique_rows.len();
+                let total_cols = unique_cols.len();
+
+                let mut panels = Vec::new();
+                for (r_idx, r_val) in unique_rows.iter().enumerate() {
+                    for (c_idx, c_val) in unique_cols.iter().enumerate() {
+                        let mut indices = Vec::new();
+                        for i in 0..n_data {
+                            let match_row = if row_var.is_some() {
+                                row_vals_source.get(i) == Some(r_val)
+                            } else {
+                                true
+                            };
+                            let match_col = if col_var.is_some() {
+                                col_vals_source.get(i) == Some(c_val)
+                            } else {
+                                true
+                            };
+                            if match_row && match_col {
+                                indices.push(i);
+                            }
+                        }
+
+                        let sub_x: Vec<f64> = indices.iter().filter_map(|&i| self.x_data.get(i).copied()).collect();
+                        let sub_y: Vec<f64> = indices.iter().filter_map(|&i| self.y_data.get(i).copied()).collect();
+                        let sub_cats: Vec<String> = indices.iter().filter_map(|&i| self.categories.get(i).cloned()).collect();
+
+                        let mut sub_series = Vec::new();
+                        if let Some(color_col_name) = self.mapping.as_ref().and_then(|m| m.color.as_ref()) {
+                            if let Some(color_vals) = self.columns_cache.get(color_col_name) {
+                                let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>)> = BTreeMap::new();
+                                for &i in &indices {
+                                    if let (Some(&x), Some(&y), Some(g_key)) = (self.x_data.get(i), self.y_data.get(i), color_vals.get(i)) {
+                                        let entry = groups.entry(g_key.clone()).or_insert_with(|| (Vec::new(), Vec::new()));
+                                        entry.0.push(x);
+                                        entry.1.push(y);
+                                    }
+                                }
+                                for (g_name, (g_xs, g_ys)) in groups {
+                                    sub_series.push(DataSeries {
+                                        group_name: Some(g_name),
+                                        color_hex: None,
+                                        x_values: g_xs,
+                                        y_values: g_ys,
+                                        categories: Vec::new(),
+                                    });
+                                }
+                            }
+                        }
+
+                        let mut sub_spec = self.clone();
+                        sub_spec.facet = None;
+                        sub_spec.x_data = sub_x;
+                        sub_spec.y_data = sub_y;
+                        sub_spec.categories = sub_cats;
+                        if !sub_series.is_empty() {
+                            sub_spec.series = sub_series;
+                        }
+
+                        match scales {
+                            FacetScales::Fixed => {
+                                sub_spec.x_limits = global_x_limits;
+                                sub_spec.y_limits = global_y_limits;
+                            }
+                            FacetScales::FreeX => {
+                                sub_spec.x_limits = None;
+                                sub_spec.y_limits = global_y_limits;
+                            }
+                            FacetScales::FreeY => {
+                                sub_spec.x_limits = global_x_limits;
+                                sub_spec.y_limits = None;
+                            }
+                            FacetScales::Free => {
+                                sub_spec.x_limits = None;
+                                sub_spec.y_limits = None;
+                            }
+                        }
+
+                        sub_spec.recompute_layer_statistics();
+
+                        let label = match (row_var.is_some(), col_var.is_some()) {
+                            (true, true) => format!("{r_val} | {c_val}"),
+                            (true, false) => r_val.clone(),
+                            (false, true) => c_val.clone(),
+                            (false, false) => String::new(),
+                        };
+
+                        panels.push(FacetPanel {
+                            label,
+                            row_label: if row_var.is_some() { Some(r_val.clone()) } else { None },
+                            col_label: if col_var.is_some() { Some(c_val.clone()) } else { None },
+                            row_idx: r_idx,
+                            col_idx: c_idx,
+                            spec: sub_spec,
+                        });
+                    }
+                }
+
+                (panels, total_rows, total_cols)
+            }
+        }
+    }
+
+    /// Recompute statistical layers (OLS regression, Tukey boxplots) on local data.
+    pub fn recompute_layer_statistics(&mut self) {
+        for layer in &mut self.layers {
+            match &mut layer.kind {
+                GeomKind::Smooth { fit, .. } => {
+                    *fit = compute_linear_fit(&self.x_data, &self.y_data);
+                }
+                GeomKind::Boxplot { stats, multi_stats } => {
+                    if !self.categories.is_empty() && !self.y_data.is_empty() {
+                        let n = self.categories.len().min(self.y_data.len());
+                        let mut grouped: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+                        for i in 0..n {
+                            grouped.entry(self.categories[i].clone()).or_default().push(self.y_data[i]);
+                        }
+                        let mut new_multi = Vec::new();
+                        for (cat, vals) in grouped {
+                            if let Some(st) = compute_five_number_summary(&vals) {
+                                new_multi.push((cat, st));
+                            }
+                        }
+                        *multi_stats = new_multi;
+                        *stats = None;
+                    } else if !self.x_data.is_empty() {
+                        *stats = compute_five_number_summary(&self.x_data);
+                        multi_stats.clear();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Compute ordinary least squares linear regression slope and intercept.
+pub fn compute_linear_fit(xs: &[f64], ys: &[f64]) -> Option<LinearFit> {
+    let n = xs.len().min(ys.len());
+    if n < 2 {
+        return None;
+    }
+    let valid: Vec<(f64, f64)> = xs[..n]
+        .iter()
+        .copied()
+        .zip(ys[..n].iter().copied())
+        .filter(|(x, y)| x.is_finite() && y.is_finite())
+        .collect();
+
+    let n = valid.len() as f64;
+    if n < 2.0 {
+        return None;
+    }
+
+    let sum_x: f64 = valid.iter().map(|p| p.0).sum();
+    let sum_y: f64 = valid.iter().map(|p| p.1).sum();
+    let mean_x = sum_x / n;
+    let mean_y = sum_y / n;
+
+    let mut ss_xy = 0.0;
+    let mut ss_xx = 0.0;
+    for (x, y) in &valid {
+        ss_xy += (x - mean_x) * (y - mean_y);
+        ss_xx += (x - mean_x) * (x - mean_x);
+    }
+
+    if ss_xx.abs() < 1e-12 {
+        return None;
+    }
+
+    let slope = ss_xy / ss_xx;
+    let intercept = mean_y - slope * mean_x;
+    Some(LinearFit { slope, intercept })
+}
+
+/// Compute Tukey five-number summary with 1.5*IQR fences and outliers.
+pub fn compute_five_number_summary(vals: &[f64]) -> Option<FiveNumberSummary> {
+    let mut clean: Vec<f64> = vals.iter().copied().filter(|v| v.is_finite()).collect();
+    if clean.is_empty() {
+        return None;
+    }
+    clean.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = clean.len();
+    let min = clean[0];
+    let max = clean[n - 1];
+    let mean = clean.iter().sum::<f64>() / n as f64;
+
+    let median = if n % 2 == 1 {
+        clean[n / 2]
+    } else {
+        (clean[n / 2 - 1] + clean[n / 2]) / 2.0
+    };
+
+    let q1 = if n % 4 == 0 {
+        (clean[n / 4 - 1] + clean[n / 4]) / 2.0
+    } else {
+        clean[n / 4]
+    };
+
+    let q3 = if (3 * n) % 4 == 0 {
+        (clean[3 * n / 4 - 1] + clean[3 * n / 4]) / 2.0
+    } else {
+        clean[3 * n / 4]
+    };
+
+    let iqr = q3 - q1;
+    let lower_fence = q1 - 1.5 * iqr;
+    let upper_fence = q3 + 1.5 * iqr;
+    let outliers: Vec<f64> = clean.iter().copied().filter(|&x| x < lower_fence || x > upper_fence).collect();
+
+    Some(FiveNumberSummary {
+        min,
+        q1,
+        median,
+        q3,
+        max,
+        mean,
+        lower_fence,
+        upper_fence,
+        outliers,
+    })
 }

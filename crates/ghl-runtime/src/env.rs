@@ -313,6 +313,8 @@ impl RuntimeEnv {
         env.set("geom_bar".into(), Value::NativeFn(native_geom_bar));
         env.set("geom_area".into(), Value::NativeFn(native_geom_area));
         env.set("geom_rug".into(), Value::NativeFn(native_geom_rug));
+        env.set("facet_wrap".into(), Value::NativeFn(native_facet_wrap));
+        env.set("facet_grid".into(), Value::NativeFn(native_facet_grid));
         env.set("labs".into(), Value::NativeFn(native_labs));
         env.set("scale_x_log10".into(), Value::NativeFn(native_scale_x_log10));
         env.set("scale_y_log10".into(), Value::NativeFn(native_scale_y_log10));

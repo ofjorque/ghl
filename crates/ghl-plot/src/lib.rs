@@ -21,8 +21,8 @@ pub use render_native::NativeRenderer;
 pub use render_terminal::TerminalRenderer;
 pub use render_vega::VegaRenderer;
 pub use spec::{
-    AestheticMap, DataSeries, FiveNumberSummary, GeomKind, GeomLayer, HistogramBins, LinearFit,
-    PlotLabels, PlotSpec, PlotTheme, ScaleTransform,
+    AestheticMap, DataSeries, FacetLayout, FacetPanel, FacetScales, FacetSpec, FiveNumberSummary,
+    GeomKind, GeomLayer, HistogramBins, LinearFit, PlotLabels, PlotSpec, PlotTheme, ScaleTransform,
 };
 
 impl PlotSpec {

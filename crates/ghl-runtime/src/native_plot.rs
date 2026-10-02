@@ -33,21 +33,56 @@ fn extract_raw_string(v: &Value) -> String {
 }
 
 pub(crate) fn native_aes(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let x = args.first().map(extract_raw_string).ok_or_else(|| {
-        Diagnostic::compute_error("C0301", "`aes()` requires at least an `x` aesthetic")
+    let mut x: Option<String> = None;
+    let mut y: Option<String> = None;
+    let mut color: Option<String> = None;
+    let mut size: Option<String> = None;
+    let mut shape: Option<String> = None;
+    let mut facet_col: Option<String> = None;
+    let mut facet_row: Option<String> = None;
+
+    let mut pos_args = Vec::new();
+    for arg in args {
+        match arg {
+            Value::NamedArg(name, val) => match name.as_str() {
+                "x" => x = Some(extract_raw_string(&val)),
+                "y" => y = Some(extract_raw_string(&val)),
+                "color" | "colour" => color = Some(extract_raw_string(&val)),
+                "size" => size = Some(extract_raw_string(&val)),
+                "shape" => shape = Some(extract_raw_string(&val)),
+                "facet_col" | "facet" => facet_col = Some(extract_raw_string(&val)),
+                "facet_row" => facet_row = Some(extract_raw_string(&val)),
+                _ => {}
+            },
+            other => pos_args.push(other),
+        }
+    }
+
+    let mut pos_idx = 0;
+    if x.is_none() && pos_idx < pos_args.len() {
+        x = Some(extract_raw_string(&pos_args[pos_idx]));
+        pos_idx += 1;
+    }
+    if y.is_none() && pos_idx < pos_args.len() {
+        y = Some(extract_raw_string(&pos_args[pos_idx]));
+        pos_idx += 1;
+    }
+    if color.is_none() && pos_idx < pos_args.len() {
+        color = Some(extract_raw_string(&pos_args[pos_idx]));
+    }
+
+    let x_str = x.ok_or_else(|| {
+        Diagnostic::compute_error("C0301", "`aes()` requires at least an `x` aesthetic (e.g. `aes(x = displ)` or `aes(displ, hwy)`)")
     })?;
 
-    let y = args.get(1).map(extract_raw_string);
-    let color = args.get(2).map(extract_raw_string);
-
     Ok(Value::Aesthetic(AestheticMap {
-        x,
+        x: x_str,
         y,
         color,
-        size: None,
-        shape: None,
-        facet_col: None,
-        facet_row: None,
+        size,
+        shape,
+        facet_col,
+        facet_row,
     }))
 }
 
@@ -67,6 +102,12 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
             let col_f64 = |name: &str| -> Vec<f64> {
                 col_values(name).iter().filter_map(|v| v.as_f64()).collect()
             };
+
+            // Pre-populate columns cache with all dataframe columns
+            for col_name in frame.get_column_names() {
+                let vals: Vec<String> = col_values(col_name).iter().map(extract_raw_string).collect();
+                plot_spec.columns_cache.insert(col_name.to_string(), vals);
+            }
 
             let aes_opt = if let Some(Value::Aesthetic(aes)) = args.get(1) {
                 Some(aes.clone())
@@ -125,6 +166,19 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     }
                 } else {
                     plot_spec.labels.title = Some(format!("Distribution of {}", aes.x));
+                }
+
+                // If aes specified facet_col or facet_row
+                if let Some(ref fc) = aes.facet_col {
+                    if let Some(col) = plot_spec.columns_cache.get(fc) {
+                        plot_spec.facet_data = col.clone();
+                        plot_spec.facet = Some(ghl_plot::FacetSpec::wrap(fc.clone(), None, None, ghl_plot::FacetScales::Fixed));
+                    }
+                }
+                if let Some(ref fr) = aes.facet_row {
+                    if let Some(col) = plot_spec.columns_cache.get(fr) {
+                        plot_spec.facet_row_data = col.clone();
+                    }
                 }
             }
             Ok(Value::Plot(Box::new(plot_spec)))
@@ -591,5 +645,187 @@ pub(crate) fn native_to_svg(args: Vec<Value>) -> Result<Value, Diagnostic> {
             Ok(Value::String(svg))
         }
         other => Err(Diagnostic::compute_error("C0318", format!("`to_svg()` requires a Plot, found `{}`", other.type_name()))),
+    }
+}
+
+fn extract_facet_var_name(v: &Value) -> String {
+    match v {
+        Value::Formula { response, terms, .. } => {
+            if !terms.is_empty() && terms[0] != "." {
+                terms[0].clone()
+            } else if !response.is_empty() && response != "." {
+                response.clone()
+            } else {
+                String::new()
+            }
+        }
+        _ => extract_raw_string(v),
+    }
+}
+
+pub(crate) fn native_facet_wrap(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut plot_opt: Option<PlotSpec> = None;
+    let mut variable = String::new();
+    let mut ncol: Option<usize> = None;
+    let mut nrow: Option<usize> = None;
+    let mut scales = ghl_plot::FacetScales::Fixed;
+
+    let mut remaining = Vec::new();
+    for arg in args {
+        match arg {
+            Value::Plot(p) => {
+                plot_opt = Some(*p);
+            }
+            Value::NamedArg(name, val) => match name.as_str() {
+                "ncol" => {
+                    ncol = val.as_i64().map(|n| n.max(1) as usize);
+                }
+                "nrow" => {
+                    nrow = val.as_i64().map(|n| n.max(1) as usize);
+                }
+                "scales" => {
+                    scales = ghl_plot::FacetScales::from_str_loose(&extract_raw_string(&val));
+                }
+                "facets" | "by" | "var" | "variable" => {
+                    variable = extract_facet_var_name(&val);
+                }
+                _ => {}
+            },
+            other => {
+                remaining.push(other);
+            }
+        }
+    }
+
+    let mut pos_idx = 0;
+    if variable.is_empty() && pos_idx < remaining.len() {
+        variable = extract_facet_var_name(&remaining[pos_idx]);
+        pos_idx += 1;
+    }
+    if ncol.is_none() && pos_idx < remaining.len() {
+        if let Some(n) = remaining[pos_idx].as_i64() {
+            ncol = Some(n.max(1) as usize);
+            pos_idx += 1;
+        }
+    }
+    if nrow.is_none() && pos_idx < remaining.len() {
+        if let Some(r) = remaining[pos_idx].as_i64() {
+            nrow = Some(r.max(1) as usize);
+            pos_idx += 1;
+        }
+    }
+    if scales == ghl_plot::FacetScales::Fixed && pos_idx < remaining.len() {
+        let s_str = extract_raw_string(&remaining[pos_idx]);
+        scales = ghl_plot::FacetScales::from_str_loose(&s_str);
+    }
+
+    if variable.is_empty() {
+        return Err(Diagnostic::compute_error(
+            "C0320",
+            "`facet_wrap()` requires a faceting variable (e.g. `facet_wrap(\"species\")` or `facet_wrap(~ species)`)"
+        ));
+    }
+
+    let facet_spec = ghl_plot::FacetSpec::wrap(variable.clone(), ncol, nrow, scales);
+
+    if let Some(mut p) = plot_opt {
+        if let Some(col) = p.columns_cache.get(&variable) {
+            p.facet_data = col.clone();
+        }
+        p.facet = Some(facet_spec);
+        Ok(Value::Plot(Box::new(p)))
+    } else {
+        Ok(Value::Facet(facet_spec))
+    }
+}
+
+pub(crate) fn native_facet_grid(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut plot_opt: Option<PlotSpec> = None;
+    let mut row_var: Option<String> = None;
+    let mut col_var: Option<String> = None;
+    let mut scales = ghl_plot::FacetScales::Fixed;
+
+    let mut remaining = Vec::new();
+    for arg in args {
+        match arg {
+            Value::Plot(p) => {
+                plot_opt = Some(*p);
+            }
+            Value::NamedArg(name, val) => match name.as_str() {
+                "rows" | "row" => {
+                    let s = extract_facet_var_name(&val);
+                    if !s.is_empty() && s != "." {
+                        row_var = Some(s);
+                    }
+                }
+                "cols" | "col" => {
+                    let s = extract_facet_var_name(&val);
+                    if !s.is_empty() && s != "." {
+                        col_var = Some(s);
+                    }
+                }
+                "scales" => {
+                    scales = ghl_plot::FacetScales::from_str_loose(&extract_raw_string(&val));
+                }
+                _ => {}
+            },
+            Value::Formula { response, terms, .. } => {
+                if !response.is_empty() && response != "." {
+                    row_var = Some(response.clone());
+                }
+                if !terms.is_empty() && terms[0] != "." {
+                    col_var = Some(terms[0].clone());
+                }
+            }
+            other => {
+                remaining.push(other);
+            }
+        }
+    }
+
+    let mut pos_idx = 0;
+    if row_var.is_none() && pos_idx < remaining.len() {
+        let s = extract_facet_var_name(&remaining[pos_idx]);
+        if !s.is_empty() && s != "." {
+            row_var = Some(s);
+        }
+        pos_idx += 1;
+    }
+    if col_var.is_none() && pos_idx < remaining.len() {
+        let s = extract_facet_var_name(&remaining[pos_idx]);
+        if !s.is_empty() && s != "." {
+            col_var = Some(s);
+        }
+        pos_idx += 1;
+    }
+    if scales == ghl_plot::FacetScales::Fixed && pos_idx < remaining.len() {
+        let s_str = extract_raw_string(&remaining[pos_idx]);
+        scales = ghl_plot::FacetScales::from_str_loose(&s_str);
+    }
+
+    if row_var.is_none() && col_var.is_none() {
+        return Err(Diagnostic::compute_error(
+            "C0321",
+            "`facet_grid()` requires at least a row or column variable (e.g. `facet_grid(drv ~ cyl)` or `facet_grid(rows = \"drv\", cols = \"cyl\")`)"
+        ));
+    }
+
+    let facet_spec = ghl_plot::FacetSpec::grid(row_var.clone(), col_var.clone(), scales);
+
+    if let Some(mut p) = plot_opt {
+        if let Some(ref r) = row_var {
+            if let Some(col) = p.columns_cache.get(r) {
+                p.facet_row_data = col.clone();
+            }
+        }
+        if let Some(ref c) = col_var {
+            if let Some(col) = p.columns_cache.get(c) {
+                p.facet_data = col.clone();
+            }
+        }
+        p.facet = Some(facet_spec);
+        Ok(Value::Plot(Box::new(p)))
+    } else {
+        Ok(Value::Facet(facet_spec))
     }
 }

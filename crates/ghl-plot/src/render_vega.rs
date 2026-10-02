@@ -153,6 +153,31 @@ impl VegaRenderer {
                 if let Some(ref g) = s.group_name {
                     row["group"] = json!(g);
                 }
+                for (col_name, col_vals) in &spec.columns_cache {
+                    if let Some(val) = col_vals.get(i) {
+                        row[col_name] = json!(val);
+                    }
+                }
+                if let Some(f_val) = spec.facet_data.get(i) {
+                    if let Some(ref facet_spec) = spec.facet {
+                        match &facet_spec.layout {
+                            crate::spec::FacetLayout::Wrap { variable, .. } => {
+                                row[variable] = json!(f_val);
+                            }
+                            crate::spec::FacetLayout::Grid { col_var: Some(c), .. } => {
+                                row[c] = json!(f_val);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if let Some(r_val) = spec.facet_row_data.get(i) {
+                    if let Some(ref facet_spec) = spec.facet {
+                        if let crate::spec::FacetLayout::Grid { row_var: Some(r), .. } = &facet_spec.layout {
+                            row[r] = json!(r_val);
+                        }
+                    }
+                }
                 data_values.push(row);
             }
         }
@@ -230,14 +255,78 @@ impl VegaRenderer {
             layers.push(smooth_layer);
         }
 
-        Ok(json!({
-            "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-            "title": title,
-            "width": 600,
-            "height": 400,
-            "data": { "values": data_values },
-            "layer": layers,
-            "config": config
-        }))
+        if let Some(ref facet_spec) = spec.facet {
+            let mut facet_json = json!({
+                "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+                "title": title,
+                "data": { "values": data_values },
+                "spec": {
+                    "width": 240,
+                    "height": 180,
+                    "layer": layers,
+                },
+                "config": config
+            });
+
+            match &facet_spec.layout {
+                crate::spec::FacetLayout::Wrap { variable, ncol, scales, .. } => {
+                    let mut facet_enc = json!({
+                        "field": variable,
+                        "type": "nominal"
+                    });
+                    if let Some(c) = ncol {
+                        facet_enc["columns"] = json!(c);
+                    }
+                    facet_json["facet"] = facet_enc;
+
+                    match scales {
+                        crate::spec::FacetScales::Free => {
+                            facet_json["resolve"] = json!({ "scale": { "x": "independent", "y": "independent" } });
+                        }
+                        crate::spec::FacetScales::FreeX => {
+                            facet_json["resolve"] = json!({ "scale": { "x": "independent" } });
+                        }
+                        crate::spec::FacetScales::FreeY => {
+                            facet_json["resolve"] = json!({ "scale": { "y": "independent" } });
+                        }
+                        crate::spec::FacetScales::Fixed => {}
+                    }
+                }
+                crate::spec::FacetLayout::Grid { row_var, col_var, scales } => {
+                    let mut facet_enc = json!({});
+                    if let Some(r) = row_var {
+                        facet_enc["row"] = json!({ "field": r, "type": "nominal" });
+                    }
+                    if let Some(c) = col_var {
+                        facet_enc["column"] = json!({ "field": c, "type": "nominal" });
+                    }
+                    facet_json["facet"] = facet_enc;
+
+                    match scales {
+                        crate::spec::FacetScales::Free => {
+                            facet_json["resolve"] = json!({ "scale": { "x": "independent", "y": "independent" } });
+                        }
+                        crate::spec::FacetScales::FreeX => {
+                            facet_json["resolve"] = json!({ "scale": { "x": "independent" } });
+                        }
+                        crate::spec::FacetScales::FreeY => {
+                            facet_json["resolve"] = json!({ "scale": { "y": "independent" } });
+                        }
+                        crate::spec::FacetScales::Fixed => {}
+                    }
+                }
+            }
+            Ok(facet_json)
+        } else {
+            Ok(json!({
+                "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+                "title": title,
+                "width": 600,
+                "height": 400,
+                "data": { "values": data_values },
+                "layer": layers,
+                "config": config
+            }))
+        }
     }
 }

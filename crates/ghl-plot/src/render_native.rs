@@ -66,6 +66,14 @@ impl NativeRenderer {
         };
         root.fill(&bg_color).map_err(|e| format!("{e}"))?;
 
+        if spec.facet.is_some() {
+            return Self::draw_facets(spec, root);
+        }
+
+        Self::draw_single_panel(spec, root)
+    }
+
+    fn draw_single_panel<DB: DrawingBackend>(spec: &PlotSpec, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
         let is_hist = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Histogram { .. }));
         let is_box = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Boxplot { .. }));
         let is_bar = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Bar));
@@ -78,6 +86,75 @@ impl NativeRenderer {
             Self::draw_bar(spec, root)?;
         } else {
             Self::draw_cartesian_layers(spec, root)?;
+        }
+
+        Ok(())
+    }
+
+    fn draw_facets<DB: DrawingBackend>(spec: &PlotSpec, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
+        let (panels, rows, cols) = spec.partition_facets();
+        if panels.is_empty() {
+            return Ok(());
+        }
+
+        let is_dark = spec.theme == PlotTheme::Dark;
+        let strip_bg = if is_dark {
+            RGBColor(38, 38, 44)
+        } else {
+            RGBColor(235, 236, 240)
+        };
+        let strip_border = if is_dark {
+            RGBColor(60, 60, 70)
+        } else {
+            RGBColor(200, 202, 210)
+        };
+        let strip_text_color = if is_dark {
+            RGBColor(240, 240, 245)
+        } else {
+            RGBColor(30, 30, 35)
+        };
+
+        // Top super-title if present
+        let grid_area = if let Some(ref title) = spec.labels.title {
+            let (top, bottom) = root.split_vertically(38);
+            let title_style = ("sans-serif", 20).into_font().color(&strip_text_color);
+            top.draw(&Text::new(title.clone(), (15, 10), title_style))
+                .map_err(|e| format!("{e}"))?;
+            bottom
+        } else {
+            root.clone()
+        };
+
+        let sub_areas = grid_area.split_evenly((rows, cols));
+
+        for panel in panels {
+            let area_idx = panel.row_idx * cols + panel.col_idx;
+            if area_idx >= sub_areas.len() {
+                continue;
+            }
+            let cell_area = &sub_areas[area_idx];
+
+            let (strip_area, chart_area) = cell_area.split_vertically(26);
+
+            strip_area.fill(&strip_bg).map_err(|e| format!("{e}"))?;
+            let w = strip_area.dim_in_pixel().0 as i32;
+            let h = strip_area.dim_in_pixel().1 as i32;
+            strip_area.draw(&plotters::element::Rectangle::new(
+                [(0, 0), (w - 1, h - 1)],
+                strip_border.stroke_width(1),
+            )).map_err(|e| format!("{e}"))?;
+
+            let strip_text = &panel.label;
+            let strip_font = ("sans-serif", 13).into_font().color(&strip_text_color);
+            let char_width = 7;
+            let text_pixel_len = strip_text.len() as i32 * char_width;
+            let draw_x = ((w - text_pixel_len) / 2).max(6);
+            strip_area.draw(&Text::new(strip_text.clone(), (draw_x, 6), strip_font))
+                .map_err(|e| format!("{e}"))?;
+
+            let mut panel_spec = panel.spec;
+            panel_spec.labels.title = None;
+            let _ = Self::draw_single_panel(&panel_spec, &chart_area);
         }
 
         Ok(())
@@ -114,6 +191,15 @@ impl NativeRenderer {
             }
         }
 
+        if let Some((lx, hx)) = spec.x_limits {
+            min_x = lx;
+            max_x = hx;
+        }
+        if let Some((ly, hy)) = spec.y_limits {
+            min_y = ly;
+            max_y = hy;
+        }
+
         if min_x.is_infinite() || min_y.is_infinite() {
             return Err("No numeric data points to render".to_string());
         }
@@ -124,15 +210,20 @@ impl NativeRenderer {
         let x_range = (min_x - pad_x)..(max_x + pad_x);
         let y_range = (min_y - pad_y)..(max_y + pad_y);
 
-        let title = spec.labels.title.as_deref().unwrap_or("Cartesian Plot");
+        let title_opt = spec.labels.title.as_deref();
         let x_label = spec.labels.x_label.as_deref().unwrap_or("x");
         let y_label = spec.labels.y_label.as_deref().unwrap_or("y");
 
-        let mut chart = ChartBuilder::on(root)
-            .caption(title, ("sans-serif", 22).into_font().color(&text_color))
-            .margin(20)
-            .x_label_area_size(42)
-            .y_label_area_size(52)
+        let mut chart_builder = ChartBuilder::on(root);
+        if let Some(t) = title_opt {
+            chart_builder.caption(t, ("sans-serif", 22).into_font().color(&text_color)).margin(18);
+        } else {
+            chart_builder.margin(10);
+        }
+
+        let mut chart = chart_builder
+            .x_label_area_size(38)
+            .y_label_area_size(48)
             .build_cartesian_2d(x_range, y_range)
             .map_err(|e| format!("Chart build error: {e}"))?;
 

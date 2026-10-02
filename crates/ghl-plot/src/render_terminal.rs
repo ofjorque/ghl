@@ -12,6 +12,27 @@ pub struct TerminalRenderer;
 
 impl TerminalRenderer {
     pub fn render(spec: &PlotSpec, caps: &RenderCaps) -> String {
+        if spec.facet.is_some() {
+            let (panels, _, _) = spec.partition_facets();
+            let mut out = String::new();
+            if let Some(ref title) = spec.labels.title {
+                out.push_str(&format!("=== {} ===\n\n", title));
+            }
+            for (idx, panel) in panels.into_iter().enumerate() {
+                if idx > 0 {
+                    out.push_str("\n\n");
+                }
+                let mut panel_spec = panel.spec;
+                panel_spec.labels.title = Some(format!("[ {} ]", panel.label));
+                out.push_str(&Self::render_single(&panel_spec, caps));
+            }
+            return out;
+        }
+
+        Self::render_single(spec, caps)
+    }
+
+    fn render_single(spec: &PlotSpec, caps: &RenderCaps) -> String {
         let is_hist = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Histogram { .. }));
         let is_box = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Boxplot { .. }));
         let is_bar = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Bar));
@@ -60,6 +81,15 @@ impl TerminalRenderer {
                 if y < min_y { min_y = y; }
                 if y > max_y { max_y = y; }
             }
+        }
+
+        if let Some((lx, hx)) = spec.x_limits {
+            min_x = lx;
+            max_x = hx;
+        }
+        if let Some((ly, hy)) = spec.y_limits {
+            min_y = ly;
+            max_y = hy;
         }
 
         let span_x = if (max_x - min_x).abs() < 1e-9 { 1.0 } else { max_x - min_x };

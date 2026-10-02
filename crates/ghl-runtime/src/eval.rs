@@ -2588,10 +2588,33 @@ impl Interpreter {
                                 if other_p.theme != ghl_plot::PlotTheme::Default { p.theme = other_p.theme; }
                                 return Ok(Value::Plot(p));
                             }
+                            Value::Facet(f) => {
+                                match &f.layout {
+                                    ghl_plot::FacetLayout::Wrap { variable, .. } => {
+                                        if let Some(col) = p.columns_cache.get(variable) {
+                                            p.facet_data = col.clone();
+                                        }
+                                    }
+                                    ghl_plot::FacetLayout::Grid { row_var, col_var, .. } => {
+                                        if let Some(r_name) = row_var {
+                                            if let Some(col) = p.columns_cache.get(r_name) {
+                                                p.facet_row_data = col.clone();
+                                            }
+                                        }
+                                        if let Some(c_name) = col_var {
+                                            if let Some(col) = p.columns_cache.get(c_name) {
+                                                p.facet_data = col.clone();
+                                            }
+                                        }
+                                    }
+                                }
+                                p.facet = Some(f);
+                                return Ok(Value::Plot(p));
+                            }
                             other => {
                                 return Err(Diagnostic::compute_error(
                                     "C0308",
-                                    format!("Cannot add `{}` to a Plot. Expected a Geom layer (e.g. `geom_point()`).", other.type_name()),
+                                    format!("Cannot add `{}` to a Plot. Expected a Geom layer or Facet (e.g. `geom_point()`, `facet_wrap()`).", other.type_name()),
                                 ));
                             }
                         }

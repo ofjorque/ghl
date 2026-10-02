@@ -189,3 +189,143 @@ fn test_grammar_of_graphics_comparative_boxplot() {
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
 }
+
+#[test]
+fn test_grammar_of_graphics_facet_wrap_composition() {
+    let src = r#"
+        let df = dataframe {
+            x: [1.0, 2.0, 3.0, 1.0, 2.0, 3.0],
+            y: [2.0, 4.0, 6.0, 10.0, 20.0, 30.0],
+            species: ["Adelie", "Adelie", "Adelie", "Chinstrap", "Chinstrap", "Chinstrap"]
+        };
+        let p = ggplot(df, aes("x", "y")) + geom_point() + geom_smooth() + facet_wrap("species", ncol = 2);
+        p
+    "#;
+    let res = eval_source(src).expect("Facet wrap evaluation should succeed");
+    match res {
+        Value::Plot(p) => {
+            assert!(p.facet.is_some(), "Plot should contain FacetSpec");
+            let (panels, rows, cols) = p.partition_facets();
+            assert_eq!(panels.len(), 2, "Should create 2 panels for Adelie and Chinstrap");
+            assert_eq!(cols, 2, "ncol requested was 2");
+            assert_eq!(rows, 1);
+
+            // First panel: Adelie (slope ~ 2.0)
+            let fit0 = panels[0].spec.smooth_fit().expect("Adelie panel must have local smooth fit");
+            assert!((fit0.slope - 2.0).abs() < 1e-4, "Adelie slope should be 2.0, got {}", fit0.slope);
+
+            // Second panel: Chinstrap (slope ~ 10.0)
+            let fit1 = panels[1].spec.smooth_fit().expect("Chinstrap panel must have local smooth fit");
+            assert!((fit1.slope - 10.0).abs() < 1e-4, "Chinstrap slope should be 10.0, got {}", fit1.slope);
+
+            // Native SVG rendering
+            let svg = p.to_svg(800, 600).expect("Faceted SVG should render");
+            assert!(svg.contains("<svg"), "Must produce valid SVG XML");
+            assert!(svg.contains("Adelie"), "SVG must include Adelie strip title");
+            assert!(svg.contains("Chinstrap"), "SVG must include Chinstrap strip title");
+
+            // Terminal ASCII rendering
+            let caps = ghl_diagnostics::RenderCaps::rich_terminal(80);
+            let term = p.render(&caps);
+            assert!(term.contains("[ Adelie ]"), "Terminal output must render Adelie facet card");
+            assert!(term.contains("[ Chinstrap ]"), "Terminal output must render Chinstrap facet card");
+
+            // Vega-Lite JSON export
+            let vega = p.to_vega_json().expect("Faceted Vega-Lite JSON export should succeed");
+            assert!(vega.contains("\"facet\""), "Vega output must declare facet");
+            assert!(vega.contains("\"field\": \"species\""), "Vega output must facet on species");
+            assert!(vega.contains("\"columns\": 2"), "Vega output must specify 2 columns");
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_grammar_of_graphics_facet_wrap_formula_and_free_scales() {
+    let src = r#"
+        let df = dataframe {
+            x: [1.0, 2.0, 100.0, 200.0],
+            y: [5.0, 6.0, 500.0, 600.0],
+            island: ["Biscoe", "Biscoe", "Dream", "Dream"]
+        };
+        let p = ggplot(df, aes("x", "y")) + geom_point() + facet_wrap("island", scales = "free");
+        p
+    "#;
+    let res = eval_source(src).expect("Facet wrap with formula and free scales should succeed");
+    match res {
+        Value::Plot(p) => {
+            let (panels, _, _) = p.partition_facets();
+            assert_eq!(panels.len(), 2);
+            assert_eq!(panels[0].label, "Biscoe");
+            assert_eq!(panels[1].label, "Dream");
+
+            // Free scales mean each panel has no fixed outer limits forced upon it
+            assert!(panels[0].spec.x_limits.is_none());
+            assert!(panels[0].spec.y_limits.is_none());
+
+            let vega = p.to_vega_json().expect("Vega-Lite should serialize");
+            assert!(vega.contains("\"resolve\""), "Free scales must specify resolve in Vega");
+            assert!(vega.contains("\"independent\""), "Free scales must be independent in Vega");
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_grammar_of_graphics_facet_grid_composition() {
+    let src = r#"
+        let df = dataframe {
+            x: [1.0, 2.0, 3.0, 4.0],
+            y: [10.0, 20.0, 30.0, 40.0],
+            drv: ["4", "4", "f", "f"],
+            cyl: ["4cyl", "6cyl", "4cyl", "6cyl"]
+        };
+        let p = ggplot(df, aes("x", "y")) + geom_point() + facet_grid(drv ~ cyl);
+        p
+    "#;
+    let res = eval_source(src).expect("Facet grid evaluation should succeed");
+    match res {
+        Value::Plot(p) => {
+            assert!(p.facet.is_some());
+            let (panels, rows, cols) = p.partition_facets();
+            assert_eq!(rows, 2, "drv has 2 unique levels: 4, f");
+            assert_eq!(cols, 2, "cyl has 2 unique levels: 4cyl, 6cyl");
+            assert_eq!(panels.len(), 4, "2x2 grid produces 4 cross-product cells");
+
+            let svg = p.to_svg(800, 600).expect("Facet grid SVG should render");
+            assert!(svg.contains("<svg"));
+
+            let vega = p.to_vega_json().expect("Facet grid Vega should render");
+            assert!(vega.contains("\"row\""));
+            assert!(vega.contains("\"column\""));
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_grammar_of_graphics_facet_pipe_syntax() {
+    let src = r#"
+        let df = dataframe {
+            score: [85.0, 90.0, 78.0, 82.0],
+            time: [10.0, 12.0, 8.0, 9.0],
+            cohort: ["A", "A", "B", "B"]
+        };
+        let p = df 
+            |> ggplot(aes("time", "score")) 
+            |> geom_point() 
+            |> facet_wrap("cohort", ncol = 1);
+        p
+    "#;
+    let res = eval_source(src).expect("Pipe facet wrap should succeed");
+    match res {
+        Value::Plot(p) => {
+            assert!(p.facet.is_some());
+            let (panels, rows, cols) = p.partition_facets();
+            assert_eq!(panels.len(), 2);
+            assert_eq!(cols, 1);
+            assert_eq!(rows, 2);
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}

@@ -2,7 +2,7 @@ use std::fmt;
 use ghl_diagnostics::{
     CockpitPanel, CockpitTable, RenderCaps, TableAlignment, TableColumn, Diagnostic,
 };
-use ghl_plot::{AestheticMap, GeomLayer, PlotSpec};
+use ghl_plot::{AestheticMap, FacetSpec, GeomLayer, PlotSpec};
 use ghl_syntax::ast::{Expr, BinaryOp, FormulaOp};
 use ghl_types::ContrastScheme;
 use crate::env::RuntimeEnv;
@@ -212,6 +212,7 @@ pub enum Value {
     Plot(Box<PlotSpec>),
     Aesthetic(AestheticMap),
     Geom(GeomLayer),
+    Facet(FacetSpec),
     Closure {
         params: Vec<String>,
         body: Expr,
@@ -345,6 +346,7 @@ impl Value {
             Value::Plot(_) => "Plot",
             Value::Aesthetic(_) => "Aesthetic",
             Value::Geom(_) => "Geom",
+            Value::Facet(_) => "Facet",
             Value::Closure { .. } => "Function",
             Value::NativeFn(_) => "NativeFunction",
             Value::NativeFnCtx(_) => "NativeFunction",
@@ -412,6 +414,7 @@ impl PartialEq for Value {
             (Value::Plot(p1), Value::Plot(p2)) => p1 == p2,
             (Value::Aesthetic(a1), Value::Aesthetic(a2)) => a1 == a2,
             (Value::Geom(g1), Value::Geom(g2)) => g1 == g2,
+            (Value::Facet(f1), Value::Facet(f2)) => f1 == f2,
             (
                 Value::GroupedDataFrame { frame: f1, na_reasons: n1, keys: k1 },
                 Value::GroupedDataFrame { frame: f2, na_reasons: n2, keys: k2 },
@@ -709,6 +712,14 @@ impl Value {
                 format!("aes({})", parts.join(", "))
             }
             Value::Geom(g) => format!("{:?}", g.kind),
+            Value::Facet(f) => match &f.layout {
+                ghl_plot::FacetLayout::Wrap { variable, ncol, nrow, scales } => {
+                    format!("facet_wrap(\"{variable}\", ncol: {ncol:?}, nrow: {nrow:?}, scales: {scales:?})")
+                }
+                ghl_plot::FacetLayout::Grid { row_var, col_var, scales } => {
+                    format!("facet_grid(rows: {row_var:?}, cols: {col_var:?}, scales: {scales:?})")
+                }
+            },
             Value::Closure { params, body, .. } => {
                 format!("fn({}) {{\n    {}\n}}", params.join(", "), body)
             }
