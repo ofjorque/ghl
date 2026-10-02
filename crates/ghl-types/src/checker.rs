@@ -375,7 +375,7 @@ impl TypeChecker {
 
             StmtKind::Break | StmtKind::Continue => {}
 
-            StmtKind::Assign { name, value } => {
+            StmtKind::Assign { name, op, value } => {
                 let value_ty = self.check_expr(value);
                 match self.env.lookup(name) {
                     None => {
@@ -400,7 +400,7 @@ impl TypeChecker {
                     }
                     Some(info) => {
                         let declared_ty = info.ty.clone();
-                        if value_ty.unify(&declared_ty).is_none() {
+                        if op.to_binary_op().is_none() && value_ty.unify(&declared_ty).is_none() {
                             self.diagnostics.push(
                                 Diagnostic::compute_error(
                                     "C0102",
@@ -415,7 +415,35 @@ impl TypeChecker {
                     }
                 }
             }
-            StmtKind::IndexAssign { target, indices, value } => {
+            StmtKind::FieldAssign { target, fields: _, op: _, value } => {
+                let _value_ty = self.check_expr(value);
+                match self.env.lookup(target) {
+                    None => {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0101",
+                                format!("Cannot assign to undefined variable `{}`", target),
+                            )
+                            .locate(&self.source_index, &self.source_file, &stmt.span)
+                            .with_help("Declare it first with `let mut`."),
+                        );
+                    }
+                    Some(info) if !info.is_mut => {
+                        self.diagnostics.push(
+                            Diagnostic::compute_error(
+                                "C0104",
+                                format!("Cannot assign to `{}`: not declared as `mut`", target),
+                            )
+                            .locate(&self.source_index, &self.source_file, &stmt.span)
+                            .with_help(format!("Declare it as `let mut {} = ...;` to allow field mutation.", target)),
+                        );
+                    }
+                    Some(_info) => {
+                        // Struct/Record/DataFrame field assignment allowed on mutable target
+                    }
+                }
+            }
+            StmtKind::IndexAssign { target, indices, op: _, value } => {
                 let value_ty = self.check_expr(value);
                 for idx in indices {
                     match idx {
@@ -489,6 +517,9 @@ impl TypeChecker {
                                         .locate(&self.source_index, &self.source_file, &stmt.span),
                                     );
                                 }
+                            }
+                            Type::DataFrame(_) => {
+                                // DataFrame column or cell indexing assignment
                             }
                             _ => {}
                         }

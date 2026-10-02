@@ -157,19 +157,34 @@ impl Interpreter {
                 self.loop_continue = true;
                 Ok(Value::Unit)
             }
-            StmtKind::Assign { name, value } => {
-                let val = self.eval_expr(value)?;
-                if !self.env.assign(name, val.clone()) {
+            StmtKind::Assign { name, op, value } => {
+                let rhs_val = self.eval_expr(value)?;
+                let final_val = if let Some(bin_op) = op.to_binary_op() {
+                    let current_val = self.env.get(name).ok_or_else(|| {
+                        Diagnostic::compute_error(
+                            "C0101",
+                            format!("Cannot assign to undefined variable `{}`", name),
+                        )
+                    })?;
+                    self.eval_binary_op(bin_op, current_val, rhs_val)?
+                } else {
+                    rhs_val
+                };
+                if !self.env.assign(name, final_val.clone()) {
                     return Err(Diagnostic::compute_error(
                         "C0101",
                         format!("Cannot assign to undefined variable `{}`", name),
                     ));
                 }
-                Ok(val)
+                Ok(final_val)
             }
-            StmtKind::IndexAssign { target, indices, value } => {
-                let val = self.eval_expr(value)?;
-                self.eval_index_assign(target, indices, val, false)
+            StmtKind::FieldAssign { target, fields, op, value } => {
+                let rhs_val = self.eval_expr(value)?;
+                self.eval_field_assign(target, fields, *op, rhs_val)
+            }
+            StmtKind::IndexAssign { target, indices, op, value } => {
+                let rhs_val = self.eval_expr(value)?;
+                self.eval_index_assign(target, indices, *op, rhs_val, false)
             }
             StmtKind::Use(use_stmt) => {
                 if use_stmt.path.first().map(|s| s != "std").unwrap_or(false) {
@@ -1305,7 +1320,7 @@ impl Interpreter {
                         IndexSpec::Expr(e) => {
                             let idx_val = self.eval_expr_ctx(e, col_ctx)?;
                             match idx_val {
-                                Value::String(col_name) => {
+                                Value::String(col_name) | Value::ColRef(col_name) => {
                                     let values = crate::polars_bridge::pull_column_as_values(frame, na_reasons, &col_name)?;
                                     return Ok(Value::Vector(crate::vector_data::VectorData::from_values(values)));
                                 }
@@ -1322,8 +1337,28 @@ impl Interpreter {
                         }
                         _ => return Err(Diagnostic::compute_error("C0201", "Invalid DataFrame index")),
                     }
+                } else if indices.len() == 2 {
+                    let col_name = match &indices[1] {
+                        IndexSpec::Expr(e) => {
+                            let idx_val = self.eval_expr_ctx(e, col_ctx)?;
+                            match idx_val {
+                                Value::String(s) | Value::ColRef(s) => s,
+                                Value::I64(i) => {
+                                    if i < 0 || (i as usize) >= frame.width() {
+                                        return Err(Diagnostic::compute_error("C0203", format!("Column index {i} out of bounds for DataFrame with {} columns", frame.width())));
+                                    }
+                                    frame.get_column_names()[i as usize].to_string()
+                                }
+                                other => return Err(Diagnostic::compute_error("C0201", format!("DataFrame column index must be string or integer, found `{}`", other.type_name()))),
+                            }
+                        }
+                        _ => return Err(Diagnostic::compute_error("C0201", "Invalid column specification in DataFrame index")),
+                    };
+                    let col_values = crate::polars_bridge::pull_column_as_values(frame, na_reasons, &col_name)?;
+                    let col_vec = Value::Vector(crate::vector_data::VectorData::from_values(col_values));
+                    return self.eval_indexing(col_vec, &[indices[0].clone()], col_ctx);
                 }
-                Err(Diagnostic::compute_error("C0201", "DataFrame indexing requires 1 index (column name or index)"))
+                Err(Diagnostic::compute_error("C0201", "DataFrame indexing requires 1 or 2 indices"))
             }
 
             Value::Matrix { rows, cols, data } => {
@@ -1556,10 +1591,178 @@ impl Interpreter {
         }
     }
 
+    pub(crate) fn eval_field_assign(
+        &mut self,
+        target: &str,
+        fields: &[String],
+        op: AssignOp,
+        rhs_val: Value,
+    ) -> Result<Value, Diagnostic> {
+        if fields.is_empty() {
+            return Err(Diagnostic::compute_error("C0201", "Field assignment requires at least one field"));
+        }
+
+        let target_val = self.env.get(target).ok_or_else(|| {
+            Diagnostic::compute_error(
+                "C0101",
+                format!("Cannot assign to undefined variable `{}`", target),
+            )
+        })?;
+
+        match target_val {
+            Value::DataFrame { frame, na_reasons } => {
+                if fields.len() != 1 {
+                    return Err(Diagnostic::compute_error(
+                        "C0201",
+                        format!("DataFrame field assignment requires exactly 1 field name, got {}", fields.len()),
+                    ));
+                }
+                self.assign_dataframe_column(target, &frame, &na_reasons, &fields[0], op, rhs_val)
+            }
+            Value::Record(_) | Value::Struct { .. } => {
+                let mut root_val = target_val;
+                let final_assigned = self.update_record_or_struct_field(&mut root_val, fields, op, rhs_val)?;
+                self.env.assign(target, root_val);
+                Ok(final_assigned)
+            }
+            other => Err(Diagnostic::compute_error(
+                "C0201",
+                format!("Type `{}` does not support field mutation", other.type_name()),
+            )),
+        }
+    }
+
+    fn update_record_or_struct_field(
+        &mut self,
+        val: &mut Value,
+        fields: &[String],
+        op: AssignOp,
+        rhs: Value,
+    ) -> Result<Value, Diagnostic> {
+        if fields.is_empty() {
+            return Err(Diagnostic::compute_error("C0201", "Field path cannot be empty"));
+        }
+        let field = &fields[0];
+        if fields.len() == 1 {
+            match val {
+                Value::Record(map_arc) => {
+                    let current_val = map_arc.get(field).cloned();
+                    let final_val = if let Some(bin_op) = op.to_binary_op() {
+                        let cur = current_val.ok_or_else(|| {
+                            Diagnostic::compute_error("C0102", format!("Field `{field}` not found in record"))
+                        })?;
+                        self.eval_binary_op(bin_op, cur, rhs)?
+                    } else {
+                        rhs
+                    };
+                    std::sync::Arc::make_mut(map_arc).insert(field.clone(), final_val.clone());
+                    Ok(final_val)
+                }
+                Value::Struct { name, fields: fields_arc } => {
+                    let current_val = fields_arc.get(field).cloned();
+                    let final_val = if let Some(bin_op) = op.to_binary_op() {
+                        let cur = current_val.ok_or_else(|| {
+                            Diagnostic::compute_error("C0102", format!("Field `{field}` not found in struct `{name}`"))
+                        })?;
+                        self.eval_binary_op(bin_op, cur, rhs)?
+                    } else {
+                        rhs
+                    };
+                    std::sync::Arc::make_mut(fields_arc).insert(field.clone(), final_val.clone());
+                    Ok(final_val)
+                }
+                other => Err(Diagnostic::compute_error(
+                    "C0201",
+                    format!("Type `{}` does not support field mutation", other.type_name()),
+                )),
+            }
+        } else {
+            match val {
+                Value::Record(map_arc) => {
+                    let map_mut = std::sync::Arc::make_mut(map_arc);
+                    let sub_val = map_mut.get_mut(field).ok_or_else(|| {
+                        Diagnostic::compute_error("C0102", format!("Field `{field}` not found in record"))
+                    })?;
+                    self.update_record_or_struct_field(sub_val, &fields[1..], op, rhs)
+                }
+                Value::Struct { name, fields: fields_arc } => {
+                    let fields_mut = std::sync::Arc::make_mut(fields_arc);
+                    let sub_val = fields_mut.get_mut(field).ok_or_else(|| {
+                        Diagnostic::compute_error("C0102", format!("Field `{field}` not found in struct `{name}`"))
+                    })?;
+                    self.update_record_or_struct_field(sub_val, &fields[1..], op, rhs)
+                }
+                other => Err(Diagnostic::compute_error(
+                    "C0201",
+                    format!("Cannot traverse field `{}` on type `{}`", field, other.type_name()),
+                )),
+            }
+        }
+    }
+
+    fn assign_dataframe_column(
+        &mut self,
+        target: &str,
+        frame: &polars_core::frame::DataFrame,
+        na_reasons: &std::sync::Arc<crate::na_reasons::NaReasonTable>,
+        col_name: &str,
+        op: AssignOp,
+        rhs_val: Value,
+    ) -> Result<Value, Diagnostic> {
+        let height = frame.height();
+        let final_rhs = if let Some(bin_op) = op.to_binary_op() {
+            let current_vals = crate::polars_bridge::pull_column_as_values(frame, na_reasons, col_name)?;
+            let current_vec = Value::Vector(crate::vector_data::VectorData::from_values(current_vals));
+            self.eval_binary_op(bin_op, current_vec, rhs_val)?
+        } else {
+            rhs_val
+        };
+
+        let new_values: Vec<Value> = match final_rhs {
+            Value::Vector(vd) => {
+                if height > 0 && vd.len() != height {
+                    return Err(Diagnostic::compute_error(
+                        "C0202",
+                        format!(
+                            "Replacement vector length ({}) does not match DataFrame height ({})",
+                            vd.len(),
+                            height
+                        ),
+                    ));
+                }
+                vd.to_vec()
+            }
+            scalar => {
+                vec![scalar; height]
+            }
+        };
+
+        let mut new_reasons = (**na_reasons).without_column(col_name);
+        for (row, v) in new_values.iter().enumerate() {
+            if let Value::NA(Some(reason)) = v {
+                new_reasons.set(col_name, row, reason.clone());
+            }
+        }
+
+        let column = crate::polars_bridge::value_column_to_polars(col_name, &new_values);
+        let mut new_frame = frame.clone();
+        new_frame.with_column(column).map_err(|e| {
+            Diagnostic::compute_error("C0210", format!("DataFrame column assignment failed: {e}"))
+        })?;
+
+        let df_val = Value::DataFrame {
+            frame: new_frame,
+            na_reasons: std::sync::Arc::new(new_reasons),
+        };
+        self.env.assign(target, df_val);
+        Ok(Value::Vector(crate::vector_data::VectorData::from_values(new_values)))
+    }
+
     pub(crate) fn eval_index_assign(
         &mut self,
         target: &str,
         indices: &[IndexSpec],
+        op: AssignOp,
         rhs_val: Value,
         col_ctx: bool,
     ) -> Result<Value, Diagnostic> {
@@ -1591,7 +1794,13 @@ impl Interpreter {
                                         format!("Index out of bounds: index {i} for vector of length {}", items.len()),
                                     ));
                                 }
-                                items[i as usize] = rhs_val.clone();
+                                let idx = i as usize;
+                                let new_cell = if let Some(bin_op) = op.to_binary_op() {
+                                    self.eval_binary_op(bin_op, items[idx].clone(), rhs_val.clone())?
+                                } else {
+                                    rhs_val.clone()
+                                };
+                                items[idx] = new_cell;
                             }
                             Value::F64(f) if f.fract() == 0.0 => {
                                 let i = f as i64;
@@ -1601,7 +1810,13 @@ impl Interpreter {
                                         format!("Index out of bounds: index {i} for vector of length {}", items.len()),
                                     ));
                                 }
-                                items[i as usize] = rhs_val.clone();
+                                let idx = i as usize;
+                                let new_cell = if let Some(bin_op) = op.to_binary_op() {
+                                    self.eval_binary_op(bin_op, items[idx].clone(), rhs_val.clone())?
+                                } else {
+                                    rhs_val.clone()
+                                };
+                                items[idx] = new_cell;
                             }
                             Value::Vector(idx_vd) => {
                                 if idx_vd.column().dtype() == &DataType::Boolean {
@@ -1641,11 +1856,22 @@ impl Interpreter {
                                             ));
                                         }
                                         for (k, &idx) in selected.iter().enumerate() {
-                                            items[idx] = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                            let rhs_item = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                            let new_cell = if let Some(bin_op) = op.to_binary_op() {
+                                                self.eval_binary_op(bin_op, items[idx].clone(), rhs_item)?
+                                            } else {
+                                                rhs_item
+                                            };
+                                            items[idx] = new_cell;
                                         }
                                     } else {
                                         for &idx in &selected {
-                                            items[idx] = rhs_val.clone();
+                                            let new_cell = if let Some(bin_op) = op.to_binary_op() {
+                                                self.eval_binary_op(bin_op, items[idx].clone(), rhs_val.clone())?
+                                            } else {
+                                                rhs_val.clone()
+                                            };
+                                            items[idx] = new_cell;
                                         }
                                     }
                                 } else {
@@ -1674,11 +1900,22 @@ impl Interpreter {
                                             ));
                                         }
                                         for (k, &idx) in selected.iter().enumerate() {
-                                            items[idx] = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                            let rhs_item = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                            let new_cell = if let Some(bin_op) = op.to_binary_op() {
+                                                self.eval_binary_op(bin_op, items[idx].clone(), rhs_item)?
+                                            } else {
+                                                rhs_item
+                                            };
+                                            items[idx] = new_cell;
                                         }
                                     } else {
                                         for &idx in &selected {
-                                            items[idx] = rhs_val.clone();
+                                            let new_cell = if let Some(bin_op) = op.to_binary_op() {
+                                                self.eval_binary_op(bin_op, items[idx].clone(), rhs_val.clone())?
+                                            } else {
+                                                rhs_val.clone()
+                                            };
+                                            items[idx] = new_cell;
                                         }
                                     }
                                 }
@@ -1729,11 +1966,22 @@ impl Interpreter {
                                 ));
                             }
                             for k in 0..len_u {
-                                items[start_u + k] = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                let rhs_item = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                let new_cell = if let Some(bin_op) = op.to_binary_op() {
+                                    self.eval_binary_op(bin_op, items[start_u + k].clone(), rhs_item)?
+                                } else {
+                                    rhs_item
+                                };
+                                items[start_u + k] = new_cell;
                             }
                         } else {
                             for k in 0..len_u {
-                                items[start_u + k] = rhs_val.clone();
+                                let new_cell = if let Some(bin_op) = op.to_binary_op() {
+                                    self.eval_binary_op(bin_op, items[start_u + k].clone(), rhs_val.clone())?
+                                } else {
+                                    rhs_val.clone()
+                                };
+                                items[start_u + k] = new_cell;
                             }
                         }
                     }
@@ -1750,11 +1998,22 @@ impl Interpreter {
                                 ));
                             }
                             for k in 0..items.len() {
-                                items[k] = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                let rhs_item = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                let new_cell = if let Some(bin_op) = op.to_binary_op() {
+                                    self.eval_binary_op(bin_op, items[k].clone(), rhs_item)?
+                                } else {
+                                    rhs_item
+                                };
+                                items[k] = new_cell;
                             }
                         } else {
                             for k in 0..items.len() {
-                                items[k] = rhs_val.clone();
+                                let new_cell = if let Some(bin_op) = op.to_binary_op() {
+                                    self.eval_binary_op(bin_op, items[k].clone(), rhs_val.clone())?
+                                } else {
+                                    rhs_val.clone()
+                                };
+                                items[k] = new_cell;
                             }
                         }
                     }
@@ -1762,6 +2021,217 @@ impl Interpreter {
 
                 self.env.assign(target, Value::Vector(VectorData::from_values(items)));
                 Ok(rhs_val)
+            }
+
+            Value::DataFrame { frame, na_reasons } => {
+                if indices.len() == 1 {
+                    let col_name = match &indices[0] {
+                        IndexSpec::Expr(e) => {
+                            let idx_val = self.eval_expr_ctx(e, col_ctx)?;
+                            match idx_val {
+                                Value::String(s) | Value::ColRef(s) => s,
+                                Value::I64(i) => {
+                                    if i < 0 || (i as usize) >= frame.width() {
+                                        return Err(Diagnostic::compute_error(
+                                            "C0203",
+                                            format!("Column index {i} out of bounds for DataFrame with {} columns", frame.width()),
+                                        ));
+                                    }
+                                    frame.get_column_names()[i as usize].to_string()
+                                }
+                                other => return Err(Diagnostic::compute_error(
+                                    "C0201",
+                                    format!("DataFrame column index must be string or integer, found `{}`", other.type_name()),
+                                )),
+                            }
+                        }
+                        _ => return Err(Diagnostic::compute_error("C0201", "Invalid DataFrame column specification")),
+                    };
+                    self.assign_dataframe_column(target, &frame, &na_reasons, &col_name, op, rhs_val)
+                } else if indices.len() == 2 {
+                    let col_name = match &indices[1] {
+                        IndexSpec::Expr(e) => {
+                            let idx_val = self.eval_expr_ctx(e, true)?;
+                            match idx_val {
+                                Value::String(s) | Value::ColRef(s) => s,
+                                Value::I64(i) => {
+                                    if i < 0 || (i as usize) >= frame.width() {
+                                        return Err(Diagnostic::compute_error(
+                                            "C0203",
+                                            format!("Column index {i} out of bounds for DataFrame with {} columns", frame.width()),
+                                        ));
+                                    }
+                                    frame.get_column_names()[i as usize].to_string()
+                                }
+                                other => return Err(Diagnostic::compute_error(
+                                    "C0201",
+                                    format!("DataFrame column index must be string or integer, found `{}`", other.type_name()),
+                                )),
+                            }
+                        }
+                        _ => return Err(Diagnostic::compute_error("C0201", "Invalid DataFrame column specification")),
+                    };
+
+                    if !frame.get_column_names().iter().any(|c| c.as_str() == col_name.as_str()) {
+                        return Err(Diagnostic::compute_error(
+                            "C0102",
+                            format!("Column `{col_name}` not found in DataFrame"),
+                        ));
+                    }
+
+                    let height = frame.height();
+                    let selected: Vec<usize> = match &indices[0] {
+                        IndexSpec::Expr(e) => {
+                            let row_val = self.eval_expr_ctx(e, col_ctx)?;
+                            match row_val {
+                                Value::I64(i) => {
+                                    if i < 0 || (i as usize) >= height {
+                                        return Err(Diagnostic::compute_error(
+                                            "C0203",
+                                            format!("Row index {i} out of bounds for DataFrame with {height} rows"),
+                                        ));
+                                    }
+                                    vec![i as usize]
+                                }
+                                Value::F64(f) if f.fract() == 0.0 => {
+                                    let i = f as i64;
+                                    if i < 0 || (i as usize) >= height {
+                                        return Err(Diagnostic::compute_error(
+                                            "C0203",
+                                            format!("Row index {i} out of bounds for DataFrame with {height} rows"),
+                                        ));
+                                    }
+                                    vec![i as usize]
+                                }
+                                Value::Vector(idx_vd) => {
+                                    if idx_vd.column().dtype() == &DataType::Boolean {
+                                        if idx_vd.len() != height {
+                                            return Err(Diagnostic::compute_error(
+                                                "C0202",
+                                                format!(
+                                                    "Boolean mask length ({}) must match DataFrame height ({})",
+                                                    idx_vd.len(),
+                                                    height
+                                                ),
+                                            ));
+                                        }
+                                        let mut sel = Vec::new();
+                                        if let Ok(ca) = idx_vd.column().bool() {
+                                            for i in 0..height {
+                                                if ca.get(i) == Some(true) {
+                                                    sel.push(i);
+                                                }
+                                            }
+                                        } else {
+                                            for (i, it) in idx_vd.iter().enumerate() {
+                                                if it.as_bool() == Some(true) {
+                                                    sel.push(i);
+                                                }
+                                            }
+                                        }
+                                        sel
+                                    } else {
+                                        let mut sel = Vec::with_capacity(idx_vd.len());
+                                        for it in idx_vd.iter() {
+                                            let i = it.as_i64().ok_or_else(|| {
+                                                Diagnostic::compute_error("C0201", "Row index must be an integer or boolean mask")
+                                            })?;
+                                            if i < 0 || (i as usize) >= height {
+                                                return Err(Diagnostic::compute_error(
+                                                    "C0203",
+                                                    format!("Row index {i} out of bounds for DataFrame with {height} rows"),
+                                                ));
+                                            }
+                                            sel.push(i as usize);
+                                        }
+                                        sel
+                                    }
+                                }
+                                other => {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0202",
+                                        format!("Cannot index DataFrame rows with `{}`", other.type_name()),
+                                    ));
+                                }
+                            }
+                        }
+                        IndexSpec::Range { start, end, inclusive } => {
+                            let s = if let Some(st) = start {
+                                let val = self.eval_expr_ctx(st, col_ctx)?;
+                                val.as_i64().ok_or_else(|| {
+                                    Diagnostic::compute_error("C0201", "Range start must be an integer")
+                                })?
+                            } else {
+                                0
+                            };
+                            let e = if let Some(ed) = end {
+                                let val = self.eval_expr_ctx(ed, col_ctx)?;
+                                let ed_i = val.as_i64().ok_or_else(|| {
+                                    Diagnostic::compute_error("C0201", "Range end must be an integer")
+                                })?;
+                                if *inclusive { ed_i + 1 } else { ed_i }
+                            } else {
+                                height as i64
+                            };
+                            if s < 0 || (s as usize) > height || e < 0 || (e as usize) > height || s > e {
+                                return Err(Diagnostic::compute_error(
+                                    "C0203",
+                                    format!("Range slice [{s}..{e}] out of bounds for DataFrame with {height} rows"),
+                                ));
+                            }
+                            (s as usize..e as usize).collect()
+                        }
+                        IndexSpec::All => (0..height).collect(),
+                    };
+
+                    let mut col_values = crate::polars_bridge::pull_column_as_values(&frame, &na_reasons, &col_name)?;
+                    if let Value::Vector(rhs_vd) = &rhs_val {
+                        if rhs_vd.len() != selected.len() {
+                            return Err(Diagnostic::compute_error(
+                                "C0202",
+                                format!(
+                                    "Replacement vector length ({}) does not match index selection count ({})",
+                                    rhs_vd.len(),
+                                    selected.len()
+                                ),
+                            ));
+                        }
+                        for (k, &row_idx) in selected.iter().enumerate() {
+                            let rhs_item = rhs_vd.value_at(k).unwrap_or(Value::NA(None));
+                            let final_cell = if let Some(bin_op) = op.to_binary_op() {
+                                self.eval_binary_op(bin_op, col_values[row_idx].clone(), rhs_item)?
+                            } else {
+                                rhs_item
+                            };
+                            col_values[row_idx] = final_cell;
+                        }
+                    } else {
+                        for &row_idx in &selected {
+                            let final_cell = if let Some(bin_op) = op.to_binary_op() {
+                                self.eval_binary_op(bin_op, col_values[row_idx].clone(), rhs_val.clone())?
+                            } else {
+                                rhs_val.clone()
+                            };
+                            col_values[row_idx] = final_cell;
+                        }
+                    }
+
+                    let mut new_reasons = (*na_reasons).without_column(&col_name);
+                    for (r, v) in col_values.iter().enumerate() {
+                        if let Value::NA(Some(reason)) = v {
+                            new_reasons.set(&col_name, r, reason.clone());
+                        }
+                    }
+                    let new_column = crate::polars_bridge::value_column_to_polars(&col_name, &col_values);
+                    let mut new_frame = frame.clone();
+                    new_frame.with_column(new_column).map_err(|e| {
+                        Diagnostic::compute_error("C0210", format!("DataFrame cell assignment failed: {e}"))
+                    })?;
+                    self.env.assign(target, Value::DataFrame { frame: new_frame, na_reasons: std::sync::Arc::new(new_reasons) });
+                    Ok(rhs_val)
+                } else {
+                    Err(Diagnostic::compute_error("C0201", "DataFrame indexing requires 1 or 2 indices"))
+                }
             }
 
             Value::Matrix { rows, cols, .. } => {
@@ -1785,7 +2255,13 @@ impl Interpreter {
                             let val_f64 = rhs_val.as_f64().ok_or_else(|| {
                                 Diagnostic::compute_error("C0202", "Matrix element must be a numeric value")
                             })?;
-                            data_mut[*r * cols_len + *c] = val_f64;
+                            let idx = *r * cols_len + *c;
+                            let res = if let Some(bin_op) = op.to_binary_op() {
+                                apply_matrix_bin_op(bin_op, data_mut[idx], val_f64)?
+                            } else {
+                                val_f64
+                            };
+                            data_mut[idx] = res;
                         }
                         (DimSelection::Scalar(r), c_spec) => {
                             let c_indices = c_spec.to_indices(cols_len);
@@ -1804,11 +2280,23 @@ impl Interpreter {
                                     let cell_val = vd.value_at(k).and_then(|v| v.as_f64()).ok_or_else(|| {
                                         Diagnostic::compute_error("C0202", "Matrix element must be a numeric value")
                                     })?;
-                                    data_mut[*r * cols_len + c] = cell_val;
+                                    let idx = *r * cols_len + c;
+                                    let res = if let Some(bin_op) = op.to_binary_op() {
+                                        apply_matrix_bin_op(bin_op, data_mut[idx], cell_val)?
+                                    } else {
+                                        cell_val
+                                    };
+                                    data_mut[idx] = res;
                                 }
                             } else if let Some(s) = rhs_val.as_f64() {
                                 for &c in &c_indices {
-                                    data_mut[*r * cols_len + c] = s;
+                                    let idx = *r * cols_len + c;
+                                    let res = if let Some(bin_op) = op.to_binary_op() {
+                                        apply_matrix_bin_op(bin_op, data_mut[idx], s)?
+                                    } else {
+                                        s
+                                    };
+                                    data_mut[idx] = res;
                                 }
                             } else {
                                 return Err(Diagnostic::compute_error(
@@ -1834,11 +2322,23 @@ impl Interpreter {
                                     let cell_val = vd.value_at(k).and_then(|v| v.as_f64()).ok_or_else(|| {
                                         Diagnostic::compute_error("C0202", "Matrix element must be a numeric value")
                                     })?;
-                                    data_mut[r * cols_len + *c] = cell_val;
+                                    let idx = r * cols_len + *c;
+                                    let res = if let Some(bin_op) = op.to_binary_op() {
+                                        apply_matrix_bin_op(bin_op, data_mut[idx], cell_val)?
+                                    } else {
+                                        cell_val
+                                    };
+                                    data_mut[idx] = res;
                                 }
                             } else if let Some(s) = rhs_val.as_f64() {
                                 for &r in &r_indices {
-                                    data_mut[r * cols_len + *c] = s;
+                                    let idx = r * cols_len + *c;
+                                    let res = if let Some(bin_op) = op.to_binary_op() {
+                                        apply_matrix_bin_op(bin_op, data_mut[idx], s)?
+                                    } else {
+                                        s
+                                    };
+                                    data_mut[idx] = res;
                                 }
                             } else {
                                 return Err(Diagnostic::compute_error(
@@ -1862,13 +2362,26 @@ impl Interpreter {
                                 }
                                 for (i, &r) in r_indices.iter().enumerate() {
                                     for (j, &c) in c_indices.iter().enumerate() {
-                                        data_mut[r * cols_len + c] = sub_data[i * sub_c + j];
+                                        let cell_val = sub_data[i * sub_c + j];
+                                        let idx = r * cols_len + c;
+                                        let res = if let Some(bin_op) = op.to_binary_op() {
+                                            apply_matrix_bin_op(bin_op, data_mut[idx], cell_val)?
+                                        } else {
+                                            cell_val
+                                        };
+                                        data_mut[idx] = res;
                                     }
                                 }
                             } else if let Some(s) = rhs_val.as_f64() {
                                 for &r in &r_indices {
                                     for &c in &c_indices {
-                                        data_mut[r * cols_len + c] = s;
+                                        let idx = r * cols_len + c;
+                                        let res = if let Some(bin_op) = op.to_binary_op() {
+                                            apply_matrix_bin_op(bin_op, data_mut[idx], s)?
+                                        } else {
+                                            s
+                                        };
+                                        data_mut[idx] = res;
                                     }
                                 }
                             } else {
@@ -2358,6 +2871,25 @@ pub(crate) const PARALLEL_THRESHOLD_SORT: usize = 5_000;
 /// worth the risk without a measured need); `native_map`'s closure loop is not touched
 /// here either, since it captures a mutable `RuntimeEnv` it swaps per call -- not a
 /// `Send`/`Sync`-safe loop to hand to rayon without redesigning that mechanism first.
+fn apply_matrix_bin_op(op: BinaryOp, a: f64, b: f64) -> Result<f64, Diagnostic> {
+    match op {
+        BinaryOp::Add => Ok(a + b),
+        BinaryOp::Sub => Ok(a - b),
+        BinaryOp::Mul => Ok(a * b),
+        BinaryOp::Div => {
+            if b == 0.0 {
+                Ok(f64::NAN)
+            } else {
+                Ok(a / b)
+            }
+        }
+        _ => Err(Diagnostic::compute_error(
+            "C0202",
+            format!("Unsupported operator `{}` for matrix assignment", op),
+        )),
+    }
+}
+
 fn vector_elementwise_op(v1: &VectorData, v2: &VectorData, op_fn: fn(f64, f64) -> f64) -> Result<Value, Diagnostic> {
     if v1.len() != v2.len() {
         return Err(Diagnostic::statistical_error(

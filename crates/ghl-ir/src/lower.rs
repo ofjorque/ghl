@@ -378,8 +378,27 @@ impl LoweringContext {
             }
             StmtKind::Break => Ok(HirStatement::Break),
             StmtKind::Continue => Ok(HirStatement::Continue),
-            StmtKind::Assign { name, value } => {
-                let value_hir = self.lower_expr(value)?;
+            StmtKind::Assign { name, op, value } => {
+                let value_hir = if let Some(bin_op) = op.to_binary_op() {
+                    let lhs_hir = self.lower_expr(&Expr::new(ExprKind::Ident(name.clone()), value.span.clone()))?;
+                    let rhs_hir = self.lower_expr(value)?;
+                    let hir_op = match bin_op {
+                        BinaryOp::Add => HirBinaryOp::Add,
+                        BinaryOp::Sub => HirBinaryOp::Sub,
+                        BinaryOp::Mul => HirBinaryOp::Mul,
+                        BinaryOp::Div => HirBinaryOp::Div,
+                        _ => return Err(Diagnostic::compute_error("C0305", "Unsupported compound operator in scalar JIT")),
+                    };
+                    let ty = lhs_hir.ty().clone();
+                    HirExpr::Binary {
+                        op: hir_op,
+                        lhs: Box::new(lhs_hir),
+                        rhs: Box::new(rhs_hir),
+                        ty,
+                    }
+                } else {
+                    self.lower_expr(value)?
+                };
                 Ok(HirStatement::Assign {
                     name: name.clone(),
                     value: value_hir,

@@ -83,6 +83,43 @@ pub enum BinaryOp {
     Or,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssignOp {
+    Assign,    // =
+    AddAssign, // +=
+    SubAssign, // -=
+    MulAssign, // *=
+    DivAssign, // /=
+}
+
+impl AssignOp {
+    pub fn to_binary_op(&self) -> Option<BinaryOp> {
+        match self {
+            AssignOp::Assign => None,
+            AssignOp::AddAssign => Some(BinaryOp::Add),
+            AssignOp::SubAssign => Some(BinaryOp::Sub),
+            AssignOp::MulAssign => Some(BinaryOp::Mul),
+            AssignOp::DivAssign => Some(BinaryOp::Div),
+        }
+    }
+
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            AssignOp::Assign => "=",
+            AssignOp::AddAssign => "+=",
+            AssignOp::SubAssign => "-=",
+            AssignOp::MulAssign => "*=",
+            AssignOp::DivAssign => "/=",
+        }
+    }
+}
+
+impl std::fmt::Display for AssignOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.symbol())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Wildcard, // _
@@ -376,16 +413,24 @@ pub enum StmtKind {
     Return(Option<Expr>),
     Break,
     Continue,
-    /// `name = value;` -- reassigns an existing `let mut` binding in place
-    /// (`RuntimeEnv::assign`), not a new declaration.
+    /// `name <op> value;` -- assignment or compound assignment (`+=`, `-=`, `*=`, `/=`)
     Assign {
         name: String,
+        op: AssignOp,
         value: Expr,
     },
-    /// `target[indices...] = value;` -- in-place mutation of a collection / slice.
+    /// `target[indices...] <op> value;` -- in-place mutation of a collection / slice / dataframe.
     IndexAssign {
         target: String,
         indices: Vec<IndexSpec>,
+        op: AssignOp,
+        value: Expr,
+    },
+    /// `target.field1[.field2...] <op> value;` -- in-place mutation of a struct / record / dataframe field.
+    FieldAssign {
+        target: String,
+        fields: Vec<String>,
+        op: AssignOp,
         value: Expr,
     },
     Use(UseStmt),
@@ -678,14 +723,21 @@ impl std::fmt::Display for Stmt {
                     write!(f, "return;")
                 }
             }
-            StmtKind::Assign { name, value } => write!(f, "{name} = {value};"),
-            StmtKind::IndexAssign { target, indices, value } => {
+            StmtKind::Assign { name, op, value } => write!(f, "{name} {op} {value};"),
+            StmtKind::FieldAssign { target, fields, op, value } => {
+                write!(f, "{target}")?;
+                for field in fields {
+                    write!(f, ".{field}")?;
+                }
+                write!(f, " {op} {value};")
+            }
+            StmtKind::IndexAssign { target, indices, op, value } => {
                 write!(f, "{target}[")?;
                 for (i, idx) in indices.iter().enumerate() {
                     if i > 0 { write!(f, ", ")?; }
                     write!(f, "{idx}")?;
                 }
-                write!(f, "] = {value};")
+                write!(f, "] {op} {value};")
             }
             StmtKind::Use(u) => write!(f, "use {};", u.path.join("::")),
             _ => write!(f, "<stmt>"),

@@ -166,6 +166,16 @@ where
         .delimited_by(just(Token::LBracket), just(Token::RBracket))
 }
 
+pub fn assign_op_parser() -> impl Parser<Token, AssignOp, Error = Simple<Token>> + Clone {
+    choice((
+        just(Token::Eq).to(AssignOp::Assign),
+        just(Token::PlusEq).to(AssignOp::AddAssign),
+        just(Token::MinusEq).to(AssignOp::SubAssign),
+        just(Token::StarEq).to(AssignOp::MulAssign),
+        just(Token::SlashEq).to(AssignOp::DivAssign),
+    ))
+}
+
 pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone {
     recursive(|expr| {
         let path_segment = select! {
@@ -437,24 +447,46 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             // be tried before `expr_stmt` below: a bare identifier also parses as a
             // valid (if pointless as a statement) expression, so without this ordering
             // `expr_stmt` would consume the identifier and then choke on the `=`.
-            let assign_stmt = select! { Token::Ident(name) => name }
-                .then_ignore(just(Token::Eq))
-                .then(expr.clone())
-                .then_ignore(just(Token::Semicolon).or_not())
-                .map_with_span(|(name, value), span| Stmt::new(StmtKind::Assign { name, value }, span));
-
-            // `target[indices...] = value;` -- in-place mutation of a collection or slice.
+            // `target[indices...] <op> value;` -- in-place mutation of a collection, slice, or dataframe.
             let index_assign_stmt = select! {
                 Token::Ident(name) => name,
                 Token::Col => "col".to_string(),
             }
             .then(index_bracket_parser(expr.clone()))
-            .then_ignore(just(Token::Eq))
+            .then(assign_op_parser())
             .then(expr.clone())
             .then_ignore(just(Token::Semicolon).or_not())
-            .map_with_span(|((target, indices), value), span| {
-                Stmt::new(StmtKind::IndexAssign { target, indices, value }, span)
+            .map_with_span(|(((target, indices), op), value), span| {
+                Stmt::new(StmtKind::IndexAssign { target, indices, op, value }, span)
             });
+
+            // `target.field1[.field2...] <op> value;` -- in-place mutation of struct, record, or dataframe field.
+            let field_assign_stmt = select! {
+                Token::Ident(name) => name,
+                Token::Col => "col".to_string(),
+            }
+            .then(
+                just(Token::Dot)
+                    .ignore_then(select! {
+                        Token::Ident(name) => name,
+                        Token::Col => "col".to_string(),
+                    })
+                    .repeated()
+                    .at_least(1),
+            )
+            .then(assign_op_parser())
+            .then(expr.clone())
+            .then_ignore(just(Token::Semicolon).or_not())
+            .map_with_span(|(((target, fields), op), value), span| {
+                Stmt::new(StmtKind::FieldAssign { target, fields, op, value }, span)
+            });
+
+            // `name <op> value;` -- variable reassignment or compound assignment (`+=`, `-=`, `*=`, `/=`).
+            let assign_stmt = select! { Token::Ident(name) => name }
+                .then(assign_op_parser())
+                .then(expr.clone())
+                .then_ignore(just(Token::Semicolon).or_not())
+                .map_with_span(|((name, op), value), span| Stmt::new(StmtKind::Assign { name, op, value }, span));
 
             let expr_stmt = expr
                 .clone()
@@ -488,6 +520,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 .or(break_stmt)
                 .or(continue_stmt)
                 .or(index_assign_stmt)
+                .or(field_assign_stmt)
                 .or(assign_stmt)
                 .or(expr_stmt)
         };
@@ -1030,25 +1063,43 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         .then_ignore(just(Token::Semicolon).or_not())
         .map_with_span(|_, span| Stmt::new(StmtKind::Continue, span));
 
-    // See the same rule in `expr_parser()`'s block-statement grammar for why this must
-    // be tried before `expr_stmt`.
-    let assign_stmt = select! { Token::Ident(name) => name }
-        .then_ignore(just(Token::Eq))
-        .then(expr_parser())
-        .then_ignore(just(Token::Semicolon).or_not())
-        .map_with_span(|(name, value), span| Stmt::new(StmtKind::Assign { name, value }, span));
-
     let index_assign_stmt = select! {
         Token::Ident(name) => name,
         Token::Col => "col".to_string(),
     }
     .then(index_bracket_parser(expr_parser()))
-    .then_ignore(just(Token::Eq))
+    .then(assign_op_parser())
     .then(expr_parser())
     .then_ignore(just(Token::Semicolon).or_not())
-    .map_with_span(|((target, indices), value), span| {
-        Stmt::new(StmtKind::IndexAssign { target, indices, value }, span)
+    .map_with_span(|(((target, indices), op), value), span| {
+        Stmt::new(StmtKind::IndexAssign { target, indices, op, value }, span)
     });
+
+    let field_assign_stmt = select! {
+        Token::Ident(name) => name,
+        Token::Col => "col".to_string(),
+    }
+    .then(
+        just(Token::Dot)
+            .ignore_then(select! {
+                Token::Ident(name) => name,
+                Token::Col => "col".to_string(),
+            })
+            .repeated()
+            .at_least(1),
+    )
+    .then(assign_op_parser())
+    .then(expr_parser())
+    .then_ignore(just(Token::Semicolon).or_not())
+    .map_with_span(|(((target, fields), op), value), span| {
+        Stmt::new(StmtKind::FieldAssign { target, fields, op, value }, span)
+    });
+
+    let assign_stmt = select! { Token::Ident(name) => name }
+        .then(assign_op_parser())
+        .then(expr_parser())
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map_with_span(|((name, op), value), span| Stmt::new(StmtKind::Assign { name, op, value }, span));
 
     let expr_stmt = expr_parser()
         .then_ignore(just(Token::Semicolon).or_not())
@@ -1198,6 +1249,7 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         .or(break_stmt)
         .or(continue_stmt)
         .or(index_assign_stmt)
+        .or(field_assign_stmt)
         .or(assign_stmt)
         .or(expr_stmt)
 }

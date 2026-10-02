@@ -70,13 +70,27 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             format_expr(out, init, level);
             out.push(';');
         }
-        StmtKind::Assign { name, value } => {
+        StmtKind::Assign { name, op, value } => {
             out.push_str(name);
-            out.push_str(" = ");
+            out.push(' ');
+            out.push_str(op.symbol());
+            out.push(' ');
             format_expr(out, value, level);
             out.push(';');
         }
-        StmtKind::IndexAssign { target, indices, value } => {
+        StmtKind::FieldAssign { target, fields, op, value } => {
+            out.push_str(target);
+            for f in fields {
+                out.push('.');
+                out.push_str(f);
+            }
+            out.push(' ');
+            out.push_str(op.symbol());
+            out.push(' ');
+            format_expr(out, value, level);
+            out.push(';');
+        }
+        StmtKind::IndexAssign { target, indices, op, value } => {
             out.push_str(target);
             out.push('[');
             for (i, idx) in indices.iter().enumerate() {
@@ -101,7 +115,9 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
                     }
                 }
             }
-            out.push_str("] = ");
+            out.push_str("] ");
+            out.push_str(op.symbol());
+            out.push(' ');
             format_expr(out, value, level);
             out.push(';');
         }

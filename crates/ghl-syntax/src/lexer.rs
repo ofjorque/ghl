@@ -169,6 +169,16 @@ pub enum Token {
     #[token("^")]
     Caret,
 
+    // Compound Assignment Operators
+    #[token("+=")]
+    PlusEq,
+    #[token("-=")]
+    MinusEq,
+    #[token("*=")]
+    StarEq,
+    #[token("/=")]
+    SlashEq,
+
     // Comparison & Logic
     #[token("==")]
     EqEq,
@@ -252,6 +262,10 @@ impl std::fmt::Display for Token {
             Token::Pipe => write!(f, "|>"),
             Token::VBar => write!(f, "|"),
             Token::Tilde => write!(f, "~"),
+            Token::PlusEq => write!(f, "+="),
+            Token::MinusEq => write!(f, "-="),
+            Token::StarEq => write!(f, "*="),
+            Token::SlashEq => write!(f, "/="),
             other => write!(f, "{:?}", other),
         }
     }
