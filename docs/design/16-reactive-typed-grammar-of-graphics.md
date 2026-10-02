@@ -380,9 +380,9 @@ Para evitar inconsistencias entre Plotters y Vega, **el cálculo de dimensiones 
 
 ### Fases del Roadmap para `ghl_plot`
 
-- [ ] **Fase 1: Modularización Limpia (`crates/ghl-plot`)**: Mover el subsistema de gráficos fuera de `ghl-diagnostics` hacia un crate independiente con arquitectura de IR limpia.
-- [ ] **Fase 2: Compositor de Capas Multi-Layer**: Sustituir el `if/else` excluyente por la estructura `ViewNode::Layer(Vec<MarkSpec>)` permitiendo acumular geometrías sobre un mismo plano cartesiano.
-- [ ] **Fase 3: Mapeo de Estéticas (`aes`) y Paletas**: Conectar canales `color`, `fill`, `size`, `shape` con las series del DataFrame y paletas categóricas (`Okabe-Ito`, `Viridis`).
-- [ ] **Fase 4: Soporte Nativo de Factores (`Factor`)**: Mapeo directo de `Value::Factor` (con o sin `ordered: true`) a escalas de bandas discretas.
-- [ ] **Fase 5: Backend Vega Interactivo**: Emisión de especificaciones Vega JSON para visualización reactiva en Positron y notebooks.
-- [ ] **Fase 6: Álgebra de Composición y Faceting**: Soporte para operadores `+`, `|`, `/` y facetado `* by(grupo)`.
+- [x] **Fase 1: Modularización Limpia (`crates/ghl-plot`)**: Mover el subsistema de gráficos fuera de `ghl-diagnostics` hacia un crate independiente con arquitectura de IR limpia.
+- [x] **Fase 2: Compositor de Capas Multi-Layer**: Sustituir el `if/else` excluyente por la estructura `ViewNode::Layer(Vec<MarkSpec>)` permitiendo acumular geometrías sobre un mismo plano cartesiano.
+- [x] **Fase 3: Mapeo de Estéticas (`aes`) y Paletas**: Conectar canales `color`, `fill`, `size`, `shape` con las series del DataFrame y paletas categóricas (`Okabe-Ito`, `Viridis`).
+- [x] **Fase 4: Soporte Nativo de Factores (`Factor`)**: Mapeo directo de `Value::Factor` (con o sin `ordered: true`) a escalas de bandas discretas y boxplots comparativos.
+- [x] **Fase 5: Backend Vega Interactivo**: Emisión de especificaciones Vega JSON para visualización reactiva en Positron y notebooks.
+- [x] **Fase 6: Faceting y Álgebra de Composición**: Soporte para `facet_wrap` y `facet_grid` bidimensional, compartición de escalas (`fixed`, `free`, `free_x`, `free_y`), cálculo local de estadísticas y operadores de composición (`+`).
