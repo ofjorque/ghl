@@ -46,23 +46,23 @@ Backlog temático para consolidar la ergonomía de última generación del lengu
 >   - **Integración IDE:** Detección automática de variables de entorno `POSITRON_PLOTS_DIR` / `GHL_PLOTS_DIR` para exportar SVGs capturados por el visor de gráficos del IDE.
 >
 > - **Aspectos Mal Implementados / Deficiencias Críticas (A Corregir):**
->   - [ ] **Pseudo-Gramática de Capas (Exclusión Mutua):** `draw_chart()` y `render()` usan un condicional en cascada (`if is_hist { ... } else if is_box { ... } else { scatter }`). Es imposible componer múltiples capas reales (e.g. histograma + densidad, boxplot + jitter de puntos, múltiples series superpuestas).
->   - [ ] **`geom_line` es un cascarón incompleto:** `GeomKind::Line` está definido en el enum pero nunca es procesado por el backend de `plotters` ni por el renderizador de terminal; el gráfico cartesiano siempre dibuja puntos incondicionalmente.
->   - [ ] **Canales Estéticos Rotos (`aes`):** Aunque `aes()` acepta `color`, la función `native_plot` nunca extrae los datos de la columna `color` del DataFrame; `PlotSpec` carece de almacenamiento para atributos de color/grupo; los puntos se dibujan siempre con un color fijo hardcodeado sin paletas ni agrupación.
->   - [ ] **Falta de Herencia y Datos Locales por Capa:** Las funciones `geom_*` solo reciben `PlotSpec` como primer argumento en la tubería. No pueden recibir parámetros propios (`alpha`, `size`, `shape`, `color`, `linetype`) ni un `DataFrame` local para sobreescribir los datos globales del gráfico.
->   - [ ] **Restricción a Datos Numéricos Continuos:** `PlotSpec` solo almacena `Vec<f64>`. No existe soporte para ejes cartesianos discretos basados en `Factor`, strings o fechas (salvo de forma aislada en el conteo simple de `geom_bar`).
->   - [ ] **Ausencia de Escalas, Leyendas y Coordenadas:** Cero soporte para `scale_*` (escalas continuas/discretas, Viridis, log10), generación de leyendas visuales (SVG/terminal), `coord_flip()` o transformaciones de coordenadas.
+>   - [x] **Pseudo-Gramática de Capas (Exclusión Mutua):** Resuelto en el motor cartesiano de `crates/ghl-plot`. Soporta capas simultáneas (`points` + `lines` + `smooth`) componibles mediante `+` y `|>`.
+>   - [x] **`geom_line` es un cascarón incompleto:** Implementado con `LineSeries` conectadas, grosores configurables y ordenamiento por $x$.
+>   - [x] **Canales Estéticos Rotos (`aes`):** `aes(color)` particiona en `DataSeries` independientes con paleta accesible Okabe-Ito y leyendas automáticas.
+>   - [ ] **Falta de Herencia y Datos Locales por Capa:** Permitir que capas individuales reciban su propio DataFrame local `geom_point(data = df2, aes(...))`.
+>   - [x] **Ejes Discretos y Factores (Boxplots Comparativos):** Resuelto para variables categóricas (`Factor` y `String`) en boxplots comparativos múltiples (`aes(x = factor, y = num)`), calculando Tukey 5-números por grupo en Plotters, terminal y Vega.
+>   - [x] **Escalas, Leyendas y Exportación Dual:** Implementado con `scale_x_log10()`, `scale_y_log10()`, `scale_x_sqrt()`, `scale_y_sqrt()`, leyendas automáticas, exportación a SVG vectorial y Vega-Lite v5 interactivo.
 >   - [ ] **Falta de Paneles Múltiples (Facetting):** Sin soporte para `facet_wrap()` ni `facet_grid()` para particionar gráficos por categorías.
->   - [ ] **Acoplamiento Indebido en `ghl-diagnostics`:** El crate de diagnósticos y formateo de errores no debería albergar el motor de gráficos SVG ni compilar `plotters`; debe migrarse a `crates/ghl-plot` o paquete autónomo `packages/ghl_plot`.
->   - [ ] **Desconexión en el REPL:** La evaluación directa de una expresión de tipo `Plot` solo imprime la tarjeta de terminal; el archivo SVG para Positron solo se escribe si se invoca explícitamente `show(p)`.
+>   - [x] **Acoplamiento Indebido en `ghl-diagnostics`:** Migrado 100% a `crates/ghl-plot`; `ghl-diagnostics` ya no compila `plotters` ni alberga `plot.rs`.
+>   - [x] **Desconexión en el REPL:** Conectado en `crates/ghl-cli/src/repl.rs`; emite automáticamente el plot SVG a `POSITRON_PLOTS_DIR` / `GHL_PLOTS_DIR` en cada evaluación de expresión `Plot`.
 >
 > - **Plan de Refactorización y Evolución a `ghl_plot`:**
 >   - [x] **Fase 1 (Modularización Limpia):** Mover el subsistema de gráficos desde `ghl-diagnostics` a un crate independiente `crates/ghl-plot`, desacoplando completamente `plotters` del núcleo de compilación y diagnósticos (tiempo de compilación de `ghl-diagnostics` reducido a <1s).
 >   - [x] **Fase 2 (Compositor de Capas Multi-Layer):** Evaluador visual multi-capa composicional real en `crates/ghl-plot` y `eval.rs`: acumula series gráficas simultáneas sobre el mismo sistema cartesiano (`points` + `lines` + `smooth` fit) tanto con el operador `+` como con la tubería `|>`.
 >   - [x] **Fase 3 (Extracción de Atributos Estéticos y Agrupación):** Conexión de `aes(color)` con los datos del DataFrame, agrupando en `DataSeries` dinámicas con la paleta accesible Okabe-Ito y leyendas automáticas.
->   - [ ] **Fase 4 (Ejes Discretos y Factores):** Permitir variables cualitativas (`Factor` y `String`) en los ejes $X$/$Y$, habilitando boxplots comparativos múltiples (`y ~ factor`) y gráficos de dispersión categórica.
+>   - [x] **Fase 4 (Ejes Discretos y Factores):** Variables cualitativas (`Factor` y `String`) en los ejes $X$/$Y$, habilitando boxplots comparativos múltiples agrupados por categorías en Plotters, terminal y Vega.
 >   - [x] **Fase 5 (Leyendas, Escalas y Exportación Dual):** Generación de leyendas en SVG y terminal, soporte para `scale_x_log10()`, `scale_y_log10()`, exportación a SVG nativo (`to_svg()`) y exportación interactiva a Vega-Lite v5 (`to_vega_json()`).
->   - [ ] **Fase 6 (Sincronización Automática con IDE):** Emitir automáticamente el plot SVG a `GHL_PLOTS_DIR` en cada evaluación de expresión `Plot` en el REPL.
+>   - [x] **Fase 6 (Sincronización Automática con IDE):** Emitir automáticamente el plot SVG a `GHL_PLOTS_DIR` / `POSITRON_PLOTS_DIR` en cada evaluación de expresión `Plot` en el REPL.
 
 ### Parte C: Interoperabilidad Python/R FFI y Empaquetado Dinámico
 - [ ] **Generación Automática de Módulos C-ABI:**

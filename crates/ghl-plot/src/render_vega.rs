@@ -105,17 +105,35 @@ impl VegaRenderer {
         }
 
         if is_box {
-            let data_values: Vec<Value> = spec.y_data.iter().map(|&y| json!({ "value": y })).collect();
+            let has_categories = !spec.categories.is_empty() && !spec.y_data.is_empty();
+            let data_values: Vec<Value> = if has_categories {
+                let n = spec.categories.len().min(spec.y_data.len());
+                (0..n).map(|i| json!({ "category": spec.categories[i], "value": spec.y_data[i] })).collect()
+            } else {
+                spec.y_data.iter().map(|&y| json!({ "value": y })).collect()
+            };
+
+            let mut encoding = json!({
+                "y": { "field": "value", "type": "quantitative", "title": y_title }
+            });
+            if has_categories {
+                encoding["x"] = json!({ "field": "category", "type": "nominal", "title": x_title });
+                encoding["color"] = json!({
+                    "field": "category",
+                    "type": "nominal",
+                    "scale": { "range": palette_range },
+                    "legend": null
+                });
+            }
+
             return Ok(json!({
                 "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
                 "title": title,
-                "width": 400,
+                "width": if has_categories { 550 } else { 400 },
                 "height": 400,
                 "data": { "values": data_values },
                 "mark": { "type": "boxplot", "extent": 1.5, "color": "#56B4E9" },
-                "encoding": {
-                    "y": { "field": "value", "type": "quantitative", "title": y_title }
-                },
+                "encoding": encoding,
                 "config": config
             }));
         }

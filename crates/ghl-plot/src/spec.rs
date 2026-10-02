@@ -98,7 +98,10 @@ pub enum GeomKind {
     Line { width: Option<u32> },
     Smooth { fit: Option<LinearFit>, se: bool },
     Histogram { bins: usize },
-    Boxplot { stats: Option<FiveNumberSummary> },
+    Boxplot {
+        stats: Option<FiveNumberSummary>,
+        multi_stats: Vec<(String, FiveNumberSummary)>,
+    },
     Bar,
     Area { alpha: Option<f64> },
     Rug,
@@ -155,14 +158,21 @@ impl GeomLayer {
 
     pub fn boxplot() -> Self {
         Self {
-            kind: GeomKind::Boxplot { stats: None },
+            kind: GeomKind::Boxplot { stats: None, multi_stats: Vec::new() },
             mapping: None,
         }
     }
 
     pub fn boxplot_with_stats(stats: FiveNumberSummary) -> Self {
         Self {
-            kind: GeomKind::Boxplot { stats: Some(stats) },
+            kind: GeomKind::Boxplot { stats: Some(stats), multi_stats: Vec::new() },
+            mapping: None,
+        }
+    }
+
+    pub fn boxplot_with_multi_stats(multi_stats: Vec<(String, FiveNumberSummary)>) -> Self {
+        Self {
+            kind: GeomKind::Boxplot { stats: None, multi_stats },
             mapping: None,
         }
     }
@@ -385,9 +395,17 @@ impl PlotSpec {
     /// Look up the statistics carried by this spec's `Boxplot` layer, if any.
     pub fn boxplot_stats(&self) -> Option<FiveNumberSummary> {
         self.layers.iter().find_map(|l| match &l.kind {
-            GeomKind::Boxplot { stats } => stats.clone(),
+            GeomKind::Boxplot { stats, .. } => stats.clone(),
             _ => None,
         })
+    }
+
+    /// Look up multi-category boxplot statistics, if any.
+    pub fn boxplot_multi_stats(&self) -> Vec<(String, FiveNumberSummary)> {
+        self.layers.iter().find_map(|l| match &l.kind {
+            GeomKind::Boxplot { multi_stats, .. } if !multi_stats.is_empty() => Some(multi_stats.clone()),
+            _ => None,
+        }).unwrap_or_default()
     }
 
     /// Number of histogram bins requested via the `Histogram` layer, or 8 by default.

@@ -280,6 +280,127 @@ impl NativeRenderer {
     }
 
     fn draw_boxplot<DB: DrawingBackend>(spec: &PlotSpec, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
+        let multi_stats = spec.boxplot_multi_stats();
+        if !multi_stats.is_empty() {
+            let (bg_color, text_color, grid_color) = match spec.theme {
+                PlotTheme::Dark => (RGBColor(24, 24, 27), RGBColor(240, 240, 245), RGBColor(50, 50, 60)),
+                _ => (WHITE, BLACK, RGBColor(210, 210, 215)),
+            };
+
+            let title = spec.labels.title.as_deref().unwrap_or("Comparative Boxplot");
+            let x_label = spec.labels.x_label.as_deref().unwrap_or("Category");
+            let y_label = spec.labels.y_label.as_deref().unwrap_or("Value");
+
+            let mut global_min = f64::INFINITY;
+            let mut global_max = f64::NEG_INFINITY;
+            for (_, st) in &multi_stats {
+                if st.min < global_min { global_min = st.min; }
+                if st.max > global_max { global_max = st.max; }
+            }
+            let y_span = (global_max - global_min).abs().max(1.0);
+            let y_pad = y_span * 0.1;
+            let y_min = global_min - y_pad;
+            let y_max = global_max + y_pad;
+
+            let k = multi_stats.len();
+            let mut chart = ChartBuilder::on(root)
+                .caption(title, ("sans-serif", 22).into_font().color(&text_color))
+                .margin(20)
+                .x_label_area_size(42)
+                .y_label_area_size(52)
+                .build_cartesian_2d(0.0..(k as f64 + 1.0), y_min..y_max)
+                .map_err(|e| format!("Chart build error: {e}"))?;
+
+            chart
+                .configure_mesh()
+                .x_desc(x_label)
+                .y_desc(y_label)
+                .axis_desc_style(("sans-serif", 15).into_font().color(&text_color))
+                .label_style(("sans-serif", 12).into_font().color(&text_color))
+                .light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
+                .draw()
+                .map_err(|e| format!("Mesh draw error: {e}"))?;
+
+            for (idx, (cat_name, stats)) in multi_stats.iter().enumerate() {
+                let center_x = (idx + 1) as f64;
+                let half_w = 0.28;
+                let whisker_w = 0.14;
+                let color_info = get_okabe_ito_color(idx);
+                let box_color = color_info.to_plotters_color();
+                let stroke_color = match spec.theme {
+                    PlotTheme::Dark => RGBColor(220, 220, 220),
+                    _ => RGBColor(30, 30, 30),
+                };
+
+                // Whiskers
+                chart.draw_series(std::iter::once(PathElement::new(
+                    vec![(center_x, stats.q1), (center_x, stats.lower_fence)],
+                    ShapeStyle::from(&stroke_color).stroke_width(2),
+                ))).map_err(|e| format!("{e}"))?;
+                chart.draw_series(std::iter::once(PathElement::new(
+                    vec![(center_x - whisker_w, stats.lower_fence), (center_x + whisker_w, stats.lower_fence)],
+                    ShapeStyle::from(&stroke_color).stroke_width(2),
+                ))).map_err(|e| format!("{e}"))?;
+
+                chart.draw_series(std::iter::once(PathElement::new(
+                    vec![(center_x, stats.q3), (center_x, stats.upper_fence)],
+                    ShapeStyle::from(&stroke_color).stroke_width(2),
+                ))).map_err(|e| format!("{e}"))?;
+                chart.draw_series(std::iter::once(PathElement::new(
+                    vec![(center_x - whisker_w, stats.upper_fence), (center_x + whisker_w, stats.upper_fence)],
+                    ShapeStyle::from(&stroke_color).stroke_width(2),
+                ))).map_err(|e| format!("{e}"))?;
+
+                // Box
+                let series = chart.draw_series(std::iter::once(Rectangle::new(
+                    [(center_x - half_w, stats.q1), (center_x + half_w, stats.q3)],
+                    ShapeStyle::from(&box_color).filled(),
+                ))).map_err(|e| format!("{e}"))?;
+
+                let leg_color = box_color;
+                let cat_label = cat_name.clone();
+                series.label(cat_label).legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 12, y + 5)], ShapeStyle::from(&leg_color).filled()));
+
+                chart.draw_series(std::iter::once(PathElement::new(
+                    vec![
+                        (center_x - half_w, stats.q1),
+                        (center_x + half_w, stats.q1),
+                        (center_x + half_w, stats.q3),
+                        (center_x - half_w, stats.q3),
+                        (center_x - half_w, stats.q1),
+                    ],
+                    ShapeStyle::from(&stroke_color).stroke_width(2),
+                ))).map_err(|e| format!("{e}"))?;
+
+                // Median line
+                chart.draw_series(std::iter::once(PathElement::new(
+                    vec![(center_x - half_w, stats.median), (center_x + half_w, stats.median)],
+                    ShapeStyle::from(&RGBColor(213, 94, 0)).stroke_width(3),
+                ))).map_err(|e| format!("{e}"))?;
+
+                // Outliers
+                for &val in &stats.outliers {
+                    chart.draw_series(std::iter::once(Circle::new(
+                        (center_x, val),
+                        4,
+                        ShapeStyle::from(&RGBColor(213, 94, 0)).filled(),
+                    ))).map_err(|e| format!("{e}"))?;
+                }
+            }
+
+            // Legend
+            chart
+                .configure_series_labels()
+                .background_style(ShapeStyle::from(&bg_color).filled())
+                .border_style(ShapeStyle::from(&grid_color).stroke_width(1))
+                .label_font(("sans-serif", 12).into_font().color(&text_color))
+                .position(SeriesLabelPosition::UpperRight)
+                .draw()
+                .map_err(|e| format!("Legend draw error: {e}"))?;
+
+            return Ok(());
+        }
+
         let stats = spec.boxplot_stats().ok_or_else(|| "Cannot plot boxplot without summary statistics".to_string())?;
 
         let (text_color, grid_color) = match spec.theme {

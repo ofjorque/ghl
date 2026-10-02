@@ -14,21 +14,31 @@ use crate::value::Value;
 // Grammar of Graphics (std::plot - RFC 16) Native Functions
 // =========================================================================
 
-pub(crate) fn native_aes(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let extract_name = |v: &Value| -> String {
-        match v {
-            Value::ColRef(s) => s.clone(),
-            Value::String(s) => s.clone(),
-            other => format!("{other}"),
+fn extract_raw_string(v: &Value) -> String {
+    match v {
+        Value::String(s) | Value::ColRef(s) => s.clone(),
+        Value::I64(n) => n.to_string(),
+        Value::F64(x) => x.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Factor { levels, indices, .. } => {
+            indices.first().and_then(|&i| levels.get(i)).cloned().unwrap_or_default()
         }
-    };
+        Value::NA(None) => "NA".to_string(),
+        Value::NA(Some(r)) => format!("NA:{}", r),
+        other => {
+            let s = other.render_styled(&RenderCaps::ascii_plain(80));
+            ghl_diagnostics::panel::strip_ansi(&s).trim_matches('"').to_string()
+        }
+    }
+}
 
-    let x = args.first().map(extract_name).ok_or_else(|| {
+pub(crate) fn native_aes(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let x = args.first().map(extract_raw_string).ok_or_else(|| {
         Diagnostic::compute_error("C0301", "`aes()` requires at least an `x` aesthetic")
     })?;
 
-    let y = args.get(1).map(extract_name);
-    let color = args.get(2).map(extract_name);
+    let y = args.get(1).map(extract_raw_string);
+    let color = args.get(2).map(extract_raw_string);
 
     Ok(Value::Aesthetic(AestheticMap {
         x,
@@ -61,14 +71,8 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
             let aes_opt = if let Some(Value::Aesthetic(aes)) = args.get(1) {
                 Some(aes.clone())
             } else if let Some(x_arg) = args.get(1) {
-                let x_name = match x_arg {
-                    Value::ColRef(s) | Value::String(s) => s.clone(),
-                    other => format!("{other}"),
-                };
-                let y_name = args.get(2).map(|y_arg| match y_arg {
-                    Value::ColRef(s) | Value::String(s) => s.clone(),
-                    other => format!("{other}"),
-                });
+                let x_name = extract_raw_string(x_arg);
+                let y_name = args.get(2).map(extract_raw_string);
                 let mut map = AestheticMap::new(x_name);
                 if let Some(y) = y_name {
                     map = map.with_y(y);
@@ -82,7 +86,7 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 plot_spec = plot_spec.with_mapping(aes.clone());
                 let xs = col_f64(&aes.x);
                 if xs.is_empty() {
-                    let cats: Vec<String> = col_values(&aes.x).iter().map(|v| format!("{v}")).collect();
+                    let cats: Vec<String> = col_values(&aes.x).iter().map(extract_raw_string).collect();
                     plot_spec = plot_spec.with_categories(cats);
                 } else {
                     plot_spec = plot_spec.with_x_data(xs.clone());
@@ -101,10 +105,7 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
                         let n = xs.len().min(ys.len()).min(color_col.len());
                         let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>)> = BTreeMap::new();
                         for i in 0..n {
-                            let g_key = match &color_col[i] {
-                                Value::String(s) => s.clone(),
-                                other => format!("{other}"),
-                            };
+                            let g_key = extract_raw_string(&color_col[i]);
                             let entry = groups.entry(g_key).or_insert_with(|| (Vec::new(), Vec::new()));
                             entry.0.push(xs[i]);
                             entry.1.push(ys[i]);
@@ -214,14 +215,33 @@ pub(crate) fn native_geom_boxplot(args: Vec<Value>) -> Result<Value, Diagnostic>
     match args.first() {
         Some(Value::Plot(plot)) => {
             let mut p = (**plot).clone();
-            let layer = match crate::plot_stats::five_number_summary(&p.x_data) {
-                Some(stats) => GeomLayer::boxplot_with_stats(stats),
-                None if p.x_data.is_empty() => GeomLayer::boxplot(),
-                None => {
-                    return Err(Diagnostic::statistical_error(
-                        "S0302",
-                        format!("`geom_boxplot()` requires at least 4 observations, found {}", p.x_data.len()),
-                    ));
+            let layer = if !p.categories.is_empty() && !p.y_data.is_empty() {
+                let n = p.categories.len().min(p.y_data.len());
+                let mut grouped: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+                for i in 0..n {
+                    grouped.entry(p.categories[i].clone()).or_default().push(p.y_data[i]);
+                }
+                let mut group_stats = Vec::new();
+                for (cat, vals) in grouped {
+                    if let Some(st) = crate::plot_stats::five_number_summary(&vals) {
+                        group_stats.push((cat, st));
+                    }
+                }
+                if !group_stats.is_empty() {
+                    GeomLayer::boxplot_with_multi_stats(group_stats)
+                } else {
+                    GeomLayer::boxplot()
+                }
+            } else {
+                match crate::plot_stats::five_number_summary(&p.x_data) {
+                    Some(stats) => GeomLayer::boxplot_with_stats(stats),
+                    None if p.x_data.is_empty() => GeomLayer::boxplot(),
+                    None => {
+                        return Err(Diagnostic::statistical_error(
+                            "S0302",
+                            format!("`geom_boxplot()` requires at least 4 observations, found {}", p.x_data.len()),
+                        ));
+                    }
                 }
             };
             p = p.add_layer(layer);

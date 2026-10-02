@@ -520,7 +520,23 @@ impl ReplSession {
 
                     if is_expr {
                         match &final_val {
-                            Value::DataFrame { .. } | Value::ModelFit(_) | Value::Matrix { .. } | Value::Plot(_) => {
+                            Value::Plot(p) => {
+                                println!("{}\n", final_val.render_styled(&self.caps));
+                                if let Some(plots_dir) = std::env::var("POSITRON_PLOTS_DIR")
+                                    .ok()
+                                    .or_else(|| std::env::var("GHL_PLOTS_DIR").ok())
+                                {
+                                    let timestamp = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_millis())
+                                        .unwrap_or(0);
+                                    let plot_path = std::path::Path::new(&plots_dir).join(format!("ghl_plot_{}_{}.svg", std::process::id(), timestamp));
+                                    if let Err(e) = p.save_file(&plot_path.to_string_lossy()) {
+                                        eprintln!("{} [Plots Pane] Warning: failed to save SVG plot: {e}", self.caps.gojo("/ᐠ ¬`‸´¬ マ"));
+                                    }
+                                }
+                            }
+                            Value::DataFrame { .. } | Value::ModelFit(_) | Value::Matrix { .. } => {
                                 println!("{}\n", final_val.render_styled(&self.caps));
                             }
                             _ => {

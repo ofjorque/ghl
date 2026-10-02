@@ -150,3 +150,42 @@ fn test_grammar_of_graphics_histogram_and_boxplot() {
         other => panic!("Expected Value::Vector, got {:?}", other),
     }
 }
+
+#[test]
+fn test_grammar_of_graphics_comparative_boxplot() {
+    let src = r#"
+        let df = dataframe {
+            species: ["Adelie", "Adelie", "Adelie", "Adelie", "Gentoo", "Gentoo", "Gentoo", "Gentoo"],
+            mass: [3300.0, 3500.0, 3700.0, 3900.0, 4800.0, 5000.0, 5200.0, 5500.0]
+        };
+        let p = ggplot(df, aes("species", "mass")) + geom_boxplot();
+        p
+    "#;
+    let res = eval_source(src).expect("Comparative boxplot should succeed");
+    match res {
+        Value::Plot(p) => {
+            let multi_stats = p.boxplot_multi_stats();
+            assert_eq!(multi_stats.len(), 2, "Should have stats for Adelie and Gentoo");
+            assert_eq!(multi_stats[0].0, "Adelie");
+            assert_eq!(multi_stats[1].0, "Gentoo");
+            assert_eq!(multi_stats[0].1.median, 3700.0);
+            assert_eq!(multi_stats[1].1.median, 5200.0);
+
+            // Test Vega-Lite JSON export for comparative boxplot
+            let json = p.to_vega_json().unwrap();
+            assert!(json.contains("\"field\": \"category\""));
+            assert!(json.contains("\"type\": \"boxplot\""));
+
+            // Test SVG rendering for comparative boxplot
+            let svg = p.to_svg(600, 400).unwrap();
+            assert!(svg.contains("<svg"));
+
+            // Test terminal card rendering
+            let caps = ghl_diagnostics::RenderCaps::rich_terminal(80);
+            let term = p.render(&caps);
+            assert!(term.contains("Adelie"));
+            assert!(term.contains("Gentoo"));
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}

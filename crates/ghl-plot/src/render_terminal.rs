@@ -261,6 +261,69 @@ impl TerminalRenderer {
         };
 
         let card_width = 72.min(caps.width);
+        let multi_stats = spec.boxplot_multi_stats();
+        if !multi_stats.is_empty() {
+            let title = spec.labels.title.clone().unwrap_or_else(|| "Comparative Boxplot".into());
+            let badge = if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ READY" } else { "[READY]" };
+
+            let mut out = String::new();
+            let header_inner = format!(" {title} ");
+            let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6);
+            out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
+
+            let mut global_min = f64::INFINITY;
+            let mut global_max = f64::NEG_INFINITY;
+            for (_, st) in &multi_stats {
+                if st.min < global_min { global_min = st.min; }
+                if st.max > global_max { global_max = st.max; }
+            }
+            let span = (global_max - global_min).abs().max(1e-9);
+            let cat_label_w = multi_stats.iter().map(|(c, _)| visual_width(c)).max().unwrap_or(8).min(16);
+            let plot_w = card_width.saturating_sub(cat_label_w + 18).max(15);
+
+            for (idx, (cat, st)) in multi_stats.iter().enumerate() {
+                let map_val = |v: f64| -> usize {
+                    let frac = ((v - global_min) / span).clamp(0.0, 1.0);
+                    (frac * (plot_w - 1) as f64).round() as usize
+                };
+
+                let lf = map_val(st.lower_fence);
+                let q1 = map_val(st.q1);
+                let med = map_val(st.median);
+                let q3 = map_val(st.q3);
+                let uf = map_val(st.upper_fence);
+
+                let mut line = vec![' '; plot_w];
+                for i in lf..q1 { line[i] = if caps.unicode_enabled { '─' } else { '-' }; }
+                for i in q1..=q3 { line[i] = if caps.unicode_enabled { '█' } else { '=' }; }
+                for i in (q3 + 1)..=uf { line[i] = if caps.unicode_enabled { '─' } else { '-' }; }
+
+                line[lf] = if caps.unicode_enabled { '├' } else { '|' };
+                line[uf] = if caps.unicode_enabled { '┤' } else { '|' };
+                line[med] = if caps.unicode_enabled { '┃' } else { '|' };
+
+                let diagram: String = line.into_iter().collect();
+                let color_info = get_okabe_ito_color(idx);
+                let colored_diag = if caps.color_enabled {
+                    format!("{}{}\x1b[0m", color_info.ansi_code, diagram)
+                } else {
+                    diagram.clone()
+                };
+
+                let line_str = format!(" {:<width$} {} Med: {:>6.1}", cat, colored_diag, st.median, width = cat_label_w);
+                let line_raw = format!(" {:<width$} {} Med: {:>6.1}", cat, diagram, st.median, width = cat_label_w);
+                let line_pad = card_width.saturating_sub(visual_width(&line_raw) + 4);
+                out.push_str(&format!("{vt}{}{}{vt}\n", line_str, " ".repeat(line_pad)));
+            }
+
+            let scale_summary = format!(" Domain: [{:.1} .. {:.1}]  Categories: {}", global_min, global_max, multi_stats.len());
+            let sc_pad = card_width.saturating_sub(visual_width(&scale_summary) + 4);
+            out.push_str(&format!("{vt}{}{}{vt}\n", caps.dim(&scale_summary), " ".repeat(sc_pad)));
+
+            out.push_str(&caps.dim(&format!("{bl}{}{br}\n", hz.to_string().repeat(card_width - 2))));
+            return out;
+        }
+
         let stats = match spec.boxplot_stats() {
             Some(s) => s,
             None => {

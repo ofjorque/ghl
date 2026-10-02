@@ -2514,10 +2514,29 @@ impl Interpreter {
                                             None => layer,
                                         }
                                     }
-                                    ghl_plot::GeomKind::Boxplot { stats: None } => {
-                                        match crate::plot_stats::five_number_summary(&p.x_data) {
-                                            Some(stats) => ghl_plot::GeomLayer::boxplot_with_stats(stats),
-                                            None => layer,
+                                    ghl_plot::GeomKind::Boxplot { stats: None, multi_stats } if multi_stats.is_empty() => {
+                                        if !p.categories.is_empty() && !p.y_data.is_empty() {
+                                            let n = p.categories.len().min(p.y_data.len());
+                                            let mut grouped: std::collections::BTreeMap<String, Vec<f64>> = std::collections::BTreeMap::new();
+                                            for i in 0..n {
+                                                grouped.entry(p.categories[i].clone()).or_default().push(p.y_data[i]);
+                                            }
+                                            let mut group_stats = Vec::new();
+                                            for (cat, vals) in grouped {
+                                                if let Some(st) = crate::plot_stats::five_number_summary(&vals) {
+                                                    group_stats.push((cat, st));
+                                                }
+                                            }
+                                            if !group_stats.is_empty() {
+                                                ghl_plot::GeomLayer::boxplot_with_multi_stats(group_stats)
+                                            } else {
+                                                layer
+                                            }
+                                        } else {
+                                            match crate::plot_stats::five_number_summary(&p.x_data) {
+                                                Some(stats) => ghl_plot::GeomLayer::boxplot_with_stats(stats),
+                                                None => layer,
+                                            }
                                         }
                                     }
                                     _ => layer,
@@ -2534,10 +2553,29 @@ impl Interpreter {
                                                 None => l,
                                             }
                                         }
-                                        ghl_plot::GeomKind::Boxplot { stats: None } => {
-                                            match crate::plot_stats::five_number_summary(&p.x_data) {
-                                                Some(stats) => ghl_plot::GeomLayer::boxplot_with_stats(stats),
-                                                None => l,
+                                        ghl_plot::GeomKind::Boxplot { stats: None, multi_stats } if multi_stats.is_empty() => {
+                                            if !p.categories.is_empty() && !p.y_data.is_empty() {
+                                                let n = p.categories.len().min(p.y_data.len());
+                                                let mut grouped: std::collections::BTreeMap<String, Vec<f64>> = std::collections::BTreeMap::new();
+                                                for i in 0..n {
+                                                    grouped.entry(p.categories[i].clone()).or_default().push(p.y_data[i]);
+                                                }
+                                                let mut group_stats = Vec::new();
+                                                for (cat, vals) in grouped {
+                                                    if let Some(st) = crate::plot_stats::five_number_summary(&vals) {
+                                                        group_stats.push((cat, st));
+                                                    }
+                                                }
+                                                if !group_stats.is_empty() {
+                                                    ghl_plot::GeomLayer::boxplot_with_multi_stats(group_stats)
+                                                } else {
+                                                    l
+                                                }
+                                            } else {
+                                                match crate::plot_stats::five_number_summary(&p.x_data) {
+                                                    Some(stats) => ghl_plot::GeomLayer::boxplot_with_stats(stats),
+                                                    None => l,
+                                                }
                                             }
                                         }
                                         _ => l,
