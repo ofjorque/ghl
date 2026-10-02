@@ -11,7 +11,7 @@
 //! diagnostic plot) should call these functions rather than reimplementing
 //! them again at the call site.
 
-use ghl_diagnostics::{FiveNumberSummary, LinearFit};
+use ghl_plot::{FiveNumberSummary, LinearFit};
 
 /// Ordinary least squares fit of `y = slope * x + intercept` over paired
 /// `(x, y)` observations. Returns `None` when there are fewer than 2 points

@@ -6,6 +6,7 @@ members = [
     "crates/ghl-ir",
     "crates/ghl-codegen",
     "crates/ghl-runtime",
+    "crates/ghl-plot",
     "crates/ghl-cli",
     "crates/ghl-lsp",
 ]

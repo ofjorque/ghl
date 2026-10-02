@@ -2502,6 +2502,62 @@ impl Interpreter {
                     if let (Value::String(s1), Value::String(s2)) = (&left, &right) {
                         return Ok(Value::String(format!("{}{}", s1, s2)));
                     }
+
+                    // Plot grammar layer accumulation: plot + geom or plot + plot
+                    if let Value::Plot(mut p) = left {
+                        match right {
+                            Value::Geom(layer) => {
+                                let configured = match &layer.kind {
+                                    ghl_plot::GeomKind::Smooth { fit: None, .. } => {
+                                        match crate::plot_stats::simple_linear_fit(&p.x_data, &p.y_data) {
+                                            Some(fit) => ghl_plot::GeomLayer::smooth_with_fit(fit),
+                                            None => layer,
+                                        }
+                                    }
+                                    ghl_plot::GeomKind::Boxplot { stats: None } => {
+                                        match crate::plot_stats::five_number_summary(&p.x_data) {
+                                            Some(stats) => ghl_plot::GeomLayer::boxplot_with_stats(stats),
+                                            None => layer,
+                                        }
+                                    }
+                                    _ => layer,
+                                };
+                                p.layers.push(configured);
+                                return Ok(Value::Plot(p));
+                            }
+                            Value::Plot(other_p) => {
+                                for l in other_p.layers {
+                                    let configured = match &l.kind {
+                                        ghl_plot::GeomKind::Smooth { fit: None, .. } => {
+                                            match crate::plot_stats::simple_linear_fit(&p.x_data, &p.y_data) {
+                                                Some(fit) => ghl_plot::GeomLayer::smooth_with_fit(fit),
+                                                None => l,
+                                            }
+                                        }
+                                        ghl_plot::GeomKind::Boxplot { stats: None } => {
+                                            match crate::plot_stats::five_number_summary(&p.x_data) {
+                                                Some(stats) => ghl_plot::GeomLayer::boxplot_with_stats(stats),
+                                                None => l,
+                                            }
+                                        }
+                                        _ => l,
+                                    };
+                                    p.layers.push(configured);
+                                }
+                                if other_p.labels.title.is_some() { p.labels.title = other_p.labels.title; }
+                                if other_p.labels.x_label.is_some() { p.labels.x_label = other_p.labels.x_label; }
+                                if other_p.labels.y_label.is_some() { p.labels.y_label = other_p.labels.y_label; }
+                                if other_p.theme != ghl_plot::PlotTheme::Default { p.theme = other_p.theme; }
+                                return Ok(Value::Plot(p));
+                            }
+                            other => {
+                                return Err(Diagnostic::compute_error(
+                                    "C0308",
+                                    format!("Cannot add `{}` to a Plot. Expected a Geom layer (e.g. `geom_point()`).", other.type_name()),
+                                ));
+                            }
+                        }
+                    }
                 }
 
                 // True matrix product `A * B` (Caso 1.2, Suite 01) and element-wise `+`/`-`

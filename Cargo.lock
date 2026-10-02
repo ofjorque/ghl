@@ -1603,9 +1603,6 @@ dependencies = [
 [[package]]
 name = "ghl-diagnostics"
 version = "0.1.0"
-dependencies = [
- "plotters",
-]
 
 [[package]]
 name = "ghl-ir"
@@ -1630,12 +1627,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghl-plot"
+version = "0.1.0"
+dependencies = [
+ "ghl-diagnostics",
+ "plotters",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ghl-runtime"
 version = "0.1.0"
 dependencies = [
  "bumpalo",
  "faer",
  "ghl-diagnostics",
+ "ghl-plot",
  "ghl-syntax",
  "ghl-types",
  "polars-core",

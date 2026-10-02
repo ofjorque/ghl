@@ -1,8 +1,8 @@
 use std::fmt;
 use ghl_diagnostics::{
     CockpitPanel, CockpitTable, RenderCaps, TableAlignment, TableColumn, Diagnostic,
-    AestheticMap, GeomLayer, PlotSpec,
 };
+use ghl_plot::{AestheticMap, GeomLayer, PlotSpec};
 use ghl_syntax::ast::{Expr, BinaryOp, FormulaOp};
 use ghl_types::ContrastScheme;
 use crate::env::RuntimeEnv;

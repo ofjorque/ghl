@@ -10,6 +10,7 @@ description = "High-performance statistical runtime, memory arenas, and linear a
 ghl-syntax = { path = "../ghl-syntax" }
 ghl-types = { path = "../ghl-types" }
 ghl-diagnostics = { path = "../ghl-diagnostics" }
+ghl-plot = { path = "../ghl-plot" }
 polars-core = "0.55.2"
 faer = "0.24.4"
 rayon = "1.12.0"

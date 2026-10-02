@@ -301,8 +301,9 @@ impl RuntimeEnv {
         env.set("row_mins".into(), Value::NativeFn(native_row_mins));
         env.set("col_mins".into(), Value::NativeFn(native_col_mins));
 
-        // Grammar of Graphics (RFC 09) Verbs
+        // Grammar of Graphics (RFC 16) Verbs
         env.set("plot".into(), Value::NativeFn(native_plot));
+        env.set("ggplot".into(), Value::NativeFn(native_plot));
         env.set("aes".into(), Value::NativeFn(native_aes));
         env.set("geom_point".into(), Value::NativeFn(native_geom_point));
         env.set("geom_line".into(), Value::NativeFn(native_geom_line));
@@ -310,9 +311,16 @@ impl RuntimeEnv {
         env.set("geom_histogram".into(), Value::NativeFn(native_geom_histogram));
         env.set("geom_boxplot".into(), Value::NativeFn(native_geom_boxplot));
         env.set("geom_bar".into(), Value::NativeFn(native_geom_bar));
+        env.set("geom_area".into(), Value::NativeFn(native_geom_area));
+        env.set("geom_rug".into(), Value::NativeFn(native_geom_rug));
         env.set("labs".into(), Value::NativeFn(native_labs));
+        env.set("scale_x_log10".into(), Value::NativeFn(native_scale_x_log10));
+        env.set("scale_y_log10".into(), Value::NativeFn(native_scale_y_log10));
         env.set("show".into(), Value::NativeFn(native_show));
         env.set("save".into(), Value::NativeFn(native_save));
+        env.set("ggsave".into(), Value::NativeFn(native_save));
+        env.set("to_vega_json".into(), Value::NativeFn(native_to_vega_json));
+        env.set("to_svg".into(), Value::NativeFn(native_to_svg));
         env.set("scatter".into(), Value::NativeFn(native_scatter));
         env.set("hist".into(), Value::NativeFn(native_hist));
         env.set("histogram".into(), Value::NativeFn(native_hist));

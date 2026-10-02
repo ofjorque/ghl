@@ -1,15 +1,17 @@
-//! Grammar of Graphics (`std::plot`, RFC 09) native functions.
+//! Grammar of Graphics (`std::plot`, RFC 16) native functions.
 //!
-//! Split out of `env.rs` for maintainability; native fn names are still
-//! referenced unqualified from `RuntimeEnv::with_prelude()` via glob imports.
+//! Grounded in GHL native types (F64, I64, Factor, String, Bool, Date).
+//! Provides multi-layer composition, color grouping with Okabe-Ito palettes,
+//! interactive Vega-Lite JSON export, and Positron Plots pane integration.
 
-use ghl_diagnostics::{AestheticMap, Diagnostic, GeomLayer, PlotSpec, RenderCaps};
+use std::collections::BTreeMap;
+use ghl_diagnostics::{Diagnostic, RenderCaps};
+use ghl_plot::{AestheticMap, DataSeries, GeomLayer, PlotSpec};
 use ghl_types::ContrastScheme;
 use crate::value::Value;
 
-
 // =========================================================================
-// Grammar of Graphics (std::plot - RFC 09) Native Functions
+// Grammar of Graphics (std::plot - RFC 16) Native Functions
 // =========================================================================
 
 pub(crate) fn native_aes(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -28,7 +30,15 @@ pub(crate) fn native_aes(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let y = args.get(1).map(extract_name);
     let color = args.get(2).map(extract_name);
 
-    Ok(Value::Aesthetic(AestheticMap { x, y, color }))
+    Ok(Value::Aesthetic(AestheticMap {
+        x,
+        y,
+        color,
+        size: None,
+        shape: None,
+        facet_col: None,
+        facet_row: None,
+    }))
 }
 
 pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -40,41 +50,80 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
     match first {
         Value::DataFrame { frame, na_reasons } => {
             let mut plot_spec = PlotSpec::new();
-            let col_f64 = |name: &str| -> Vec<f64> {
+            let col_values = |name: &str| -> Vec<Value> {
                 crate::polars_bridge::pull_column_as_values(frame, na_reasons, name)
-                    .map(|vals| vals.iter().filter_map(|v| v.as_f64()).collect())
                     .unwrap_or_default()
             };
+            let col_f64 = |name: &str| -> Vec<f64> {
+                col_values(name).iter().filter_map(|v| v.as_f64()).collect()
+            };
 
-            if let Some(Value::Aesthetic(aes)) = args.get(1) {
-                plot_spec = plot_spec.with_mapping(aes.clone());
-                plot_spec = plot_spec.with_x_data(col_f64(&aes.x));
-                if let Some(ref y_name) = aes.y {
-                    plot_spec.y_data = col_f64(y_name);
-                    plot_spec.labels.y_label = Some(y_name.clone());
-                    plot_spec.labels.title = Some(format!("Plot: {} vs {}", y_name, aes.x));
-                } else {
-                    plot_spec.labels.title = Some(format!("Distribution of {}", aes.x));
-                }
-                plot_spec.labels.x_label = Some(aes.x.clone());
+            let aes_opt = if let Some(Value::Aesthetic(aes)) = args.get(1) {
+                Some(aes.clone())
             } else if let Some(x_arg) = args.get(1) {
                 let x_name = match x_arg {
                     Value::ColRef(s) | Value::String(s) => s.clone(),
                     other => format!("{other}"),
                 };
-                plot_spec = plot_spec.with_x_data(col_f64(&x_name));
-                plot_spec.labels.x_label = Some(x_name.clone());
+                let y_name = args.get(2).map(|y_arg| match y_arg {
+                    Value::ColRef(s) | Value::String(s) => s.clone(),
+                    other => format!("{other}"),
+                });
+                let mut map = AestheticMap::new(x_name);
+                if let Some(y) = y_name {
+                    map = map.with_y(y);
+                }
+                Some(map)
+            } else {
+                None
+            };
 
-                if let Some(y_arg) = args.get(2) {
-                    let y_name = match y_arg {
-                        Value::ColRef(s) | Value::String(s) => s.clone(),
-                        other => format!("{other}"),
-                    };
-                    plot_spec.y_data = col_f64(&y_name);
-                    plot_spec.labels.y_label = Some(y_name.clone());
-                    plot_spec.labels.title = Some(format!("Plot: {} vs {}", y_name, x_name));
+            if let Some(aes) = aes_opt {
+                plot_spec = plot_spec.with_mapping(aes.clone());
+                let xs = col_f64(&aes.x);
+                if xs.is_empty() {
+                    let cats: Vec<String> = col_values(&aes.x).iter().map(|v| format!("{v}")).collect();
+                    plot_spec = plot_spec.with_categories(cats);
                 } else {
-                    plot_spec.labels.title = Some(format!("Distribution of {}", x_name));
+                    plot_spec = plot_spec.with_x_data(xs.clone());
+                }
+                plot_spec.labels.x_label = Some(aes.x.clone());
+
+                if let Some(ref y_name) = aes.y {
+                    let ys = col_f64(y_name);
+                    plot_spec.y_data = ys.clone();
+                    plot_spec.labels.y_label = Some(y_name.clone());
+                    plot_spec.labels.title = Some(format!("Plot: {} vs {}", y_name, aes.x));
+
+                    // Group by color aesthetic if specified
+                    if let Some(ref color_name) = aes.color {
+                        let color_col = col_values(color_name);
+                        let n = xs.len().min(ys.len()).min(color_col.len());
+                        let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>)> = BTreeMap::new();
+                        for i in 0..n {
+                            let g_key = match &color_col[i] {
+                                Value::String(s) => s.clone(),
+                                other => format!("{other}"),
+                            };
+                            let entry = groups.entry(g_key).or_insert_with(|| (Vec::new(), Vec::new()));
+                            entry.0.push(xs[i]);
+                            entry.1.push(ys[i]);
+                        }
+                        let mut series = Vec::new();
+                        for (g_name, (g_xs, g_ys)) in groups {
+                            series.push(DataSeries {
+                                group_name: Some(g_name),
+                                color_hex: None,
+                                x_values: g_xs,
+                                y_values: g_ys,
+                                categories: Vec::new(),
+                            });
+                        }
+                        plot_spec = plot_spec.with_series(series);
+                        plot_spec.labels.color_label = Some(color_name.clone());
+                    }
+                } else {
+                    plot_spec.labels.title = Some(format!("Distribution of {}", aes.x));
                 }
             }
             Ok(Value::Plot(Box::new(plot_spec)))
@@ -102,72 +151,117 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_geom_point(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let mut p = match args.first() {
-        Some(Value::Plot(plot)) => (**plot).clone(),
-        _ => PlotSpec::new(),
-    };
-    p = p.add_layer(GeomLayer::point());
-    Ok(Value::Plot(Box::new(p)))
+    match args.first() {
+        Some(Value::Plot(plot)) => {
+            let mut p = (**plot).clone();
+            p = p.add_layer(GeomLayer::point());
+            Ok(Value::Plot(Box::new(p)))
+        }
+        _ => Ok(Value::Geom(GeomLayer::point())),
+    }
 }
 
 pub(crate) fn native_geom_line(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let mut p = match args.first() {
-        Some(Value::Plot(plot)) => (**plot).clone(),
-        _ => PlotSpec::new(),
-    };
-    p = p.add_layer(GeomLayer::line());
-    Ok(Value::Plot(Box::new(p)))
+    match args.first() {
+        Some(Value::Plot(plot)) => {
+            let mut p = (**plot).clone();
+            p = p.add_layer(GeomLayer::line());
+            Ok(Value::Plot(Box::new(p)))
+        }
+        _ => Ok(Value::Geom(GeomLayer::line())),
+    }
 }
 
 pub(crate) fn native_geom_smooth(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let mut p = match args.first() {
-        Some(Value::Plot(plot)) => (**plot).clone(),
-        _ => PlotSpec::new(),
-    };
-    let layer = match crate::plot_stats::simple_linear_fit(&p.x_data, &p.y_data) {
-        Some(fit) => GeomLayer::smooth_with_fit(fit),
-        None => GeomLayer::smooth(),
-    };
-    p = p.add_layer(layer);
-    Ok(Value::Plot(Box::new(p)))
+    match args.first() {
+        Some(Value::Plot(plot)) => {
+            let mut p = (**plot).clone();
+            let layer = match crate::plot_stats::simple_linear_fit(&p.x_data, &p.y_data) {
+                Some(fit) => GeomLayer::smooth_with_fit(fit),
+                None => GeomLayer::smooth(),
+            };
+            p = p.add_layer(layer);
+            Ok(Value::Plot(Box::new(p)))
+        }
+        _ => Ok(Value::Geom(GeomLayer::smooth())),
+    }
 }
 
 pub(crate) fn native_geom_histogram(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let mut p = match args.first() {
-        Some(Value::Plot(plot)) => (**plot).clone(),
-        _ => PlotSpec::new(),
+    let (plot_opt, bins) = match args.first() {
+        Some(Value::Plot(plot)) => {
+            let b = args.get(1).and_then(|v| v.as_i64()).unwrap_or(8) as usize;
+            (Some(plot), b)
+        }
+        Some(other) => {
+            let b = other.as_i64().unwrap_or(8) as usize;
+            (None, b)
+        }
+        None => (None, 8),
     };
-    let bins = args.get(1).and_then(|v| v.as_i64()).unwrap_or(8) as usize;
-    p = p.add_layer(GeomLayer::histogram(bins));
-    Ok(Value::Plot(Box::new(p)))
+
+    match plot_opt {
+        Some(plot) => {
+            let mut p = (**plot).clone();
+            p = p.add_layer(GeomLayer::histogram(bins));
+            Ok(Value::Plot(Box::new(p)))
+        }
+        None => Ok(Value::Geom(GeomLayer::histogram(bins))),
+    }
 }
 
 pub(crate) fn native_geom_boxplot(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let mut p = match args.first() {
-        Some(Value::Plot(plot)) => (**plot).clone(),
-        _ => PlotSpec::new(),
-    };
-    let layer = match crate::plot_stats::five_number_summary(&p.x_data) {
-        Some(stats) => GeomLayer::boxplot_with_stats(stats),
-        None if p.x_data.is_empty() => GeomLayer::boxplot(),
-        None => {
-            return Err(Diagnostic::statistical_error(
-                "S0302",
-                format!("`geom_boxplot()` requires at least 4 observations, found {}", p.x_data.len()),
-            ));
+    match args.first() {
+        Some(Value::Plot(plot)) => {
+            let mut p = (**plot).clone();
+            let layer = match crate::plot_stats::five_number_summary(&p.x_data) {
+                Some(stats) => GeomLayer::boxplot_with_stats(stats),
+                None if p.x_data.is_empty() => GeomLayer::boxplot(),
+                None => {
+                    return Err(Diagnostic::statistical_error(
+                        "S0302",
+                        format!("`geom_boxplot()` requires at least 4 observations, found {}", p.x_data.len()),
+                    ));
+                }
+            };
+            p = p.add_layer(layer);
+            Ok(Value::Plot(Box::new(p)))
         }
-    };
-    p = p.add_layer(layer);
-    Ok(Value::Plot(Box::new(p)))
+        _ => Ok(Value::Geom(GeomLayer::boxplot())),
+    }
 }
 
 pub(crate) fn native_geom_bar(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let mut p = match args.first() {
-        Some(Value::Plot(plot)) => (**plot).clone(),
-        _ => PlotSpec::new(),
-    };
-    p = p.add_layer(GeomLayer::bar());
-    Ok(Value::Plot(Box::new(p)))
+    match args.first() {
+        Some(Value::Plot(plot)) => {
+            let mut p = (**plot).clone();
+            p = p.add_layer(GeomLayer::bar());
+            Ok(Value::Plot(Box::new(p)))
+        }
+        _ => Ok(Value::Geom(GeomLayer::bar())),
+    }
+}
+
+pub(crate) fn native_geom_area(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::Plot(plot)) => {
+            let mut p = (**plot).clone();
+            p = p.add_layer(GeomLayer::area());
+            Ok(Value::Plot(Box::new(p)))
+        }
+        _ => Ok(Value::Geom(GeomLayer::area())),
+    }
+}
+
+pub(crate) fn native_geom_rug(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::Plot(plot)) => {
+            let mut p = (**plot).clone();
+            p = p.add_layer(GeomLayer::rug());
+            Ok(Value::Plot(Box::new(p)))
+        }
+        _ => Ok(Value::Geom(GeomLayer::rug())),
+    }
 }
 
 pub(crate) fn native_labs(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -187,6 +281,28 @@ pub(crate) fn native_labs(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 
     Ok(Value::Plot(Box::new(p)))
+}
+
+pub(crate) fn native_scale_x_log10(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::Plot(plot)) => {
+            let mut p = (**plot).clone();
+            p = p.scale_x_log10();
+            Ok(Value::Plot(Box::new(p)))
+        }
+        _ => Err(Diagnostic::compute_error("C0315", "`scale_x_log10()` requires a Plot as first argument")),
+    }
+}
+
+pub(crate) fn native_scale_y_log10(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    match args.first() {
+        Some(Value::Plot(plot)) => {
+            let mut p = (**plot).clone();
+            p = p.scale_y_log10();
+            Ok(Value::Plot(Box::new(p)))
+        }
+        _ => Err(Diagnostic::compute_error("C0315", "`scale_y_log10()` requires a Plot as first argument")),
+    }
 }
 
 pub(crate) fn native_theme_minimal(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -405,7 +521,7 @@ pub(crate) fn native_boxplot(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub(crate) fn native_save(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let plot_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0310", "`save()` requires a Plot as first argument")
+        Diagnostic::compute_error("C0310", "`save()` / `ggsave()` requires a Plot as first argument")
     })?;
 
     let path_val = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| {
@@ -427,5 +543,33 @@ pub(crate) fn native_save(args: Vec<Value>) -> Result<Value, Diagnostic> {
             "C0310",
             format!("`save()` requires a Plot, found `{}`", other.type_name()),
         )),
+    }
+}
+
+pub(crate) fn native_to_vega_json(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let plot_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0316", "`to_vega_json()` requires a Plot as first argument")
+    })?;
+    match plot_val {
+        Value::Plot(p) => {
+            let json = p.to_vega_json().map_err(|e| Diagnostic::compute_error("C0317", e))?;
+            Ok(Value::String(json))
+        }
+        other => Err(Diagnostic::compute_error("C0316", format!("`to_vega_json()` requires a Plot, found `{}`", other.type_name()))),
+    }
+}
+
+pub(crate) fn native_to_svg(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let plot_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0318", "`to_svg()` requires a Plot as first argument")
+    })?;
+    let width = args.get(1).and_then(|v| v.as_i64()).unwrap_or(800) as u32;
+    let height = args.get(2).and_then(|v| v.as_i64()).unwrap_or(600) as u32;
+    match plot_val {
+        Value::Plot(p) => {
+            let svg = p.to_svg(width, height).map_err(|e| Diagnostic::compute_error("C0319", e))?;
+            Ok(Value::String(svg))
+        }
+        other => Err(Diagnostic::compute_error("C0318", format!("`to_svg()` requires a Plot, found `{}`", other.type_name()))),
     }
 }

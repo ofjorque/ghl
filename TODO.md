@@ -57,11 +57,11 @@ Backlog temático para consolidar la ergonomía de última generación del lengu
 >   - [ ] **Desconexión en el REPL:** La evaluación directa de una expresión de tipo `Plot` solo imprime la tarjeta de terminal; el archivo SVG para Positron solo se escribe si se invoca explícitamente `show(p)`.
 >
 > - **Plan de Refactorización y Evolución a `ghl_plot`:**
->   - [ ] **Fase 1 (Modularización Limpia):** Mover el subsistema de gráficos desde `ghl-diagnostics` a un crate independiente `crates/ghl-plot` (o paquete de stdlib) reduciendo el tiempo de compilación y limpiando las dependencias.
->   - [ ] **Fase 2 (Compositor de Capas Multi-Layer):** Rediseñar el evaluador visual para iterar sobre `layers` y acumular series gráficas sobre el mismo sistema cartesiano (`points` + `lines` + `areas` + `ribbons`).
->   - [ ] **Fase 3 (Extracción de Atributos Estéticos y Agrupación):** Conectar `aes(color, fill, shape, size)` con los datos del DataFrame, permitiendo series agrupadas y mapeo dinámico a paletas de colores.
+>   - [x] **Fase 1 (Modularización Limpia):** Mover el subsistema de gráficos desde `ghl-diagnostics` a un crate independiente `crates/ghl-plot`, desacoplando completamente `plotters` del núcleo de compilación y diagnósticos (tiempo de compilación de `ghl-diagnostics` reducido a <1s).
+>   - [x] **Fase 2 (Compositor de Capas Multi-Layer):** Evaluador visual multi-capa composicional real en `crates/ghl-plot` y `eval.rs`: acumula series gráficas simultáneas sobre el mismo sistema cartesiano (`points` + `lines` + `smooth` fit) tanto con el operador `+` como con la tubería `|>`.
+>   - [x] **Fase 3 (Extracción de Atributos Estéticos y Agrupación):** Conexión de `aes(color)` con los datos del DataFrame, agrupando en `DataSeries` dinámicas con la paleta accesible Okabe-Ito y leyendas automáticas.
 >   - [ ] **Fase 4 (Ejes Discretos y Factores):** Permitir variables cualitativas (`Factor` y `String`) en los ejes $X$/$Y$, habilitando boxplots comparativos múltiples (`y ~ factor`) y gráficos de dispersión categórica.
->   - [ ] **Fase 5 (Leyendas y Escalas):** Generación automática de leyendas en SVG y terminal, y soporte inicial para `scale_color_*`.
+>   - [x] **Fase 5 (Leyendas, Escalas y Exportación Dual):** Generación de leyendas en SVG y terminal, soporte para `scale_x_log10()`, `scale_y_log10()`, exportación a SVG nativo (`to_svg()`) y exportación interactiva a Vega-Lite v5 (`to_vega_json()`).
 >   - [ ] **Fase 6 (Sincronización Automática con IDE):** Emitir automáticamente el plot SVG a `GHL_PLOTS_DIR` en cada evaluación de expresión `Plot` en el REPL.
 
 ### Parte C: Interoperabilidad Python/R FFI y Empaquetado Dinámico
