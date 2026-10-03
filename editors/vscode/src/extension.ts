@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import * as cp from 'child_process';
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -97,30 +96,7 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Register document formatting provider (ghl fmt)
-  context.subscriptions.push(
-    vscode.languages.registerDocumentFormattingEditProvider('ghl', {
-      provideDocumentFormattingEdits(document: vscode.TextDocument): vscode.TextEdit[] {
-        const binaryPath = resolveBinaryPath();
-        try {
-          const formatted = cp.execFileSync(binaryPath, ['fmt', '-'], {
-            input: document.getText(),
-            encoding: 'utf-8',
-            maxBuffer: 10 * 1024 * 1024
-          });
-          const fullRange = new vscode.Range(
-            document.positionAt(0),
-            document.positionAt(document.getText().length)
-          );
-          return [vscode.TextEdit.replace(fullRange, formatted)];
-        } catch (_) {
-          return [];
-        }
-      }
-    })
-  );
-
-  // Register Terminal Link Provider for Parquet (Data Explorer) and SVG/PNG (Plots)
+  // Terminal Link Provider for Parquet (Data Explorer) and SVG/PNG (Plots)
   context.subscriptions.push(
     vscode.window.registerTerminalLinkProvider({
       provideTerminalLinks: (linkContext, _token) => {

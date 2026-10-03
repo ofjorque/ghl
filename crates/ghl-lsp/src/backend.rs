@@ -164,6 +164,8 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 definition_provider: Some(OneOf::Left(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
+                document_range_formatting_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -256,6 +258,68 @@ impl LanguageServer for Backend {
 
         Ok(loc.map(GotoDefinitionResponse::Scalar))
     }
+
+    async fn formatting(
+        &self,
+        params: DocumentFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = &params.text_document.uri;
+        let docs = self.documents.read().await;
+        let doc = match docs.get(uri) {
+            Some(d) => d,
+            None => return Ok(None),
+        };
+
+        match ghl_syntax::format_source(&doc.text) {
+            Ok(formatted) => {
+                if formatted == doc.text {
+                    return Ok(Some(vec![]));
+                }
+                let ((_, _), (end_line, end_col)) = doc.index.span_to_range(&(0..doc.text.len()));
+                let range = Range {
+                    start: Position::new(0, 0),
+                    end: Position::new(end_line, end_col),
+                };
+                Ok(Some(vec![TextEdit {
+                    range,
+                    new_text: formatted,
+                }]))
+            }
+            Err(_) => Ok(None),
+        }
+    }
+
+    async fn range_formatting(
+        &self,
+        params: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = &params.text_document.uri;
+        let range = params.range;
+        let docs = self.documents.read().await;
+        let doc = match docs.get(uri) {
+            Some(d) => d,
+            None => return Ok(None),
+        };
+
+        match ghl_syntax::format_range(
+            &doc.text,
+            range.start.line as usize,
+            range.end.line as usize,
+        ) {
+            Ok(Some((text_range, formatted_text))) => {
+                let ((sl, sc), _) = doc.index.span_to_range(&(text_range.start_offset..text_range.start_offset));
+                let ((el, ec), _) = doc.index.span_to_range(&(text_range.end_offset..text_range.end_offset));
+                Ok(Some(vec![TextEdit {
+                    range: Range {
+                        start: Position::new(sl, sc),
+                        end: Position::new(el, ec),
+                    },
+                    new_text: formatted_text,
+                }]))
+            }
+            _ => Ok(None),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -297,6 +361,62 @@ mod tests {
         let diag = &diags[0];
         assert_eq!(diag.severity, Some(DiagnosticSeverity::ERROR));
         assert!(diag.message.contains("C0102"));
+    }
+
+    #[tokio::test]
+    async fn test_lsp_formatting_handler() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+        let uri = Url::parse("file:///test_fmt.gh").unwrap();
+        let unformatted = "// Module note\nlet x=1+2*3; // inline\n";
+        backend.validate_document(&uri, unformatted).await;
+
+        let edits = backend
+            .formatting(DocumentFormattingParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                options: FormattingOptions {
+                    tab_size: 4,
+                    insert_spaces: true,
+                    ..Default::default()
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .expect("formatting result ok")
+            .expect("has edits");
+
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "// Module note\nlet x = 1 + 2 * 3; // inline\n");
+    }
+
+    #[tokio::test]
+    async fn test_lsp_range_formatting_handler() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+        let uri = Url::parse("file:///test_range_fmt.gh").unwrap();
+        let code = "let a = 1;\nlet b=2+3;\nlet c = 4;\n";
+        backend.validate_document(&uri, code).await;
+
+        let edits = backend
+            .range_formatting(DocumentRangeFormattingParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                range: Range {
+                    start: Position::new(1, 0),
+                    end: Position::new(1, 10),
+                },
+                options: FormattingOptions {
+                    tab_size: 4,
+                    insert_spaces: true,
+                    ..Default::default()
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .expect("range formatting result ok")
+            .expect("has edits");
+
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "let b = 2 + 3;\n");
     }
 }
 

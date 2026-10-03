@@ -67,6 +67,39 @@ impl SourceIndex {
             self.offset_to_position(span.end),
         )
     }
+
+    /// Convert 0-based `(line, character)` position to byte offset.
+    pub fn position_to_offset(&self, line: u32, character: u32) -> usize {
+        let line = (line as usize).min(self.line_starts.len().saturating_sub(1));
+        if self.line_starts.is_empty() {
+            return 0;
+        }
+        let line_start = self.line_starts[line];
+        let next_line_start = if line + 1 < self.line_starts.len() {
+            self.line_starts[line + 1]
+        } else {
+            self.len
+        };
+        (line_start + character as usize).min(next_line_start).min(self.len)
+    }
+
+    /// Returns the start byte offset of `line` (0-indexed).
+    pub fn line_start_offset(&self, line: usize) -> usize {
+        if line < self.line_starts.len() {
+            self.line_starts[line]
+        } else {
+            self.len
+        }
+    }
+
+    /// Returns the end byte offset of `line` (including newline if present).
+    pub fn line_end_offset(&self, line: usize) -> usize {
+        if line + 1 < self.line_starts.len() {
+            self.line_starts[line + 1]
+        } else {
+            self.len
+        }
+    }
 }
 
 #[cfg(test)]

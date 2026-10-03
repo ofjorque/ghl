@@ -72,18 +72,22 @@ Backlog temático para consolidar la ergonomía de última generación del lengu
   - Generación automática de módulos nativos para Julia (`module ...Bridge`, `struct` isbits inmutables, `ccall` directo LLVM con `LIB_PATH` y `export`).
 
 ### Parte D: Cuadernos Científicos y Literate Computing
-- [ ] **Formato de Documento Reproducible (`.ghmd`):**
-  - Ejecutor de documentos Markdown con bloques de código ````ghl ... ```` que evalúa celdas e incrusta salidas de texto, tablas Cockpit y gráficos SVG.
+- [x] **Integración Nativa con Quarto (`.qmd`) en Positron:**
+  - Adopción de Quarto como el estándar oficial de computación científica reproducible en lugar de un formato propietario `.ghmd` (decisión de diseño en [`docs/roadmap/02_TODO_INTERACTIVE_QUARTO.md`](docs/roadmap/02_TODO_INTERACTIVE_QUARTO.md)).
+  - Extensión oficial y filtro Lua en [`_extensions/ghl/ghl.lua`](_extensions/ghl/ghl.lua) para ejecutar chunks ````{ghl}` preservando estado entre celdas e incrustando salidas y figuras SVG.
+  - Ejemplo científico completo en [`examples/quarto_report.qmd`](examples/quarto_report.qmd).
+  - Soporte interactivo en Positron/VS Code para evaluar chunks con `Ctrl + Enter` hacia el REPL, Data Explorer (`view(df)`) y panel lateral de Plots.
 
 ### Parte E: Formateador Canónico y Soporte de Editor / LSP (`Alt + Shift + F`)
-- [ ] **Soporte Nativo de Formateo en el Language Server (`ghl-lsp`):**
-  - Implementar el capability estándar `textDocument/formatting` (`document_formatting_provider: Some(OneOf::Left(true))`) y el handler asíncrono `formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>>` en `Backend`.
-  - Habilitar formateo instantáneo en memoria al pulsar `Alt + Shift + F` o al guardar (`editor.formatOnSave`) en Positron, VS Code, Neovim, Zed y Helix, eliminando la necesidad de subprocesos externos síncronos (`execFileSync`).
-- [ ] **Preservación de Comentarios y *Trivia* en `ghl-syntax/src/fmt.rs`:**
-  - El formateador actual (`format_program`) genera código canónico reescribiendo desde el AST puro, lo que descarta comentarios de código (`//`, `/* ... */`) y saltos de línea manuales que no están fijados a nodos del AST.
-  - Implementar preservación de *trivia* (comentarios y espaciado intencional) en el lexer/parser o formateo consciente de tokens para garantizar que el formateo nunca destruya anotaciones del desarrollador.
-- [ ] **Formateo de Rango / Selección (*Range Formatting*):**
-  - Implementar `textDocument/rangeFormatting` (`Ctrl + K, Ctrl + F`) para dar formato únicamente al fragmento de código resaltado por el cursor sin alterar el resto del archivo.
+- [x] **Soporte Nativo de Formateo en el Language Server (`ghl-lsp`):**
+  - Implementado el capability estándar `textDocument/formatting` (`document_formatting_provider: Some(OneOf::Left(true))`) y el handler asíncrono `formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>>` en `Backend`.
+  - Habilitado formateo instantáneo en memoria al pulsar `Alt + Shift + F` o al guardar (`editor.formatOnSave`) en Positron, VS Code, Neovim, Zed y Helix, eliminando la necesidad de subprocesos externos síncronos (`execFileSync`).
+- [x] **Preservación de Comentarios y *Trivia* en `ghl-syntax/src/fmt.rs`:**
+  - Implementada extracción de *trivia* (`extract_comments`) y seguimiento de estado (`CommentState`) con conciencia de cadenas de texto y delimitadores.
+  - Preserva comentarios previos de documentación (`///`), comentarios de línea (`//`), comentarios inline/posteriores en la misma línea (`let x = 10; // note`), comentarios de bloque (`/* ... */`), comentarios internos en bloques (`{ ... }`), structs, traits e impls, y comentarios al final del archivo sin pérdida de información.
+  - Preservación canónica de líneas en blanco intencionales (`has_blank_line_before`), colapsando múltiples saltos redundantes a exactamente 1 línea en blanco. Idempotencia garantizada: `format(format(x)) == format(x)`.
+- [x] **Formateo de Rango / Selección (*Range Formatting*):**
+  - Implementado `textDocument/rangeFormatting` (`Ctrl + K, Ctrl + F` / `format_range`) mapeando rangos de líneas a sentencias AST y comentarios asociados vía `SourceIndex`, permitiendo formatear fragmentos seleccionados sin alterar el resto del archivo.
 
 ---
 
