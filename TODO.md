@@ -108,37 +108,41 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
 
 ## Roadmap de Ecosistema Científico y Paquetes de Utilidad
 
-### 1. Validación y Suites de Prueba en Paquetes de Dominio (`packages/`)
-- [ ] **`packages/ghl_irt` (Psicometría MIRT & CAT):**
+> **Sincronización con GitHub:** Este backlog está estructurado y rastreado activamente en los [Milestones](https://github.com/ofjorque/ghl/milestones) e [Issues](https://github.com/ofjorque/ghl/issues) de GitHub.
+
+### 1. Validación y Suites de Prueba en Paquetes de Dominio (`packages/`) — [Milestone v0.2.0](https://github.com/ofjorque/ghl/milestone/1)
+- [ ] **`packages/ghl_irt` (Psicometría MIRT & CAT) — [#1](https://github.com/ofjorque/ghl/issues/1):**
   - Ejecutar y consolidar tests (`ghl test`) sobre los 17 módulos de IRT (1PL, 2PL, 3PL, Graded Response, Nominal Response, MHRM, DIF, Information Curves, CAT).
   - Validar paridad numérica contra benchmarks de R (`mirt`) y Python (`mirt`).
   - Publicar cuaderno reproducible Quarto (`.qmd`) de calibración psicométrica completa.
-- [ ] **`packages/ghl_causal` (Inferencia Causal y Evaluación de Impacto):**
+- [ ] **`packages/ghl_causal` (Inferencia Causal y Evaluación de Impacto) — [#2](https://github.com/ofjorque/ghl/issues/2):**
   - Consolidar tests para Difference-in-Differences (DiD), Event Studies y pruebas de tendencias paralelas.
   - Documentar caso de estudio empírico reproducible en Quarto (`.qmd`).
-- [ ] **`packages/ghl_timeseries` (Series Temporales y Filtrado Dinámico):**
+- [ ] **`packages/ghl_timeseries` (Series Temporales y Filtrado Dinámico) — [#3](https://github.com/ofjorque/ghl/issues/3):**
   - Tests de calibración para modelos ARIMA, GARCH y Filtro de Kalman.
   - Ejemplo de pronóstico y visualización integrada con `ghl_plot`.
-- [ ] **`packages/ghl_panel` (Econometría de Datos de Panel):**
+- [ ] **`packages/ghl_panel` (Econometría de Datos de Panel) — [#4](https://github.com/ofjorque/ghl/issues/4):**
   - Validar estimadores dinámicos Arellano-Bond y Blundell-Bond contra benchmarks de Stata (`xtabond2`) y R (`plm`).
-- [ ] **`packages/ghl_survival` (Bioestadística y Análisis de Supervivencia):**
+- [ ] **`packages/ghl_survival` (Bioestadística y Análisis de Supervivencia) — [#5](https://github.com/ofjorque/ghl/issues/5):**
   - Pruebas para curvas Kaplan-Meier, test Log-Rank y modelo de riesgos proporcionales de Cox.
-- [ ] **`packages/ghl_multilevel` (Modelos Lineales Mixtos / HLM):**
+- [ ] **`packages/ghl_multilevel` (Modelos Lineales Mixtos / HLM) — [#6](https://github.com/ofjorque/ghl/issues/6):**
   - Pruebas para modelos con interceptos y pendientes aleatorias contra R `lme4`.
-- [ ] **`packages/spring_pact` (Grafos Probabilísticos y PACT):**
+- [ ] **`packages/spring_pact` (Grafos Probabilísticos y PACT) — [#7](https://github.com/ofjorque/ghl/issues/7):**
   - Verificación del motor de especificación de redes y grafos causales/probabilísticos.
 
-### 2. Nuevos Paquetes de Utilidad Propuestos para el Ecosistema
-- [ ] **`packages/ghl_optim` (Optimización Numérica No Lineal General):**
+### 2. Nuevos Paquetes de Utilidad Propuestos para el Ecosistema — [Milestone v0.3.0](https://github.com/ofjorque/ghl/milestone/2)
+- [ ] **`packages/ghl_optim` (Optimización Numérica No Lineal General) — [#8](https://github.com/ofjorque/ghl/issues/8):**
   - Implementar biblioteca de algoritmos de optimización matemática (BFGS, L-BFGS-B, Nelder-Mead, Levenberg-Marquardt).
   - Exponer interfaz canónica para estimación de funciones de pérdida personalizadas y máxima verosimilitud (MLE).
-- [ ] **`packages/ghl_impute` (Limpieza Científica y Datos Faltantes):**
+- [ ] **`packages/ghl_impute` (Limpieza Científica y Datos Faltantes) — [#9](https://github.com/ofjorque/ghl/issues/9):**
   - Algoritmos de imputación múltiple (tipo MICE y k-NN) integrados nativamente con la semántica de `NA:reason` de GHL.
-- [ ] **`packages/ghl_db` / Conectores SQL Extendido:**
+- [ ] **`packages/ghl_db` / Conectores SQL Extendido — [#10](https://github.com/ofjorque/ghl/issues/10):**
   - Conector nativo hacia DuckDB / SQLite para consultas SQL analíticas directamente sobre DataFrames y archivos Parquet.
 
-### 3. Herramientas Periféricas y Developer Experience (DX)
-- [ ] **Empaquetado y Distribución de Extensión VS Code / Positron:**
-  - Generar el binario actualizado `.vsix` en `editors/vscode/` con la nueva integración nativa de LSP formatting.
-- [ ] **Pre-commit Hooks y CI Ligera:**
-  - Configurar `.pre-commit-hooks.yaml` y GitHub Action para `ghl fmt --check` y `ghl check` en repositorios de usuarios.
+### 3. Developer Experience (DX), CI/CD y Distribución — [Milestone v0.4.0](https://github.com/ofjorque/ghl/milestone/3)
+- [ ] **GitHub Actions Matrix Multi-Plataforma — [#11](https://github.com/ofjorque/ghl/issues/11):**
+  - Workflows automatizados de compilación y pruebas para Ubuntu, macOS y Windows con cacheo de dependencias.
+- [ ] **Pipeline de Releases Automatizados y Empaquetado VSIX — [#12](https://github.com/ofjorque/ghl/issues/12):**
+  - Empaquetado automático de binarios optimizados (Linux, macOS, Windows) y extensión VS Code / Positron al publicar tags `v*.*.*`.
+- [ ] **Generador de Documentación HTML Estática (`ghl doc`) — [#13](https://github.com/ofjorque/ghl/issues/13):**
+  - Extracción de comentarios `///` y renderizado de sitio web estático moderno con fórmulas KaTeX y buscador en cliente.
