@@ -605,3 +605,128 @@ fn test_shape_mapping_groups_without_color() {
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
 }
+
+#[test]
+fn test_grammar_of_graphics_layer_local_data() {
+    let src = r#"
+        let df1 = dataframe {
+            x: [1.0, 2.0, 3.0],
+            y: [10.0, 20.0, 30.0]
+        };
+        let df2 = dataframe {
+            a: [4.0, 5.0],
+            b: [40.0, 50.0]
+        };
+        let p = ggplot(df1, aes("x", "y")) + geom_point() + geom_line(data = df2, aes("a", "b"));
+        p
+    "#;
+    let res = eval_source(src).expect("Plot with layer-local data should evaluate successfully");
+    match res {
+        Value::Plot(p) => {
+            assert_eq!(p.layers.len(), 2, "Plot should contain 2 layers");
+            // Layer 0 inherits global data
+            assert!(p.layers[0].data.is_none(), "Layer 0 should not have local data");
+            // Layer 1 has local data
+            assert!(p.layers[1].data.is_some(), "Layer 1 should have local data");
+            let ld = p.layers[1].data.as_ref().unwrap();
+            assert_eq!(ld.x_values, vec![4.0, 5.0]);
+            assert_eq!(ld.y_values, vec![40.0, 50.0]);
+
+            // Rendering tests (SVG, Vega JSON, terminal)
+            let svg = p.to_svg(800, 600).expect("SVG render with layer data should succeed");
+            assert!(svg.contains("<svg"), "Valid SVG should be produced");
+
+            let vega = p.to_vega_json().expect("Vega-Lite v5 JSON with layer data should succeed");
+            assert!(vega.contains("\"values\": ["), "Vega should output layer data values");
+            assert!(vega.contains("40.0"), "Vega should include local data points");
+
+            let caps = ghl_diagnostics::RenderCaps::rich_terminal(80);
+            let card = p.render(&caps);
+            assert!(card.contains("Cartesian Plot") || card.contains("READY"));
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_grammar_of_graphics_layer_local_data_inherit_mapping() {
+    let src = r#"
+        let df1 = dataframe {
+            x: [1.0, 2.0],
+            y: [10.0, 20.0]
+        };
+        let df2 = dataframe {
+            x: [10.0, 20.0],
+            y: [100.0, 200.0]
+        };
+        // geom_line specifies data = df2 without mapping; inherits aes("x", "y") from plot
+        let p = ggplot(df1, aes("x", "y")) + geom_point() + geom_line(data = df2);
+        p
+    "#;
+    let res = eval_source(src).expect("Plot with inherited mapping on local data should evaluate");
+    match res {
+        Value::Plot(p) => {
+            assert_eq!(p.layers.len(), 2);
+            assert!(p.layers[1].data.is_some(), "Layer 1 should have local data");
+            let ld = p.layers[1].data.as_ref().unwrap();
+            assert_eq!(ld.x_values, vec![10.0, 20.0], "Should resolve x from inherited mapping");
+            assert_eq!(ld.y_values, vec![100.0, 200.0], "Should resolve y from inherited mapping");
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_grammar_of_graphics_layer_local_mapping_inherit_data() {
+    let src = r#"
+        let df1 = dataframe {
+            x: [1.0, 2.0, 3.0],
+            y1: [10.0, 20.0, 30.0],
+            y2: [100.0, 200.0, 300.0]
+        };
+        // geom_line specifies aes("x", "y2") without data; inherits df1 columns from plot
+        let p = ggplot(df1, aes("x", "y1")) + geom_point() + geom_line(aes("x", "y2"));
+        p
+    "#;
+    let res = eval_source(src).expect("Plot with local mapping inheriting data should evaluate");
+    match res {
+        Value::Plot(p) => {
+            assert_eq!(p.layers.len(), 2);
+            assert!(p.layers[1].data.is_some(), "Layer 1 should resolve its local mapping into data");
+            let ld = p.layers[1].data.as_ref().unwrap();
+            assert_eq!(ld.x_values, vec![1.0, 2.0, 3.0]);
+            assert_eq!(ld.y_values, vec![100.0, 200.0, 300.0], "Should resolve y2 values");
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_grammar_of_graphics_layer_local_data_pipe_syntax() {
+    let src = r#"
+        let df1 = dataframe {
+            x: [1.0, 2.0],
+            y: [5.0, 15.0]
+        };
+        let df2 = dataframe {
+            a: [10.0, 20.0],
+            b: [50.0, 150.0]
+        };
+        let p = df1
+            |> ggplot(aes("x", "y"))
+            |> geom_point()
+            |> geom_line(df2, aes("a", "b"));
+        p
+    "#;
+    let res = eval_source(src).expect("Pipelined plot with local layer data should evaluate");
+    match res {
+        Value::Plot(p) => {
+            assert_eq!(p.layers.len(), 2);
+            assert!(p.layers[1].data.is_some(), "Layer 1 should have local data from pipeline");
+            let ld = p.layers[1].data.as_ref().unwrap();
+            assert_eq!(ld.x_values, vec![10.0, 20.0]);
+            assert_eq!(ld.y_values, vec![50.0, 150.0]);
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}

@@ -307,11 +307,12 @@ impl VegaRenderer {
 
         let mut layers = Vec::new();
 
-        let has_points = spec.layers.is_empty() || spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Point { .. }));
-        let has_lines = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Line { .. }));
-        let has_smooth = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Smooth { .. }));
+        let global_has_points = spec.layers.is_empty()
+            || spec.layers.iter().any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Point { .. }));
+        let global_has_lines = spec.layers.iter().any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Line { .. }));
+        let global_has_smooth = spec.layers.iter().any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Smooth { .. }));
 
-        if has_points {
+        if global_has_points && !data_values.is_empty() {
             let mut point_mark = json!({
                 "type": "point",
                 "filled": true,
@@ -326,7 +327,7 @@ impl VegaRenderer {
             }));
         }
 
-        if has_lines {
+        if global_has_lines && !data_values.is_empty() {
             let mut line_encoding = base_encoding.clone();
             if let Some(obj) = line_encoding.as_object_mut() {
                 obj.remove("shape");
@@ -338,7 +339,7 @@ impl VegaRenderer {
             }));
         }
 
-        if has_smooth {
+        if global_has_smooth && !data_values.is_empty() {
             // Vega regression transform
             let smooth_layer = json!({
                 "mark": { "type": "line", "color": "#D55E00", "strokeWidth": 3 },
@@ -351,6 +352,77 @@ impl VegaRenderer {
                 }
             });
             layers.push(smooth_layer);
+        }
+
+        // Add layers with local data
+        let mut local_layer_idx = 0;
+        for layer in &spec.layers {
+            if let Some(ref d) = layer.data {
+                let mut local_values = Vec::new();
+                let n = d.x_values.len().min(d.y_values.len());
+                for i in 0..n {
+                    let mut row = json!({
+                        "x": d.x_values[i],
+                        "y": d.y_values[i]
+                    });
+                    for (col_name, col_vals) in &d.columns_cache {
+                        if let Some(val) = col_vals.get(i) {
+                            row[col_name] = json!(val);
+                        }
+                    }
+                    local_values.push(row);
+                }
+
+                let color = OKABE_ITO[(local_layer_idx + 1) % OKABE_ITO.len()].hex;
+                local_layer_idx += 1;
+
+                match &layer.kind {
+                    GeomKind::Point { .. } => {
+                        layers.push(json!({
+                            "data": { "values": local_values },
+                            "mark": { "type": "point", "filled": true, "color": color, "size": 60, "tooltip": true },
+                            "encoding": {
+                                "x": { "field": "x", "type": "quantitative" },
+                                "y": { "field": "y", "type": "quantitative" }
+                            }
+                        }));
+                    }
+                    GeomKind::Line { .. } => {
+                        layers.push(json!({
+                            "data": { "values": local_values },
+                            "mark": { "type": "line", "color": color, "strokeWidth": 2 },
+                            "encoding": {
+                                "x": { "field": "x", "type": "quantitative" },
+                                "y": { "field": "y", "type": "quantitative" }
+                            }
+                        }));
+                    }
+                    GeomKind::Area { .. } => {
+                        layers.push(json!({
+                            "data": { "values": local_values },
+                            "mark": { "type": "area", "color": color, "opacity": 0.3 },
+                            "encoding": {
+                                "x": { "field": "x", "type": "quantitative" },
+                                "y": { "field": "y", "type": "quantitative" }
+                            }
+                        }));
+                    }
+                    GeomKind::Smooth { .. } => {
+                        layers.push(json!({
+                            "data": { "values": local_values },
+                            "mark": { "type": "line", "color": color, "strokeWidth": 3 },
+                            "transform": [
+                                { "regression": "y", "on": "x" }
+                            ],
+                            "encoding": {
+                                "x": { "field": "x", "type": "quantitative" },
+                                "y": { "field": "y", "type": "quantitative" }
+                            }
+                        }));
+                    }
+                    _ => {}
+                }
+            }
         }
 
         if let Some(ref facet_spec) = spec.facet {

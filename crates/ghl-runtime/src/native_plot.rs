@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 use ghl_diagnostics::{Diagnostic, RenderCaps};
 use ghl_plot::{AestheticMap, DataSeries, GeomLayer, PlotSpec};
 use ghl_types::ContrastScheme;
+use polars_core::prelude::DataFrame;
+use crate::na_reasons::NaReasonTable;
 use crate::value::Value;
 
 // =========================================================================
@@ -260,137 +262,308 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 }
 
-pub(crate) fn native_geom_point(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    match args.first() {
-        Some(Value::Plot(plot)) => {
-            let mut p = (**plot).clone();
-            p = p.add_layer(GeomLayer::point());
-            Ok(Value::Plot(Box::new(p)))
-        }
-        _ => Ok(Value::Geom(GeomLayer::point())),
+pub(crate) fn extract_layer_data_from_df(
+    frame: &DataFrame,
+    na_reasons: &NaReasonTable,
+    aes_opt: Option<&AestheticMap>,
+) -> ghl_plot::LayerData {
+    let mut layer_data = ghl_plot::LayerData::new();
+    let col_values = |name: &str| -> Vec<Value> {
+        crate::polars_bridge::pull_column_as_values(frame, na_reasons, name)
+            .unwrap_or_default()
+    };
+    let col_f64 = |name: &str| -> Vec<f64> {
+        col_values(name).iter().filter_map(|v| v.as_f64()).collect()
+    };
+
+    // Pre-populate columns cache with all dataframe columns
+    for col_name in frame.get_column_names() {
+        let vals: Vec<String> = col_values(col_name).iter().map(extract_raw_string).collect();
+        layer_data.columns_cache.insert(col_name.to_string(), vals);
     }
+
+    if let Some(aes) = aes_opt {
+        let xs = col_f64(&aes.x);
+        if xs.is_empty() {
+            let cats: Vec<String> = col_values(&aes.x).iter().map(extract_raw_string).collect();
+            layer_data.categories = cats;
+        } else {
+            layer_data.x_values = xs.clone();
+        }
+
+        let size_col: Vec<f64> = if let Some(ref size_name) = aes.size {
+            let s_vals = col_f64(size_name);
+            layer_data.size_values = s_vals.clone();
+            s_vals
+        } else {
+            Vec::new()
+        };
+
+        let shape_col: Vec<String> = if let Some(ref shape_name) = aes.shape {
+            let sh_vals: Vec<String> = col_values(shape_name).iter().map(extract_raw_string).collect();
+            layer_data.shape_values = sh_vals.clone();
+            sh_vals
+        } else {
+            Vec::new()
+        };
+
+        if let Some(ref y_name) = aes.y {
+            let ys = col_f64(y_name);
+            layer_data.y_values = ys.clone();
+
+            if let Some(ref color_name) = aes.color {
+                let color_col = col_values(color_name);
+                let n = xs.len().min(ys.len()).min(color_col.len());
+                let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>)> = BTreeMap::new();
+                for i in 0..n {
+                    let g_key = extract_raw_string(&color_col[i]);
+                    let entry = groups.entry(g_key).or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                    entry.0.push(xs[i]);
+                    entry.1.push(ys[i]);
+                    if let Some(&sz) = size_col.get(i) {
+                        entry.2.push(sz);
+                    }
+                    if let Some(sh) = shape_col.get(i) {
+                        entry.3.push(sh.clone());
+                    }
+                }
+                let mut series = Vec::new();
+                for (g_name, (g_xs, g_ys, g_szs, g_shs)) in groups {
+                    series.push(DataSeries {
+                        group_name: Some(g_name),
+                        color_hex: None,
+                        x_values: g_xs,
+                        y_values: g_ys,
+                        categories: Vec::new(),
+                        size_values: g_szs,
+                        shape_values: g_shs,
+                    });
+                }
+                layer_data.series = series;
+            }
+        }
+    }
+
+    layer_data
+}
+
+struct ParsedGeomConfig {
+    plot: Option<PlotSpec>,
+    layer_data: Option<ghl_plot::LayerData>,
+    mapping: Option<AestheticMap>,
+    extra_pos: Vec<Value>,
+    extra_named: BTreeMap<String, Value>,
+}
+
+fn parse_geom_layer_args(args: Vec<Value>) -> ParsedGeomConfig {
+    let mut plot = None;
+    let mut df_val = None;
+    let mut mapping = None;
+    let mut extra_pos = Vec::new();
+    let mut extra_named = BTreeMap::new();
+
+    for arg in args {
+        match arg {
+            Value::Plot(p) => {
+                plot = Some(*p);
+            }
+            Value::DataFrame { frame, na_reasons } => {
+                df_val = Some((frame, na_reasons));
+            }
+            Value::Aesthetic(m) => {
+                mapping = Some(m);
+            }
+            Value::NamedArg(name, val) => {
+                match name.as_str() {
+                    "data" => {
+                        if let Value::DataFrame { frame, na_reasons } = *val {
+                            df_val = Some((frame, na_reasons));
+                        }
+                    }
+                    "mapping" | "aes" => {
+                        if let Value::Aesthetic(m) = *val {
+                            mapping = Some(m);
+                        }
+                    }
+                    _ => {
+                        extra_named.insert(name, *val);
+                    }
+                }
+            }
+            other => {
+                extra_pos.push(other);
+            }
+        }
+    }
+
+    let layer_data = df_val.map(|(frame, na_reasons)| {
+        extract_layer_data_from_df(&frame, &na_reasons, mapping.as_ref())
+    });
+
+    ParsedGeomConfig {
+        plot,
+        layer_data,
+        mapping,
+        extra_pos,
+        extra_named,
+    }
+}
+
+fn finalize_geom_layer(
+    mut layer: GeomLayer,
+    parsed: ParsedGeomConfig,
+) -> Result<Value, Diagnostic> {
+    layer.data = parsed.layer_data;
+    layer.mapping = parsed.mapping;
+
+    if let Some(mut p) = parsed.plot {
+        // Resolve inheritance if piped from a plot
+        if let Some(ref mut ld) = layer.data {
+            if layer.mapping.is_none() {
+                if let Some(ref p_map) = p.mapping {
+                    ld.resolve_mapping(p_map);
+                    layer.mapping = Some(p_map.clone());
+                }
+            }
+        } else if let Some(ref map) = layer.mapping {
+            let mut ld = ghl_plot::LayerData::new();
+            ld.columns_cache = p.columns_cache.clone();
+            ld.resolve_mapping(map);
+            layer.data = Some(ld);
+        }
+
+        layer = match &layer.kind {
+            ghl_plot::GeomKind::Smooth { fit: None, se } => {
+                let (xs, ys) = layer.effective_xy(&p);
+                match crate::plot_stats::simple_linear_fit(xs, ys) {
+                    Some(fit) => GeomLayer {
+                        kind: ghl_plot::GeomKind::Smooth { fit: Some(fit), se: *se },
+                        mapping: layer.mapping.clone(),
+                        data: layer.data.clone(),
+                    },
+                    None => layer,
+                }
+            }
+            ghl_plot::GeomKind::Boxplot { stats: None, multi_stats } if multi_stats.is_empty() => {
+                let (xs, ys) = layer.effective_xy(&p);
+                if !p.categories.is_empty() && !ys.is_empty() {
+                    let n = p.categories.len().min(ys.len());
+                    let mut grouped: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+                    for i in 0..n {
+                        grouped.entry(p.categories[i].clone()).or_default().push(ys[i]);
+                    }
+                    let mut group_stats = Vec::new();
+                    for (cat, vals) in grouped {
+                        if let Some(st) = crate::plot_stats::five_number_summary(&vals) {
+                            group_stats.push((cat, st));
+                        }
+                    }
+                    if !group_stats.is_empty() {
+                        GeomLayer {
+                            kind: ghl_plot::GeomKind::Boxplot { stats: None, multi_stats: group_stats },
+                            mapping: layer.mapping.clone(),
+                            data: layer.data.clone(),
+                        }
+                    } else {
+                        layer
+                    }
+                } else {
+                    match crate::plot_stats::five_number_summary(xs) {
+                        Some(stats) => GeomLayer {
+                            kind: ghl_plot::GeomKind::Boxplot { stats: Some(stats), multi_stats: Vec::new() },
+                            mapping: layer.mapping.clone(),
+                            data: layer.data.clone(),
+                        },
+                        None => layer,
+                    }
+                }
+            }
+            _ => layer,
+        };
+
+        p = p.add_layer(layer);
+        Ok(Value::Plot(Box::new(p)))
+    } else {
+        Ok(Value::Geom(layer))
+    }
+}
+
+pub(crate) fn native_geom_point(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let parsed = parse_geom_layer_args(args);
+    let size = parsed.extra_named.get("size").and_then(|v| v.as_f64())
+        .or_else(|| parsed.extra_pos.first().and_then(|v| v.as_f64()));
+    let glyph = parsed.extra_named.get("glyph").and_then(|v| match v {
+        Value::String(s) => s.chars().next(),
+        _ => None,
+    });
+    let layer = match (size, glyph) {
+        (s, g) if s.is_some() || g.is_some() => GeomLayer {
+            kind: ghl_plot::GeomKind::Point { size: s, glyph: g },
+            mapping: None,
+            data: None,
+        },
+        _ => GeomLayer::point(),
+    };
+    finalize_geom_layer(layer, parsed)
 }
 
 pub(crate) fn native_geom_line(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    match args.first() {
-        Some(Value::Plot(plot)) => {
-            let mut p = (**plot).clone();
-            p = p.add_layer(GeomLayer::line());
-            Ok(Value::Plot(Box::new(p)))
-        }
-        _ => Ok(Value::Geom(GeomLayer::line())),
-    }
+    let parsed = parse_geom_layer_args(args);
+    let width = parsed.extra_named.get("width").and_then(|v| v.as_i64()).map(|w| w as u32)
+        .or_else(|| parsed.extra_pos.first().and_then(|v| v.as_i64()).map(|w| w as u32));
+    let layer = match width {
+        Some(w) => GeomLayer {
+            kind: ghl_plot::GeomKind::Line { width: Some(w) },
+            mapping: None,
+            data: None,
+        },
+        None => GeomLayer::line(),
+    };
+    finalize_geom_layer(layer, parsed)
 }
 
 pub(crate) fn native_geom_smooth(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    match args.first() {
-        Some(Value::Plot(plot)) => {
-            let mut p = (**plot).clone();
-            let layer = match crate::plot_stats::simple_linear_fit(&p.x_data, &p.y_data) {
-                Some(fit) => GeomLayer::smooth_with_fit(fit),
-                None => GeomLayer::smooth(),
-            };
-            p = p.add_layer(layer);
-            Ok(Value::Plot(Box::new(p)))
-        }
-        _ => Ok(Value::Geom(GeomLayer::smooth())),
-    }
+    let parsed = parse_geom_layer_args(args);
+    let layer = GeomLayer::smooth();
+    finalize_geom_layer(layer, parsed)
 }
 
 pub(crate) fn native_geom_histogram(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let (plot_opt, bins) = match args.first() {
-        Some(Value::Plot(plot)) => {
-            let b = args.get(1).and_then(|v| v.as_i64()).unwrap_or(8) as usize;
-            (Some(plot), b)
-        }
-        Some(other) => {
-            let b = other.as_i64().unwrap_or(8) as usize;
-            (None, b)
-        }
-        None => (None, 8),
-    };
-
-    match plot_opt {
-        Some(plot) => {
-            let mut p = (**plot).clone();
-            p = p.add_layer(GeomLayer::histogram(bins));
-            Ok(Value::Plot(Box::new(p)))
-        }
-        None => Ok(Value::Geom(GeomLayer::histogram(bins))),
-    }
+    let parsed = parse_geom_layer_args(args);
+    let bins = parsed.extra_named.get("bins").and_then(|v| v.as_i64())
+        .or_else(|| parsed.extra_pos.first().and_then(|v| v.as_i64()))
+        .unwrap_or(8) as usize;
+    let layer = GeomLayer::histogram(bins);
+    finalize_geom_layer(layer, parsed)
 }
 
 pub(crate) fn native_geom_boxplot(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    match args.first() {
-        Some(Value::Plot(plot)) => {
-            let mut p = (**plot).clone();
-            let layer = if !p.categories.is_empty() && !p.y_data.is_empty() {
-                let n = p.categories.len().min(p.y_data.len());
-                let mut grouped: BTreeMap<String, Vec<f64>> = BTreeMap::new();
-                for i in 0..n {
-                    grouped.entry(p.categories[i].clone()).or_default().push(p.y_data[i]);
-                }
-                let mut group_stats = Vec::new();
-                for (cat, vals) in grouped {
-                    if let Some(st) = crate::plot_stats::five_number_summary(&vals) {
-                        group_stats.push((cat, st));
-                    }
-                }
-                if !group_stats.is_empty() {
-                    GeomLayer::boxplot_with_multi_stats(group_stats)
-                } else {
-                    GeomLayer::boxplot()
-                }
-            } else {
-                match crate::plot_stats::five_number_summary(&p.x_data) {
-                    Some(stats) => GeomLayer::boxplot_with_stats(stats),
-                    None if p.x_data.is_empty() => GeomLayer::boxplot(),
-                    None => {
-                        return Err(Diagnostic::statistical_error(
-                            "S0302",
-                            format!("`geom_boxplot()` requires at least 4 observations, found {}", p.x_data.len()),
-                        ));
-                    }
-                }
-            };
-            p = p.add_layer(layer);
-            Ok(Value::Plot(Box::new(p)))
-        }
-        _ => Ok(Value::Geom(GeomLayer::boxplot())),
-    }
+    let parsed = parse_geom_layer_args(args);
+    let layer = GeomLayer::boxplot();
+    finalize_geom_layer(layer, parsed)
 }
 
 pub(crate) fn native_geom_bar(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    match args.first() {
-        Some(Value::Plot(plot)) => {
-            let mut p = (**plot).clone();
-            p = p.add_layer(GeomLayer::bar());
-            Ok(Value::Plot(Box::new(p)))
-        }
-        _ => Ok(Value::Geom(GeomLayer::bar())),
-    }
+    let parsed = parse_geom_layer_args(args);
+    let layer = GeomLayer::bar();
+    finalize_geom_layer(layer, parsed)
 }
 
 pub(crate) fn native_geom_area(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    match args.first() {
-        Some(Value::Plot(plot)) => {
-            let mut p = (**plot).clone();
-            p = p.add_layer(GeomLayer::area());
-            Ok(Value::Plot(Box::new(p)))
-        }
-        _ => Ok(Value::Geom(GeomLayer::area())),
-    }
+    let parsed = parse_geom_layer_args(args);
+    let alpha = parsed.extra_named.get("alpha").and_then(|v| v.as_f64());
+    let layer = GeomLayer {
+        kind: ghl_plot::GeomKind::Area { alpha },
+        mapping: None,
+        data: None,
+    };
+    finalize_geom_layer(layer, parsed)
 }
 
 pub(crate) fn native_geom_rug(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    match args.first() {
-        Some(Value::Plot(plot)) => {
-            let mut p = (**plot).clone();
-            p = p.add_layer(GeomLayer::rug());
-            Ok(Value::Plot(Box::new(p)))
-        }
-        _ => Ok(Value::Geom(GeomLayer::rug())),
-    }
+    let parsed = parse_geom_layer_args(args);
+    let layer = GeomLayer::rug();
+    finalize_geom_layer(layer, parsed)
 }
 
 pub(crate) fn native_labs(args: Vec<Value>) -> Result<Value, Diagnostic> {

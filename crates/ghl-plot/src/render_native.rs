@@ -202,7 +202,8 @@ impl NativeRenderer {
     /// with multi-series colors and automatic legend.
     fn draw_cartesian_layers<DB: DrawingBackend>(spec: &PlotSpec, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
         let series_list = spec.all_series();
-        if series_list.is_empty() || series_list.iter().all(|s| s.x_values.is_empty() && s.y_values.is_empty()) {
+        let has_local_data = spec.layers.iter().any(|l| l.data.as_ref().map(|d| !d.x_values.is_empty() || !d.series.is_empty()).unwrap_or(false));
+        if (series_list.is_empty() || series_list.iter().all(|s| s.x_values.is_empty() && s.y_values.is_empty())) && !has_local_data {
             return Err("Cannot plot empty Cartesian data".to_string());
         }
 
@@ -212,7 +213,7 @@ impl NativeRenderer {
             _ => (WHITE, BLACK, RGBColor(210, 210, 215)),
         };
 
-        // Determine min and max domain across all series
+        // Determine min and max domain across all series and layer-local data
         let mut min_x = f64::INFINITY;
         let mut max_x = f64::NEG_INFINITY;
         let mut min_y = f64::INFINITY;
@@ -226,6 +227,29 @@ impl NativeRenderer {
             for &y in &s.y_values {
                 if y < min_y { min_y = y; }
                 if y > max_y { max_y = y; }
+            }
+        }
+
+        for layer in &spec.layers {
+            if let Some(ref d) = layer.data {
+                for &x in &d.x_values {
+                    if x < min_x { min_x = x; }
+                    if x > max_x { max_x = x; }
+                }
+                for &y in &d.y_values {
+                    if y < min_y { min_y = y; }
+                    if y > max_y { max_y = y; }
+                }
+                for s in &d.series {
+                    for &x in &s.x_values {
+                        if x < min_x { min_x = x; }
+                        if x > max_x { max_x = x; }
+                    }
+                    for &y in &s.y_values {
+                        if y < min_y { min_y = y; }
+                        if y > max_y { max_y = y; }
+                    }
+                }
             }
         }
 
@@ -277,23 +301,23 @@ impl NativeRenderer {
             .draw()
             .map_err(|e| format!("Mesh draw error: {e}"))?;
 
-        let has_points = spec.layers.is_empty() || spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Point { .. }));
-        let has_lines = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Line { .. }));
-        let has_smooth = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Smooth { .. }));
+        let global_has_points = spec.layers.is_empty()
+            || spec.layers.iter().any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Point { .. }));
+        let global_has_lines = spec.layers.iter().any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Line { .. }));
+        let global_has_smooth = spec.layers.iter().any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Smooth { .. }));
 
-        // Render each series with palette color
+        // 1. Render global series if requested
         for (i, s) in series_list.iter().enumerate() {
             let color_palette = get_okabe_ito_color(i);
             let series_color = color_palette.to_plotters_color();
 
             let points: Vec<(f64, f64)> = s.x_values.iter().copied().zip(s.y_values.iter().copied()).collect();
 
-            // 1. Draw points layer if requested
-            if has_points && !points.is_empty() {
+            // Draw points layer if requested
+            if global_has_points && !points.is_empty() {
                 let name = s.group_name.clone().unwrap_or_else(|| format!("Series {}", i + 1));
                 let color_for_legend = series_color;
 
-                // Group points by MarkerShape so we can render each shape with its dynamic size
                 let mut shape_map: std::collections::BTreeMap<crate::spec::MarkerShape, Vec<(f64, f64, i32)>> = std::collections::BTreeMap::new();
                 for j in 0..points.len() {
                     let (x, y) = points[j];
@@ -379,8 +403,8 @@ impl NativeRenderer {
                 }
             }
 
-            // 2. Draw line layer if requested
-            if has_lines && points.len() >= 2 {
+            // Draw line layer if requested
+            if global_has_lines && points.len() >= 2 {
                 let mut sorted_points = points.clone();
                 sorted_points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -391,14 +415,14 @@ impl NativeRenderer {
                     LineSeries::new(sorted_points, ShapeStyle::from(&series_color).stroke_width(2))
                 ).map_err(|e| format!("Line draw error: {e}"))?;
 
-                if s.group_name.is_some() && !has_points {
+                if s.group_name.is_some() && !global_has_points {
                     series.label(name).legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], ShapeStyle::from(&color_for_legend).stroke_width(2)));
                 }
             }
         }
 
-        // 3. Draw smooth regression line if requested
-        if has_smooth {
+        // Draw global smooth regression line if requested
+        if global_has_smooth {
             if let Some(fit) = spec.smooth_fit() {
                 let smooth_color = RGBColor(220, 50, 47); // Vivid Coral / Solarized Red
                 let line_pts = vec![
@@ -413,8 +437,69 @@ impl NativeRenderer {
             }
         }
 
+        // 2. Render each layer with local data
+        let mut local_palette_offset = series_list.len();
+        for layer in &spec.layers {
+            if let Some(ref d) = layer.data {
+                let local_series = d.all_series();
+                for (s_idx, s) in local_series.iter().enumerate() {
+                    let color_palette = get_okabe_ito_color(local_palette_offset + s_idx);
+                    let color = color_palette.to_plotters_color();
+                    let pts: Vec<(f64, f64)> = s.x_values.iter().copied().zip(s.y_values.iter().copied()).collect();
+                    if pts.is_empty() {
+                        continue;
+                    }
+
+                    match &layer.kind {
+                        GeomKind::Point { .. } => {
+                            let series = chart.draw_series(pts.iter().map(|&(x, y)| {
+                                Circle::new((x, y), 5, ShapeStyle::from(&color).filled())
+                            })).map_err(|e| format!("Layer point draw error: {e}"))?;
+                            if let Some(ref name) = s.group_name {
+                                let l_name = name.clone();
+                                let cl = color;
+                                series.label(l_name).legend(move |(x, y)| Circle::new((x + 10, y), 4, ShapeStyle::from(&cl).filled()));
+                            }
+                        }
+                        GeomKind::Line { .. } => {
+                            if pts.len() >= 2 {
+                                let mut sorted = pts.clone();
+                                sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                                let series = chart.draw_series(
+                                    LineSeries::new(sorted, ShapeStyle::from(&color).stroke_width(2))
+                                ).map_err(|e| format!("Layer line draw error: {e}"))?;
+                                if let Some(ref name) = s.group_name {
+                                    let l_name = name.clone();
+                                    let cl = color;
+                                    series.label(l_name).legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], ShapeStyle::from(&cl).stroke_width(2)));
+                                }
+                            }
+                        }
+                        GeomKind::Smooth { fit, .. } => {
+                            let fit_val = fit.or_else(|| crate::spec::LinearFit::compute(&s.x_values, &s.y_values));
+                            if let Some(f) = fit_val {
+                                let line_pts = vec![
+                                    (min_x, f.intercept + f.slope * min_x),
+                                    (max_x, f.intercept + f.slope * max_x),
+                                ];
+                                chart.draw_series(LineSeries::new(line_pts, ShapeStyle::from(&color).stroke_width(3)))
+                                    .map_err(|e| format!("Layer smooth draw error: {e}"))?
+                                    .label(format!("Fit: y = {:.2} + {:.2}x", f.intercept, f.slope))
+                                    .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], ShapeStyle::from(&color).stroke_width(3)));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                local_palette_offset += local_series.len().max(1);
+            }
+        }
+
         // Render legend if grouped aesthetics were mapped
-        let has_groups = series_list.iter().any(|s| s.group_name.is_some()) || has_smooth;
+        let has_groups = series_list.iter().any(|s| s.group_name.is_some())
+            || global_has_smooth
+            || spec.layers.iter().any(|l| l.data.as_ref().map(|d| d.series.iter().any(|s| s.group_name.is_some())).unwrap_or(false))
+            || spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Smooth { .. }) && l.data.is_some());
         if has_groups {
             chart
                 .configure_series_labels()

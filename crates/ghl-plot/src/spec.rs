@@ -151,6 +151,34 @@ pub struct LinearFit {
     pub intercept: f64,
 }
 
+impl LinearFit {
+    pub fn compute(xs: &[f64], ys: &[f64]) -> Option<Self> {
+        let n = xs.len().min(ys.len());
+        if n < 2 {
+            return None;
+        }
+        let mean_x = xs.iter().take(n).sum::<f64>() / n as f64;
+        let mean_y = ys.iter().take(n).sum::<f64>() / n as f64;
+
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for i in 0..n {
+            let dx = xs[i] - mean_x;
+            let dy = ys[i] - mean_y;
+            num += dx * dy;
+            den += dx * dx;
+        }
+
+        if den.abs() < 1e-12 {
+            return None;
+        }
+
+        let slope = num / den;
+        let intercept = mean_y - slope * mean_x;
+        Some(Self { slope, intercept })
+    }
+}
+
 /// A Tukey five-number summary with 1.5*IQR fences and detected outliers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FiveNumberSummary {
@@ -180,10 +208,81 @@ pub enum GeomKind {
     Rug,
 }
 
+/// Local dataset attached to an individual geom layer, overriding or supplementing the global plot dataset.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct LayerData {
+    pub x_values: Vec<f64>,
+    pub y_values: Vec<f64>,
+    pub categories: Vec<String>,
+    pub size_values: Vec<f64>,
+    pub shape_values: Vec<String>,
+    pub series: Vec<DataSeries>,
+    pub columns_cache: BTreeMap<String, Vec<String>>,
+}
+
+impl LayerData {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_xy(mut self, x: Vec<f64>, y: Vec<f64>) -> Self {
+        self.x_values = x;
+        self.y_values = y;
+        self
+    }
+
+    pub fn with_series(mut self, series: Vec<DataSeries>) -> Self {
+        self.series = series;
+        self
+    }
+
+    pub fn with_column_cache(mut self, name: impl Into<String>, data: Vec<String>) -> Self {
+        self.columns_cache.insert(name.into(), data);
+        self
+    }
+
+    pub fn resolve_mapping(&mut self, mapping: &AestheticMap) {
+        if self.x_values.is_empty() {
+            if let Some(col) = self.columns_cache.get(&mapping.x) {
+                self.x_values = col.iter().filter_map(|s| s.parse::<f64>().ok()).collect();
+                if self.x_values.is_empty() {
+                    self.categories = col.clone();
+                }
+            }
+        }
+        if self.y_values.is_empty() {
+            if let Some(ref y_name) = mapping.y {
+                if let Some(col) = self.columns_cache.get(y_name) {
+                    self.y_values = col.iter().filter_map(|s| s.parse::<f64>().ok()).collect();
+                }
+            }
+        }
+    }
+
+    pub fn all_series(&self) -> Vec<DataSeries> {
+        if !self.series.is_empty() {
+            self.series.clone()
+        } else if !self.x_values.is_empty() {
+            vec![DataSeries {
+                group_name: None,
+                color_hex: None,
+                x_values: self.x_values.clone(),
+                y_values: self.y_values.clone(),
+                categories: self.categories.clone(),
+                size_values: self.size_values.clone(),
+                shape_values: self.shape_values.clone(),
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeomLayer {
     pub kind: GeomKind,
     pub mapping: Option<AestheticMap>,
+    pub data: Option<LayerData>,
 }
 
 impl GeomLayer {
@@ -191,6 +290,7 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Point { size: None, glyph: None },
             mapping: None,
+            data: None,
         }
     }
 
@@ -198,6 +298,7 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Point { size: None, glyph: Some(glyph) },
             mapping: None,
+            data: None,
         }
     }
 
@@ -205,6 +306,7 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Line { width: None },
             mapping: None,
+            data: None,
         }
     }
 
@@ -212,6 +314,7 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Smooth { fit: None, se: false },
             mapping: None,
+            data: None,
         }
     }
 
@@ -219,6 +322,7 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Smooth { fit: Some(fit), se: false },
             mapping: None,
+            data: None,
         }
     }
 
@@ -226,6 +330,7 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Histogram { bins },
             mapping: None,
+            data: None,
         }
     }
 
@@ -233,6 +338,7 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Boxplot { stats: None, multi_stats: Vec::new() },
             mapping: None,
+            data: None,
         }
     }
 
@@ -240,6 +346,7 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Boxplot { stats: Some(stats), multi_stats: Vec::new() },
             mapping: None,
+            data: None,
         }
     }
 
@@ -247,6 +354,7 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Boxplot { stats: None, multi_stats },
             mapping: None,
+            data: None,
         }
     }
 
@@ -254,6 +362,7 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Bar,
             mapping: None,
+            data: None,
         }
     }
 
@@ -261,6 +370,7 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Area { alpha: Some(0.3) },
             mapping: None,
+            data: None,
         }
     }
 
@@ -268,12 +378,43 @@ impl GeomLayer {
         Self {
             kind: GeomKind::Rug,
             mapping: None,
+            data: None,
         }
     }
 
     pub fn with_mapping(mut self, mapping: AestheticMap) -> Self {
         self.mapping = Some(mapping);
         self
+    }
+
+    pub fn with_data(mut self, data: LayerData) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    pub fn with_xy_data(mut self, x: Vec<f64>, y: Vec<f64>) -> Self {
+        self.data = Some(LayerData::default().with_xy(x, y));
+        self
+    }
+
+    /// Returns the effective X and Y data for this layer, falling back to the plot's global data.
+    pub fn effective_xy<'a>(&'a self, plot: &'a PlotSpec) -> (&'a [f64], &'a [f64]) {
+        if let Some(ref d) = self.data {
+            if !d.x_values.is_empty() || !d.y_values.is_empty() {
+                return (&d.x_values, &d.y_values);
+            }
+        }
+        (&plot.x_data, &plot.y_data)
+    }
+
+    /// Returns the effective series list for this layer, falling back to the plot's global series.
+    pub fn effective_series<'a>(&'a self, plot: &'a PlotSpec) -> &'a [DataSeries] {
+        if let Some(ref d) = self.data {
+            if !d.series.is_empty() {
+                return &d.series;
+            }
+        }
+        &plot.series
     }
 }
 

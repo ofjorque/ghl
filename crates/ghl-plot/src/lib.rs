@@ -24,7 +24,7 @@ pub use render_terminal::TerminalRenderer;
 pub use render_vega::VegaRenderer;
 pub use spec::{
     AestheticMap, CompositePlot, DataSeries, FacetLayout, FacetPanel, FacetScales, FacetSpec,
-    FiveNumberSummary, GeomKind, GeomLayer, HistogramBins, LinearFit, MarkerShape, PlotLabels,
+    FiveNumberSummary, GeomKind, GeomLayer, HistogramBins, LayerData, LinearFit, MarkerShape, PlotLabels,
     PlotSpec, PlotTheme, ScaleModifier, ScaleTransform, ThemeModifier,
 };
 

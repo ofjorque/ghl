@@ -75,7 +75,8 @@ impl TerminalRenderer {
         let plot_h = spec.height.max(8);
 
         let series_list = spec.all_series();
-        if series_list.is_empty() || series_list.iter().all(|s| s.x_values.is_empty() && s.y_values.is_empty()) {
+        let has_local_data = spec.layers.iter().any(|l| l.data.as_ref().map(|d| !d.x_values.is_empty() || !d.series.is_empty()).unwrap_or(false));
+        if (series_list.is_empty() || series_list.iter().all(|s| s.x_values.is_empty() && s.y_values.is_empty())) && !has_local_data {
             return format!("{tl}{}\n{vt} (Empty cartesian data)\n{bl}{}\n",
                 hz.to_string().repeat(24),
                 hz.to_string().repeat(24)
@@ -95,6 +96,29 @@ impl TerminalRenderer {
             for &y in &s.y_values {
                 if y < min_y { min_y = y; }
                 if y > max_y { max_y = y; }
+            }
+        }
+
+        for layer in &spec.layers {
+            if let Some(ref d) = layer.data {
+                for &x in &d.x_values {
+                    if x < min_x { min_x = x; }
+                    if x > max_x { max_x = x; }
+                }
+                for &y in &d.y_values {
+                    if y < min_y { min_y = y; }
+                    if y > max_y { max_y = y; }
+                }
+                for s in &d.series {
+                    for &x in &s.x_values {
+                        if x < min_x { min_x = x; }
+                        if x > max_x { max_x = x; }
+                    }
+                    for &y in &s.y_values {
+                        if y < min_y { min_y = y; }
+                        if y > max_y { max_y = y; }
+                    }
+                }
             }
         }
 
@@ -157,6 +181,62 @@ impl TerminalRenderer {
                     grid_chars[r][c] = point_glyph;
                     grid_colors[r][c] = Some(color_palette.ansi_code);
                 }
+            }
+        }
+
+        // Draw layer-local data if any
+        let mut local_palette_offset = series_list.len();
+        for layer in &spec.layers {
+            if let Some(ref d) = layer.data {
+                let local_series = d.all_series();
+                for (s_idx, s) in local_series.iter().enumerate() {
+                    let color_palette = get_okabe_ito_color(local_palette_offset + s_idx);
+                    let n_pts = s.x_values.len().min(s.y_values.len());
+
+                    match &layer.kind {
+                        GeomKind::Point { .. } => {
+                            for pt_idx in 0..n_pts {
+                                let px = ((s.x_values[pt_idx] - min_x) / span_x).clamp(0.0, 1.0);
+                                let py = ((s.y_values[pt_idx] - min_y) / span_y).clamp(0.0, 1.0);
+                                let c = (px * (plot_w - 1) as f64).round() as usize;
+                                let r = ((1.0 - py) * (plot_h - 1) as f64).round() as usize;
+                                if r < plot_h && c < plot_w {
+                                    grid_chars[r][c] = if caps.unicode_enabled { '●' } else { '*' };
+                                    grid_colors[r][c] = Some(color_palette.ansi_code);
+                                }
+                            }
+                        }
+                        GeomKind::Line { .. } => {
+                            for pt_idx in 0..n_pts {
+                                let px = ((s.x_values[pt_idx] - min_x) / span_x).clamp(0.0, 1.0);
+                                let py = ((s.y_values[pt_idx] - min_y) / span_y).clamp(0.0, 1.0);
+                                let c = (px * (plot_w - 1) as f64).round() as usize;
+                                let r = ((1.0 - py) * (plot_h - 1) as f64).round() as usize;
+                                if r < plot_h && c < plot_w {
+                                    grid_chars[r][c] = if caps.unicode_enabled { '─' } else { '-' };
+                                    grid_colors[r][c] = Some(color_palette.ansi_code);
+                                }
+                            }
+                        }
+                        GeomKind::Smooth { fit, .. } => {
+                            let fit_val = fit.or_else(|| crate::spec::LinearFit::compute(&s.x_values, &s.y_values));
+                            if let Some(f) = fit_val {
+                                for c in 0..plot_w {
+                                    let cur_x = min_x + (c as f64 / (plot_w - 1) as f64) * span_x;
+                                    let cur_y = f.intercept + f.slope * cur_x;
+                                    let norm_y = ((cur_y - min_y) / span_y).clamp(0.0, 1.0);
+                                    let row = ((1.0 - norm_y) * (plot_h - 1) as f64).round() as usize;
+                                    if row < plot_h {
+                                        grid_chars[row][c] = if caps.unicode_enabled { '·' } else { '.' };
+                                        grid_colors[row][c] = Some(color_palette.ansi_code);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                local_palette_offset += local_series.len().max(1);
             }
         }
 

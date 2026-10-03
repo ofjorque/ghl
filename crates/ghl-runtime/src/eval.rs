@@ -2506,20 +2506,42 @@ impl Interpreter {
                     // Plot grammar layer accumulation: plot + geom or plot + plot
                     if let Value::Plot(mut p) = left {
                         match right {
-                            Value::Geom(layer) => {
+                            Value::Geom(mut layer) => {
+                                // 1. If layer has local data but no mapping, inherit mapping from plot:
+                                if let Some(ref mut ld) = layer.data {
+                                    if layer.mapping.is_none() {
+                                        if let Some(ref p_map) = p.mapping {
+                                            ld.resolve_mapping(p_map);
+                                            layer.mapping = Some(p_map.clone());
+                                        }
+                                    }
+                                } else if let Some(ref map) = layer.mapping {
+                                    // 2. If layer has mapping but no local data, resolve mapping against plot's columns_cache:
+                                    let mut ld = ghl_plot::LayerData::new();
+                                    ld.columns_cache = p.columns_cache.clone();
+                                    ld.resolve_mapping(map);
+                                    layer.data = Some(ld);
+                                }
+
                                 let configured = match &layer.kind {
-                                    ghl_plot::GeomKind::Smooth { fit: None, .. } => {
-                                        match crate::plot_stats::simple_linear_fit(&p.x_data, &p.y_data) {
-                                            Some(fit) => ghl_plot::GeomLayer::smooth_with_fit(fit),
+                                    ghl_plot::GeomKind::Smooth { fit: None, se } => {
+                                        let (xs, ys) = layer.effective_xy(&p);
+                                        match crate::plot_stats::simple_linear_fit(xs, ys) {
+                                            Some(fit) => ghl_plot::GeomLayer {
+                                                kind: ghl_plot::GeomKind::Smooth { fit: Some(fit), se: *se },
+                                                mapping: layer.mapping.clone(),
+                                                data: layer.data.clone(),
+                                            },
                                             None => layer,
                                         }
                                     }
                                     ghl_plot::GeomKind::Boxplot { stats: None, multi_stats } if multi_stats.is_empty() => {
-                                        if !p.categories.is_empty() && !p.y_data.is_empty() {
-                                            let n = p.categories.len().min(p.y_data.len());
+                                        let (xs, ys) = layer.effective_xy(&p);
+                                        if !p.categories.is_empty() && !ys.is_empty() {
+                                            let n = p.categories.len().min(ys.len());
                                             let mut grouped: std::collections::BTreeMap<String, Vec<f64>> = std::collections::BTreeMap::new();
                                             for i in 0..n {
-                                                grouped.entry(p.categories[i].clone()).or_default().push(p.y_data[i]);
+                                                grouped.entry(p.categories[i].clone()).or_default().push(ys[i]);
                                             }
                                             let mut group_stats = Vec::new();
                                             for (cat, vals) in grouped {
@@ -2528,20 +2550,28 @@ impl Interpreter {
                                                 }
                                             }
                                             if !group_stats.is_empty() {
-                                                ghl_plot::GeomLayer::boxplot_with_multi_stats(group_stats)
+                                                ghl_plot::GeomLayer {
+                                                    kind: ghl_plot::GeomKind::Boxplot { stats: None, multi_stats: group_stats },
+                                                    mapping: layer.mapping.clone(),
+                                                    data: layer.data.clone(),
+                                                }
                                             } else {
                                                 layer
                                             }
                                         } else {
-                                            match crate::plot_stats::five_number_summary(&p.x_data) {
-                                                Some(stats) => ghl_plot::GeomLayer::boxplot_with_stats(stats),
+                                            match crate::plot_stats::five_number_summary(xs) {
+                                                Some(stats) => ghl_plot::GeomLayer {
+                                                    kind: ghl_plot::GeomKind::Boxplot { stats: Some(stats), multi_stats: Vec::new() },
+                                                    mapping: layer.mapping.clone(),
+                                                    data: layer.data.clone(),
+                                                },
                                                 None => layer,
                                             }
                                         }
                                     }
                                     _ => layer,
                                 };
-                                p.layers.push(configured);
+                                p = Box::new(p.add_layer(configured));
                                 return Ok(Value::Plot(p));
                             }
                             Value::Plot(other_p) => {

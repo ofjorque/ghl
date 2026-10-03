@@ -49,7 +49,7 @@ Backlog temático para consolidar la ergonomía de última generación del lengu
 >   - [x] **Pseudo-Gramática de Capas (Exclusión Mutua):** Resuelto en el motor cartesiano de `crates/ghl-plot`. Soporta capas simultáneas (`points` + `lines` + `smooth`) componibles mediante `+` y `|>`.
 >   - [x] **`geom_line` es un cascarón incompleto:** Implementado con `LineSeries` conectadas, grosores configurables y ordenamiento por $x$.
 >   - [x] **Canales Estéticos Rotos (`aes`):** `aes(color)` particiona en `DataSeries` independientes con paleta accesible Okabe-Ito y leyendas automáticas.
->   - [ ] **Falta de Herencia y Datos Locales por Capa:** Permitir que capas individuales reciban su propio DataFrame local `geom_point(data = df2, aes(...))`.
+>   - [x] **Herencia y Datos Locales por Capa:** Permitir que capas individuales reciban su propio DataFrame local `geom_point(data = df2, aes(...))`.
 >   - [x] **Ejes Discretos y Factores (Boxplots Comparativos):** Resuelto para variables categóricas (`Factor` y `String`) en boxplots comparativos múltiples (`aes(x = factor, y = num)`), calculando Tukey 5-números por grupo en Plotters, terminal y Vega.
 >   - [x] **Escalas, Leyendas y Exportación Dual:** Implementado con `scale_x_log10()`, `scale_y_log10()`, `scale_x_sqrt()`, `scale_y_sqrt()`, leyendas automáticas, exportación a SVG vectorial y Vega-Lite v5 interactivo.
 >   - [x] **Paneles Múltiples (Facetting):** Soporte completo para `facet_wrap()` y `facet_grid()` con fórmulas (`drv ~ cyl`) o cadenas, escalas libres (`scales = "free"`), y renderizado dual en Plotters, terminal y Vega-Lite.
@@ -63,9 +63,9 @@ Backlog temático para consolidar la ergonomía de última generación del lengu
 >   - [x] **Fase 4 (Ejes Discretos y Factores):** Variables cualitativas (`Factor` y `String`) en los ejes $X$/$Y$, habilitando boxplots comparativos múltiples agrupados por categorías en Plotters, terminal y Vega.
 >   - [x] **Fase 5 (Leyendas, Escalas y Exportación Dual):** Generación de leyendas en SVG y terminal, soporte para `scale_x_log10()`, `scale_y_log10()`, exportación a SVG nativo (`to_svg()`) y exportación interactiva a Vega-Lite v5 (`to_vega_json()`).
 >   - [x] **Fase 6 (Sincronización Automática con IDE):** Emitir automáticamente el plot SVG a `GHL_PLOTS_DIR` / `POSITRON_PLOTS_DIR` en cada evaluación de expresión `Plot` en el REPL.
->   - [ ] **Fase 7 (Cierre del Core — Datos Locales por Capa) *(Objetivo Inmediato Core)*:**
+>   - [x] **Fase 7 (Cierre del Core — Datos Locales por Capa):**
 >     - [x] Paneles múltiples / subgráficos categóricos (`facet_wrap("categoria")` y `facet_grid("fila ~ col")`).
->     - [ ] Herencia y DataFrames locales por capa (`geom_point(data = df2, aes(...))`).
+>     - [x] Herencia y DataFrames locales por capa (`geom_point(data = df2, aes(...))`).
 
 ### Parte C: Interoperabilidad Python/R/Julia FFI y Empaquetado Dinámico
 - [x] **Generación Automática de Módulos C-ABI ("Santísima Trinidad" Científica):**
