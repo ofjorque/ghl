@@ -1,5 +1,6 @@
 // ghl_timeseries :: Main Library Module (RFC 15 Parte E)
-// Advanced Time Series Analysis in Pure GHL: Kalman Filter, ARIMA/SARIMA, and GARCH Volatility.
+// Advanced Time Series Analysis in Pure GHL: Unit Roots (ADF, KPSS), Decomposition,
+// Holt-Winters, Auto-ARIMA, GARCH/GJR-GARCH, RTS Kalman Smoothing, and VAR.
 
 struct TimeSeriesAudit {
     kalman_result: KalmanResult,
@@ -59,4 +60,44 @@ fn render_timeseries_report(audit: TimeSeriesAudit) {
 
     let summary = timeseries_audit_cockpit(audit);
     show_cockpit(summary);
+}
+
+/// High-level audit for Stationarity and Unit Roots.
+fn audit_stationarity(series: Vector, lags: i64) -> AdfTestResult {
+    let adf = test_adf(series, lags);
+    let lb = test_ljung_box(series, lags);
+    stationarity_cockpit(adf, lb);
+    adf
+}
+
+/// High-level audit for Seasonal Decomposition.
+fn audit_decomposition(series: Vector, period: i64, is_multiplicative: bool) -> DecompositionResult {
+    let res = decompose_series(series, period, is_multiplicative);
+    decomposition_cockpit(res);
+    res
+}
+
+/// High-level audit for Automated ARIMA selection.
+fn audit_auto_arima(series: Vector, max_p: i64, max_d: i64, max_q: i64) -> ArimaResult {
+    let res = auto_arima(series, max_p, max_d, max_q);
+    render_arima_cockpit(res);
+    res
+}
+
+/// High-level audit for Asymmetric GJR-GARCH.
+fn audit_gjr_garch(returns: Vector) -> GjrGarchResult {
+    fit_gjr_garch(returns)
+}
+
+/// High-level audit for RTS Kalman backward smoothing.
+fn audit_kalman_smoother(obs: Vector, F: f64, H: f64, Q: f64, R: f64, init_x: f64, init_p: f64) -> KalmanSmoothedResult {
+    let k_filt = kalman_filter_1d(obs, F, H, Q, R, init_x, init_p);
+    kalman_smoother_rts(k_filt, F)
+}
+
+/// High-level audit for Vector Autoregression.
+fn audit_var_system(df: DataFrame, cols: Vector, lags: i64) -> VarResult {
+    let res = fit_var(df, cols, lags);
+    var_cockpit(res);
+    res
 }

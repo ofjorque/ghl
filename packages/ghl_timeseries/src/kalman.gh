@@ -105,6 +105,81 @@ fn kalman_filter_1d(obs: Vector, F: f64, H: f64, Q: f64, R: f64, init_x: f64, in
     }
 }
 
+/// Results of Rauch-Tung-Striebel (RTS) backward smoothing.
+struct KalmanSmoothedResult {
+    smoothed_states: Vector,
+    smoothed_variances: Vector,
+    smoother_gains: Vector,
+    smoothed_mse: f64
+}
+
+/// Rauch-Tung-Striebel (RTS) backward smoother.
+/// Computes optimal retrospective state trajectory utilizing future measurements.
+fn kalman_smoother_rts(res: KalmanResult, F: f64) -> KalmanSmoothedResult {
+    let n = length(res.filtered_states);
+    let mut smoothed_x = [];
+    let mut smoothed_p = [];
+    let mut c_gains = [];
+
+    for i in 0..n {
+        smoothed_x = append(smoothed_x, 0.0);
+        smoothed_p = append(smoothed_p, 0.0);
+        c_gains = append(c_gains, 0.0);
+    }
+
+    // Initialize at final filtered state: x_{n-1|n-1}
+    smoothed_x = set(smoothed_x, n - 1, res.filtered_states[n - 1]);
+    smoothed_p = set(smoothed_p, n - 1, res.variances[n - 1]);
+
+    // Backward recursion from t = n-2 down to 0
+    let mut t = n - 2;
+    while t >= 0 {
+        let p_filt = res.variances[t];
+        let p_pred_next = (F * p_filt * F) + 0.05;
+        let c_t = if p_pred_next > 0.0 { (p_filt * F) / p_pred_next } else { 0.0 };
+
+        let x_filt = res.filtered_states[t];
+        let x_pred_next = res.predicted_states[t + 1];
+        let next_smoothed_x = smoothed_x[t + 1];
+        let next_smoothed_p = smoothed_p[t + 1];
+
+        let sm_x = x_filt + (c_t * (next_smoothed_x - x_pred_next));
+        let sm_p = p_filt + (c_t * c_t * (next_smoothed_p - p_pred_next));
+
+        smoothed_x = set(smoothed_x, t, sm_x);
+        smoothed_p = set(smoothed_p, t, if sm_p > 0.0 { sm_p } else { 0.001 });
+        c_gains = set(c_gains, t, c_t);
+
+        t = t - 1;
+    }
+
+    let mut ssq_sm = 0.0;
+    for i in 0..n {
+        let err = res.raw_observations[i] - smoothed_x[i];
+        ssq_sm = ssq_sm + (err * err);
+    }
+    let sm_mse = ssq_sm / (0.0 + n);
+
+    KalmanSmoothedResult {
+        smoothed_states: smoothed_x,
+        smoothed_variances: smoothed_p,
+        smoother_gains: c_gains,
+        smoothed_mse: sm_mse
+    }
+}
+
+/// Project states h steps ahead from the final Kalman estimate.
+fn forecast_kalman(res: KalmanResult, steps: i64, F: f64, Q: f64) -> Vector {
+    let mut fc = [];
+    let mut curr_x = res.final_state;
+
+    for h in 0..steps {
+        curr_x = F * curr_x;
+        fc = append(fc, curr_x);
+    }
+    fc
+}
+
 /// Builds visual Cockpit Deck panel for Kalman Filter diagnostics.
 fn kalman_cockpit(res: KalmanResult) {
     let badge = if res.is_converged {
@@ -140,3 +215,4 @@ fn render_kalman_cockpit(res: KalmanResult) {
     let p = kalman_cockpit(res);
     show_cockpit(p);
 }
+

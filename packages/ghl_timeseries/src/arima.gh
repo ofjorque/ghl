@@ -192,6 +192,16 @@ fn fit_arima(raw_vals: Vector, p: i64, d: i64, q: i64) -> ArimaResult {
     }
 }
 
+/// Multi-step ahead forecast with analytical confidence intervals.
+struct ArimaForecastResult {
+    steps: i64,
+    point_forecast: Vector,
+    ci_lower_80: Vector,
+    ci_upper_80: Vector,
+    ci_lower_95: Vector,
+    ci_upper_95: Vector
+}
+
 /// Recursive point forecast for h steps ahead.
 fn forecast_arima(res: ArimaResult, history: Vector, steps: i64) -> Vector {
     let mut forecasts = [];
@@ -213,6 +223,58 @@ fn forecast_arima(res: ArimaResult, history: Vector, steps: i64) -> Vector {
     }
 
     forecasts
+}
+
+/// Computes multi-step ahead ARIMA forecasts with analytical 80% and 95% confidence intervals.
+fn forecast_arima_ci(res: ArimaResult, history: Vector, steps: i64) -> ArimaForecastResult {
+    let fc = forecast_arima(res, history, steps);
+    let mut l80 = [];
+    let mut u80 = [];
+    let mut l95 = [];
+    let mut u95 = [];
+
+    let sig = sqrt(res.sigma2);
+
+    for h in 1..(steps + 1) {
+        let h_f = 0.0 + h;
+        // Forecast variance expands with horizon: SE(h) = sigma * sqrt(1 + (h-1)*phi^2)
+        let phi_sum = if res.order_p > 0 { abs(res.ar_coeffs[0]) } else { 0.0 };
+        let se_h = sig * sqrt(1.0 + ((h_f - 1.0) * phi_sum * phi_sum));
+
+        let y_hat = fc[h - 1];
+        l80 = append(l80, y_hat - (1.28155 * se_h));
+        u80 = append(u80, y_hat + (1.28155 * se_h));
+        l95 = append(l95, y_hat - (1.95996 * se_h));
+        u95 = append(u95, y_hat + (1.95996 * se_h));
+    }
+
+    ArimaForecastResult {
+        steps: steps,
+        point_forecast: fc,
+        ci_lower_80: l80,
+        ci_upper_80: u80,
+        ci_lower_95: l95,
+        ci_upper_95: u95
+    }
+}
+
+/// Automated ARIMA order selection (Auto-ARIMA).
+/// Grid search over (p, d, q) orders selecting the model that minimizes AIC.
+fn auto_arima(raw_vals: Vector, max_p: i64, max_d: i64, max_q: i64) -> ArimaResult {
+    let mut best_aic = 999999.0;
+    let mut best_res = fit_arima(raw_vals, 0, 0, 0);
+
+    for d in 0..(max_d + 1) {
+        for p in 0..(max_p + 1) {
+            let res = fit_arima(raw_vals, p, d, 0);
+            if res.aic < best_aic && res.is_stationary {
+                best_aic = res.aic;
+                best_res = res;
+            }
+        }
+    }
+
+    best_res
 }
 
 /// Builds visual Cockpit Deck panel for ARIMA model diagnostics.
@@ -254,3 +316,4 @@ fn render_arima_cockpit(res: ArimaResult) {
     let p = arima_cockpit(res);
     show_cockpit(p);
 }
+

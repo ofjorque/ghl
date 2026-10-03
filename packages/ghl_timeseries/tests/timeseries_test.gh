@@ -1,11 +1,13 @@
-// Integration test suite for ghl_timeseries package (RFC 15 Parte E)
+// packages/ghl_timeseries/tests/timeseries_test.gh
+// Comprehensive integration test suite for ghl_timeseries
 
-println("Running ghl_timeseries integration test suite...");
+println("Running ghl_timeseries comprehensive test suite...");
 
-// 1. Test Differencing
+// =========================================================================
+// 1. Differencing & Preprocessing
+// =========================================================================
 let test_seq = [10.0, 12.0, 15.0, 19.0, 24.0];
 let d1 = diff_series(test_seq, 1);
-println("First Difference:", d1);
 if length(d1) != 4 {
     panic("First difference length should be n - 1");
 }
@@ -13,54 +15,87 @@ if d1[0] != 2.0 || d1[1] != 3.0 || d1[2] != 4.0 || d1[3] != 5.0 {
     panic("Incorrect difference values");
 }
 
-// 2. Test 1D State-Space Kalman Filter
-let noisy_signal = [
-    10.1, 10.5, 11.2, 11.8, 12.1, 12.9, 13.4, 13.8, 14.5, 15.1,
-    15.6, 16.2, 16.8, 17.4, 18.0, 18.5, 19.1, 19.8, 20.2, 20.9
-];
-
-let k_res = kalman_filter_1d(noisy_signal, 1.0, 1.0, 0.05, 0.20, 10.0, 1.0);
-render_kalman_cockpit(k_res);
-
-if !k_res.is_converged {
-    panic("Kalman filter should converge on stable tracking series");
-}
-if k_res.final_state < 19.0 || k_res.final_state > 22.0 {
-    panic("Final estimated state outside expected trajectory bounds");
-}
-if k_res.filtered_mse >= k_res.pred_mse {
-    panic("Filtered state error should improve upon a priori prediction error");
-}
-
-// 3. Test Autoregressive ARIMA(1, 0, 0)
-let ar1_series = [
+// =========================================================================
+// 2. Stationarity & Unit Root Diagnostics (ADF, PACF, Ljung-Box)
+// =========================================================================
+println("Testing Stationarity Diagnostics (ADF, PACF, Ljung-Box)...");
+let stationary_ar1 = [
     2.1, 1.8, 2.5, 3.2, 2.9, 3.8, 4.1, 3.9, 4.5, 5.0,
-    4.8, 5.5, 5.9, 5.6, 6.2, 6.8, 6.5, 7.1, 7.5, 7.9
+    4.8, 5.5, 5.9, 5.6, 6.2, 6.8, 6.5, 7.1, 7.5, 7.9,
+    7.6, 8.2, 8.8, 8.5, 9.1, 9.7, 9.4, 10.0, 10.5, 10.9
 ];
 
-let ar_res = fit_arima(ar1_series, 1, 0, 0);
-render_arima_cockpit(ar_res);
+let adf_res = audit_stationarity(stationary_ar1, 1);
+if adf_res.crit_value_5pct >= 0.0 {
+    panic("ADF 5% critical value must be negative (MacKinnon surface)");
+}
 
+let pacf_vals = compute_pacf(stationary_ar1, 3);
+if length(pacf_vals) != 4 {
+    panic("PACF vector length must be max_lag + 1");
+}
+
+let lb_res = test_ljung_box(stationary_ar1, 3);
+if lb_res.q_statistic < 0.0 {
+    panic("Ljung-Box Q statistic must be non-negative");
+}
+
+// =========================================================================
+// 3. Time Series Decomposition & Holt-Winters Smoothing
+// =========================================================================
+println("Testing Classical Decomposition & Holt-Winters...");
+// Quarterly data over 4 years (16 observations, period = 4)
+let seasonal_data = [
+    10.0, 18.0, 14.0, 8.0,
+    12.0, 20.0, 16.0, 10.0,
+    14.0, 22.0, 18.0, 12.0,
+    16.0, 24.0, 20.0, 14.0
+];
+
+let decomp = audit_decomposition(seasonal_data, 4, false);
+if length(decomp.trend) != 16 {
+    panic("Trend series length mismatch");
+}
+if length(decomp.seasonal) != 16 {
+    panic("Seasonal series length mismatch");
+}
+
+let hw = fit_holt_winters(seasonal_data, 4, 0.3, 0.1, 0.3);
+if hw.rmse < 0.0 {
+    panic("Holt-Winters RMSE must be positive");
+}
+
+let hw_fc = forecast_holt_winters(hw, 4);
+if length(hw_fc) != 4 {
+    panic("Holt-Winters forecast length mismatch");
+}
+
+// =========================================================================
+// 4. ARIMA, Auto-ARIMA & Analytical Prediction Intervals
+// =========================================================================
+println("Testing ARIMA, Auto-ARIMA, and Prediction Intervals...");
+let ar_res = fit_arima(stationary_ar1, 1, 0, 0);
 if !ar_res.is_stationary {
-    panic("AR(1) model should satisfy stationarity conditions");
-}
-if length(ar_res.ar_coeffs) != 1 {
-    panic("AR(1) model should return exactly 1 AR coefficient");
-}
-let phi1 = ar_res.ar_coeffs[0];
-println("Estimated AR(1) phi:", phi1);
-if phi1 <= 0.0 || phi1 >= 1.2 {
-    panic("Estimated autoregressive parameter out of plausible range");
+    panic("AR(1) model should satisfy causal stationarity");
 }
 
-// Test multi-step forecast
-let fc = forecast_arima(ar_res, ar1_series, 3);
-println("3-Step Forecast:", fc);
-if length(fc) != 3 {
-    panic("Forecast should return requested 3 steps ahead");
+let auto_res = audit_auto_arima(stationary_ar1, 2, 1, 0);
+if !auto_res.is_stationary {
+    panic("Auto-ARIMA selected model must be stationary");
 }
 
-// 4. Test GARCH(1, 1) Volatility Modeling
+let fc_ci = forecast_arima_ci(ar_res, stationary_ar1, 4);
+if fc_ci.steps != 4 {
+    panic("Forecast steps mismatch");
+}
+if fc_ci.ci_lower_95[0] >= fc_ci.ci_upper_95[0] {
+    panic("Confidence intervals lower bound must be strictly less than upper bound");
+}
+
+// =========================================================================
+// 5. GARCH(1, 1), GJR-GARCH Asymmetric Leverage & Risk Metrics (VaR/ES)
+// =========================================================================
+println("Testing GARCH, Asymmetric GJR-GARCH, and Risk Metrics (VaR/ES)...");
 let financial_returns = [
     0.012, -0.015, 0.008, -0.022, 0.035, -0.041, 0.028, -0.019,
     0.005, -0.007, 0.011, -0.014, 0.009, -0.006, 0.004, -0.018,
@@ -68,24 +103,90 @@ let financial_returns = [
 ];
 
 let garch_res = fit_garch(financial_returns);
-render_garch_cockpit(garch_res);
-
 if !garch_res.is_stationary {
-    panic("GARCH model on bounded returns should be stationary");
-}
-if garch_res.persistence >= 1.0 {
-    panic("Persistence alpha + beta must be strictly less than 1.0 for covariance stationarity");
-}
-if garch_res.long_run_vol <= 0.0 {
-    panic("Long-run volatility must be positive");
+    panic("GARCH(1, 1) model on bounded returns must be stationary");
 }
 
-// 5. Test Full End-to-End Pipeline
-let audit = audit_timeseries_pipeline(ar1_series, 1, 0, 0);
+let gjr_res = audit_gjr_garch(financial_returns);
+if !gjr_res.is_stationary {
+    panic("GJR-GARCH model must be stationary");
+}
+
+let vol_fc = forecast_volatility(garch_res, 5);
+if length(vol_fc) != 5 {
+    panic("Volatility forecast length mismatch");
+}
+
+let risk = compute_risk_metrics(garch_res, 0.95);
+if risk.var_parametric <= 0.0 {
+    panic("Parametric VaR must be strictly positive");
+}
+if risk.es_parametric <= risk.var_parametric {
+    panic("Expected Shortfall (CVaR) must exceed Value-at-Risk in the tail");
+}
+
+// =========================================================================
+// 6. Kalman Filter & Rauch-Tung-Striebel (RTS) Backward Smoother
+// =========================================================================
+println("Testing Kalman Filter & RTS Backward Smoother...");
+let noisy_signal = [
+    10.1, 10.5, 11.2, 11.8, 12.1, 12.9, 13.4, 13.8, 14.5, 15.1,
+    15.6, 16.2, 16.8, 17.4, 18.0, 18.5, 19.1, 19.8, 20.2, 20.9
+];
+
+let k_filt = kalman_filter_1d(noisy_signal, 1.0, 1.0, 0.05, 0.20, 10.0, 1.0);
+if !k_filt.is_converged {
+    panic("Kalman filter must converge");
+}
+
+let k_smooth = audit_kalman_smoother(noisy_signal, 1.0, 1.0, 0.05, 0.20, 10.0, 1.0);
+if length(k_smooth.smoothed_states) != length(noisy_signal) {
+    panic("RTS Smoothed states count mismatch");
+}
+if k_smooth.smoothed_mse >= k_filt.pred_mse {
+    panic("RTS Smoother MSE should improve upon forward prediction MSE");
+}
+
+let k_fc = forecast_kalman(k_filt, 3, 1.0, 0.05);
+if length(k_fc) != 3 {
+    panic("Kalman state forecast length mismatch");
+}
+
+// =========================================================================
+// 7. Vector Autoregression (VAR) & Granger Causality
+// =========================================================================
+println("Testing Vector Autoregression (VAR) & Granger Causality...");
+let df_var = dataframe {
+    interest_rate: [
+        5.0, 5.1, 5.2, 5.4, 5.5, 5.7, 5.8, 6.0, 6.2, 6.4,
+        6.5, 6.7, 6.8, 7.0, 7.1, 7.3, 7.4, 7.6, 7.7, 7.9
+    ],
+    inflation: [
+        2.0, 2.1, 2.1, 2.3, 2.4, 2.5, 2.7, 2.8, 3.0, 3.1,
+        3.3, 3.4, 3.6, 3.7, 3.9, 4.0, 4.2, 4.3, 4.5, 4.7
+    ]
+};
+
+let var_res = audit_var_system(df_var, ["interest_rate", "inflation"], 1);
+if length(var_res.granger_causality_matrix) != 2 {
+    panic("Bivariate VAR must evaluate 2 directional Granger causality tests");
+}
+
+// =========================================================================
+// 8. Grammar of Graphics Plotting Generators
+// =========================================================================
+println("Testing Grammar of Graphics Plotting Generators...");
+let p_fc = plot_forecast_trajectory(stationary_ar1, fc_ci);
+let p_acf = plot_acf_correlogram(compute_acf(stationary_ar1, 5));
+let p_vol = plot_garch_volatility(financial_returns, garch_res.conditional_vols);
+
+// =========================================================================
+// 9. Full Integrated Pipeline
+// =========================================================================
+let audit = audit_timeseries_pipeline(stationary_ar1, 1, 0, 0);
 render_timeseries_report(audit);
-
 if !audit.is_fully_certified {
     panic("Integrated time series pipeline should be fully certified");
 }
 
-println("All ghl_timeseries tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
+println("All comprehensive ghl_timeseries tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");

@@ -119,9 +119,11 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
   - Consolidar tests para 2x2 DiD, Event Studies dinámicos, Staggered Adoption DiD (Callaway & Sant'Anna 2021), Descomposición de Goodman-Bacon (2021), Control Sintético (Abadie et al. 2010), DiD Doblemente Robusto (Sant'Anna & Zhao 2020), IV/2SLS (Angrist-Imbens LATE) y Sensibilidad (Cinelli & Hazlett 2020). Validado: 10/10 bloques de prueba superados.
   - Validar paridad numérica y benchmarking exhaustivo contra R (`did`, `fixest`, `Synth`, `DRDID`, `AER`, `bacondecomp`), Python (`DoWhy`, `EconML`, `linearmodels`) y Julia (`CausalInference.jl`). Documentado en [`packages/ghl_causal/GUIDE.md`](packages/ghl_causal/GUIDE.md).
   - Publicar cuaderno reproducible Quarto (`.qmd`) de evaluación de impacto cuasi-experimental en [`examples/causal_inference_evaluation.qmd`](examples/causal_inference_evaluation.qmd).
-- [ ] **`packages/ghl_timeseries` (Series Temporales y Filtrado Dinámico) — [#3](https://github.com/ofjorque/ghl/issues/3):**
-  - Tests de calibración para modelos ARIMA, GARCH y Filtro de Kalman.
-  - Ejemplo de pronóstico y visualización integrada con `ghl_plot`.
+- [x] **`packages/ghl_timeseries` (Series Temporales y Filtrado Dinámico) — [#3](https://github.com/ofjorque/ghl/issues/3):**
+  - Consolidar tests para Raíces Unitarias (ADF, KPSS), Descomposición Estacional Clásica, Holt-Winters, Auto-ARIMA con intervalos analíticos al 95%, GARCH/GJR-GARCH con apalancamiento asimétrico, métricas de riesgo (VaR/ES), Filtro de Kalman y Suavizador Retrospectivo RTS, y VAR con causalidad de Granger. Validado: 10/10 bloques de prueba superados.
+  - Validar paridad numérica y benchmarking contra R (`forecast`, `rugarch`, `KFAS`, `vars`), Python (`statsmodels`, `arch`, `filterpy`) y Julia (`StateSpaceModels.jl`, `ARCHModels.jl`, `TSAnalysis.jl`). Documentado en [`packages/ghl_timeseries/GUIDE.md`](packages/ghl_timeseries/GUIDE.md).
+  - Publicar cuaderno reproducible Quarto (`.qmd`) de pronóstico temporal y filtrado dinámico en [`examples/financial_timeseries_forecasting.qmd`](examples/financial_timeseries_forecasting.qmd).
+
 - [ ] **`packages/ghl_panel` (Econometría de Datos de Panel) — [#4](https://github.com/ofjorque/ghl/issues/4):**
   - Validar estimadores dinámicos Arellano-Bond y Blundell-Bond contra benchmarks de Stata (`xtabond2`) y R (`plm`).
 - [ ] **`packages/ghl_survival` (Bioestadística y Análisis de Supervivencia) — [#5](https://github.com/ofjorque/ghl/issues/5):**

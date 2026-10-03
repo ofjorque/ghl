@@ -1,0 +1,67 @@
+// packages/ghl_timeseries/src/plots.gh
+// Publication-Quality Grammar of Graphics Visualizations for Time Series
+
+/// Generates a Publication-Quality Forecast Plot comparing historical data with future predictions.
+fn plot_forecast_trajectory(history: Vector, fc: ArimaForecastResult) -> Plot {
+    let n_hist = length(history);
+    let mut time_idx = [];
+    let mut values = [];
+
+    for i in 0..n_hist {
+        time_idx = append(time_idx, 0.0 + i);
+        values = append(values, history[i]);
+    }
+
+    for h in 0..fc.steps {
+        time_idx = append(time_idx, 0.0 + (n_hist + h));
+        values = append(values, fc.point_forecast[h]);
+    }
+
+    let df_plot = dataframe {
+        time: time_idx,
+        value: values
+    };
+
+    df_plot |> plot(aes(col("time"), col("value")))
+            |> geom_line()
+            |> geom_point()
+            |> labs("Time Series Dynamic Forecast with Multi-Step Projections")
+}
+
+/// Generates an Autocorrelation Function (ACF) Correlogram plot.
+fn plot_acf_correlogram(acf_vals: Vector) -> Plot {
+    let n = length(acf_vals);
+    let mut lags = [];
+    for k in 0..n {
+        lags = append(lags, 0.0 + k);
+    }
+
+    let df_acf = dataframe {
+        lag: lags,
+        autocorr: acf_vals
+    };
+
+    df_acf |> plot(aes(col("lag"), col("autocorr")))
+           |> geom_point()
+           |> geom_line()
+           |> labs("Sample Autocorrelation Function (ACF) Correlogram")
+}
+
+/// Generates a Financial Volatility Clustering Plot comparing returns against GARCH conditional volatility.
+fn plot_garch_volatility(returns: Vector, cond_vols: Vector) -> Plot {
+    let n = length(returns);
+    let mut t_idx = [];
+    for i in 0..n {
+        t_idx = append(t_idx, 0.0 + i);
+    }
+
+    let df_vol = dataframe {
+        time: t_idx,
+        returns: returns,
+        volatility: cond_vols
+    };
+
+    df_vol |> plot(aes(col("time"), col("volatility")))
+           |> geom_line()
+           |> labs("GARCH Conditional Volatility Process σ_t")
+}
