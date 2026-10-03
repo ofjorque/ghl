@@ -52,7 +52,7 @@ Backlog temático para consolidar la ergonomía de última generación del lengu
 >   - [ ] **Falta de Herencia y Datos Locales por Capa:** Permitir que capas individuales reciban su propio DataFrame local `geom_point(data = df2, aes(...))`.
 >   - [x] **Ejes Discretos y Factores (Boxplots Comparativos):** Resuelto para variables categóricas (`Factor` y `String`) en boxplots comparativos múltiples (`aes(x = factor, y = num)`), calculando Tukey 5-números por grupo en Plotters, terminal y Vega.
 >   - [x] **Escalas, Leyendas y Exportación Dual:** Implementado con `scale_x_log10()`, `scale_y_log10()`, `scale_x_sqrt()`, `scale_y_sqrt()`, leyendas automáticas, exportación a SVG vectorial y Vega-Lite v5 interactivo.
->   - [ ] **Falta de Paneles Múltiples (Facetting):** Sin soporte para `facet_wrap()` ni `facet_grid()` para particionar gráficos por categorías.
+>   - [x] **Paneles Múltiples (Facetting):** Soporte completo para `facet_wrap()` y `facet_grid()` con fórmulas (`drv ~ cyl`) o cadenas, escalas libres (`scales = "free"`), y renderizado dual en Plotters, terminal y Vega-Lite.
 >   - [x] **Acoplamiento Indebido en `ghl-diagnostics`:** Migrado 100% a `crates/ghl-plot`; `ghl-diagnostics` ya no compila `plotters` ni alberga `plot.rs`.
 >   - [x] **Desconexión en el REPL:** Conectado en `crates/ghl-cli/src/repl.rs`; emite automáticamente el plot SVG a `POSITRON_PLOTS_DIR` / `GHL_PLOTS_DIR` en cada evaluación de expresión `Plot`.
 >
@@ -63,9 +63,9 @@ Backlog temático para consolidar la ergonomía de última generación del lengu
 >   - [x] **Fase 4 (Ejes Discretos y Factores):** Variables cualitativas (`Factor` y `String`) en los ejes $X$/$Y$, habilitando boxplots comparativos múltiples agrupados por categorías en Plotters, terminal y Vega.
 >   - [x] **Fase 5 (Leyendas, Escalas y Exportación Dual):** Generación de leyendas en SVG y terminal, soporte para `scale_x_log10()`, `scale_y_log10()`, exportación a SVG nativo (`to_svg()`) y exportación interactiva a Vega-Lite v5 (`to_vega_json()`).
 >   - [x] **Fase 6 (Sincronización Automática con IDE):** Emitir automáticamente el plot SVG a `GHL_PLOTS_DIR` / `POSITRON_PLOTS_DIR` en cada evaluación de expresión `Plot` en el REPL.
->   - [ ] **Fase 7 (Cierre del Core — Datos Locales por Capa y Facetting) *(Objetivo Inmediato Core)*:**
->     - Herencia y DataFrames locales por capa (`geom_point(data = df2, aes(...))`).
->     - Paneles múltiples / subgráficos categóricos (`facet_wrap("categoria")` y `facet_grid("fila ~ col")`).
+>   - [ ] **Fase 7 (Cierre del Core — Datos Locales por Capa) *(Objetivo Inmediato Core)*:**
+>     - [x] Paneles múltiples / subgráficos categóricos (`facet_wrap("categoria")` y `facet_grid("fila ~ col")`).
+>     - [ ] Herencia y DataFrames locales por capa (`geom_point(data = df2, aes(...))`).
 
 ### Parte C: Interoperabilidad Python/R/Julia FFI y Empaquetado Dinámico
 - [x] **Generación Automática de Módulos C-ABI ("Santísima Trinidad" Científica):**
