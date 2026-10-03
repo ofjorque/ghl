@@ -649,6 +649,54 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "ggplot".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "scale_size".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "scale_size_continuous".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "scale_x_log10".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "scale_y_log10".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "theme".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
             "theme_minimal".into(),
             Type::Function {
                 params: vec![Type::Any],
@@ -669,6 +717,38 @@ impl TypeEnv {
             Type::Function {
                 params: vec![Type::Any],
                 ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "beside".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "stack".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
+            "to_vega_json".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::String),
+            },
+            false,
+        );
+        env.insert(
+            "to_svg".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::String),
             },
             false,
         );

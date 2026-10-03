@@ -318,6 +318,8 @@ impl RuntimeEnv {
         env.set("labs".into(), Value::NativeFn(native_labs));
         env.set("scale_x_log10".into(), Value::NativeFn(native_scale_x_log10));
         env.set("scale_y_log10".into(), Value::NativeFn(native_scale_y_log10));
+        env.set("scale_size".into(), Value::NativeFn(native_scale_size));
+        env.set("scale_size_continuous".into(), Value::NativeFn(native_scale_size));
         env.set("show".into(), Value::NativeFn(native_show));
         env.set("save".into(), Value::NativeFn(native_save));
         env.set("ggsave".into(), Value::NativeFn(native_save));

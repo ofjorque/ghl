@@ -194,6 +194,8 @@ impl VegaRenderer {
         let series_list = spec.all_series();
         let mut data_values = Vec::new();
         let has_groups = series_list.iter().any(|s| s.group_name.is_some());
+        let has_size = series_list.iter().any(|s| !s.size_values.is_empty()) || !spec.size_data.is_empty();
+        let has_shape = series_list.iter().any(|s| !s.shape_values.is_empty()) || !spec.shape_data.is_empty();
 
         for s in &series_list {
             let n = s.x_values.len().min(s.y_values.len());
@@ -204,6 +206,18 @@ impl VegaRenderer {
                 });
                 if let Some(ref g) = s.group_name {
                     row["group"] = json!(g);
+                }
+                if let Some(&sz) = s.size_values.get(i) {
+                    row["size"] = json!(sz);
+                } else if let Some(&sz) = spec.size_data.get(i) {
+                    row["size"] = json!(sz);
+                }
+                if let Some(sh) = s.shape_values.get(i) {
+                    row["shape"] = json!(sh);
+                } else if let Some(ref gn) = s.group_name {
+                    row["shape"] = json!(gn);
+                } else if let Some(sh) = spec.shape_data.get(i) {
+                    row["shape"] = json!(sh);
                 }
                 for (col_name, col_vals) in &spec.columns_cache {
                     if let Some(val) = col_vals.get(i) {
@@ -272,6 +286,25 @@ impl VegaRenderer {
             });
         }
 
+        if has_size {
+            let min_area = (spec.size_range.0 * spec.size_range.0 * std::f64::consts::PI).round() as u64;
+            let max_area = (spec.size_range.1 * spec.size_range.1 * std::f64::consts::PI).round() as u64;
+            base_encoding["size"] = json!({
+                "field": "size",
+                "type": "quantitative",
+                "title": spec.labels.size_label.as_deref().unwrap_or("Size"),
+                "scale": { "range": [min_area, max_area] }
+            });
+        }
+
+        if has_shape {
+            base_encoding["shape"] = json!({
+                "field": "shape",
+                "type": "nominal",
+                "title": spec.labels.shape_label.as_deref().unwrap_or("Shape")
+            });
+        }
+
         let mut layers = Vec::new();
 
         let has_points = spec.layers.is_empty() || spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Point { .. }));
@@ -279,16 +312,29 @@ impl VegaRenderer {
         let has_smooth = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Smooth { .. }));
 
         if has_points {
+            let mut point_mark = json!({
+                "type": "point",
+                "filled": true,
+                "tooltip": true
+            });
+            if !has_size {
+                point_mark["size"] = json!(60);
+            }
             layers.push(json!({
-                "mark": { "type": "circle", "size": 60, "tooltip": true },
+                "mark": point_mark,
                 "encoding": base_encoding
             }));
         }
 
         if has_lines {
+            let mut line_encoding = base_encoding.clone();
+            if let Some(obj) = line_encoding.as_object_mut() {
+                obj.remove("shape");
+                obj.remove("size");
+            }
             layers.push(json!({
                 "mark": { "type": "line", "strokeWidth": 2 },
-                "encoding": base_encoding
+                "encoding": line_encoding
             }));
         }
 

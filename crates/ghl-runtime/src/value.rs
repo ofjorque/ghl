@@ -214,6 +214,7 @@ pub enum Value {
     Geom(GeomLayer),
     Facet(FacetSpec),
     Theme(ghl_plot::ThemeModifier),
+    Scale(ghl_plot::ScaleModifier),
     Labels(ghl_plot::PlotLabels),
     Closure {
         params: Vec<String>,
@@ -350,6 +351,7 @@ impl Value {
             Value::Geom(_) => "Geom",
             Value::Facet(_) => "Facet",
             Value::Theme(_) => "Theme",
+            Value::Scale(_) => "Scale",
             Value::Labels(_) => "Labels",
             Value::Closure { .. } => "Function",
             Value::NativeFn(_) => "NativeFunction",
@@ -420,6 +422,7 @@ impl PartialEq for Value {
             (Value::Geom(g1), Value::Geom(g2)) => g1 == g2,
             (Value::Facet(f1), Value::Facet(f2)) => f1 == f2,
             (Value::Theme(t1), Value::Theme(t2)) => t1 == t2,
+            (Value::Scale(s1), Value::Scale(s2)) => s1 == s2,
             (Value::Labels(l1), Value::Labels(l2)) => l1 == l2,
             (
                 Value::GroupedDataFrame { frame: f1, na_reasons: n1, keys: k1 },
@@ -729,6 +732,13 @@ impl Value {
             Value::Theme(t) => {
                 format!("theme(theme: {:?}, font: {:?})", t.theme, t.font_family)
             }
+            Value::Scale(s) => match s {
+                ghl_plot::ScaleModifier::Size { range } => format!("scale_size(range: [{}, {}])", range.0, range.1),
+                ghl_plot::ScaleModifier::XLog10 => "scale_x_log10()".to_string(),
+                ghl_plot::ScaleModifier::YLog10 => "scale_y_log10()".to_string(),
+                ghl_plot::ScaleModifier::XSqrt => "scale_x_sqrt()".to_string(),
+                ghl_plot::ScaleModifier::YSqrt => "scale_y_sqrt()".to_string(),
+            },
             Value::Labels(l) => {
                 format!("labs(title: {:?}, x: {:?}, y: {:?})", l.title, l.x_label, l.y_label)
             }

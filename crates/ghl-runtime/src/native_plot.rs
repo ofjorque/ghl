@@ -134,6 +134,26 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 }
                 plot_spec.labels.x_label = Some(aes.x.clone());
 
+                // Size aesthetic mapping
+                let size_col: Vec<f64> = if let Some(ref size_name) = aes.size {
+                    let s_vals = col_f64(size_name);
+                    plot_spec.size_data = s_vals.clone();
+                    plot_spec.labels.size_label = Some(size_name.clone());
+                    s_vals
+                } else {
+                    Vec::new()
+                };
+
+                // Shape aesthetic mapping
+                let shape_col: Vec<String> = if let Some(ref shape_name) = aes.shape {
+                    let sh_vals: Vec<String> = col_values(shape_name).iter().map(extract_raw_string).collect();
+                    plot_spec.shape_data = sh_vals.clone();
+                    plot_spec.labels.shape_label = Some(shape_name.clone());
+                    sh_vals
+                } else {
+                    Vec::new()
+                };
+
                 if let Some(ref y_name) = aes.y {
                     let ys = col_f64(y_name);
                     plot_spec.y_data = ys.clone();
@@ -144,25 +164,60 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     if let Some(ref color_name) = aes.color {
                         let color_col = col_values(color_name);
                         let n = xs.len().min(ys.len()).min(color_col.len());
-                        let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>)> = BTreeMap::new();
+                        let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>)> = BTreeMap::new();
                         for i in 0..n {
                             let g_key = extract_raw_string(&color_col[i]);
-                            let entry = groups.entry(g_key).or_insert_with(|| (Vec::new(), Vec::new()));
+                            let entry = groups.entry(g_key).or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
                             entry.0.push(xs[i]);
                             entry.1.push(ys[i]);
+                            if let Some(&sz) = size_col.get(i) {
+                                entry.2.push(sz);
+                            }
+                            if let Some(sh) = shape_col.get(i) {
+                                entry.3.push(sh.clone());
+                            }
                         }
                         let mut series = Vec::new();
-                        for (g_name, (g_xs, g_ys)) in groups {
+                        for (g_name, (g_xs, g_ys, g_szs, g_shs)) in groups {
                             series.push(DataSeries {
                                 group_name: Some(g_name),
                                 color_hex: None,
                                 x_values: g_xs,
                                 y_values: g_ys,
                                 categories: Vec::new(),
+                                size_values: g_szs,
+                                shape_values: g_shs,
                             });
                         }
                         plot_spec = plot_spec.with_series(series);
                         plot_spec.labels.color_label = Some(color_name.clone());
+                    } else if let Some(ref _shape_name) = aes.shape {
+                        // If color is not specified but shape is, group by shape for legend entries
+                        let n = xs.len().min(ys.len()).min(shape_col.len());
+                        let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>)> = BTreeMap::new();
+                        for i in 0..n {
+                            let g_key = shape_col[i].clone();
+                            let entry = groups.entry(g_key.clone()).or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                            entry.0.push(xs[i]);
+                            entry.1.push(ys[i]);
+                            if let Some(&sz) = size_col.get(i) {
+                                entry.2.push(sz);
+                            }
+                            entry.3.push(g_key);
+                        }
+                        let mut series = Vec::new();
+                        for (g_name, (g_xs, g_ys, g_szs, g_shs)) in groups {
+                            series.push(DataSeries {
+                                group_name: Some(g_name),
+                                color_hex: None,
+                                x_values: g_xs,
+                                y_values: g_ys,
+                                categories: Vec::new(),
+                                size_values: g_szs,
+                                shape_values: g_shs,
+                            });
+                        }
+                        plot_spec = plot_spec.with_series(series);
                     }
                 } else {
                     plot_spec.labels.title = Some(format!("Distribution of {}", aes.x));
@@ -345,6 +400,8 @@ pub(crate) fn native_labs(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let mut x_label: Option<String> = None;
     let mut y_label: Option<String> = None;
     let mut color_label: Option<String> = None;
+    let mut size_label: Option<String> = None;
+    let mut shape_label: Option<String> = None;
     let mut caption: Option<String> = None;
 
     let mut pos_args = Vec::new();
@@ -359,6 +416,8 @@ pub(crate) fn native_labs(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 "x" | "x_label" | "xlab" => x_label = Some(extract_raw_string(&val)),
                 "y" | "y_label" | "ylab" => y_label = Some(extract_raw_string(&val)),
                 "color" | "colour" => color_label = Some(extract_raw_string(&val)),
+                "size" => size_label = Some(extract_raw_string(&val)),
+                "shape" => shape_label = Some(extract_raw_string(&val)),
                 "caption" => caption = Some(extract_raw_string(&val)),
                 _ => {}
             },
@@ -385,6 +444,8 @@ pub(crate) fn native_labs(args: Vec<Value>) -> Result<Value, Diagnostic> {
         if let Some(x) = x_label { p.labels.x_label = Some(x); }
         if let Some(y) = y_label { p.labels.y_label = Some(y); }
         if let Some(c) = color_label { p.labels.color_label = Some(c); }
+        if let Some(sz) = size_label { p.labels.size_label = Some(sz); }
+        if let Some(sh) = shape_label { p.labels.shape_label = Some(sh); }
         if let Some(cap) = caption { p.labels.caption = Some(cap); }
         Ok(Value::Plot(Box::new(p)))
     } else {
@@ -394,6 +455,8 @@ pub(crate) fn native_labs(args: Vec<Value>) -> Result<Value, Diagnostic> {
             x_label,
             y_label,
             color_label,
+            size_label,
+            shape_label,
             caption,
         }))
     }
@@ -406,6 +469,7 @@ pub(crate) fn native_scale_x_log10(args: Vec<Value>) -> Result<Value, Diagnostic
             p = p.scale_x_log10();
             Ok(Value::Plot(Box::new(p)))
         }
+        None => Ok(Value::Scale(ghl_plot::ScaleModifier::XLog10)),
         _ => Err(Diagnostic::compute_error("C0315", "`scale_x_log10()` requires a Plot as first argument")),
     }
 }
@@ -417,7 +481,76 @@ pub(crate) fn native_scale_y_log10(args: Vec<Value>) -> Result<Value, Diagnostic
             p = p.scale_y_log10();
             Ok(Value::Plot(Box::new(p)))
         }
+        None => Ok(Value::Scale(ghl_plot::ScaleModifier::YLog10)),
         _ => Err(Diagnostic::compute_error("C0315", "`scale_y_log10()` requires a Plot as first argument")),
+    }
+}
+
+pub(crate) fn native_scale_size(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let mut plot_opt: Option<PlotSpec> = None;
+    let mut min_size: Option<f64> = None;
+    let mut max_size: Option<f64> = None;
+    let mut pos_args = Vec::new();
+
+    for arg in args {
+        match arg {
+            Value::Plot(p) => {
+                plot_opt = Some(*p);
+            }
+            Value::NamedArg(name, val) => match name.as_str() {
+                "range" => {
+                    match val.as_ref() {
+                        Value::Vector(v) => {
+                            if let Some(r0) = v.iter().nth(0).and_then(|x| x.as_f64()) {
+                                min_size = Some(r0);
+                            }
+                            if let Some(r1) = v.iter().nth(1).and_then(|x| x.as_f64()) {
+                                max_size = Some(r1);
+                            }
+                        }
+                        other => {
+                            if let Some(n) = other.as_f64() {
+                                min_size = Some(n);
+                            }
+                        }
+                    }
+                }
+                "min" => min_size = val.as_f64(),
+                "max" => max_size = val.as_f64(),
+                _ => {}
+            },
+            other => pos_args.push(other),
+        }
+    }
+
+    let mut pos_idx = 0;
+    if min_size.is_none() && pos_idx < pos_args.len() {
+        if let Value::Vector(v) = &pos_args[pos_idx] {
+            if let Some(r0) = v.iter().nth(0).and_then(|x| x.as_f64()) {
+                min_size = Some(r0);
+            }
+            if let Some(r1) = v.iter().nth(1).and_then(|x| x.as_f64()) {
+                max_size = Some(r1);
+            }
+            pos_idx += 1;
+        } else if let Some(n) = pos_args[pos_idx].as_f64() {
+            min_size = Some(n);
+            pos_idx += 1;
+        }
+    }
+    if max_size.is_none() && pos_idx < pos_args.len() {
+        if let Some(n) = pos_args[pos_idx].as_f64() {
+            max_size = Some(n);
+        }
+    }
+
+    let range = (min_size.unwrap_or(1.0), max_size.unwrap_or(6.0));
+
+    if let Some(mut p) = plot_opt {
+        p.size_range = range;
+        Ok(Value::Plot(Box::new(p)))
+    } else {
+        Ok(Value::Scale(ghl_plot::ScaleModifier::Size { range }))
     }
 }
 

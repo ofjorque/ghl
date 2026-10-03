@@ -60,6 +60,10 @@ impl NativeRenderer {
     }
 
     pub fn draw_chart<DB: DrawingBackend>(spec: &PlotSpec, root: &DrawingArea<DB, plotters::coord::Shift>) -> Result<(), String> {
+        if let Some(ref font) = spec.font_family {
+            crate::fonts::discover_and_register_font(font);
+        }
+
         let bg_color = match spec.theme {
             PlotTheme::Dark => RGBColor(24, 24, 27),
             _ => WHITE,
@@ -288,13 +292,90 @@ impl NativeRenderer {
             if has_points && !points.is_empty() {
                 let name = s.group_name.clone().unwrap_or_else(|| format!("Series {}", i + 1));
                 let color_for_legend = series_color;
-                
-                let series = chart.draw_series(points.iter().map(|&(x, y)| {
-                    Circle::new((x, y), 5, ShapeStyle::from(&series_color).filled())
-                })).map_err(|e| format!("Points draw error: {e}"))?;
 
-                if s.group_name.is_some() {
-                    series.label(name).legend(move |(x, y)| Circle::new((x + 10, y), 4, ShapeStyle::from(&color_for_legend).filled()));
+                // Group points by MarkerShape so we can render each shape with its dynamic size
+                let mut shape_map: std::collections::BTreeMap<crate::spec::MarkerShape, Vec<(f64, f64, i32)>> = std::collections::BTreeMap::new();
+                for j in 0..points.len() {
+                    let (x, y) = points[j];
+                    let r = if j < s.size_values.len() {
+                        spec.scale_size(s.size_values[j]).round() as i32
+                    } else if let Some(&sz) = spec.size_data.get(j) {
+                        spec.scale_size(sz).round() as i32
+                    } else {
+                        5
+                    };
+                    let sh = if j < s.shape_values.len() {
+                        spec.map_shape(&s.shape_values[j])
+                    } else if let Some(ref gn) = s.group_name {
+                        spec.map_shape(gn)
+                    } else if let Some(sh_val) = spec.shape_data.get(j) {
+                        spec.map_shape(sh_val)
+                    } else {
+                        crate::spec::MarkerShape::Circle
+                    };
+                    shape_map.entry(sh).or_default().push((x, y, r.max(2)));
+                }
+
+                let mut first_drawn = true;
+                for (&sh, pts) in &shape_map {
+                    let is_first = first_drawn;
+                    first_drawn = false;
+                    match sh {
+                        crate::spec::MarkerShape::Circle => {
+                            let series = chart.draw_series(pts.iter().map(|&(x, y, r)| {
+                                Circle::new((x, y), r, ShapeStyle::from(&series_color).filled())
+                            })).map_err(|e| format!("Points draw error: {e}"))?;
+                            if is_first && s.group_name.is_some() {
+                                let l_name = name.clone();
+                                series.label(l_name).legend(move |(x, y)| Circle::new((x + 10, y), 4, ShapeStyle::from(&color_for_legend).filled()));
+                            }
+                        }
+                        crate::spec::MarkerShape::Triangle => {
+                            let series = chart.draw_series(pts.iter().map(|&(x, y, r)| {
+                                TriangleMarker::new((x, y), r, ShapeStyle::from(&series_color).filled())
+                            })).map_err(|e| format!("Points draw error: {e}"))?;
+                            if is_first && s.group_name.is_some() {
+                                let l_name = name.clone();
+                                series.label(l_name).legend(move |(x, y)| TriangleMarker::new((x + 10, y), 4, ShapeStyle::from(&color_for_legend).filled()));
+                            }
+                        }
+                        crate::spec::MarkerShape::Cross => {
+                            let series = chart.draw_series(pts.iter().map(|&(x, y, r)| {
+                                Cross::new((x, y), r, ShapeStyle::from(&series_color).stroke_width(2))
+                            })).map_err(|e| format!("Points draw error: {e}"))?;
+                            if is_first && s.group_name.is_some() {
+                                let l_name = name.clone();
+                                series.label(l_name).legend(move |(x, y)| Cross::new((x + 10, y), 4, ShapeStyle::from(&color_for_legend).stroke_width(2)));
+                            }
+                        }
+                        crate::spec::MarkerShape::Square => {
+                            let series = chart.draw_series(pts.iter().map(|&(x, y, r)| {
+                                EmptyElement::at((x, y)) + Rectangle::new([(-r, -r), (r, r)], ShapeStyle::from(&series_color).filled())
+                            })).map_err(|e| format!("Points draw error: {e}"))?;
+                            if is_first && s.group_name.is_some() {
+                                let l_name = name.clone();
+                                series.label(l_name).legend(move |(x, y)| EmptyElement::at((x + 10, y)) + Rectangle::new([(-4, -4), (4, 4)], ShapeStyle::from(&color_for_legend).filled()));
+                            }
+                        }
+                        crate::spec::MarkerShape::Diamond => {
+                            let series = chart.draw_series(pts.iter().map(|&(x, y, r)| {
+                                EmptyElement::at((x, y)) + Polygon::new(vec![(0, -r), (r, 0), (0, r), (-r, 0)], ShapeStyle::from(&series_color).filled())
+                            })).map_err(|e| format!("Points draw error: {e}"))?;
+                            if is_first && s.group_name.is_some() {
+                                let l_name = name.clone();
+                                series.label(l_name).legend(move |(x, y)| EmptyElement::at((x + 10, y)) + Polygon::new(vec![(0, -4), (4, 0), (0, 4), (-4, 0)], ShapeStyle::from(&color_for_legend).filled()));
+                            }
+                        }
+                        crate::spec::MarkerShape::InvertedTriangle => {
+                            let series = chart.draw_series(pts.iter().map(|&(x, y, r)| {
+                                EmptyElement::at((x, y)) + Polygon::new(vec![(0, r), (-r, -r), (r, -r)], ShapeStyle::from(&series_color).filled())
+                            })).map_err(|e| format!("Points draw error: {e}"))?;
+                            if is_first && s.group_name.is_some() {
+                                let l_name = name.clone();
+                                series.label(l_name).legend(move |(x, y)| EmptyElement::at((x + 10, y)) + Polygon::new(vec![(0, 4), (-4, -4), (4, -4)], ShapeStyle::from(&color_for_legend).filled()));
+                            }
+                        }
+                    }
                 }
             }
 

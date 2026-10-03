@@ -1,0 +1,29 @@
+// Demo: Reactive Typed Grammar of Graphics (RFC 16)
+// Showcasing Continuous Size, Discrete Shape, Patchwork, System Fonts & Cockpit Deck
+
+let cars = dataframe {
+    wt:    [2.32, 3.15, 3.44, 4.07, 2.78, 3.57],
+    mpg:   [30.4, 21.0, 18.7, 15.2, 24.4, 15.0],
+    pop:   [120.0, 450.0, 680.0, 1100.0, 320.0, 950.0],
+    brand: ["Sedan", "SUV", "SUV", "Truck", "Sedan", "Truck"]
+};
+
+// Plot 1: Points with continuous size and discrete shape mapping
+let p1 = ggplot(cars, aes(x = "wt", y = "mpg", size = "pop", shape = "brand"))
+    + geom_point()
+    + labs(title = "Fuel Economy by Weight", x = "Weight (1000 lbs)", y = "MPG")
+    + scale_size(range = [3.0, 8.0])
+    + theme(font = "Segoe UI", style = "minimal");
+
+// Plot 2: Trend line
+let p2 = ggplot(cars, aes(x = "wt", y = "mpg"))
+    + geom_point()
+    + geom_smooth()
+    + labs(title = "Linear Trend")
+    + theme_minimal();
+
+// Patchwork Composition (p1 | p2)
+let dashboard = (p1 | p2) + theme(font = "Segoe UI");
+
+// Terminal Cockpit Deck Card Rendering
+dashboard

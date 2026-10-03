@@ -64,10 +64,10 @@ impl TerminalRenderer {
     }
 
     fn render_cartesian(spec: &PlotSpec, caps: &RenderCaps) -> String {
-        let (tl, tr, bl, br, hz, vt) = if caps.unicode_enabled {
-            ('╭', '╮', '╰', '╯', '─', '│')
+        let (tl, bl, hz, vt) = if caps.unicode_enabled {
+            ('╭', '╰', '─', '│')
         } else {
-            ('+', '+', '+', '+', '-', '|')
+            ('+', '+', '-', '|')
         };
 
         let card_width = 72.min(caps.width);
@@ -76,9 +76,9 @@ impl TerminalRenderer {
 
         let series_list = spec.all_series();
         if series_list.is_empty() || series_list.iter().all(|s| s.x_values.is_empty() && s.y_values.is_empty()) {
-            return format!("{tl}{}{tr}\n{vt} (Empty cartesian data) {vt}\n{bl}{}{br}",
-                hz.to_string().repeat(card_width - 2),
-                hz.to_string().repeat(card_width - 2)
+            return format!("{tl}{}\n{vt} (Empty cartesian data)\n{bl}{}\n",
+                hz.to_string().repeat(24),
+                hz.to_string().repeat(24)
             );
         }
 
@@ -129,7 +129,6 @@ impl TerminalRenderer {
         }
 
         // Draw points from series
-        let point_glyph = if caps.unicode_enabled { '●' } else { '*' };
         for (i, s) in series_list.iter().enumerate() {
             let color_palette = get_okabe_ito_color(i);
             let n_pts = s.x_values.len().min(s.y_values.len());
@@ -142,25 +141,37 @@ impl TerminalRenderer {
                 let r = ((1.0 - py) * (plot_h - 1) as f64).round() as usize;
 
                 if r < plot_h && c < plot_w {
+                    let point_glyph = if caps.unicode_enabled {
+                        if pt_idx < s.shape_values.len() {
+                            spec.map_shape(&s.shape_values[pt_idx]).to_unicode_char()
+                        } else if let Some(ref gn) = s.group_name {
+                            spec.map_shape(gn).to_unicode_char()
+                        } else if let Some(sh_val) = spec.shape_data.get(pt_idx) {
+                            spec.map_shape(sh_val).to_unicode_char()
+                        } else {
+                            '●'
+                        }
+                    } else {
+                        '*'
+                    };
                     grid_chars[r][c] = point_glyph;
                     grid_colors[r][c] = Some(color_palette.ansi_code);
                 }
             }
         }
 
-        // Build output card
+        // Build output card: Left-Rail Modern Layout
         let title = spec.labels.title.clone().unwrap_or_else(|| "Cartesian Plot".into());
         let badge = if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ READY" } else { "[READY]" };
 
         let mut out = String::new();
         let header_inner = format!(" {title} ");
-        let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6);
-        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
+        let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6).max(4);
+        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge}\n", hz.to_string().repeat(pad_top))));
 
         if let Some(ref yl) = spec.labels.y_label {
             let y_header = format!("{yl} ▲");
-            let y_pad = card_width.saturating_sub(visual_width(&y_header) + 4);
-            out.push_str(&format!("{vt} {}{}{vt}\n", caps.bold(&y_header), " ".repeat(y_pad)));
+            out.push_str(&format!("{vt} {}\n", caps.bold(&y_header)));
         }
 
         for r in 0..plot_h {
@@ -194,26 +205,22 @@ impl TerminalRenderer {
             }
 
             let line_content = format!("{} {} {}", caps.dim(&y_label), caps.dim(tick), row_chars);
-            let row_pad = card_width.saturating_sub(visual_width(&line_content) + 4);
-            out.push_str(&format!("{vt} {}{}{vt}\n", line_content, " ".repeat(row_pad)));
+            out.push_str(&format!("{vt} {}\n", line_content));
         }
 
         // X axis line
         let axis_corner = if caps.unicode_enabled { "└" } else { "+" };
         let axis_line = hz.to_string().repeat(plot_w);
         let x_axis_str = format!("        {} {}", axis_corner, axis_line);
-        let x_axis_pad = card_width.saturating_sub(visual_width(&x_axis_str) + 4);
-        out.push_str(&format!("{vt} {}{}{vt}\n", caps.dim(&x_axis_str), " ".repeat(x_axis_pad)));
+        out.push_str(&format!("{vt} {}\n", caps.dim(&x_axis_str)));
 
         // X tick labels
         let x_labels_str = format!("         {:<8.1}{:>width$.1}", min_x, max_x, width = plot_w.saturating_sub(8));
-        let x_labels_pad = card_width.saturating_sub(visual_width(&x_labels_str) + 4);
-        out.push_str(&format!("{vt} {}{}{vt}\n", caps.dim(&x_labels_str), " ".repeat(x_labels_pad)));
+        out.push_str(&format!("{vt} {}\n", caps.dim(&x_labels_str)));
 
         if let Some(ref xl) = spec.labels.x_label {
             let x_center = format!("{xl} ▶");
-            let x_pad = card_width.saturating_sub(visual_width(&x_center) + 4);
-            out.push_str(&format!("{vt} {}{}{vt}\n", caps.bold(&x_center), " ".repeat(x_pad)));
+            out.push_str(&format!("{vt} {}\n", caps.bold(&x_center)));
         }
 
         // Legend if multiple series
@@ -223,35 +230,40 @@ impl TerminalRenderer {
             for (i, s) in series_list.iter().enumerate() {
                 if let Some(ref name) = s.group_name {
                     let color = get_okabe_ito_color(i);
-                    if caps.color_enabled {
-                        legend_str.push_str(&format!("{}■\x1b[0m {}  ", color.ansi_code, name));
+                    let sym = if caps.unicode_enabled {
+                        spec.map_shape(name).to_unicode_char()
                     } else {
-                        legend_str.push_str(&format!("[*] {}  ", name));
+                        '*'
+                    };
+                    if caps.color_enabled {
+                        legend_str.push_str(&format!("{}{sym}\x1b[0m {}  ", color.ansi_code, name));
+                    } else {
+                        legend_str.push_str(&format!("[{sym}] {}  ", name));
                     }
                 }
             }
-            let leg_pad = card_width.saturating_sub(visual_width(&legend_str) + 4);
-            out.push_str(&format!("{vt} {}{}{vt}\n", caps.dim(&legend_str), " ".repeat(leg_pad)));
+            out.push_str(&format!("{vt} {}\n", caps.dim(&legend_str)));
         }
 
-        out.push_str(&caps.dim(&format!("{bl}{}{br}\n", hz.to_string().repeat(card_width - 2))));
+        let bot_len = (plot_w + 14).min(card_width).max(30);
+        out.push_str(&caps.dim(&format!("{bl}{}\n", hz.to_string().repeat(bot_len))));
         out
     }
 
     fn render_histogram(spec: &PlotSpec, bins_count: usize, caps: &RenderCaps) -> String {
-        let (tl, tr, bl, br, hz, vt) = if caps.unicode_enabled {
-            ('╭', '╮', '╰', '╯', '─', '│')
+        let (tl, bl, hz, vt) = if caps.unicode_enabled {
+            ('╭', '╰', '─', '│')
         } else {
-            ('+', '+', '+', '+', '-', '|')
+            ('+', '+', '-', '|')
         };
 
         let card_width = 72.min(caps.width);
         let HistogramBins { min_x, max_x, bin_width, counts, max_count } = match spec.histogram_bins(bins_count.clamp(4, 24)) {
             Some(b) => b,
             None => {
-                return format!("{tl}{}{tr}\n{vt} (Empty histogram data) {vt}\n{bl}{}{br}",
-                    hz.to_string().repeat(card_width - 2),
-                    hz.to_string().repeat(card_width - 2)
+                return format!("{tl}{}\n{vt} (Empty histogram data)\n{bl}{}\n",
+                    hz.to_string().repeat(24),
+                    hz.to_string().repeat(24)
                 );
             }
         };
@@ -261,8 +273,8 @@ impl TerminalRenderer {
 
         let mut out = String::new();
         let header_inner = format!(" {title} ");
-        let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6);
-        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
+        let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6).max(4);
+        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge}\n", hz.to_string().repeat(pad_top))));
 
         let bar_levels = [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
         let hist_h = 6;
@@ -285,24 +297,23 @@ impl TerminalRenderer {
                 row.push(' ');
             }
             let styled_row = caps.cyan(&row);
-            let row_pad = card_width.saturating_sub(visual_width(&row) + 6);
-            out.push_str(&format!("{vt}   {}{}{vt}\n", styled_row, " ".repeat(row_pad)));
+            out.push_str(&format!("{vt}   {}\n", styled_row));
         }
 
         // Domain summary
         let summary = format!("[{:.1} .. {:.1}]  Bins: {}  BinWidth: {:.2}", min_x, max_x, counts.len(), bin_width);
-        let sum_pad = card_width.saturating_sub(visual_width(&summary) + 4);
-        out.push_str(&format!("{vt} {}{}{vt}\n", caps.dim(&summary), " ".repeat(sum_pad)));
+        out.push_str(&format!("{vt} {}\n", caps.dim(&summary)));
 
-        out.push_str(&caps.dim(&format!("{bl}{}{br}\n", hz.to_string().repeat(card_width - 2))));
+        let bot_len = (counts.len() * 2 + 8).min(card_width).max(30);
+        out.push_str(&caps.dim(&format!("{bl}{}\n", hz.to_string().repeat(bot_len))));
         out
     }
 
     fn render_boxplot(spec: &PlotSpec, caps: &RenderCaps) -> String {
-        let (tl, tr, bl, br, hz, vt) = if caps.unicode_enabled {
-            ('╭', '╮', '╰', '╯', '─', '│')
+        let (tl, bl, hz, vt) = if caps.unicode_enabled {
+            ('╭', '╰', '─', '│')
         } else {
-            ('+', '+', '+', '+', '-', '|')
+            ('+', '+', '-', '|')
         };
 
         let card_width = 72.min(caps.width);
@@ -313,8 +324,8 @@ impl TerminalRenderer {
 
             let mut out = String::new();
             let header_inner = format!(" {title} ");
-            let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6);
-            out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
+            let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6).max(4);
+            out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge}\n", hz.to_string().repeat(pad_top))));
 
             let mut global_min = f64::INFINITY;
             let mut global_max = f64::NEG_INFINITY;
@@ -356,25 +367,23 @@ impl TerminalRenderer {
                 };
 
                 let line_str = format!(" {:<width$} {} Med: {:>6.1}", cat, colored_diag, st.median, width = cat_label_w);
-                let line_raw = format!(" {:<width$} {} Med: {:>6.1}", cat, diagram, st.median, width = cat_label_w);
-                let line_pad = card_width.saturating_sub(visual_width(&line_raw) + 4);
-                out.push_str(&format!("{vt}{}{}{vt}\n", line_str, " ".repeat(line_pad)));
+                out.push_str(&format!("{vt}{}\n", line_str));
             }
 
             let scale_summary = format!(" Domain: [{:.1} .. {:.1}]  Categories: {}", global_min, global_max, multi_stats.len());
-            let sc_pad = card_width.saturating_sub(visual_width(&scale_summary) + 4);
-            out.push_str(&format!("{vt}{}{}{vt}\n", caps.dim(&scale_summary), " ".repeat(sc_pad)));
+            out.push_str(&format!("{vt}{}\n", caps.dim(&scale_summary)));
 
-            out.push_str(&caps.dim(&format!("{bl}{}{br}\n", hz.to_string().repeat(card_width - 2))));
+            let bot_len = (plot_w + cat_label_w + 20).min(card_width).max(30);
+            out.push_str(&caps.dim(&format!("{bl}{}\n", hz.to_string().repeat(bot_len))));
             return out;
         }
 
         let stats = match spec.boxplot_stats() {
             Some(s) => s,
             None => {
-                return format!("{tl}{}{tr}\n{vt} (No boxplot statistics) {vt}\n{bl}{}{br}",
-                    hz.to_string().repeat(card_width - 2),
-                    hz.to_string().repeat(card_width - 2)
+                return format!("{tl}{}\n{vt} (No boxplot statistics)\n{bl}{}\n",
+                    hz.to_string().repeat(24),
+                    hz.to_string().repeat(24)
                 );
             }
         };
@@ -384,8 +393,8 @@ impl TerminalRenderer {
 
         let mut out = String::new();
         let header_inner = format!(" {title} ");
-        let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6);
-        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
+        let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6).max(4);
+        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge}\n", hz.to_string().repeat(pad_top))));
 
         let plot_w = card_width.saturating_sub(16).max(20);
         let span = (stats.max - stats.min).abs().max(1e-9);
@@ -411,31 +420,30 @@ impl TerminalRenderer {
         line[med] = if caps.unicode_enabled { '┃' } else { '|' };
 
         let diagram: String = line.into_iter().collect();
-        let diag_pad = card_width.saturating_sub(visual_width(&diagram) + 6);
-        out.push_str(&format!("{vt}   {}{}{vt}\n", caps.green(&diagram), " ".repeat(diag_pad)));
+        out.push_str(&format!("{vt}   {}\n", caps.green(&diagram)));
 
         let stats_info = format!("Min: {:.1}  Q1: {:.1}  Med: {:.1}  Q3: {:.1}  Max: {:.1}", stats.min, stats.q1, stats.median, stats.q3, stats.max);
-        let info_pad = card_width.saturating_sub(visual_width(&stats_info) + 4);
-        out.push_str(&format!("{vt} {}{}{vt}\n", caps.dim(&stats_info), " ".repeat(info_pad)));
+        out.push_str(&format!("{vt} {}\n", caps.dim(&stats_info)));
 
-        out.push_str(&caps.dim(&format!("{bl}{}{br}\n", hz.to_string().repeat(card_width - 2))));
+        let bot_len = (plot_w + 14).min(card_width).max(30);
+        out.push_str(&caps.dim(&format!("{bl}{}\n", hz.to_string().repeat(bot_len))));
         out
     }
 
     fn render_bar(spec: &PlotSpec, caps: &RenderCaps) -> String {
-        let (tl, tr, bl, br, hz, vt) = if caps.unicode_enabled {
-            ('╭', '╮', '╰', '╯', '─', '│')
+        let (tl, bl, hz, vt) = if caps.unicode_enabled {
+            ('╭', '╰', '─', '│')
         } else {
-            ('+', '+', '+', '+', '-', '|')
+            ('+', '+', '-', '|')
         };
 
         let card_width = 72.min(caps.width);
         let counts_map = match spec.bar_counts() {
             Some(c) => c,
             None => {
-                return format!("{tl}{}{tr}\n{vt} (Empty bar data) {vt}\n{bl}{}{br}",
-                    hz.to_string().repeat(card_width - 2),
-                    hz.to_string().repeat(card_width - 2)
+                return format!("{tl}{}\n{vt} (Empty bar data)\n{bl}{}\n",
+                    hz.to_string().repeat(24),
+                    hz.to_string().repeat(24)
                 );
             }
         };
@@ -445,8 +453,8 @@ impl TerminalRenderer {
 
         let mut out = String::new();
         let header_inner = format!(" {title} ");
-        let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6);
-        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge} {hz}{tr}\n", hz.to_string().repeat(pad_top))));
+        let pad_top = card_width.saturating_sub(visual_width(&header_inner) + visual_width(badge) + 6).max(4);
+        out.push_str(&caps.dim(&format!("{tl}{hz} {title} {}{hz} {badge}\n", hz.to_string().repeat(pad_top))));
 
         let max_count = counts_map.values().copied().max().unwrap_or(1);
         let bar_max_w = card_width.saturating_sub(28).max(10);
@@ -456,11 +464,11 @@ impl TerminalRenderer {
             let bar_len = (frac * bar_max_w as f64).round() as usize;
             let bar_str = if caps.unicode_enabled { "█".repeat(bar_len) } else { "#".repeat(bar_len) };
             let line = format!("{:<12} {} ({})", cat, caps.cyan(&bar_str), cnt);
-            let row_pad = card_width.saturating_sub(visual_width(&format!("{:<12} {} ({})", cat, bar_str, cnt)) + 4);
-            out.push_str(&format!("{vt} {}{}{vt}\n", line, " ".repeat(row_pad)));
+            out.push_str(&format!("{vt} {}\n", line));
         }
 
-        out.push_str(&caps.dim(&format!("{bl}{}{br}\n", hz.to_string().repeat(card_width - 2))));
+        let bot_len = (bar_max_w + 24).min(card_width).max(30);
+        out.push_str(&caps.dim(&format!("{bl}{}\n", hz.to_string().repeat(bot_len))));
         out
     }
 }

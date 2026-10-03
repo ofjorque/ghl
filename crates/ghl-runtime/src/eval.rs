@@ -2615,19 +2615,25 @@ impl Interpreter {
                                 t.apply(&mut p);
                                 return Ok(Value::Plot(p));
                             }
+                            Value::Scale(s) => {
+                                s.apply(&mut p);
+                                return Ok(Value::Plot(p));
+                            }
                             Value::Labels(l) => {
                                 if let Some(t) = l.title { p.labels.title = Some(t); }
                                 if let Some(s) = l.subtitle { p.labels.subtitle = Some(s); }
                                 if let Some(x) = l.x_label { p.labels.x_label = Some(x); }
                                 if let Some(y) = l.y_label { p.labels.y_label = Some(y); }
                                 if let Some(c) = l.color_label { p.labels.color_label = Some(c); }
+                                if let Some(sz) = l.size_label { p.labels.size_label = Some(sz); }
+                                if let Some(sh) = l.shape_label { p.labels.shape_label = Some(sh); }
                                 if let Some(cap) = l.caption { p.labels.caption = Some(cap); }
                                 return Ok(Value::Plot(p));
                             }
                             other => {
                                 return Err(Diagnostic::compute_error(
                                     "C0308",
-                                    format!("Cannot add `{}` to a Plot. Expected a Geom layer, Facet, Theme, or Labels (e.g. `geom_point()`, `facet_wrap()`, `theme()`, `labs()`).", other.type_name()),
+                                    format!("Cannot add `{}` to a Plot. Expected a Geom layer, Facet, Theme, Scale, or Labels (e.g. `geom_point()`, `facet_wrap()`, `theme()`, `scale_size()`, `labs()`).", other.type_name()),
                                 ));
                             }
                         }

@@ -391,4 +391,4 @@ Para evitar inconsistencias entre Plotters y Vega, **el cálculo de dimensiones 
   - Desambiguación sintáctica completa con fórmulas econométricas multipartitas (`y ~ x | fe`).
   - Soporte nativo de fuentes del sistema (`theme(font = "Fira Code", style = "minimal")`): emisión directa en SVG vectoriales (sin los dolores de cabeza de `showtext`/`extrafont` en R) y Vega-Lite v5 (`config.font`).
   - Soporte de etiquetas flexibles: `p + labs(title = "...", x = "...", y = "...")` y `p |> labs(...)`.
-  - [ ] **TODO Futuro (Fase 7.1 - Raster OS Font Discovery)**: Indexación automática de directorios del sistema operativo (`C:\Windows\Fonts`, `/Library/Fonts`, `/usr/share/fonts`) para rasterizado pixel-perfect de fuentes TrueType/OpenType en exportaciones PNG locales.
+  - [x] **Fase 7.1 - Raster OS Font Discovery**: Indexación y auto-descubrimiento en directorios del sistema operativo (`C:\Windows\Fonts`, `/Library/Fonts`, `/usr/share/fonts`) para rasterizado pixel-perfect de fuentes TrueType/OpenType en exportaciones PNG locales vía `plotters::style::register_font` con la feature `ab_glyph`.

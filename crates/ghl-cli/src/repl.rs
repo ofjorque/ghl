@@ -77,6 +77,8 @@ pub struct ReplSession {
     pub caps: RenderCaps,
     pub user_vars: Vec<String>,
     pub user_docs: std::collections::HashMap<String, ghl_syntax::ItemDoc>,
+    pub last_assigned_var: Option<String>,
+    pub last_expr_ident: Option<String>,
 }
 
 impl ReplSession {
@@ -87,6 +89,8 @@ impl ReplSession {
             caps,
             user_vars: Vec::new(),
             user_docs: std::collections::HashMap::new(),
+            last_assigned_var: None,
+            last_expr_ident: None,
         }
     }
 
@@ -185,11 +189,11 @@ impl ReplSession {
                 continue;
             }
 
-            // Accumulate multi-line if open brackets exist
+            // Accumulate multi-line if input is incomplete (unbalanced brackets, trailing operators, etc.)
             multi_line_accum.push_str(trimmed);
             multi_line_accum.push('\n');
 
-            if Self::has_unbalanced_brackets(&multi_line_accum) {
+            if Self::is_incomplete_input(&multi_line_accum) {
                 continue;
             }
 
@@ -303,6 +307,8 @@ impl ReplSession {
                 self.type_env = TypeEnv::with_prelude();
                 self.user_vars.clear();
                 self.user_docs.clear();
+                self.last_assigned_var = None;
+                self.last_expr_ident = None;
                 let glyph = if self.caps.unicode_enabled { "ฅ(•⩊ •マ" } else { "[OK]" };
                 println!("{} Session environment successfully reset.\n", self.caps.haru(glyph));
                 false
@@ -373,6 +379,9 @@ impl ReplSession {
             self.interpreter.env.remove(var);
             self.type_env.remove(var);
         }
+        self.user_vars.clear();
+        self.last_assigned_var = None;
+        self.last_expr_ident = None;
         let glyph = if self.caps.unicode_enabled { "ฅ(•⩊ •マ" } else { "[OK]" };
         println!("{} Cleared {count} user variable(s).\n", self.caps.haru(glyph));
     }
@@ -431,9 +440,46 @@ impl ReplSession {
         println!("{}\n", panel.render(&self.caps));
     }
 
+    fn is_continuation_input(&self, s: &str) -> bool {
+        let trimmed = s.trim();
+        trimmed.starts_with('+')
+            || (trimmed.starts_with('|') && !trimmed.starts_with("||") && !trimmed.starts_with("|>"))
+            || trimmed.starts_with("|>")
+    }
+
     fn eval_input(&mut self, code: &str) {
+        let trimmed_code = code.trim();
+        if trimmed_code.is_empty() {
+            return;
+        }
+
+        // Handle continuation lines starting with +, |, |>
+        let desugared_storage;
+        let effective_code = if self.is_continuation_input(trimmed_code) {
+            if let Some(ref var_name) = self.last_assigned_var {
+                if self.interpreter.env.get(var_name).is_some() {
+                    let body = trimmed_code.trim_end_matches(';').trim();
+                    desugared_storage = format!("let {} = {} {};", var_name, var_name, body);
+                    desugared_storage.as_str()
+                } else {
+                    code
+                }
+            } else if let Some(ref expr_id) = self.last_expr_ident {
+                if self.interpreter.env.get(expr_id).is_some() {
+                    desugared_storage = format!("{} {}", expr_id, trimmed_code);
+                    desugared_storage.as_str()
+                } else {
+                    code
+                }
+            } else {
+                code
+            }
+        } else {
+            code
+        };
+
         // 1. Parse
-        let mut program = match ghl_syntax::parse(code) {
+        let mut program = match ghl_syntax::parse(effective_code) {
             Ok(prog) => prog,
             Err(errors) => {
                 for err_msg in errors {
@@ -464,7 +510,7 @@ impl ReplSession {
         }
 
         // 2. Track new variable declarations and doc comments
-        let extracted_docs = ghl_syntax::extract_doc_comments(code, &program);
+        let extracted_docs = ghl_syntax::extract_doc_comments(effective_code, &program);
         for d in extracted_docs {
             if d.has_doc {
                 self.user_docs.insert(d.name.clone(), d);
@@ -485,7 +531,7 @@ impl ReplSession {
         }
 
         // 3. Typecheck
-        let mut checker = ghl_types::TypeChecker::new("<repl>".to_string(), code);
+        let mut checker = ghl_types::TypeChecker::new("<repl>".to_string(), effective_code);
         checker.env = self.type_env.clone();
         for stmt in &program.statements {
             checker.check_stmt(stmt);
@@ -508,6 +554,34 @@ impl ReplSession {
                     if !self.user_vars.contains(&v) {
                         self.type_env.remove(&v);
                     }
+                }
+
+                // Track newly assigned var or expr ident for REPL continuations
+                let mut newly_assigned_var = None;
+                let mut newly_expr_id = None;
+                let mut is_only_expr = false;
+
+                for stmt in &program.statements {
+                    match &stmt.kind {
+                        ghl_syntax::ast::StmtKind::Let { name, .. } => {
+                            newly_assigned_var = Some(name.clone());
+                        }
+                        ghl_syntax::ast::StmtKind::Expr(expr) => {
+                            is_only_expr = true;
+                            if let ghl_syntax::ast::ExprKind::Ident(ref id) = expr.kind {
+                                newly_expr_id = Some(id.clone());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                if let Some(v) = newly_assigned_var {
+                    self.last_assigned_var = Some(v);
+                    self.last_expr_ident = None;
+                } else if is_only_expr {
+                    self.last_assigned_var = None;
+                    self.last_expr_ident = newly_expr_id;
                 }
 
                 if !matches!(final_val, Value::Unit) {
@@ -553,13 +627,71 @@ impl ReplSession {
         }
     }
 
-    fn has_unbalanced_brackets(s: &str) -> bool {
+    pub fn is_incomplete_input(s: &str) -> bool {
+        if Self::has_unbalanced_brackets(s) {
+            return true;
+        }
+
+        // Clean lines of comments to check trailing operator
+        let mut clean_lines = Vec::new();
+        for line in s.lines() {
+            let line_trimmed = line.trim();
+            if let Some(idx) = line_trimmed.find("//") {
+                let prefix = &line_trimmed[..idx];
+                let quotes = prefix.chars().filter(|&c| c == '"').count();
+                if quotes % 2 == 0 {
+                    let stripped = prefix.trim();
+                    if !stripped.is_empty() {
+                        clean_lines.push(stripped);
+                    }
+                    continue;
+                }
+            }
+            if !line_trimmed.is_empty() {
+                clean_lines.push(line_trimmed);
+            }
+        }
+
+        if let Some(last) = clean_lines.last() {
+            let trimmed = last.trim();
+            if trimmed.ends_with('+')
+                || (trimmed.ends_with('|') && !trimmed.ends_with("||") && !trimmed.ends_with("|>"))
+                || trimmed.ends_with("|>")
+                || trimmed.ends_with('*')
+                || trimmed.ends_with('/')
+                || trimmed.ends_with('%')
+                || trimmed.ends_with('^')
+                || trimmed.ends_with("&&")
+                || trimmed.ends_with("||")
+                || trimmed.ends_with("==")
+                || trimmed.ends_with("!=")
+                || trimmed.ends_with("<=")
+                || trimmed.ends_with(">=")
+                || (trimmed.ends_with('<') && !trimmed.ends_with("<<"))
+                || (trimmed.ends_with('>') && !trimmed.ends_with(">>"))
+                || trimmed.ends_with('~')
+                || trimmed.ends_with(',')
+                || trimmed.ends_with('=')
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    pub fn has_unbalanced_brackets(s: &str) -> bool {
         let mut open_braces = 0i32;
         let mut open_parens = 0i32;
         let mut open_brackets = 0i32;
         let mut in_string = false;
 
-        for ch in s.chars() {
+        let mut chars = s.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' && in_string {
+                chars.next();
+                continue;
+            }
             if ch == '"' {
                 in_string = !in_string;
                 continue;
@@ -578,7 +710,7 @@ impl ReplSession {
             }
         }
 
-        open_braces > 0 || open_parens > 0 || open_brackets > 0
+        in_string || open_braces > 0 || open_parens > 0 || open_brackets > 0
     }
 }
 
@@ -658,5 +790,46 @@ mod tests {
         let doc = ghl_runtime::lookup_doc("mean").unwrap();
         assert_eq!(doc.name, "mean");
         assert!(doc.formula.unwrap().contains("x̄"));
+    }
+
+    #[test]
+    fn test_incomplete_input_detection() {
+        assert!(ReplSession::is_incomplete_input("let x = 10 +"));
+        assert!(ReplSession::is_incomplete_input("let p = ggplot(df, aes(x = \"a\")) +"));
+        assert!(ReplSession::is_incomplete_input("df |>"));
+        assert!(ReplSession::is_incomplete_input("p1 |"));
+        assert!(ReplSession::is_incomplete_input("let x = 10 + // comment"));
+        assert!(!ReplSession::is_incomplete_input("let x = 10 + 5;"));
+        assert!(!ReplSession::is_incomplete_input("let p = ggplot(df, aes(x = \"a\")) + geom_point();"));
+    }
+
+    #[test]
+    fn test_repl_continuation_lines() {
+        let caps = RenderCaps::ascii_plain(80);
+        let mut session = ReplSession::new(caps);
+
+        // Incremental variable updates with leading +
+        session.eval_input("let x = 10;");
+        session.eval_input("+ 5;");
+        session.eval_input("+ 2;");
+        assert_eq!(session.interpreter.env.get("x"), Some(Value::I64(17)));
+
+        // Multi-line plot creation with incremental layers
+        session.eval_input("let cars = dataframe { wt: [2.0, 3.0], mpg: [30.0, 20.0], pop: [100.0, 200.0], brand: [\"Sedan\", \"SUV\"] };");
+        session.eval_input("let p1 = ggplot(cars, aes(x = \"wt\", y = \"mpg\", size = \"pop\", shape = \"brand\"))");
+        session.eval_input("+ geom_point()");
+        session.eval_input("+ labs(title = \"Fuel Economy by Weight\")");
+        session.eval_input("+ scale_size(range = [3.0, 9.0])");
+        session.eval_input("+ theme(font = \"Segoe UI\", style = \"minimal\");");
+
+        assert!(session.interpreter.env.get("p1").is_some());
+        if let Some(Value::Plot(plot)) = session.interpreter.env.get("p1") {
+            assert_eq!(plot.labels.title.as_deref(), Some("Fuel Economy by Weight"));
+            assert_eq!(plot.layers.len(), 1);
+            assert_eq!(plot.size_range, (3.0, 9.0));
+            assert_eq!(plot.font_family.as_deref(), Some("Segoe UI"));
+        } else {
+            panic!("Expected Value::Plot for p1");
+        }
     }
 }

@@ -282,6 +282,7 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
 
         ["std", "plot"] => Some(vec![
             ("plot".into(), any_fn_multi(2)),
+            ("ggplot".into(), any_fn_multi(2)),
             ("aes".into(), any_fn()),
             ("geom_point".into(), any_fn()),
             ("geom_line".into(), any_fn()),
@@ -289,6 +290,14 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("geom_histogram".into(), any_fn()),
             ("geom_boxplot".into(), any_fn()),
             ("geom_bar".into(), any_fn()),
+            ("scale_size".into(), any_fn()),
+            ("scale_size_continuous".into(), any_fn()),
+            ("theme".into(), any_fn()),
+            ("theme_minimal".into(), any_fn()),
+            ("theme_classic".into(), any_fn()),
+            ("theme_dark".into(), any_fn()),
+            ("beside".into(), any_fn_multi(2)),
+            ("stack".into(), any_fn_multi(2)),
             ("labs".into(), any_fn()),
             ("show".into(), any_fn()),
             ("save".into(), any_fn_multi(2)),

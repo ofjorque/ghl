@@ -317,6 +317,84 @@ impl ThemeModifier {
     }
 }
 
+/// Scale modifier applied to a `PlotSpec` via `+` or pipeline functions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ScaleModifier {
+    Size { range: (f64, f64) },
+    XLog10,
+    YLog10,
+    XSqrt,
+    YSqrt,
+}
+
+impl ScaleModifier {
+    pub fn apply(&self, plot: &mut PlotSpec) {
+        match self {
+            ScaleModifier::Size { range } => {
+                plot.size_range = *range;
+            }
+            ScaleModifier::XLog10 => {
+                plot.x_scale = ScaleTransform::Log10;
+            }
+            ScaleModifier::YLog10 => {
+                plot.y_scale = ScaleTransform::Log10;
+            }
+            ScaleModifier::XSqrt => {
+                plot.x_scale = ScaleTransform::Sqrt;
+            }
+            ScaleModifier::YSqrt => {
+                plot.y_scale = ScaleTransform::Sqrt;
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+pub enum MarkerShape {
+    #[default]
+    Circle,
+    Triangle,
+    Square,
+    Cross,
+    Diamond,
+    InvertedTriangle,
+}
+
+impl MarkerShape {
+    pub fn from_index(idx: usize) -> Self {
+        match idx % 6 {
+            0 => MarkerShape::Circle,
+            1 => MarkerShape::Triangle,
+            2 => MarkerShape::Square,
+            3 => MarkerShape::Cross,
+            4 => MarkerShape::Diamond,
+            _ => MarkerShape::InvertedTriangle,
+        }
+    }
+
+    pub fn to_vega_shape(self) -> &'static str {
+        match self {
+            MarkerShape::Circle => "circle",
+            MarkerShape::Triangle => "triangle",
+            MarkerShape::Square => "square",
+            MarkerShape::Cross => "cross",
+            MarkerShape::Diamond => "diamond",
+            MarkerShape::InvertedTriangle => "triangle-down",
+        }
+    }
+
+    pub fn to_unicode_char(self) -> char {
+        match self {
+            MarkerShape::Circle => '●',
+            MarkerShape::Triangle => '▲',
+            MarkerShape::Square => '■',
+            MarkerShape::Cross => '+',
+            MarkerShape::Diamond => '◆',
+            MarkerShape::InvertedTriangle => '▼',
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PlotLabels {
     pub title: Option<String>,
@@ -324,10 +402,12 @@ pub struct PlotLabels {
     pub x_label: Option<String>,
     pub y_label: Option<String>,
     pub color_label: Option<String>,
+    pub size_label: Option<String>,
+    pub shape_label: Option<String>,
     pub caption: Option<String>,
 }
 
-/// A grouped series of data points, used when aesthetic mapping includes `color`.
+/// A grouped series of data points, used when aesthetic mapping includes `color`, `shape`, or `size`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct DataSeries {
     pub group_name: Option<String>,
@@ -335,6 +415,8 @@ pub struct DataSeries {
     pub x_values: Vec<f64>,
     pub y_values: Vec<f64>,
     pub categories: Vec<String>,
+    pub size_values: Vec<f64>,
+    pub shape_values: Vec<String>,
 }
 
 /// Equal-width binning for histograms.
@@ -361,6 +443,9 @@ pub struct PlotSpec {
     pub x_data: Vec<f64>,
     pub y_data: Vec<f64>,
     pub categories: Vec<String>,
+    pub size_data: Vec<f64>,
+    pub shape_data: Vec<String>,
+    pub size_range: (f64, f64),
     pub series: Vec<DataSeries>,
     pub x_scale: ScaleTransform,
     pub y_scale: ScaleTransform,
@@ -392,6 +477,9 @@ impl PlotSpec {
             x_data: Vec::new(),
             y_data: Vec::new(),
             categories: Vec::new(),
+            size_data: Vec::new(),
+            shape_data: Vec::new(),
+            size_range: (3.0, 10.0),
             series: Vec::new(),
             x_scale: ScaleTransform::Linear,
             y_scale: ScaleTransform::Linear,
@@ -427,6 +515,62 @@ impl PlotSpec {
     pub fn with_font(mut self, font: impl Into<String>) -> Self {
         self.font_family = Some(font.into());
         self
+    }
+
+    pub fn with_size_data(mut self, size_data: Vec<f64>) -> Self {
+        self.size_data = size_data;
+        self
+    }
+
+    pub fn with_shape_data(mut self, shape_data: Vec<String>) -> Self {
+        self.shape_data = shape_data;
+        self
+    }
+
+    pub fn with_size_range(mut self, min: f64, max: f64) -> Self {
+        self.size_range = (min, max);
+        self
+    }
+
+    /// Scale a continuous raw value into a pixel radius according to `self.size_range`.
+    pub fn scale_size(&self, val: f64) -> f64 {
+        let (min_r, max_r) = self.size_range;
+        if self.size_data.is_empty() {
+            return (min_r + max_r) / 2.0;
+        }
+        let mut min_val = f64::INFINITY;
+        let mut max_val = f64::NEG_INFINITY;
+        for &v in &self.size_data {
+            if v < min_val { min_val = v; }
+            if v > max_val { max_val = v; }
+        }
+        if (max_val - min_val).abs() < 1e-9 {
+            return (min_r + max_r) / 2.0;
+        }
+        let norm = ((val - min_val) / (max_val - min_val)).clamp(0.0, 1.0);
+        min_r + norm * (max_r - min_r)
+    }
+
+    /// Return deterministic unique shape levels.
+    pub fn shape_levels(&self) -> Vec<String> {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut levels = Vec::new();
+        for s in &self.shape_data {
+            if seen.insert(s.clone()) {
+                levels.push(s.clone());
+            }
+        }
+        levels
+    }
+
+    /// Map a discrete category to a `MarkerShape`.
+    pub fn map_shape(&self, val: &str) -> MarkerShape {
+        let levels = self.shape_levels();
+        if let Some(pos) = levels.iter().position(|l| l == val) {
+            MarkerShape::from_index(pos)
+        } else {
+            MarkerShape::Circle
+        }
     }
 
     pub fn with_facet(mut self, facet: FacetSpec) -> Self {
@@ -550,6 +694,8 @@ impl PlotSpec {
                 x_values: self.x_data.clone(),
                 y_values: self.y_data.clone(),
                 categories: self.categories.clone(),
+                size_values: self.size_data.clone(),
+                shape_values: self.shape_data.clone(),
             }]
         } else {
             Vec::new()
@@ -721,26 +867,32 @@ impl PlotSpec {
                     let sub_x: Vec<f64> = indices.iter().filter_map(|&i| self.x_data.get(i).copied()).collect();
                     let sub_y: Vec<f64> = indices.iter().filter_map(|&i| self.y_data.get(i).copied()).collect();
                     let sub_cats: Vec<String> = indices.iter().filter_map(|&i| self.categories.get(i).cloned()).collect();
+                    let sub_sizes: Vec<f64> = indices.iter().filter_map(|&i| self.size_data.get(i).copied()).collect();
+                    let sub_shapes: Vec<String> = indices.iter().filter_map(|&i| self.shape_data.get(i).cloned()).collect();
 
                     // Reconstruct series if color aesthetic is present
                     let mut sub_series = Vec::new();
                     if let Some(color_col_name) = self.mapping.as_ref().and_then(|m| m.color.as_ref()) {
                         if let Some(color_vals) = self.columns_cache.get(color_col_name) {
-                            let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>)> = BTreeMap::new();
+                            let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>)> = BTreeMap::new();
                             for &i in &indices {
                                 if let (Some(&x), Some(&y), Some(g_key)) = (self.x_data.get(i), self.y_data.get(i), color_vals.get(i)) {
-                                    let entry = groups.entry(g_key.clone()).or_insert_with(|| (Vec::new(), Vec::new()));
+                                    let entry = groups.entry(g_key.clone()).or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
                                     entry.0.push(x);
                                     entry.1.push(y);
+                                    if let Some(&sz) = self.size_data.get(i) { entry.2.push(sz); }
+                                    if let Some(sh) = self.shape_data.get(i) { entry.3.push(sh.clone()); }
                                 }
                             }
-                            for (g_name, (g_xs, g_ys)) in groups {
+                            for (g_name, (g_xs, g_ys, g_sizes, g_shapes)) in groups {
                                 sub_series.push(DataSeries {
                                     group_name: Some(g_name),
                                     color_hex: None,
                                     x_values: g_xs,
                                     y_values: g_ys,
                                     categories: Vec::new(),
+                                    size_values: g_sizes,
+                                    shape_values: g_shapes,
                                 });
                             }
                         }
@@ -751,6 +903,8 @@ impl PlotSpec {
                     sub_spec.x_data = sub_x;
                     sub_spec.y_data = sub_y;
                     sub_spec.categories = sub_cats;
+                    sub_spec.size_data = sub_sizes;
+                    sub_spec.shape_data = sub_shapes;
                     if !sub_series.is_empty() {
                         sub_spec.series = sub_series;
                     }
@@ -855,25 +1009,35 @@ impl PlotSpec {
                         let sub_x: Vec<f64> = indices.iter().filter_map(|&i| self.x_data.get(i).copied()).collect();
                         let sub_y: Vec<f64> = indices.iter().filter_map(|&i| self.y_data.get(i).copied()).collect();
                         let sub_cats: Vec<String> = indices.iter().filter_map(|&i| self.categories.get(i).cloned()).collect();
+                        let sub_sizes: Vec<f64> = indices.iter().filter_map(|&i| self.size_data.get(i).copied()).collect();
+                        let sub_shapes: Vec<String> = indices.iter().filter_map(|&i| self.shape_data.get(i).cloned()).collect();
 
                         let mut sub_series = Vec::new();
                         if let Some(color_col_name) = self.mapping.as_ref().and_then(|m| m.color.as_ref()) {
                             if let Some(color_vals) = self.columns_cache.get(color_col_name) {
-                                let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>)> = BTreeMap::new();
+                                let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>)> = BTreeMap::new();
                                 for &i in &indices {
                                     if let (Some(&x), Some(&y), Some(g_key)) = (self.x_data.get(i), self.y_data.get(i), color_vals.get(i)) {
-                                        let entry = groups.entry(g_key.clone()).or_insert_with(|| (Vec::new(), Vec::new()));
+                                        let entry = groups.entry(g_key.clone()).or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
                                         entry.0.push(x);
                                         entry.1.push(y);
+                                        if let Some(&sz) = self.size_data.get(i) {
+                                            entry.2.push(sz);
+                                        }
+                                        if let Some(sh) = self.shape_data.get(i) {
+                                            entry.3.push(sh.clone());
+                                        }
                                     }
                                 }
-                                for (g_name, (g_xs, g_ys)) in groups {
+                                for (g_name, (g_xs, g_ys, g_szs, g_shs)) in groups {
                                     sub_series.push(DataSeries {
                                         group_name: Some(g_name),
                                         color_hex: None,
                                         x_values: g_xs,
                                         y_values: g_ys,
                                         categories: Vec::new(),
+                                        size_values: g_szs,
+                                        shape_values: g_shs,
                                     });
                                 }
                             }
@@ -884,6 +1048,8 @@ impl PlotSpec {
                         sub_spec.x_data = sub_x;
                         sub_spec.y_data = sub_y;
                         sub_spec.categories = sub_cats;
+                        sub_spec.size_data = sub_sizes;
+                        sub_spec.shape_data = sub_shapes;
                         if !sub_series.is_empty() {
                             sub_spec.series = sub_series;
                         }

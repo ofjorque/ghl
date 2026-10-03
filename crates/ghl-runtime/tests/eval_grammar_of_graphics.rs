@@ -523,3 +523,85 @@ fn test_patchwork_inherited_font_on_composite() {
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
 }
+
+#[test]
+fn test_continuous_size_and_discrete_shape_mapping() {
+    let src = r#"
+        let df = dataframe {
+            x: [1.0, 2.0, 3.0, 4.0],
+            y: [10.0, 20.0, 15.0, 25.0],
+            pop: [100.0, 500.0, 250.0, 1000.0],
+            kind: ["Alpha", "Beta", "Alpha", "Beta"]
+        };
+        let p = ggplot(df, aes(x = "x", y = "y", size = "pop", shape = "kind"))
+            + geom_point()
+            + labs(title = "Size & Shape Mapping", size = "Population", shape = "Type")
+            + scale_size(range = [3.0, 12.0]);
+        p
+    "#;
+    let res = eval_source(src).expect("Plot with size and shape should evaluate");
+    match res {
+        Value::Plot(p) => {
+            assert_eq!(p.size_range, (3.0, 12.0), "scale_size should update size_range");
+            assert_eq!(p.size_data.len(), 4);
+            assert_eq!(p.shape_data.len(), 4);
+            assert_eq!(p.labels.size_label.as_deref(), Some("Population"));
+            assert_eq!(p.labels.shape_label.as_deref(), Some("Type"));
+
+            // Verify continuous size scaling: min val (100) -> 3.0, max val (1000) -> 12.0
+            let r_min = p.scale_size(100.0);
+            let r_max = p.scale_size(1000.0);
+            assert!((r_min - 3.0).abs() < 1e-6);
+            assert!((r_max - 12.0).abs() < 1e-6);
+
+            // Shape levels: Alpha -> Circle, Beta -> Triangle
+            let sh_alpha = p.map_shape("Alpha");
+            let sh_beta = p.map_shape("Beta");
+            assert_eq!(sh_alpha, ghl_plot::MarkerShape::Circle);
+            assert_eq!(sh_beta, ghl_plot::MarkerShape::Triangle);
+
+            // Verify Vega-Lite v5 export
+            let vega_json = p.to_vega_json().expect("Vega-Lite v5 generation should succeed");
+            assert!(vega_json.contains("\"size\""), "Vega JSON should contain size encoding");
+            assert!(vega_json.contains("\"shape\""), "Vega JSON should contain shape encoding");
+            assert!(vega_json.contains("Population"), "Vega JSON should contain size title");
+            assert!(vega_json.contains("Type"), "Vega JSON should contain shape title");
+
+            // Verify SVG export with geometric markers
+            let svg = p.to_svg(800, 600).expect("Native SVG rendering should succeed");
+            assert!(svg.contains("<svg"), "Output must be valid SVG");
+            assert!(svg.contains("polygon") || svg.contains("circle") || svg.contains("path"), "SVG must render point shapes");
+
+            // Verify Cockpit Deck terminal rendering
+            let caps = ghl_diagnostics::RenderCaps::rich_terminal(80);
+            let card = p.render(&caps);
+            assert!(card.contains("Size & Shape Mapping"), "Terminal card must display title");
+            assert!(card.contains('●') || card.contains('▲'), "Terminal card should display shape glyphs");
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_shape_mapping_groups_without_color() {
+    let src = r#"
+        let df = dataframe {
+            speed: [10.0, 20.0, 30.0, 40.0],
+            dist: [5.0, 15.0, 25.0, 45.0],
+            brand: ["Ford", "Chevy", "Ford", "Chevy"]
+        };
+        let p = ggplot(df, aes(x = "speed", y = "dist", shape = "brand")) + geom_point();
+        p
+    "#;
+    let res = eval_source(src).expect("Plot with only shape should evaluate");
+    match res {
+        Value::Plot(p) => {
+            // When shape is mapped without color, it automatically creates series for the legend
+            assert_eq!(p.series.len(), 2, "Should create 2 series for Ford and Chevy");
+            let grp_names: Vec<_> = p.series.iter().filter_map(|s| s.group_name.as_deref()).collect();
+            assert!(grp_names.contains(&"Ford"));
+            assert!(grp_names.contains(&"Chevy"));
+        }
+        other => panic!("Expected Value::Plot, got {:?}", other),
+    }
+}

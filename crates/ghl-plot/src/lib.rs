@@ -10,20 +10,22 @@
 //!   and Tukey boxplots.
 //! - **Vega**: Interactive Vega-Lite v5 specification JSON for Positron, Jupyter, and web tools.
 
+pub mod fonts;
 pub mod palette;
 pub mod render_native;
 pub mod render_terminal;
 pub mod render_vega;
 pub mod spec;
 
+pub use fonts::{discover_and_register_font, os_font_directories};
 pub use palette::{get_dark2_color, get_okabe_ito_color, sample_viridis, PaletteColor, DARK2, OKABE_ITO, VIRIDIS};
 pub use render_native::NativeRenderer;
 pub use render_terminal::TerminalRenderer;
 pub use render_vega::VegaRenderer;
 pub use spec::{
     AestheticMap, CompositePlot, DataSeries, FacetLayout, FacetPanel, FacetScales, FacetSpec,
-    FiveNumberSummary, GeomKind, GeomLayer, HistogramBins, LinearFit, PlotLabels, PlotSpec,
-    PlotTheme, ScaleTransform, ThemeModifier,
+    FiveNumberSummary, GeomKind, GeomLayer, HistogramBins, LinearFit, MarkerShape, PlotLabels,
+    PlotSpec, PlotTheme, ScaleModifier, ScaleTransform, ThemeModifier,
 };
 
 impl PlotSpec {
