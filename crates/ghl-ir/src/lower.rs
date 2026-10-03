@@ -116,7 +116,7 @@ impl LoweringContext {
         let top_level_stmts: Vec<&Stmt> = program
             .statements
             .iter()
-            .filter(|s| !matches!(&s.kind, StmtKind::Fn { .. } | StmtKind::Use(_)))
+            .filter(|s| !matches!(&s.kind, StmtKind::Fn { .. } | StmtKind::Use(_) | StmtKind::Struct(_) | StmtKind::Trait(_) | StmtKind::Impl(_)))
             .collect();
 
         if !top_level_stmts.is_empty() {
@@ -404,8 +404,8 @@ impl LoweringContext {
                     value: value_hir,
                 })
             }
-            StmtKind::Use(_) => {
-                // Static imports are handled during symbol resolution
+            StmtKind::Use(_) | StmtKind::Struct(_) | StmtKind::Trait(_) | StmtKind::Impl(_) => {
+                // Static imports and type declarations don't emit instructions in scalar JIT function body
                 Ok(HirStatement::Expr(HirExpr::Literal(HirLiteral::I64(0), HirType::Unit)))
             }
             _ => Err(Diagnostic::compute_error(

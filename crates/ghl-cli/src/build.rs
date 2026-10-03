@@ -1,6 +1,6 @@
 //! `ghl build` — ahead-of-time compilation via Cranelift, linked into a standalone
-//! binary or shared library (`--shared`), with auto-generated Python/R FFI bridges
-//! for exported functions (RFC 06 §3).
+//! binary or shared library (`--shared`), with auto-generated Python/R/Julia FFI bridges
+//! for exported functions and structs (RFC 06 §3).
 
 use std::time::Instant;
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps};
@@ -11,6 +11,7 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
     let mut release = false;
     let mut shared = false;
     let mut out_opt: Option<String> = None;
+    let mut bridges_filter = "all".to_string();
 
     let mut i = 2;
     while i < args.len() {
@@ -28,12 +29,26 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
                     std::process::exit(1);
                 }
             }
+            arg if arg.starts_with("--bridges=") => {
+                bridges_filter = arg.trim_start_matches("--bridges=").to_lowercase();
+            }
+            "--bridges" => {
+                i += 1;
+                if i < args.len() {
+                    bridges_filter = args[i].to_lowercase();
+                } else {
+                    let err = Diagnostic::compute_error("C0008", "Missing argument after `--bridges`")
+                        .with_help("Provide bridges list: `--bridges=py,r,jl` or `--bridges=all`");
+                    eprintln!("{}", err.render_with_caps(caps));
+                    std::process::exit(1);
+                }
+            }
             arg if !arg.starts_with('-') && file_opt.is_none() => {
                 file_opt = Some(arg.to_string());
             }
             unknown => {
                 let err = Diagnostic::compute_error("C0006", format!("Unknown build option `{unknown}`"))
-                    .with_help("Usage: `ghl build <file.gh> [--release] [--shared] [-o <out>]`");
+                    .with_help("Usage: `ghl build <file.gh> [--release] [--shared] [--bridges=py,r,jl] [-o <out>]`");
                 eprintln!("{}", err.render_with_caps(caps));
                 std::process::exit(1);
             }
@@ -85,13 +100,21 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
         std::process::exit(1);
     }
 
-    // 2. Collect exported FFI functions
+    // 2. Collect exported FFI functions and structs
     let mut exported_fns: Vec<(String, Vec<ghl_syntax::FnParam>, Option<ghl_syntax::TypeAnnotation>)> = Vec::new();
+    let mut exported_structs: Vec<ghl_syntax::StructDecl> = Vec::new();
+
     for stmt in &program.statements {
-        if let ghl_syntax::StmtKind::Fn { name, params, ret_ty, export_ffi, .. } = &stmt.kind {
-            if *export_ffi {
-                exported_fns.push((name.clone(), params.clone(), ret_ty.clone()));
+        match &stmt.kind {
+            ghl_syntax::StmtKind::Fn { name, params, ret_ty, export_ffi, .. } => {
+                if *export_ffi {
+                    exported_fns.push((name.clone(), params.clone(), ret_ty.clone()));
+                }
             }
+            ghl_syntax::StmtKind::Struct(decl) => {
+                exported_structs.push(decl.clone());
+            }
+            _ => {}
         }
     }
 
@@ -192,7 +215,85 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
     // adding a host function there is the only edit needed for both backends.
     let host_stub = ghl_codegen::host::runner_source_stub();
     let runner_source = if is_shared {
-        format!("#![no_main]\n#![allow(non_snake_case)]\n{host_stub}")
+        let mut ffi_decls = String::new();
+        let mut r_adapters = String::new();
+
+        for (fn_name, params, ret_ty) in &exported_fns {
+            let rust_params: Vec<String> = params.iter().map(|p| {
+                let ty_str = match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                    Some("int") | Some("Int") | Some("i64") => "i64",
+                    Some("float") | Some("Float") | Some("f64") => "f64",
+                    Some("bool") | Some("Bool") => "bool",
+                    _ => "i64",
+                };
+                format!("{}: {}", p.name, ty_str)
+            }).collect();
+
+            let rust_ret = match ret_ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                Some("int") | Some("Int") | Some("i64") => "i64",
+                Some("float") | Some("Float") | Some("f64") => "f64",
+                Some("bool") | Some("Bool") => "bool",
+                _ => "i64",
+            };
+
+            ffi_decls.push_str(&format!("    fn {fn_name}({}) -> {rust_ret};\n", rust_params.join(", ")));
+
+            // R adapter: all numeric/bool arguments passed as *const f64 pointers
+            let mut r_params: Vec<String> = params.iter().map(|p| format!("{}: *const f64", p.name)).collect();
+            let mut null_checks: Vec<String> = params.iter().map(|p| format!("!{}.is_null()", p.name)).collect();
+
+            let is_unit_ret = matches!(ret_ty.as_ref().map(|t| format!("{t}")).as_deref(), None | Some("unit") | Some("()"));
+
+            if !is_unit_ret {
+                r_params.push("out: *mut f64".to_string());
+                null_checks.push("!out.is_null()".to_string());
+            }
+
+            let null_check_str = if null_checks.is_empty() {
+                "true".to_string()
+            } else {
+                null_checks.join(" && ")
+            };
+
+            let call_args: Vec<String> = params.iter().map(|p| {
+                match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                    Some("int") | Some("Int") | Some("i64") => format!("*{} as i64", p.name),
+                    Some("float") | Some("Float") | Some("f64") => format!("*{}", p.name),
+                    Some("bool") | Some("Bool") => format!("*{} != 0.0", p.name),
+                    _ => format!("*{} as i64", p.name),
+                }
+            }).collect();
+
+            let invocation = if is_unit_ret {
+                format!("let _ = {fn_name}({});", call_args.join(", "))
+            } else {
+                match ret_ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                    Some("bool") | Some("Bool") => format!("*out = if {fn_name}({}) {{ 1.0 }} else {{ 0.0 }};", call_args.join(", ")),
+                    _ => format!("*out = {fn_name}({}) as f64;", call_args.join(", ")),
+                }
+            };
+
+            r_adapters.push_str(&format!(r#"
+#[no_mangle]
+pub unsafe extern "C" fn {fn_name}_r({}) {{
+    if {null_check_str} {{
+        {invocation}
+    }}
+}}
+"#, r_params.join(", ")));
+        }
+
+        format!(r#"
+#![no_main]
+#![allow(non_snake_case)]
+{host_stub}
+
+extern "C" {{
+{ffi_decls}
+}}
+
+{r_adapters}
+"#)
     } else {
         let has_ghl_main = hir_module.functions.contains_key("__ghl_main");
         let has_main = hir_module.functions.contains_key("main");
@@ -282,9 +383,11 @@ fn main() {{
 
                 let py_bridge_path = out_dir.join(format!("{stem}_bridge.py"));
                 let r_bridge_path = out_dir.join(format!("{stem}_bridge.R"));
+                let jl_bridge_path = out_dir.join(format!("{stem}_bridge.jl"));
 
-                // Generate Python ctypes bridge
-                let mut py_content = format!(r#""""
+                // 1. Python ctypes bridge
+                if bridges_filter == "all" || bridges_filter.contains("py") {
+                    let mut py_content = format!(r#""""
 Auto-generated Python ctypes FFI bridge for {stem}
 Generated by Gojo & Haru High-Performance Statistical System (GHL) - RFC 06 §3
 """
@@ -302,54 +405,266 @@ except OSError:
 
 "#);
 
-                for (fn_name, params, ret_ty) in &exported_fns {
-                    let py_param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
-                    let py_arg_types: Vec<&'static str> = params.iter().map(|p| {
-                        match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                    // Emit Struct classes in Python
+                    for s in &exported_structs {
+                        let mut fields_str = String::new();
+                        for f in &s.fields {
+                            let ty_str = format!("{}", f.ty);
+                            let cty = match ty_str.as_str() {
+                                "int" | "Int" | "i64" => "ctypes.c_int64",
+                                "float" | "Float" | "f64" => "ctypes.c_double",
+                                "bool" | "Bool" => "ctypes.c_bool",
+                                _ => "ctypes.c_int64",
+                            };
+                            fields_str.push_str(&format!("        (\"{}\", {}),\n", f.name, cty));
+                        }
+                        py_content.push_str(&format!(
+                            "class {}(ctypes.Structure):\n    _fields_ = [\n{fields_str}    ]\n\n",
+                            s.name
+                        ));
+                    }
+
+                    // Emit functions in Python
+                    let mut all_exports: Vec<String> = Vec::new();
+                    for (fn_name, params, ret_ty) in &exported_fns {
+                        all_exports.push(format!("\"{fn_name}\""));
+                        let py_param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                        let py_arg_types: Vec<&'static str> = params.iter().map(|p| {
+                            match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                                Some("int") | Some("Int") | Some("i64") => "ctypes.c_int64",
+                                Some("float") | Some("Float") | Some("f64") => "ctypes.c_double",
+                                Some("bool") | Some("Bool") => "ctypes.c_bool",
+                                _ => "ctypes.c_int64",
+                            }
+                        }).collect();
+
+                        let py_ret = match ret_ty.as_ref().map(|t| format!("{t}")).as_deref() {
                             Some("int") | Some("Int") | Some("i64") => "ctypes.c_int64",
                             Some("float") | Some("Float") | Some("f64") => "ctypes.c_double",
                             Some("bool") | Some("Bool") => "ctypes.c_bool",
+                            None | Some("unit") | Some("()") => "None",
                             _ => "ctypes.c_int64",
-                        }
-                    }).collect();
+                        };
 
-                    let py_ret = match ret_ty.as_ref().map(|t| format!("{t}")).as_deref() {
-                        Some("int") | Some("Int") | Some("i64") => "ctypes.c_int64",
-                        Some("float") | Some("Float") | Some("f64") => "ctypes.c_double",
-                        Some("bool") | Some("Bool") => "ctypes.c_bool",
-                        None | Some("unit") | Some("()") => "None",
-                        _ => "ctypes.c_int64",
-                    };
+                        py_content.push_str(&format!(
+                            "# Function: {fn_name}\nlib.{fn_name}.argtypes = [{argtypes}]\nlib.{fn_name}.restype = {py_ret}\n\ndef {fn_name}({args}):\n    return lib.{fn_name}({args})\n\n",
+                            argtypes = py_arg_types.join(", "),
+                            args = py_param_names.join(", ")
+                        ));
+                    }
 
-                    py_content.push_str(&format!(
-                        "# Function: {fn_name}\nlib.{fn_name}.argtypes = [{argtypes}]\nlib.{fn_name}.restype = {py_ret}\n\ndef {fn_name}({args}):\n    return lib.{fn_name}({args})\n\n",
-                        argtypes = py_arg_types.join(", "),
-                        args = py_param_names.join(", ")
-                    ));
+                    for s in &exported_structs {
+                        all_exports.push(format!("\"{}\"", s.name));
+                    }
+
+                    if !all_exports.is_empty() {
+                        py_content.push_str(&format!("__all__ = [{}]\n", all_exports.join(", ")));
+                    }
+
+                    let _ = std::fs::write(&py_bridge_path, py_content);
                 }
 
-                let _ = std::fs::write(&py_bridge_path, py_content);
-
-                // Generate R FFI bridge
-                let mut r_content = format!(r#"# Auto-generated R FFI bridge for {stem}
+                // 2. R FFI bridge
+                if bridges_filter == "all" || bridges_filter.contains("r") {
+                    let mut r_content = format!(r#"# Auto-generated R FFI bridge for {stem}
 # Generated by Gojo & Haru High-Performance Statistical System (GHL) - RFC 06 §3
 
-lib_path <- "{out_filename}"
-if (file.exists(file.path(getwd(), lib_path))) {{
-  dyn.load(file.path(getwd(), lib_path))
-}} else {{
-  dyn.load(lib_path)
+.ghl_lib_name <- "{out_filename}"
+.ghl_load_lib <- function() {{
+  cur_dir <- getwd()
+  p <- file.path(cur_dir, .ghl_lib_name)
+  if (file.exists(p)) {{
+    dyn.load(p)
+  }} else {{
+    dyn.load(.ghl_lib_name)
+  }}
 }}
+.ghl_load_lib()
 
 "#);
 
-                for (fn_name, _params, _ret_ty) in &exported_fns {
-                    r_content.push_str(&format!(
-                        "# Native symbol for '{fn_name}'\n{fn_name}_symbol <- if (is.loaded(\"{fn_name}\")) getNativeSymbolInfo(\"{fn_name}\") else NULL\n\n"
-                    ));
+                    // Emit Struct constructors in R
+                    for s in &exported_structs {
+                        let mut param_defaults = Vec::new();
+                        let mut field_assigns = Vec::new();
+
+                        for f in &s.fields {
+                            let ty_str = format!("{}", f.ty);
+                            match ty_str.as_str() {
+                                "int" | "Int" | "i64" => {
+                                    param_defaults.push(format!("{} = 0L", f.name));
+                                    field_assigns.push(format!("      {} = as.integer({})", f.name, f.name));
+                                }
+                                "float" | "Float" | "f64" => {
+                                    param_defaults.push(format!("{} = 0.0", f.name));
+                                    field_assigns.push(format!("      {} = as.double({})", f.name, f.name));
+                                }
+                                "bool" | "Bool" => {
+                                    param_defaults.push(format!("{} = FALSE", f.name));
+                                    field_assigns.push(format!("      {} = as.logical({})", f.name, f.name));
+                                }
+                                _ => {
+                                    param_defaults.push(format!("{} = NULL", f.name));
+                                    field_assigns.push(format!("      {} = {}", f.name, f.name));
+                                }
+                            }
+                        }
+
+                        r_content.push_str(&format!(
+                            "new_{name} <- function({params}) {{\n  structure(\n    list(\n{fields}\n    ),\n    class = \"{name}\"\n  )\n}}\n\n",
+                            name = s.name,
+                            params = param_defaults.join(", "),
+                            fields = field_assigns.join(",\n")
+                        ));
+                    }
+
+                    // Emit functions in R
+                    for (fn_name, params, ret_ty) in &exported_fns {
+                        let r_params: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                        let mut dot_c_args: Vec<String> = params.iter().map(|p| format!("as.double({})", p.name)).collect();
+
+                        let is_unit_ret = matches!(ret_ty.as_ref().map(|t| format!("{t}")).as_deref(), None | Some("unit") | Some("()"));
+
+                        if !is_unit_ret {
+                            dot_c_args.push("out = double(1)".to_string());
+                        }
+
+                        let ret_code = if is_unit_ret {
+                            "  invisible(NULL)".to_string()
+                        } else {
+                            match ret_ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                                Some("int") | Some("Int") | Some("i64") => {
+                                    "  if (abs(res$out) <= 2147483647) as.integer(res$out) else res$out".to_string()
+                                }
+                                Some("bool") | Some("Bool") => {
+                                    "  as.logical(res$out != 0)".to_string()
+                                }
+                                _ => {
+                                    "  res$out".to_string()
+                                }
+                            }
+                        };
+
+                        r_content.push_str(&format!(
+                            "{fn_name} <- function({args}) {{\n  res <- .C(\"{fn_name}_r\", {dot_c_args})\n{ret_code}\n}}\n\n",
+                            args = r_params.join(", "),
+                            dot_c_args = dot_c_args.join(", ")
+                        ));
+                    }
+
+                    let _ = std::fs::write(&r_bridge_path, r_content);
                 }
 
-                let _ = std::fs::write(&r_bridge_path, r_content);
+                // 3. Julia FFI bridge
+                if bridges_filter == "all" || bridges_filter.contains("jl") {
+                    let jl_module_name = to_pascal_case_module(stem);
+                    let mut jl_content = format!(r#""""
+Auto-generated Julia FFI bridge for {stem}
+Generated by Gojo & Haru High-Performance Statistical System (GHL) - RFC 06 §3
+"""
+module {jl_module_name}
+
+const LIB_PATH = if Sys.iswindows()
+    joinpath(@__DIR__, "{out_filename}")
+elseif Sys.isapple()
+    joinpath(@__DIR__, "{out_filename}")
+else
+    joinpath(@__DIR__, "{out_filename}")
+end
+
+"#);
+
+                    // Emit Structs in Julia
+                    for s in &exported_structs {
+                        let mut fields_str = String::new();
+                        for f in &s.fields {
+                            let ty_str = format!("{}", f.ty);
+                            let jl_ty = match ty_str.as_str() {
+                                "int" | "Int" | "i64" => "Int64",
+                                "float" | "Float" | "f64" => "Float64",
+                                "bool" | "Bool" => "Bool",
+                                _ => "Float64",
+                            };
+                            fields_str.push_str(&format!("    {}::{}\n", f.name, jl_ty));
+                        }
+                        jl_content.push_str(&format!(
+                            "struct {}\n{}end\n\n",
+                            s.name, fields_str
+                        ));
+                    }
+
+                    // Emit functions in Julia
+                    let mut jl_exports: Vec<String> = Vec::new();
+                    for (fn_name, params, ret_ty) in &exported_fns {
+                        jl_exports.push(fn_name.clone());
+
+                        let typed_params: Vec<String> = params.iter().map(|p| {
+                            let ty_str = match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                                Some("int") | Some("Int") | Some("i64") => "Int64",
+                                Some("float") | Some("Float") | Some("f64") => "Float64",
+                                Some("bool") | Some("Bool") => "Bool",
+                                _ => "Int64",
+                            };
+                            format!("{}::{}", p.name, ty_str)
+                        }).collect();
+
+                        let ccall_arg_types: Vec<&'static str> = params.iter().map(|p| {
+                            match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                                Some("int") | Some("Int") | Some("i64") => "Int64",
+                                Some("float") | Some("Float") | Some("f64") => "Float64",
+                                Some("bool") | Some("Bool") => "Bool",
+                                _ => "Int64",
+                            }
+                        }).collect();
+
+                        let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+
+                        let jl_ret = match ret_ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                            Some("int") | Some("Int") | Some("i64") => "Int64",
+                            Some("float") | Some("Float") | Some("f64") => "Float64",
+                            Some("bool") | Some("Bool") => "Bool",
+                            None | Some("unit") | Some("()") => "Cvoid",
+                            _ => "Int64",
+                        };
+
+                        let ccall_tuple = if ccall_arg_types.is_empty() {
+                            "()".to_string()
+                        } else if ccall_arg_types.len() == 1 {
+                            format!("({},)", ccall_arg_types[0])
+                        } else {
+                            format!("({})", ccall_arg_types.join(", "))
+                        };
+
+                        let ccall_args_str = if param_names.is_empty() {
+                            String::new()
+                        } else {
+                            format!(", {}", param_names.join(", "))
+                        };
+
+                        if jl_ret == "Cvoid" {
+                            jl_content.push_str(&format!(
+                                "function {fn_name}({args})::Cvoid\n    ccall((:{fn_name}, LIB_PATH), Cvoid, {ccall_tuple}{ccall_args_str})\n    return nothing\nend\n\n",
+                                args = typed_params.join(", ")
+                            ));
+                        } else {
+                            jl_content.push_str(&format!(
+                                "function {fn_name}({args})::{jl_ret}\n    ccall((:{fn_name}, LIB_PATH), {jl_ret}, {ccall_tuple}{ccall_args_str})\nend\n\n",
+                                args = typed_params.join(", ")
+                            ));
+                        }
+                    }
+
+                    for s in &exported_structs {
+                        jl_exports.push(s.name.clone());
+                    }
+
+                    if !jl_exports.is_empty() {
+                        jl_content.push_str(&format!("export {}\n\n", jl_exports.join(", ")));
+                    }
+
+                    jl_content.push_str("end # module\n");
+                    let _ = std::fs::write(&jl_bridge_path, jl_content);
+                }
 
                 let mut panel = CockpitPanel::new("GHL FFI Shared Library (RFC 06 §3)");
                 panel.with_badge(caps.green(if caps.unicode_enabled { "≽(• ̀⩊ •́マ≼ CDYLIB SUCCESS" } else { "[CDYLIB SUCCESS]" }));
@@ -359,8 +674,18 @@ if (file.exists(file.path(getwd(), lib_path))) {{
                 panel.add_kv("Library Size", size_str);
                 panel.add_kv("Compilation Time", format!("{:.2} ms", elapsed_ms));
                 panel.add_kv("FFI Functions", format!("{} exported", exported_fns.len()));
-                panel.add_kv("Python Bridge", py_bridge_path.display().to_string());
-                panel.add_kv("R Bridge", r_bridge_path.display().to_string());
+                if !exported_structs.is_empty() {
+                    panel.add_kv("FFI Structs", format!("{} declared", exported_structs.len()));
+                }
+                if bridges_filter == "all" || bridges_filter.contains("py") {
+                    panel.add_kv("Python Bridge", py_bridge_path.display().to_string());
+                }
+                if bridges_filter == "all" || bridges_filter.contains("r") {
+                    panel.add_kv("R Bridge", r_bridge_path.display().to_string());
+                }
+                if bridges_filter == "all" || bridges_filter.contains("jl") {
+                    panel.add_kv("Julia Bridge", jl_bridge_path.display().to_string());
+                }
 
                 println!("{}", panel.render(caps));
             } else {
@@ -389,6 +714,26 @@ if (file.exists(file.path(getwd(), lib_path))) {{
             eprintln!("{}", err.render_with_caps(caps));
             std::process::exit(1);
         }
+    }
+}
+
+fn to_pascal_case_module(stem: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize = true;
+    for c in stem.chars() {
+        if c == '_' || c == '-' {
+            capitalize = true;
+        } else if capitalize {
+            result.extend(c.to_uppercase());
+            capitalize = false;
+        } else {
+            result.push(c);
+        }
+    }
+    if result.is_empty() {
+        "GhlBridge".to_string()
+    } else {
+        format!("{result}Bridge")
     }
 }
 
@@ -514,6 +859,11 @@ mod tests {
     #[test]
     fn test_build_shared_library_and_ffi() {
         let code = r#"
+            struct Summary {
+                mean: float,
+                count: int,
+            }
+
             #[export_ffi]
             fn calc_stat(x: int, y: int) -> int {
                 x * 2 + y
@@ -536,7 +886,22 @@ mod tests {
 
         std::fs::write(&obj_path, &obj_bytes).expect("write obj");
         let host_stub = ghl_codegen::host::runner_source_stub();
-        let runner_src = format!("#![no_main]\n#![allow(non_snake_case)]\n{host_stub}");
+        let runner_src = format!(r#"
+#![no_main]
+#![allow(non_snake_case)]
+{host_stub}
+
+extern "C" {{
+    fn calc_stat(x: i64, y: i64) -> i64;
+}}
+
+#[no_mangle]
+pub unsafe extern "C" fn calc_stat_r(x: *const f64, y: *const f64, out: *mut f64) {{
+    if !x.is_null() && !y.is_null() && !out.is_null() {{
+        *out = calc_stat(*x as i64, *y as i64) as f64;
+    }}
+}}
+"#);
         std::fs::write(&runner_path, runner_src).expect("write runner");
 
         let mut cmd = std::process::Command::new("rustc");
@@ -549,16 +914,35 @@ mod tests {
         assert!(status.success(), "rustc compilation of cdylib must succeed");
         assert!(so_path.exists(), "shared library file must exist");
 
-        // Verify with Python ctypes
-        let py_script = format!(
-            "import ctypes\nlib = ctypes.CDLL('{}')\nres = lib.calc_stat(10, 5)\nassert res == 25, f'Expected 25, got {{res}}'\nprint('PYTHON_FFI_OK')",
-            so_path.display()
-        );
+        // 1. Verify with Python ctypes
+        let py_bridge_path = temp_dir.join(format!("{stem}_bridge.py"));
+        let py_script = format!(r#"
+import ctypes
+import os
 
-        let py_res = std::process::Command::new("python3")
-            .arg("-c")
-            .arg(&py_script)
-            .output();
+lib = ctypes.CDLL(r'{}')
+lib.calc_stat.argtypes = [ctypes.c_int64, ctypes.c_int64]
+lib.calc_stat.restype = ctypes.c_int64
+
+class Summary(ctypes.Structure):
+    _fields_ = [
+        ("mean", ctypes.c_double),
+        ("count", ctypes.c_int64),
+    ]
+
+res = lib.calc_stat(10, 5)
+assert res == 25, f'Expected 25, got {{res}}'
+
+s = Summary(mean=3.14, count=42)
+assert s.mean == 3.14 and s.count == 42, 'Summary struct validation failed'
+print('PYTHON_FFI_OK')
+"#, so_path.display());
+        std::fs::write(&py_bridge_path, &py_script).expect("write py bridge");
+
+        let py_res = std::process::Command::new("python")
+            .arg(&py_bridge_path)
+            .output()
+            .or_else(|_| std::process::Command::new("python3").arg(&py_bridge_path).output());
 
         if let Ok(out) = py_res {
             if out.status.success() {
@@ -567,21 +951,79 @@ mod tests {
             }
         }
 
-        // Verify with R dyn.load
-        let r_script = format!(
-            "dyn.load('{}'); stopifnot(is.loaded('calc_stat')); cat('R_FFI_OK\\n')",
-            so_path.display()
-        );
+        // 2. Verify with R FFI (.C adapter and S3 struct constructor)
+        let r_bridge_path = temp_dir.join(format!("{stem}_bridge.R"));
+        let r_script = format!(r#"
+dyn.load(r'{}')
+
+new_Summary <- function(mean = 0.0, count = 0L) {{
+  structure(
+    list(
+      mean = as.double(mean),
+      count = as.integer(count)
+    ),
+    class = "Summary"
+  )
+}}
+
+calc_stat <- function(x, y) {{
+  res <- .C("calc_stat_r", as.double(x), as.double(y), out = double(1))
+  as.integer(res$out)
+}}
+
+res <- calc_stat(10, 5)
+stopifnot(res == 25)
+
+s <- new_Summary(3.14, 42)
+stopifnot(s$mean == 3.14, s$count == 42)
+
+cat('R_FFI_OK\n')
+"#, so_path.display());
+        std::fs::write(&r_bridge_path, &r_script).expect("write r bridge");
 
         let r_res = std::process::Command::new("Rscript")
-            .arg("-e")
-            .arg(&r_script)
+            .arg(&r_bridge_path)
             .output();
 
         if let Ok(out) = r_res {
             if out.status.success() {
                 let stdout = String::from_utf8_lossy(&out.stdout);
-                assert!(stdout.contains("R_FFI_OK"), "R dyn.load invocation succeeded");
+                assert!(stdout.contains("R_FFI_OK"), "R FFI invocation succeeded");
+            }
+        }
+
+        // 3. Verify with Julia FFI (ccall and struct)
+        let jl_bridge_path = temp_dir.join(format!("{stem}_bridge.jl"));
+        let jl_script = format!(r#"
+const LIB_PATH = raw"{}"
+
+struct Summary
+    mean::Float64
+    count::Int64
+end
+
+function calc_stat(x::Int64, y::Int64)::Int64
+    ccall((:calc_stat, LIB_PATH), Int64, (Int64, Int64), x, y)
+end
+
+res = calc_stat(10, 5)
+@assert res == 25 "Expected 25, got $res"
+
+s = Summary(3.14, 42)
+@assert s.mean == 3.14 && s.count == 42 "Summary struct validation failed"
+
+println("JULIA_FFI_OK")
+"#, so_path.display());
+        std::fs::write(&jl_bridge_path, &jl_script).expect("write jl bridge");
+
+        let jl_res = std::process::Command::new("julia")
+            .arg(&jl_bridge_path)
+            .output();
+
+        if let Ok(out) = jl_res {
+            if out.status.success() {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                assert!(stdout.contains("JULIA_FFI_OK"), "Julia ccall invocation succeeded");
             }
         }
 
@@ -589,5 +1031,8 @@ mod tests {
         let _ = std::fs::remove_file(obj_path);
         let _ = std::fs::remove_file(runner_path);
         let _ = std::fs::remove_file(so_path);
+        let _ = std::fs::remove_file(py_bridge_path);
+        let _ = std::fs::remove_file(r_bridge_path);
+        let _ = std::fs::remove_file(jl_bridge_path);
     }
 }

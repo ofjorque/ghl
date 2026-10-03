@@ -64,10 +64,12 @@ Backlog temático para consolidar la ergonomía de última generación del lengu
 >   - [x] **Fase 5 (Leyendas, Escalas y Exportación Dual):** Generación de leyendas en SVG y terminal, soporte para `scale_x_log10()`, `scale_y_log10()`, exportación a SVG nativo (`to_svg()`) y exportación interactiva a Vega-Lite v5 (`to_vega_json()`).
 >   - [x] **Fase 6 (Sincronización Automática con IDE):** Emitir automáticamente el plot SVG a `GHL_PLOTS_DIR` / `POSITRON_PLOTS_DIR` en cada evaluación de expresión `Plot` en el REPL.
 
-### Parte C: Interoperabilidad Python/R FFI y Empaquetado Dinámico
-- [ ] **Generación Automática de Módulos C-ABI:**
-  - Comando `ghl build <file.gh> --shared` para exportar structs y funciones `.gh` a librerías compartidas (`.so` / `.dll`).
-  - Generación automática de wrappers para Python (`ctypes`/`cffi`) y R (`.Call`).
+### Parte C: Interoperabilidad Python/R/Julia FFI y Empaquetado Dinámico
+- [x] **Generación Automática de Módulos C-ABI ("Santísima Trinidad" Científica):**
+  - Comando `ghl build <file.gh> --shared` (con selector opcional `--bridges=<py,r,jl,all>`) para exportar structs y funciones `.gh` a librerías compartidas nativas (`.so` / `.dll` / `.dylib`).
+  - Generación automática de wrappers para Python (`ctypes.Structure` y funciones tipadas).
+  - Generación automática de wrappers para R (constructores S3 y adaptadores `.C` con paso de punteros y desempaquetado de tipos).
+  - Generación automática de módulos nativos para Julia (`module ...Bridge`, `struct` isbits inmutables, `ccall` directo LLVM con `LIB_PATH` y `export`).
 
 ### Parte D: Cuadernos Científicos y Literate Computing
 - [ ] **Formato de Documento Reproducible (`.ghmd`):**
