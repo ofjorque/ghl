@@ -248,6 +248,7 @@ impl RuntimeEnv {
         env.set("filter_na".into(), Value::NativeFn(native_filter_na));
         env.set("quantile".into(), Value::NativeFn(native_quantile));
         env.set("append".into(), Value::NativeFn(native_append));
+        env.set("sort".into(), Value::NativeFn(native_sort));
 
 
         // NEKO Statistical Modeling Verbs

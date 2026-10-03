@@ -1,0 +1,53 @@
+// packages/ghl_causal/src/plots.gh
+// Publication-Quality Grammar of Graphics Visualizations for Causal Inference
+
+/// Generates an Event Study Plot with point estimates and confidence intervals.
+/// Uses GHL's native grammar of graphics (plot |> geom_line |> labs).
+fn plot_event_study_trajectory(res: EventStudyResult) -> Plot {
+    let mut periods = [];
+    let mut estimates = [];
+    let mut lows = [];
+    let mut highs = [];
+
+    for pt in res.estimates {
+        periods = append(periods, pt.period);
+        estimates = append(estimates, pt.estimate);
+        lows = append(lows, pt.conf_low);
+        highs = append(highs, pt.conf_high);
+    }
+
+    let df_plot = dataframe {
+        event_time: periods,
+        att_estimate: estimates,
+        ci_lower: lows,
+        ci_upper: highs
+    };
+
+    df_plot |> plot(aes(col("event_time"), col("att_estimate")))
+            |> geom_line()
+            |> geom_point()
+            |> labs("Dynamic Event Study: Treatment Effect Trajectory & Pre-Trends")
+}
+
+/// Generates a Synthetic Control Trajectory Plot comparing Actual vs Synthetic Counterfactual.
+fn plot_synthetic_trajectory(res: SyntheticControlResult) -> Plot {
+    let mut times = [];
+    let mut actuals = [];
+    let mut synths = [];
+
+    for pt in res.trajectory {
+        times = append(times, pt.time);
+        actuals = append(actuals, pt.actual);
+        synths = append(synths, pt.synthetic);
+    }
+
+    let df_plot = dataframe {
+        time: times,
+        actual_y: actuals,
+        synthetic_y: synths
+    };
+
+    df_plot |> plot(aes(col("time"), col("actual_y")))
+            |> geom_line()
+            |> labs("Synthetic Control Method: Actual vs Counterfactual Trajectory")
+}

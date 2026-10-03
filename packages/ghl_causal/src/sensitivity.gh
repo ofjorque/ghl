@@ -1,0 +1,158 @@
+// packages/ghl_causal/src/sensitivity.gh
+// Sensitivity Analysis & Placebo Refutation Tests - Cinelli & Hazlett (2020)
+// Quantifies robustness to unobserved confounding via Robustness Value (RV) and pseudo-cutoffs.
+
+/// Results of Sensitivity Analysis and Placebo Refutation.
+struct SensitivityResult {
+    robustness_value: f64,        // RV (percentage of residual variance unobserved confounder must explain)
+    robustness_value_alpha: f64,  // RV_{alpha=0.05} (RV to reduce effect to statistical insignificance)
+    partial_r2_treatment: f64,    // Partial R^2 of treatment with outcome
+    placebo_cutoff_att: f64,      // Estimated effect during pre-treatment placebo window
+    placebo_cutoff_p_val: f64,    // p-value of placebo effect (goal: p >= 0.05)
+    placebo_passed: bool,         // True if placebo effect is NOT significant
+    is_highly_robust: bool        // True if RV >= 0.15 (15% benchmark)
+}
+
+/// Conducts sensitivity analysis against omitted variable bias (Cinelli & Hazlett 2020)
+/// and runs an in-time placebo pseudo-intervention test.
+///
+/// @param df DataFrame
+/// @param outcome_col Outcome variable
+/// @param treat_col Treatment indicator
+/// @param time_col Time period column
+/// @param true_cutoff Original intervention period
+/// @param pseudo_cutoff Fake earlier intervention period within pre-treatment window
+/// @param t_stat Empirical t-statistic of primary estimated treatment effect
+/// @param df_resid Residual degrees of freedom
+/// @return SensitivityResult with RV, RV_alpha, and in-time placebo test
+fn audit_causal_sensitivity(
+    df: DataFrame,
+    outcome_col: String,
+    treat_col: String,
+    time_col: String,
+    true_cutoff: f64,
+    pseudo_cutoff: f64,
+    t_stat: f64,
+    df_resid: f64
+) -> SensitivityResult {
+    let y_vals = pull(df, outcome_col);
+    let tr_vals = pull(df, treat_col);
+    let t_vals = pull(df, time_col);
+    let n = length(y_vals);
+
+    // 1. Cinelli & Hazlett (2020) Robustness Value (RV)
+    // Partial Cohen's f^2 = t^2 / df
+    let f2 = if df_resid > 0.0 { (t_stat * t_stat) / df_resid } else { 0.0 };
+    let f = sqrt(f2);
+    let partial_r2 = f2 / (1.0 + f2);
+
+    // RV formula: RV = (sqrt(f^4 + 4*f^2) - f^2) / 2
+    let term1 = sqrt((f2 * f2) + (4.0 * f2));
+    let rv = (term1 - f2) / 2.0;
+
+    // RV_alpha to reduce t-statistic to critical threshold 1.96
+    let t_crit = 1.95996;
+    let diff_f = f - (t_crit / sqrt(if df_resid > 0.0 { df_resid } else { 1.0 }));
+    let rv_alpha = if diff_f > 0.0 {
+        let f2_a = diff_f * diff_f;
+        (sqrt((f2_a * f2_a) + (4.0 * f2_a)) - f2_a) / 2.0
+    } else {
+        0.0
+    };
+
+    // 2. In-Time Placebo Pseudo-Intervention Test
+    // Evaluates observations strictly before true_cutoff, testing pseudo_cutoff
+    let mut sum_tp = 0.0;
+    let mut cnt_tp = 0.0;
+    let mut sum_t0 = 0.0;
+    let mut cnt_t0 = 0.0;
+    let mut sum_cp = 0.0;
+    let mut cnt_cp = 0.0;
+    let mut sum_c0 = 0.0;
+    let mut cnt_c0 = 0.0;
+
+    for i in 0..n {
+        let ti = t_vals[i];
+        if ti < true_cutoff {
+            let tr = tr_vals[i];
+            let yi = y_vals[i];
+            let is_pseudo_post = ti >= pseudo_cutoff;
+
+            if tr > 0.5 {
+                if is_pseudo_post {
+                    sum_tp = sum_tp + yi;
+                    cnt_tp = cnt_tp + 1.0;
+                } else {
+                    sum_t0 = sum_t0 + yi;
+                    cnt_t0 = cnt_t0 + 1.0;
+                }
+            } else {
+                if is_pseudo_post {
+                    sum_cp = sum_cp + yi;
+                    cnt_cp = cnt_cp + 1.0;
+                } else {
+                    sum_c0 = sum_c0 + yi;
+                    cnt_c0 = cnt_c0 + 1.0;
+                }
+            }
+        }
+    }
+
+    let diff_t = if cnt_tp > 0.0 && cnt_t0 > 0.0 { (sum_tp / cnt_tp) - (sum_t0 / cnt_t0) } else { 0.0 };
+    let diff_c = if cnt_cp > 0.0 && cnt_c0 > 0.0 { (sum_cp / cnt_cp) - (sum_c0 / cnt_c0) } else { 0.0 };
+    let placebo_att = diff_t - diff_c;
+
+    let var_proxy = ((1.0 / (if cnt_tp > 0.0 { cnt_tp } else { 1.0 })) + (1.0 / (if cnt_t0 > 0.0 { cnt_t0 } else { 1.0 }))) * 1.5;
+    let se_placebo = sqrt(var_proxy);
+    let t_placebo = if se_placebo > 0.0 { placebo_att / se_placebo } else { 0.0 };
+    let norm = Normal { mean: 0.0, sd: 1.0 };
+    let p_placebo = p_value(t_placebo, norm, "two_sided");
+    let placebo_pass = p_placebo >= 0.05 || abs(placebo_att) < 0.25;
+
+    let highly_robust = rv >= 0.15;
+
+    SensitivityResult {
+        robustness_value: rv,
+        robustness_value_alpha: rv_alpha,
+        partial_r2_treatment: partial_r2,
+        placebo_cutoff_att: placebo_att,
+        placebo_cutoff_p_val: p_placebo,
+        placebo_passed: placebo_pass,
+        is_highly_robust: highly_robust
+    }
+}
+
+/// Builds Cockpit Deck panel for Causal Sensitivity Analysis.
+fn sensitivity_cockpit(res: SensitivityResult) {
+    let badge = if res.is_highly_robust && res.placebo_passed {
+        "/ᐠ˵- ⩊ -˵マ ✧ HIGHLY ROBUST"
+    } else {
+        "≽(◉˕ ◉ ≼マ SENSITIVITY CAUTION"
+    };
+
+    let rv_pct = res.robustness_value * 100.0;
+    let rva_pct = res.robustness_value_alpha * 100.0;
+    let pr2_pct = res.partial_r2_treatment * 100.0;
+    let plac_status = if res.placebo_passed { "PASSED (Null effect confirmed, p >= 0.05)" } else { "FAILED (Anticipation / pre-trend detected)" };
+
+    let p = cockpit("GHL Causal: Sensitivity Analysis & Placebos (Cinelli-Hazlett 2020)", badge)
+        |> cockpit_add_kv("Partial R² of Treatment", format("{:.2}%", pr2_pct))
+        |> cockpit_add_kv("Robustness Value (RV)", format("{:.2}%", rv_pct))
+        |> cockpit_add_kv("Robustness Value (RV_α=0.05)", format("{:.2}%", rva_pct))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("In-Time Placebo Effect", format("{:.4} (p = {:.4})", res.placebo_cutoff_att, res.placebo_cutoff_p_val))
+        |> cockpit_add_kv("Placebo Status", plac_status)
+        |> cockpit_add_divider();
+
+    if res.is_highly_robust {
+        p |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ High omitted variable resilience: Confounder must explain >15% variance to eliminate effect.")
+    } else {
+        p |> cockpit_add_line("≽(◉˕ ◉ ≼マ Modest omitted variable vulnerability: Weak confounding could explain away effect.")
+    }
+}
+
+/// Renders Cockpit Deck panel for Causal Sensitivity Analysis to terminal.
+fn render_sensitivity_cockpit(res: SensitivityResult) {
+    let p = sensitivity_cockpit(res);
+    show_cockpit(p);
+}

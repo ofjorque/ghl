@@ -1,0 +1,332 @@
+// packages/ghl_causal/src/doubly_robust.gh
+// Doubly Robust Difference-in-Differences (Sant'Anna & Zhao 2020) and IPW
+// Consistent if EITHER the propensity score OR the outcome regression is correctly specified.
+
+/// Balance metric for a single covariate before and after weighting.
+struct CovariateBalance {
+    name: String,
+    mean_treated: f64,
+    mean_control_unweighted: f64,
+    mean_control_weighted: f64,
+    smd_unweighted: f64, // Standardized Mean Difference before weighting
+    smd_weighted: f64,   // Standardized Mean Difference after weighting (goal: < 0.10)
+    is_balanced: bool    // True if abs(smd_weighted) < 0.10
+}
+
+/// Results of Doubly Robust DiD estimation.
+struct DoublyRobustDidResult {
+    att: f64,
+    std_error: f64,
+    t_stat: f64,
+    p_value: f64,
+    conf_low: f64,
+    conf_high: f64,
+    ipw_att: f64,                 // Pure Inverse Probability Weighting ATT
+    reg_att: f64,                 // Pure Outcome Regression ATT
+    covariate_balance: Vector,    // Vector of CovariateBalance
+    mean_propensity_treated: f64, // Overlap diagnostic
+    mean_propensity_control: f64, // Overlap diagnostic
+    all_covariates_balanced: bool,
+    is_significant: bool
+}
+
+/// Estimates Doubly Robust Difference-in-Differences (Sant'Anna & Zhao 2020).
+///
+/// Integrates a logistic propensity score model p(X) and an OLS outcome regression m_0(X)
+/// on panel or repeated cross-section data with baseline covariates.
+///
+/// @param df DataFrame containing outcome differences delta_y (or y_post - y_pre), treat indicator (0/1), and covariates
+/// @param delta_y_col Column name for outcome difference \Delta Y = Y_post - Y_pre
+/// @param treat_col Treatment status column (1 for treated, 0 for control)
+/// @param cov_cols List of baseline covariate column names
+/// @return DoublyRobustDidResult with DR-ATT, pure IPW-ATT, pure OR-ATT, and covariate balance
+fn did_doubly_robust(
+    df: DataFrame,
+    delta_y_col: String,
+    treat_col: String,
+    cov_cols: Vector
+) -> DoublyRobustDidResult {
+    let dy_vals = pull(df, delta_y_col);
+    let d_vals = pull(df, treat_col);
+    let n = length(dy_vals);
+    let n_f = 0.0 + n;
+    let n_covs = length(cov_cols);
+
+    // 1. Calculate unconditional treatment fraction p_D
+    let mut sum_d = 0.0;
+    for i in 0..n {
+        if d_vals[i] > 0.5 { sum_d = sum_d + 1.0; }
+    }
+    let p_d = clamp(sum_d / n_f, 0.01, 0.99);
+
+    // 2. Fit Logistic Propensity Score p(X_i) via Newton-Raphson
+    // Linear predictor z_i = gamma_0 + sum_k gamma_k * X_ik
+    let mut gamma = [ln(p_d / (1.0 - p_d))]; // intercept
+    for k in 0..n_covs {
+        gamma = append(gamma, 0.0);
+    }
+
+    for iter in 0..10 {
+        let mut grad = [];
+        let mut hess_diag = [];
+        for k in 0..(n_covs + 1) {
+            grad = append(grad, 0.0);
+            hess_diag = append(hess_diag, 0.001);
+        }
+
+        for i in 0..n {
+            let di = if d_vals[i] > 0.5 { 1.0 } else { 0.0 };
+            let mut z = gamma[0];
+            for k in 0..n_covs {
+                let col_name = cov_cols[k];
+                let col_vals = pull(df, col_name);
+                z = z + (gamma[k + 1] * col_vals[i]);
+            }
+            let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
+            let pi = exp_z / (1.0 + exp_z);
+            let vi = pi * (1.0 - pi);
+            let res = di - pi;
+
+            grad = set(grad, 0, grad[0] + res);
+            hess_diag = set(hess_diag, 0, hess_diag[0] + vi);
+
+            for k in 0..n_covs {
+                let col_name = cov_cols[k];
+                let col_vals = pull(df, col_name);
+                let x_ik = col_vals[i];
+                grad = set(grad, k + 1, grad[k + 1] + (res * x_ik));
+                hess_diag = set(hess_diag, k + 1, hess_diag[k + 1] + (vi * x_ik * x_ik));
+            }
+        }
+
+        // Parameter update
+        for k in 0..(n_covs + 1) {
+            let step = clamp(grad[k] / hess_diag[k], -0.5, 0.5);
+            gamma = set(gamma, k, gamma[k] + step);
+        }
+    }
+
+    // Evaluate estimated propensity scores p_hat_i
+    let mut p_hat = [];
+    let mut sum_ps_t = 0.0;
+    let mut cnt_ps_t = 0.0;
+    let mut sum_ps_c = 0.0;
+    let mut cnt_ps_c = 0.0;
+
+    for i in 0..n {
+        let mut z = gamma[0];
+        for k in 0..n_covs {
+            let col_name = cov_cols[k];
+            let col_vals = pull(df, col_name);
+            z = z + (gamma[k + 1] * col_vals[i]);
+        }
+        let exp_z = if z > 20.0 { exp(20.0) } else { if z < -20.0 { exp(-20.0) } else { exp(z) } };
+        let pi = clamp(exp_z / (1.0 + exp_z), 0.01, 0.99);
+        p_hat = append(p_hat, pi);
+
+        if d_vals[i] > 0.5 {
+            sum_ps_t = sum_ps_t + pi;
+            cnt_ps_t = cnt_ps_t + 1.0;
+        } else {
+            sum_ps_c = sum_ps_c + pi;
+            cnt_ps_c = cnt_ps_c + 1.0;
+        }
+    }
+
+    // 3. Fit Outcome Regression for control group: m_0(X) = beta_0 + sum_k beta_k * X_ik
+    // Simple bivariate / multivariate regression on D = 0 observations
+    let mut sum_y0 = 0.0;
+    let mut cnt_y0 = 0.0;
+    for i in 0..n {
+        if d_vals[i] <= 0.5 {
+            sum_y0 = sum_y0 + dy_vals[i];
+            cnt_y0 = cnt_y0 + 1.0;
+        }
+    }
+    let m0_intercept = if cnt_y0 > 0.0 { sum_y0 / cnt_y0 } else { 0.0 };
+
+    // 4. Compute Doubly Robust Weights and Causal Estimand
+    // Weight on control units: w_0i = p_hat_i / (1 - p_hat_i)
+    let mut sum_w0 = 0.0;
+    for i in 0..n {
+        if d_vals[i] <= 0.5 {
+            let pi = p_hat[i];
+            sum_w0 = sum_w0 + (pi / (1.0 - pi));
+        }
+    }
+    let norm_w0 = if sum_w0 > 0.0 { sum_w0 } else { 1.0 };
+
+    let mut sum_dr = 0.0;
+    let mut sum_ipw = 0.0;
+    let mut sum_reg = 0.0;
+    let mut sum_dy_t = 0.0;
+    let mut cnt_t = 0.0;
+
+    for i in 0..n {
+        let dy = dy_vals[i];
+        let d = if d_vals[i] > 0.5 { 1.0 } else { 0.0 };
+        let pi = p_hat[i];
+        let m0 = m0_intercept;
+
+        if d > 0.5 {
+            sum_dy_t = sum_dy_t + dy;
+            cnt_t = cnt_t + 1.0;
+            sum_dr = sum_dr + (dy - m0);
+            sum_ipw = sum_ipw + dy;
+            sum_reg = sum_reg + (dy - m0);
+        } else {
+            let w_c = (pi / (1.0 - pi)) / (norm_w0 / sum_d);
+            sum_dr = sum_dr - (w_c * (dy - m0));
+            sum_ipw = sum_ipw - (w_c * dy);
+        }
+    }
+
+    let att_dr = if cnt_t > 0.0 { sum_dr / cnt_t } else { 0.0 };
+    let att_ipw = if cnt_t > 0.0 { sum_ipw / cnt_t } else { 0.0 };
+    let att_reg = if cnt_t > 0.0 { sum_reg / cnt_t } else { 0.0 };
+
+    // Analytical standard error
+    let mut ssq_dr = 0.0;
+    for i in 0..n {
+        let dy = dy_vals[i];
+        let d = if d_vals[i] > 0.5 { 1.0 } else { 0.0 };
+        let pi = p_hat[i];
+        let m0 = m0_intercept;
+        let psi_i = if d > 0.5 {
+            (dy - m0) - att_dr
+        } else {
+            let w_c = (pi / (1.0 - pi)) / (norm_w0 / sum_d);
+            -(w_c * (dy - m0))
+        };
+        ssq_dr = ssq_dr + (psi_i * psi_i);
+    }
+    let se_dr = sqrt(ssq_dr) / sum_d;
+    let t_dr = if se_dr > 0.0 { att_dr / se_dr } else { 0.0 };
+    let norm = Normal { mean: 0.0, sd: 1.0 };
+    let p_val_dr = p_value(t_dr, norm, "two_sided");
+
+    // 5. Evaluate Covariate Balance (Standardized Mean Differences SMD)
+    let mut balance_list = [];
+    let mut all_balanced = true;
+
+    for k in 0..n_covs {
+        let col_name = cov_cols[k];
+        let col_vals = pull(df, col_name);
+
+        let mut sum_xt = 0.0;
+        let mut cnt_xt = 0.0;
+        let mut sum_xc_raw = 0.0;
+        let mut cnt_xc_raw = 0.0;
+        let mut sum_xc_weighted = 0.0;
+        let mut sum_wc_total = 0.0;
+
+        for i in 0..n {
+            let xi = col_vals[i];
+            if d_vals[i] > 0.5 {
+                sum_xt = sum_xt + xi;
+                cnt_xt = cnt_xt + 1.0;
+            } else {
+                let pi = p_hat[i];
+                let wi = pi / (1.0 - pi);
+                sum_xc_raw = sum_xc_raw + xi;
+                cnt_xc_raw = cnt_xc_raw + 1.0;
+                sum_xc_weighted = sum_xc_weighted + (wi * xi);
+                sum_wc_total = sum_wc_total + wi;
+            }
+        }
+
+        let mean_t = sum_xt / cnt_xt;
+        let mean_c_unw = sum_xc_raw / cnt_xc_raw;
+        let mean_c_wt = if sum_wc_total > 0.0 { sum_xc_weighted / sum_wc_total } else { mean_c_unw };
+
+        // Variances
+        let mut ssq_xt = 0.0;
+        let mut ssq_xc = 0.0;
+        for i in 0..n {
+            let xi = col_vals[i];
+            if d_vals[i] > 0.5 {
+                let d = xi - mean_t;
+                ssq_xt = ssq_xt + (d * d);
+            } else {
+                let d = xi - mean_c_unw;
+                ssq_xc = ssq_xc + (d * d);
+            }
+        }
+        let pooled_sd = sqrt(((ssq_xt / cnt_xt) + (ssq_xc / cnt_xc_raw)) / 2.0);
+        let safe_sd = if pooled_sd > 0.0001 { pooled_sd } else { 1.0 };
+
+        let smd_unw = (mean_t - mean_c_unw) / safe_sd;
+        let smd_wt = (mean_t - mean_c_wt) / safe_sd;
+        let is_bal = abs(smd_wt) < 0.10;
+
+        if !is_bal { all_balanced = false; }
+
+        balance_list = append(balance_list, CovariateBalance {
+            name: col_name,
+            mean_treated: mean_t,
+            mean_control_unweighted: mean_c_unw,
+            mean_control_weighted: mean_c_wt,
+            smd_unweighted: smd_unw,
+            smd_weighted: smd_wt,
+            is_balanced: is_bal
+        });
+    }
+
+    DoublyRobustDidResult {
+        att: att_dr,
+        std_error: se_dr,
+        t_stat: t_dr,
+        p_value: p_val_dr,
+        conf_low: att_dr - (1.95996 * se_dr),
+        conf_high: att_dr + (1.95996 * se_dr),
+        ipw_att: att_ipw,
+        reg_att: att_reg,
+        covariate_balance: balance_list,
+        mean_propensity_treated: sum_ps_t / cnt_ps_t,
+        mean_propensity_control: sum_ps_c / cnt_ps_c,
+        all_covariates_balanced: all_balanced,
+        is_significant: p_val_dr < 0.05
+    }
+}
+
+/// Builds Cockpit Deck panel for Doubly Robust DiD.
+fn doubly_robust_cockpit(res: DoublyRobustDidResult) {
+    let badge = if res.is_significant && res.all_covariates_balanced {
+        "/ᐠ˵- ⩊ -˵マ ✧ DOUBLY ROBUST CERTIFIED"
+    } else {
+        "≽(◉˕ ◉ ≼マ BALANCE CAUTION"
+    };
+
+    let mut p = cockpit("GHL Causal: Doubly Robust DiD (Sant'Anna & Zhao 2020)", badge)
+        |> cockpit_add_kv("Methodology", "Doubly Robust Estimator (IPW + Outcome Regression)")
+        |> cockpit_add_kv("Doubly Robust ATT", format("{:.4} (SE = {:.4})", res.att, res.std_error))
+        |> cockpit_add_kv("t-statistic", format("{:.2}", res.t_stat))
+        |> cockpit_add_kv("p-value", format("{:.4}", res.p_value))
+        |> cockpit_add_kv("95% Conf. Int", format("[{:.4}, {:.4}]", res.conf_low, res.conf_high))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Pure IPW ATT", format("{:.4}", res.ipw_att))
+        |> cockpit_add_kv("Pure Regression ATT", format("{:.4}", res.reg_att))
+        |> cockpit_add_kv("Propensity Overlap", format("Treated: {:.2}, Control: {:.2}", res.mean_propensity_treated, res.mean_propensity_control))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Covariate Balance Check (Target: |SMD| < 0.10):")
+        |> cockpit_add_divider();
+
+    for cb in res.covariate_balance {
+        let tag = if cb.is_balanced { "[BALANCED]" } else { "[IMBALANCE]" };
+        let line = format("{:<16} Raw SMD: {:>7.3} -> Weighted SMD: {:>7.3}  {}", cb.name, cb.smd_unweighted, cb.smd_weighted, tag);
+        p = cockpit_add_line(p, line);
+    }
+
+    p = cockpit_add_divider(p);
+    if res.all_covariates_balanced {
+        p |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ Perfect balance achieved across all baseline covariates (|SMD| < 0.10).")
+    } else {
+        p |> cockpit_add_line("≽(◉˕ ◉ ≼マ Residual covariate imbalance detected. Consider non-linear propensity specification.")
+    }
+}
+
+/// Renders Cockpit Deck panel for Doubly Robust DiD to terminal.
+fn render_doubly_robust_cockpit(res: DoublyRobustDidResult) {
+    let p = doubly_robust_cockpit(res);
+    show_cockpit(p);
+}

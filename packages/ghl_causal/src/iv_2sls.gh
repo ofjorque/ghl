@@ -1,0 +1,192 @@
+// packages/ghl_causal/src/iv_2sls.gh
+// Instrumental Variables / Two-Stage Least Squares (2SLS) - Angrist & Imbens LATE
+// Identifies Local Average Treatment Effects under unobserved confounding.
+
+/// Results of Two-Stage Least Squares (2SLS) Instrumental Variables estimation.
+struct Iv2slsResult {
+    late_att: f64,               // Local Average Treatment Effect \beta_{LATE}
+    std_error: f64,              // Asymptotic 2SLS standard error
+    t_stat: f64,
+    p_value: f64,
+    conf_low: f64,
+    conf_high: f64,
+    first_stage_f_stat: f64,     // First stage instrument relevance F-statistic (Stock-Yogo)
+    first_stage_coef: f64,       // First stage slope \pi_1
+    first_stage_p_val: f64,
+    ols_naive_coef: f64,         // Naive OLS estimate for comparison
+    hausman_stat: f64,           // Hausman endogeneity test statistic
+    hausman_p_val: f64,          // Hausman test p-value (< 0.05 indicates OLS is inconsistent)
+    is_instrument_strong: bool,  // True if F > 10.0 (Stock-Yogo rule of thumb)
+    is_endogenous: bool,         // True if Hausman rejects null of exogenous treatment
+    is_significant: bool
+}
+
+/// Estimates Local Average Treatment Effects (LATE) via Two-Stage Least Squares (2SLS).
+///
+/// Instrument Z purges endogeneity from treatment T. Automatically tests instrument relevance
+/// (First-stage F > 10 rule of thumb) and Hausman endogeneity specification.
+///
+/// @param df DataFrame containing outcome y, endogenous treatment t, and instrument z
+/// @param outcome_col Outcome variable name (Y)
+/// @param treat_col Endogenous treatment variable name (T)
+/// @param instrument_col Exogenous instrument variable name (Z)
+/// @return Iv2slsResult with LATE effect, first-stage F-statistic, and Hausman endogeneity test
+fn iv_2sls(
+    df: DataFrame,
+    outcome_col: String,
+    treat_col: String,
+    instrument_col: String
+) -> Iv2slsResult {
+    let y_vals = pull(df, outcome_col);
+    let t_vals = pull(df, treat_col);
+    let z_vals = pull(df, instrument_col);
+    let n = length(y_vals);
+    let n_f = 0.0 + n;
+
+    // Means
+    let mut sum_y = 0.0;
+    let mut sum_t = 0.0;
+    let mut sum_z = 0.0;
+    for i in 0..n {
+        sum_y = sum_y + y_vals[i];
+        sum_t = sum_t + t_vals[i];
+        sum_z = sum_z + z_vals[i];
+    }
+    let my = sum_y / n_f;
+    let mt = sum_t / n_f;
+    let mz = sum_z / n_f;
+
+    // Variances and Covariances
+    let mut var_z = 0.0;
+    let mut var_t = 0.0;
+    let mut cov_zt = 0.0;
+    let mut cov_zy = 0.0;
+    let mut cov_ty = 0.0;
+
+    for i in 0..n {
+        let dz = z_vals[i] - mz;
+        let dt = t_vals[i] - mt;
+        let dy = y_vals[i] - my;
+
+        var_z = var_z + (dz * dz);
+        var_t = var_t + (dt * dt);
+        cov_zt = cov_zt + (dz * dt);
+        cov_zy = cov_zy + (dz * dy);
+        cov_ty = cov_ty + (dt * dy);
+    }
+
+    if var_z <= 0.00001 || abs(cov_zt) <= 0.00001 {
+        panic("Instrument Z exhibits zero variance or zero covariance with treatment T.");
+    }
+
+    // 1. First Stage: T = pi_0 + pi_1 * Z + v
+    let pi_1 = cov_zt / var_z;
+    let pi_0 = mt - (pi_1 * mz);
+
+    let mut rss_stage1 = 0.0;
+    let mut t_hat = [];
+    for i in 0..n {
+        let t_pred = pi_0 + (pi_1 * z_vals[i]);
+        t_hat = append(t_hat, t_pred);
+        let res_1 = t_vals[i] - t_pred;
+        rss_stage1 = rss_stage1 + (res_1 * res_1);
+    }
+    let s2_stage1 = rss_stage1 / (n_f - 2.0);
+    let var_pi_1 = s2_stage1 / var_z;
+    let se_pi_1 = sqrt(var_pi_1);
+    let f_stat_stage1 = if var_pi_1 > 0.0 { (pi_1 * pi_1) / var_pi_1 } else { 0.0 };
+    let norm = Normal { mean: 0.0, sd: 1.0 };
+    let p_val_stage1 = p_value(if se_pi_1 > 0.0 { pi_1 / se_pi_1 } else { 0.0 }, norm, "two_sided");
+
+    // 2. Second Stage (Wald / 2SLS Estimator): beta_IV = cov(Z, Y) / cov(Z, T)
+    let beta_iv = cov_zy / cov_zt;
+    let beta_0_iv = my - (beta_iv * mt);
+
+    // Naive OLS for comparison: beta_OLS = cov(T, Y) / var(T)
+    let beta_ols = if var_t > 0.0 { cov_ty / var_t } else { 0.0 };
+    let s2_ols = (cov_ty) / (n_f - 2.0);
+    let se_ols = sqrt(abs(s2_ols) / var_t);
+
+    // 3. Proper 2SLS Variance: uses original T in residuals e_i = Y_i - beta_0 - beta_IV * T_i
+    let mut ssq_resid_2sls = 0.0;
+    for i in 0..n {
+        let e_i = y_vals[i] - (beta_0_iv + (beta_iv * t_vals[i]));
+        ssq_resid_2sls = ssq_resid_2sls + (e_i * e_i);
+    }
+    let s2_2sls = ssq_resid_2sls / (n_f - 2.0);
+
+    // var(beta_IV) = s2_2sls / (var_z * pi_1^2)
+    let var_t_hat = var_z * pi_1 * pi_1;
+    let var_beta_iv = if var_t_hat > 0.0 { s2_2sls / var_t_hat } else { 0.0 };
+    let se_iv = sqrt(var_beta_iv);
+    let t_stat_iv = if se_iv > 0.0 { beta_iv / se_iv } else { 0.0 };
+    let p_val_iv = p_value(t_stat_iv, norm, "two_sided");
+
+    // 4. Hausman Endogeneity Test: H = (beta_IV - beta_OLS)^2 / (var_IV - var_OLS)
+    let diff_beta = beta_iv - beta_ols;
+    let var_diff = abs(var_beta_iv - (se_ols * se_ols));
+    let hausman_stat = if var_diff > 0.0001 { (diff_beta * diff_beta) / var_diff } else { 0.0 };
+    let p_hausman = 1.0 - chisq_cdf(hausman_stat, 1.0);
+
+
+    let is_strong = f_stat_stage1 >= 10.0;
+    let is_endog = p_hausman < 0.05;
+
+    Iv2slsResult {
+        late_att: beta_iv,
+        std_error: se_iv,
+        t_stat: t_stat_iv,
+        p_value: p_val_iv,
+        conf_low: beta_iv - (1.95996 * se_iv),
+        conf_high: beta_iv + (1.95996 * se_iv),
+        first_stage_f_stat: f_stat_stage1,
+        first_stage_coef: pi_1,
+        first_stage_p_val: p_val_stage1,
+        ols_naive_coef: beta_ols,
+        hausman_stat: hausman_stat,
+        hausman_p_val: p_hausman,
+        is_instrument_strong: is_strong,
+        is_endogenous: is_endog,
+        is_significant: p_val_iv < 0.05
+    }
+}
+
+/// Builds visual Cockpit Deck panel for Instrumental Variables 2SLS.
+fn iv_cockpit(res: Iv2slsResult) {
+    let badge = if res.is_instrument_strong && res.is_significant {
+        "/ᐠ˵- ⩊ -˵マ ✧ IV 2SLS CERTIFIED"
+    } else if !res.is_instrument_strong {
+        "≽(◉˕ ◉ ≼マ WEAK INSTRUMENT (F < 10)"
+    } else {
+        "≽(◉˕ ◉ ≼マ INSUFFICIENT EVIDENCE"
+    };
+
+    let f_status = if res.is_instrument_strong { "STRONG (F >= 10.0)" } else { "WEAK (F < 10.0)" };
+    let endog_status = if res.is_endogenous { "ENDOGENOUS (OLS Biased, p < 0.05)" } else { "EXOGENOUS / INCONCLUSIVE" };
+
+    let p = cockpit("GHL Causal: Instrumental Variables / 2SLS (Angrist-Imbens LATE)", badge)
+        |> cockpit_add_kv("Estimation Method", "Two-Stage Least Squares (2SLS)")
+        |> cockpit_add_kv("LATE Estimate (β_IV)", format("{:.4} (SE = {:.4})", res.late_att, res.std_error))
+        |> cockpit_add_kv("t-statistic", format("{:.2}", res.t_stat))
+        |> cockpit_add_kv("p-value", format("{:.4}", res.p_value))
+        |> cockpit_add_kv("95% Conf. Int", format("[{:.4}, {:.4}]", res.conf_low, res.conf_high))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("First-Stage F-Statistic", format("{:.2} [{}]", res.first_stage_f_stat, f_status))
+        |> cockpit_add_kv("First-Stage Instrument Slope", format("{:.4} (p = {:.4})", res.first_stage_coef, res.first_stage_p_val))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Naive OLS Estimate", format("{:.4}", res.ols_naive_coef))
+        |> cockpit_add_kv("Hausman Endogeneity Test", format("χ²(1) = {:.2} (p = {:.4}) [{}]", res.hausman_stat, res.hausman_p_val, endog_status))
+        |> cockpit_add_divider();
+
+    if res.is_instrument_strong {
+        p |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ Instrument relevance verified (F >= 10). Stock-Yogo weak identification avoided.")
+    } else {
+        p |> cockpit_add_line("≽(◉˕ ◉ ≼マ WEAK INSTRUMENT HAZARD: First stage F < 10 indicates high asymptotic bias.")
+    }
+}
+
+/// Renders visual Cockpit Deck panel for Instrumental Variables 2SLS to terminal.
+fn render_iv_cockpit(res: Iv2slsResult) {
+    let p = iv_cockpit(res);
+    show_cockpit(p);
+}

@@ -1,0 +1,352 @@
+// packages/ghl_causal/src/bacon_decomp.gh
+// Goodman-Bacon (2021) Two-Way Fixed Effects (TWFE) DiD Decomposition
+// Decomposes TWFE into 2x2 comparison subgroups to diagnose negative weighting bias.
+
+/// Represents a single 2x2 comparison component in the Goodman-Bacon decomposition.
+struct BaconComponent {
+    comparison_type: String, // "Earlier vs Later (control)", "Later vs Earlier (already treated)", or "Treated vs Untreated"
+    group_k: f64,            // First cohort
+    group_u: f64,            // Comparison cohort
+    weight: f64,             // Decomposition weight s_ku in [0, 1]
+    estimate: f64,           // 2x2 DiD estimate \beta_{ku}^{2x2}
+    is_already_treated: bool // Flag: True if comparison uses already-treated units as controls
+}
+
+/// Results of Goodman-Bacon (2021) TWFE Decomposition.
+struct BaconDecompositionResult {
+    twfe_estimate: f64,          // Overall TWFE OLS estimate \beta_{TWFE} = \sum s_k \beta_k
+    weight_treated_vs_untreated: f64, // Total weight for Treated vs Untreated
+    weight_earlier_vs_later: f64,     // Total weight for Earlier vs Later
+    weight_already_treated: f64,      // Total weight for Later vs Already-Treated (HAZARDOUS!)
+    components: Vector,          // Vector of BaconComponent
+    has_high_already_treated_weight: bool // True if already-treated weight > 0.15 (15%)
+}
+
+/// Performs the Goodman-Bacon (2021) decomposition of the TWFE estimator.
+///
+/// Dissects standard OLS two-way fixed effects regressions with staggered timing into their
+/// underlying 2x2 DiD sub-experiments. Crucially isolates the weight placed on "forbidden"
+/// comparisons (units already treated acting as controls for later treated units), which
+/// can flip the sign of the estimated causal effect when treatment effects are dynamic.
+///
+/// @param df DataFrame containing unit_id, time, cohort (first treatment time, 0 if never), and outcome y
+/// @param outcome_col Outcome variable name
+/// @param unit_col Unit identifier column name
+/// @param time_col Time period column name
+/// @param cohort_col Treatment cohort column name (0 = never treated)
+/// @return BaconDecompositionResult with subgroup weights, 2x2 estimates, and bias diagnostic
+fn bacon_decompose(
+    df: DataFrame,
+    outcome_col: String,
+    unit_col: String,
+    time_col: String,
+    cohort_col: String
+) -> BaconDecompositionResult {
+    let y_vals = pull(df, outcome_col);
+    let u_vals = pull(df, unit_col);
+    let t_vals = pull(df, time_col);
+    let g_vals = pull(df, cohort_col);
+    let n = length(y_vals);
+
+    // Identify unique cohorts g (positive cohorts and 0 if present)
+    let mut timing_groups = [];
+    let mut has_never_treated = false;
+
+    for i in 0..n {
+        let g = g_vals[i];
+        if g > 0.0 {
+            let mut found = false;
+            for tg in timing_groups {
+                if tg == g { found = true; }
+            }
+            if !found {
+                timing_groups = append(timing_groups, g);
+            }
+        } else {
+            has_never_treated = true;
+        }
+    }
+    timing_groups = sort(timing_groups);
+    let n_groups = length(timing_groups);
+
+    let mut components = [];
+    let mut total_weight_untreated = 0.0;
+    let mut total_weight_earlier = 0.0;
+    let mut total_weight_already = 0.0;
+
+    // 1. Comparisons with Never-Treated units (Treated k vs Untreated 0)
+    if has_never_treated {
+        for g_k in timing_groups {
+            // Compute 2x2 DiD between cohort g_k and untreated 0
+            // Pre-period: time < g_k; Post-period: time >= g_k
+            let mut sum_k_post = 0.0;
+            let mut cnt_k_post = 0.0;
+            let mut sum_k_pre = 0.0;
+            let mut cnt_k_pre = 0.0;
+            let mut sum_0_post = 0.0;
+            let mut cnt_0_post = 0.0;
+            let mut sum_0_pre = 0.0;
+            let mut cnt_0_pre = 0.0;
+
+            for i in 0..n {
+                let gi = g_vals[i];
+                let ti = t_vals[i];
+                let yi = y_vals[i];
+
+                if gi == g_k {
+                    if ti >= g_k {
+                        sum_k_post = sum_k_post + yi;
+                        cnt_k_post = cnt_k_post + 1.0;
+                    } else {
+                        sum_k_pre = sum_k_pre + yi;
+                        cnt_k_pre = cnt_k_pre + 1.0;
+                    }
+                } else if gi == 0.0 {
+                    if ti >= g_k {
+                        sum_0_post = sum_0_post + yi;
+                        cnt_0_post = cnt_0_post + 1.0;
+                    } else {
+                        sum_0_pre = sum_0_pre + yi;
+                        cnt_0_pre = cnt_0_pre + 1.0;
+                    }
+                }
+            }
+
+            if cnt_k_post > 0.0 && cnt_k_pre > 0.0 && cnt_0_post > 0.0 && cnt_0_pre > 0.0 {
+                let diff_k = (sum_k_post / cnt_k_post) - (sum_k_pre / cnt_k_pre);
+                let diff_0 = (sum_0_post / cnt_0_post) - (sum_0_pre / cnt_0_pre);
+                let est_k0 = diff_k - diff_0;
+
+                // Goodman-Bacon weight based on variance of treatment indicator
+                let n_k = cnt_k_post + cnt_k_pre;
+                let n_0 = cnt_0_post + cnt_0_pre;
+                let p_k = n_k / (n_k + n_0);
+                let d_k = cnt_k_post / n_k;
+                let w_k0 = (n_k + n_0) * (n_k + n_0) * p_k * (1.0 - p_k) * d_k * (1.0 - d_k);
+
+                let comp = BaconComponent {
+                    comparison_type: "Treated vs Untreated",
+                    group_k: g_k,
+                    group_u: 0.0,
+                    weight: w_k0,
+                    estimate: est_k0,
+                    is_already_treated: false
+                };
+                components = append(components, comp);
+            }
+        }
+    }
+
+    // 2. Pairwise timing comparisons between timing groups (Earlier k vs Later l)
+    if n_groups >= 2 {
+        for i_k in 0..n_groups {
+            for i_l in (i_k + 1)..n_groups {
+                let g_early = timing_groups[i_k];
+                let g_late = timing_groups[i_l];
+
+                // Sub-comparison A: Earlier treated (g_early) vs Later treated (g_late as control before g_late)
+                // Window: time < g_late
+                let mut sum_e_post = 0.0;
+                let mut cnt_e_post = 0.0;
+                let mut sum_e_pre = 0.0;
+                let mut cnt_e_pre = 0.0;
+                let mut sum_l_post = 0.0;
+                let mut cnt_l_post = 0.0;
+                let mut sum_l_pre = 0.0;
+                let mut cnt_l_pre = 0.0;
+
+                for i in 0..n {
+                    let gi = g_vals[i];
+                    let ti = t_vals[i];
+                    let yi = y_vals[i];
+
+                    if ti < g_late { // strictly before late receives treatment
+                        if gi == g_early {
+                            if ti >= g_early {
+                                sum_e_post = sum_e_post + yi;
+                                cnt_e_post = cnt_e_post + 1.0;
+                            } else {
+                                sum_e_pre = sum_e_pre + yi;
+                                cnt_e_pre = cnt_e_pre + 1.0;
+                            }
+                        } else if gi == g_late {
+                            if ti >= g_early {
+                                sum_l_post = sum_l_post + yi;
+                                cnt_l_post = cnt_l_post + 1.0;
+                            } else {
+                                sum_l_pre = sum_l_pre + yi;
+                                cnt_l_pre = cnt_l_pre + 1.0;
+                            }
+                        }
+                    }
+                }
+
+                if cnt_e_post > 0.0 && cnt_e_pre > 0.0 && cnt_l_post > 0.0 && cnt_l_pre > 0.0 {
+                    let diff_e = (sum_e_post / cnt_e_post) - (sum_e_pre / cnt_e_pre);
+                    let diff_l = (sum_l_post / cnt_l_post) - (sum_l_pre / cnt_l_pre);
+                    let est_early = diff_e - diff_l;
+
+                    let n_e = cnt_e_post + cnt_e_pre;
+                    let n_l = cnt_l_post + cnt_l_pre;
+                    let p_e = n_e / (n_e + n_l);
+                    let d_e = cnt_e_post / n_e;
+                    let w_early = (n_e + n_l) * (n_e + n_l) * p_e * (1.0 - p_e) * d_e * (1.0 - d_e);
+
+                    let comp_early = BaconComponent {
+                        comparison_type: "Earlier vs Later (clean control)",
+                        group_k: g_early,
+                        group_u: g_late,
+                        weight: w_early,
+                        estimate: est_early,
+                        is_already_treated: false
+                    };
+                    components = append(components, comp_early);
+                }
+
+                // Sub-comparison B: Later treated (g_late) vs Earlier treated (already treated units as control!)
+                // Window: time >= g_early
+                let mut sum_l2_post = 0.0;
+                let mut cnt_l2_post = 0.0;
+                let mut sum_l2_pre = 0.0;
+                let mut cnt_l2_pre = 0.0;
+                let mut sum_e2_post = 0.0;
+                let mut cnt_e2_post = 0.0;
+                let mut sum_e2_pre = 0.0;
+                let mut cnt_e2_pre = 0.0;
+
+                for i in 0..n {
+                    let gi = g_vals[i];
+                    let ti = t_vals[i];
+                    let yi = y_vals[i];
+
+                    if ti >= g_early { // during earlier cohort's treatment period
+                        if gi == g_late {
+                            if ti >= g_late {
+                                sum_l2_post = sum_l2_post + yi;
+                                cnt_l2_post = cnt_l2_post + 1.0;
+                            } else {
+                                sum_l2_pre = sum_l2_pre + yi;
+                                cnt_l2_pre = cnt_l2_pre + 1.0;
+                            }
+                        } else if gi == g_early {
+                            if ti >= g_late {
+                                sum_e2_post = sum_e2_post + yi;
+                                cnt_e2_post = cnt_e2_post + 1.0;
+                            } else {
+                                sum_e2_pre = sum_e2_pre + yi;
+                                cnt_e2_pre = cnt_e2_pre + 1.0;
+                            }
+                        }
+                    }
+                }
+
+                if cnt_l2_post > 0.0 && cnt_l2_pre > 0.0 && cnt_e2_post > 0.0 && cnt_e2_pre > 0.0 {
+                    let diff_l2 = (sum_l2_post / cnt_l2_post) - (sum_l2_pre / cnt_l2_pre);
+                    let diff_e2 = (sum_e2_post / cnt_e2_post) - (sum_e2_pre / cnt_e2_pre);
+                    let est_already = diff_l2 - diff_e2;
+
+                    let n_l2 = cnt_l2_post + cnt_l2_pre;
+                    let n_e2 = cnt_e2_post + cnt_e2_pre;
+                    let p_l2 = n_l2 / (n_l2 + n_e2);
+                    let d_l2 = cnt_l2_post / n_l2;
+                    let w_already = (n_l2 + n_e2) * (n_l2 + n_e2) * p_l2 * (1.0 - p_l2) * d_l2 * (1.0 - d_l2);
+
+                    let comp_already = BaconComponent {
+                        comparison_type: "Later vs Earlier (ALREADY TREATED)",
+                        group_k: g_late,
+                        group_u: g_early,
+                        weight: w_already,
+                        estimate: est_already,
+                        is_already_treated: true
+                    };
+                    components = append(components, comp_already);
+                }
+            }
+        }
+    }
+
+    // Normalize weights to sum to 1.0
+    let mut sum_raw_weights = 0.0;
+    for c in components {
+        sum_raw_weights = sum_raw_weights + c.weight;
+    }
+
+    let mut norm_components = [];
+    let mut twfe_est = 0.0;
+
+    for c in components {
+        let nw = if sum_raw_weights > 0.0 { c.weight / sum_raw_weights } else { 0.0 };
+        twfe_est = twfe_est + (nw * c.estimate);
+
+        if c.comparison_type == "Treated vs Untreated" {
+            total_weight_untreated = total_weight_untreated + nw;
+        } else if c.is_already_treated {
+            total_weight_already = total_weight_already + nw;
+        } else {
+            total_weight_earlier = total_weight_earlier + nw;
+        }
+
+        let updated_c = BaconComponent {
+            comparison_type: c.comparison_type,
+            group_k: c.group_k,
+            group_u: c.group_u,
+            weight: nw,
+            estimate: c.estimate,
+            is_already_treated: c.is_already_treated
+        };
+        norm_components = append(norm_components, updated_c);
+    }
+
+    let high_already_treated = total_weight_already > 0.15;
+
+    BaconDecompositionResult {
+        twfe_estimate: twfe_est,
+        weight_treated_vs_untreated: total_weight_untreated,
+        weight_earlier_vs_later: total_weight_earlier,
+        weight_already_treated: total_weight_already,
+        components: norm_components,
+        has_high_already_treated_weight: high_already_treated
+    }
+}
+
+/// Builds visual Cockpit Deck panel for Goodman-Bacon decomposition.
+fn bacon_cockpit(res: BaconDecompositionResult) {
+    let badge = if !res.has_high_already_treated_weight {
+        "/ᐠ˵- ⩊ -˵マ ✧ TWFE WEIGHTS BENIGN"
+    } else {
+        "≽(◉˕ ◉ ≼マ NEGATIVE WEIGHT HAZARD"
+    };
+
+    let pct_untreated = res.weight_treated_vs_untreated * 100.0;
+    let pct_earlier = res.weight_earlier_vs_later * 100.0;
+    let pct_already = res.weight_already_treated * 100.0;
+
+    let mut p = cockpit("GHL Causal: Goodman-Bacon (2021) TWFE Decomposition", badge)
+        |> cockpit_add_kv("Decomposition Metric", "Two-Way Fixed Effects OLS Decomposition")
+        |> cockpit_add_kv("Aggregate TWFE β", format("{:.4}", res.twfe_estimate))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Treated vs Untreated Weight", format("{:.1}%", pct_untreated))
+        |> cockpit_add_kv("Earlier vs Later (clean) Weight", format("{:.1}%", pct_earlier))
+        |> cockpit_add_kv("Already-Treated (HAZARD) Weight", format("{:.1}%", pct_already))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Comparison Type                        g_k     g_u    Weight     Estimate")
+        |> cockpit_add_divider();
+
+    for c in res.components {
+        let line = format("{:<36} {:>6.0}  {:>6.0}  {:>8.1}%   {:>10.4}", c.comparison_type, c.group_k, c.group_u, c.weight * 100.0, c.estimate);
+        p = cockpit_add_line(p, line);
+    }
+
+    p = cockpit_add_divider(p);
+    if !res.has_high_already_treated_weight {
+        p |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ Clean comparisons dominate (<15% already treated). TWFE bias risk is low.")
+    } else {
+        p |> cockpit_add_line("≽(◉˕ ◉ ≼マ HAZARD: Substantial weight on already-treated controls. Use cs_did() instead.")
+    }
+}
+
+/// Renders visual Cockpit Deck panel for Goodman-Bacon decomposition to terminal.
+fn render_bacon_cockpit(res: BaconDecompositionResult) {
+    let p = bacon_cockpit(res);
+    show_cockpit(p);
+}

@@ -115,9 +115,10 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
   - Ejecutar y consolidar tests (`ghl test`) sobre los 17 módulos de IRT (1PL, 2PL, 3PL, Graded Response, Nominal Response, MHRM, DIF, Information Curves, CAT). Validado: 22/22 tests superados.
   - Validar paridad numérica contra benchmarks de R (`mirt`) y Python (`mirt`). Documentado en [`packages/ghl_irt/GUIDE.md`](packages/ghl_irt/GUIDE.md).
   - Publicar cuaderno reproducible Quarto (`.qmd`) de calibración psicométrica completa en [`examples/irt_calibration.qmd`](examples/irt_calibration.qmd).
-- [ ] **`packages/ghl_causal` (Inferencia Causal y Evaluación de Impacto) — [#2](https://github.com/ofjorque/ghl/issues/2):**
-  - Consolidar tests para Difference-in-Differences (DiD), Event Studies y pruebas de tendencias paralelas.
-  - Documentar caso de estudio empírico reproducible en Quarto (`.qmd`).
+- [x] **`packages/ghl_causal` (Inferencia Causal y Evaluación de Impacto) — [#2](https://github.com/ofjorque/ghl/issues/2):**
+  - Consolidar tests para 2x2 DiD, Event Studies dinámicos, Staggered Adoption DiD (Callaway & Sant'Anna 2021), Descomposición de Goodman-Bacon (2021), Control Sintético (Abadie et al. 2010), DiD Doblemente Robusto (Sant'Anna & Zhao 2020), IV/2SLS (Angrist-Imbens LATE) y Sensibilidad (Cinelli & Hazlett 2020). Validado: 10/10 bloques de prueba superados.
+  - Validar paridad numérica y benchmarking exhaustivo contra R (`did`, `fixest`, `Synth`, `DRDID`, `AER`, `bacondecomp`), Python (`DoWhy`, `EconML`, `linearmodels`) y Julia (`CausalInference.jl`). Documentado en [`packages/ghl_causal/GUIDE.md`](packages/ghl_causal/GUIDE.md).
+  - Publicar cuaderno reproducible Quarto (`.qmd`) de evaluación de impacto cuasi-experimental en [`examples/causal_inference_evaluation.qmd`](examples/causal_inference_evaluation.qmd).
 - [ ] **`packages/ghl_timeseries` (Series Temporales y Filtrado Dinámico) — [#3](https://github.com/ofjorque/ghl/issues/3):**
   - Tests de calibración para modelos ARIMA, GARCH y Filtro de Kalman.
   - Ejemplo de pronóstico y visualización integrada con `ghl_plot`.

@@ -482,3 +482,29 @@ pub(crate) fn native_append(args: Vec<Value>) -> Result<Value, Diagnostic> {
     Ok(Value::Vector(VectorData::from_values(items)))
 }
 
+pub(crate) fn native_sort(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.is_empty() {
+        return Err(Diagnostic::compute_error("C0201", "`sort()` requires a vector argument"));
+    }
+    match &args[0] {
+        Value::Vector(vd) => {
+            if let Ok(view) = vd.as_f64_view() {
+                let mut vals: Vec<f64> = view.as_slice().to_vec();
+                vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                Ok(Value::Vector(VectorData::from_f64(vals)))
+            } else {
+                let mut items: Vec<Value> = vd.iter().cloned().collect();
+                items.sort_by(|a, b| match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+                    (Value::I64(x), Value::I64(y)) => x.cmp(y),
+                    (Value::String(x), Value::String(y)) => x.cmp(y),
+                    _ => std::cmp::Ordering::Equal,
+                });
+                Ok(Value::Vector(VectorData::from_values(items)))
+            }
+        }
+        other => Ok(Value::Vector(VectorData::from_values(vec![other.clone()]))),
+    }
+}
+
+

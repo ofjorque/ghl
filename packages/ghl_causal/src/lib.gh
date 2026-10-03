@@ -1,5 +1,6 @@
 // ghl_causal :: Main Library Module (RFC 15 Parte E)
-// Advanced Causal Inference for GHL: Difference-in-Differences, Parallel Trends, and Event Studies.
+// Advanced Causal Inference for GHL: Staggered DiD, Event Studies, Goodman-Bacon,
+// Synthetic Control, Doubly Robust Estimators, Instrumental Variables (2SLS), and Sensitivity Refutations.
 
 struct CausalAudit {
     did_result: DidResult,
@@ -8,7 +9,7 @@ struct CausalAudit {
     is_fully_certified: bool
 }
 
-/// Orchestrates an end-to-end causal audit:
+/// Orchestrates an end-to-end 2x2 causal audit:
 /// 1. Verifies parallel pre-trends assumption before intervention
 /// 2. Estimates canonical 2x2 DiD Treatment Effect (ATT)
 /// 3. Computes dynamic event study trajectory across relative periods
@@ -61,3 +62,37 @@ fn render_causal_audit(audit: CausalAudit) {
     show_cockpit(summary);
 }
 
+/// High-level audit for Callaway & Sant'Anna (2021) Staggered DiD.
+fn audit_staggered_did(df: DataFrame, outcome_col: String, unit_col: String, time_col: String, cohort_col: String) -> CsDidResult {
+    let res = cs_did(df, outcome_col, unit_col, time_col, cohort_col);
+    render_cs_did_cockpit(res);
+    res
+}
+
+/// High-level audit for Goodman-Bacon (2021) TWFE decomposition.
+fn audit_bacon_decomposition(df: DataFrame, outcome_col: String, unit_col: String, time_col: String, cohort_col: String) -> BaconDecompositionResult {
+    let res = bacon_decompose(df, outcome_col, unit_col, time_col, cohort_col);
+    render_bacon_cockpit(res);
+    res
+}
+
+/// High-level audit for Synthetic Control Method (Abadie et al. 2010).
+fn audit_synthetic_control_analysis(df: DataFrame, outcome_col: String, unit_col: String, time_col: String, treated_unit: f64, cutoff_time: f64) -> SyntheticControlResult {
+    let res = synthetic_control(df, outcome_col, unit_col, time_col, treated_unit, cutoff_time);
+    render_scm_cockpit(res);
+    res
+}
+
+/// High-level audit for Doubly Robust DiD (Sant'Anna & Zhao 2020).
+fn audit_doubly_robust_analysis(df: DataFrame, delta_y_col: String, treat_col: String, cov_cols: Vector) -> DoublyRobustDidResult {
+    let res = did_doubly_robust(df, delta_y_col, treat_col, cov_cols);
+    render_doubly_robust_cockpit(res);
+    res
+}
+
+/// High-level audit for Instrumental Variables 2SLS (Angrist-Imbens LATE).
+fn audit_iv_analysis(df: DataFrame, outcome_col: String, treat_col: String, instrument_col: String) -> Iv2slsResult {
+    let res = iv_2sls(df, outcome_col, treat_col, instrument_col);
+    render_iv_cockpit(res);
+    res
+}

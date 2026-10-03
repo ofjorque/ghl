@@ -365,6 +365,15 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "sort".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Vector(Box::new(Type::Any))),
+            },
+            false,
+        );
+
+        env.insert(
             "print".into(),
             Type::Function {
                 params: vec![Type::Any],
