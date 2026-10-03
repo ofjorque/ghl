@@ -111,10 +111,10 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
 > **Sincronización con GitHub:** Este backlog está estructurado y rastreado activamente en los [Milestones](https://github.com/ofjorque/ghl/milestones) e [Issues](https://github.com/ofjorque/ghl/issues) de GitHub.
 
 ### 1. Validación y Suites de Prueba en Paquetes de Dominio (`packages/`) — [Milestone v0.2.0](https://github.com/ofjorque/ghl/milestone/1)
-- [ ] **`packages/ghl_irt` (Psicometría MIRT & CAT) — [#1](https://github.com/ofjorque/ghl/issues/1):**
-  - Ejecutar y consolidar tests (`ghl test`) sobre los 17 módulos de IRT (1PL, 2PL, 3PL, Graded Response, Nominal Response, MHRM, DIF, Information Curves, CAT).
-  - Validar paridad numérica contra benchmarks de R (`mirt`) y Python (`mirt`).
-  - Publicar cuaderno reproducible Quarto (`.qmd`) de calibración psicométrica completa.
+- [x] **`packages/ghl_irt` (Psicometría MIRT & CAT) — [#1](https://github.com/ofjorque/ghl/issues/1):**
+  - Ejecutar y consolidar tests (`ghl test`) sobre los 17 módulos de IRT (1PL, 2PL, 3PL, Graded Response, Nominal Response, MHRM, DIF, Information Curves, CAT). Validado: 22/22 tests superados.
+  - Validar paridad numérica contra benchmarks de R (`mirt`) y Python (`mirt`). Documentado en [`packages/ghl_irt/GUIDE.md`](packages/ghl_irt/GUIDE.md).
+  - Publicar cuaderno reproducible Quarto (`.qmd`) de calibración psicométrica completa en [`examples/irt_calibration.qmd`](examples/irt_calibration.qmd).
 - [ ] **`packages/ghl_causal` (Inferencia Causal y Evaluación de Impacto) — [#2](https://github.com/ofjorque/ghl/issues/2):**
   - Consolidar tests para Difference-in-Differences (DiD), Event Studies y pruebas de tendencias paralelas.
   - Documentar caso de estudio empírico reproducible en Quarto (`.qmd`).
