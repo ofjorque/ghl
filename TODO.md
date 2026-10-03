@@ -63,6 +63,9 @@ Backlog temático para consolidar la ergonomía de última generación del lengu
 >   - [x] **Fase 4 (Ejes Discretos y Factores):** Variables cualitativas (`Factor` y `String`) en los ejes $X$/$Y$, habilitando boxplots comparativos múltiples agrupados por categorías en Plotters, terminal y Vega.
 >   - [x] **Fase 5 (Leyendas, Escalas y Exportación Dual):** Generación de leyendas en SVG y terminal, soporte para `scale_x_log10()`, `scale_y_log10()`, exportación a SVG nativo (`to_svg()`) y exportación interactiva a Vega-Lite v5 (`to_vega_json()`).
 >   - [x] **Fase 6 (Sincronización Automática con IDE):** Emitir automáticamente el plot SVG a `GHL_PLOTS_DIR` / `POSITRON_PLOTS_DIR` en cada evaluación de expresión `Plot` en el REPL.
+>   - [ ] **Fase 7 (Cierre del Core — Datos Locales por Capa y Facetting) *(Objetivo Inmediato Core)*:**
+>     - Herencia y DataFrames locales por capa (`geom_point(data = df2, aes(...))`).
+>     - Paneles múltiples / subgráficos categóricos (`facet_wrap("categoria")` y `facet_grid("fila ~ col")`).
 
 ### Parte C: Interoperabilidad Python/R/Julia FFI y Empaquetado Dinámico
 - [x] **Generación Automática de Módulos C-ABI ("Santísima Trinidad" Científica):**
@@ -100,3 +103,42 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
 - [x] **Alineación tabular en `:vars`:** Reemplazado `CockpitPanel` por `CockpitTable` en `repl.rs` — nombres, tipos y valores ahora se alinean en columnas de ancho consistente por fila.
 - [x] **Prompt con color ANSI en Rustyline:** Verificado contra el código fuente de `rustyline` 18.0.1 — secuencias CSI tratadas con ancho cero.
 - [x] **Sugerencias de comandos desconocidos:** Distancia de Levenshtein contra la lista de comandos REPL conocidos cuando la distancia es ≤2 (ej. `:clera` → "Did you mean `:clear`?").
+
+---
+
+## Roadmap de Ecosistema Científico y Paquetes de Utilidad
+
+### 1. Validación y Suites de Prueba en Paquetes de Dominio (`packages/`)
+- [ ] **`packages/ghl_irt` (Psicometría MIRT & CAT):**
+  - Ejecutar y consolidar tests (`ghl test`) sobre los 17 módulos de IRT (1PL, 2PL, 3PL, Graded Response, Nominal Response, MHRM, DIF, Information Curves, CAT).
+  - Validar paridad numérica contra benchmarks de R (`mirt`) y Python (`mirt`).
+  - Publicar cuaderno reproducible Quarto (`.qmd`) de calibración psicométrica completa.
+- [ ] **`packages/ghl_causal` (Inferencia Causal y Evaluación de Impacto):**
+  - Consolidar tests para Difference-in-Differences (DiD), Event Studies y pruebas de tendencias paralelas.
+  - Documentar caso de estudio empírico reproducible en Quarto (`.qmd`).
+- [ ] **`packages/ghl_timeseries` (Series Temporales y Filtrado Dinámico):**
+  - Tests de calibración para modelos ARIMA, GARCH y Filtro de Kalman.
+  - Ejemplo de pronóstico y visualización integrada con `ghl_plot`.
+- [ ] **`packages/ghl_panel` (Econometría de Datos de Panel):**
+  - Validar estimadores dinámicos Arellano-Bond y Blundell-Bond contra benchmarks de Stata (`xtabond2`) y R (`plm`).
+- [ ] **`packages/ghl_survival` (Bioestadística y Análisis de Supervivencia):**
+  - Pruebas para curvas Kaplan-Meier, test Log-Rank y modelo de riesgos proporcionales de Cox.
+- [ ] **`packages/ghl_multilevel` (Modelos Lineales Mixtos / HLM):**
+  - Pruebas para modelos con interceptos y pendientes aleatorias contra R `lme4`.
+- [ ] **`packages/spring_pact` (Grafos Probabilísticos y PACT):**
+  - Verificación del motor de especificación de redes y grafos causales/probabilísticos.
+
+### 2. Nuevos Paquetes de Utilidad Propuestos para el Ecosistema
+- [ ] **`packages/ghl_optim` (Optimización Numérica No Lineal General):**
+  - Implementar biblioteca de algoritmos de optimización matemática (BFGS, L-BFGS-B, Nelder-Mead, Levenberg-Marquardt).
+  - Exponer interfaz canónica para estimación de funciones de pérdida personalizadas y máxima verosimilitud (MLE).
+- [ ] **`packages/ghl_impute` (Limpieza Científica y Datos Faltantes):**
+  - Algoritmos de imputación múltiple (tipo MICE y k-NN) integrados nativamente con la semántica de `NA:reason` de GHL.
+- [ ] **`packages/ghl_db` / Conectores SQL Extendido:**
+  - Conector nativo hacia DuckDB / SQLite para consultas SQL analíticas directamente sobre DataFrames y archivos Parquet.
+
+### 3. Herramientas Periféricas y Developer Experience (DX)
+- [ ] **Empaquetado y Distribución de Extensión VS Code / Positron:**
+  - Generar el binario actualizado `.vsix` en `editors/vscode/` con la nueva integración nativa de LSP formatting.
+- [ ] **Pre-commit Hooks y CI Ligera:**
+  - Configurar `.pre-commit-hooks.yaml` y GitHub Action para `ghl fmt --check` y `ghl check` en repositorios de usuarios.
