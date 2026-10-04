@@ -1,0 +1,27 @@
+// packages/ghl_panel/src/plots.gh
+// Publication-Quality Grammar of Graphics Visualizations for Panel Econometrics
+
+/// Generates a Longitudinal Panel Trajectory Plot (Spaghetti Plot) tracking entities over time.
+fn plot_panel_trajectories(df: DataFrame, unit_col: String, time_col: String, y_col: String) -> Plot {
+    df |> plot(aes(col(time_col), col(y_col)))
+       |> geom_line()
+       |> geom_point()
+       |> labs("Longitudinal Panel Trajectories across Cross-Sectional Units")
+}
+
+/// Generates a Model Comparison Plot comparing Pooled OLS, Fixed Effects, and Random Effects.
+fn plot_static_comparison(fe: FixedEffectsResult, re: RandomEffectsResult) -> Plot {
+    let models = ["Fixed Effects (Within)", "Random Effects (GLS)"];
+    let estimates = [fe.coefficients[0], re.coefficients[0]];
+    let se = [fe.std_errors[0], re.std_errors[0]];
+
+    let df_comp = dataframe {
+        model: models,
+        beta_estimate: estimates,
+        standard_error: se
+    };
+
+    df_comp |> plot(aes(col("model"), col("beta_estimate")))
+            |> geom_point()
+            |> labs("Static Panel Model Comparison: Fixed Effects vs Random Effects")
+}

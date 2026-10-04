@@ -1,22 +1,24 @@
 // packages/ghl_panel/tests/panel_test.gh
-// Integration test suite for ghl_panel dynamic panel econometrics
+// Comprehensive integration test suite for ghl_panel econometrics
 
-println("Running ghl_panel integration test suite...");
+println("Running ghl_panel comprehensive test suite...");
 
-// 1. Generate Synthetic Dynamic Panel (N = 6, T = 5)
-// Data generating process: y_{it} = 0.5 * y_{i, t-1} + 1.2 * x_{it} + eta_i + e_{it}
+// =========================================================================
+// 1. Synthetic Panel Dataset Generation (N = 6, T = 5)
+// =========================================================================
 let n_units = 6;
 let n_time = 5;
-
 let total_obs = n_units * n_time;
 let errors = random_normal(total_obs, 0.0, 0.05, 42);
 
 let mut y_panel = [];
 let mut x_panel = [];
+let mut unit_ids = [];
+let mut time_ids = [];
 
 for i in 0..n_units {
     let fi = 0.0 + i;
-    let eta_i = 0.4 * fi;
+    let eta_i = 0.4 * fi; // unit fixed effect
     let mut y_prev = 2.0 + eta_i;
 
     for t in 0..n_time {
@@ -27,18 +29,63 @@ for i in 0..n_units {
 
         x_panel = append(x_panel, x_val);
         y_panel = append(y_panel, y_val);
+        unit_ids = append(unit_ids, fi);
+        time_ids = append(time_ids, ft);
         y_prev = y_val;
     }
 }
 
-let expected_len = n_units * n_time;
-if length(y_panel) != expected_len {
-    panic("Panel length mismatch");
+let df_panel = dataframe {
+    y: y_panel,
+    x1: x_panel,
+    unit: unit_ids,
+    time: time_ids
+};
+
+// =========================================================================
+// 2. Static Panel Econometrics: POLS, Fixed Effects, Random Effects, Hausman
+// =========================================================================
+println("Testing Static Panel Econometrics (POLS, FE, RE, Hausman, Breusch-Pagan)...");
+let static_audit = audit_static_panel(df_panel, "y", ["x1"], "unit");
+
+let pols = static_audit.pooled_ols;
+if pols.coefficients[0] <= 0.0 {
+    panic("Pooled OLS slope must be positive");
 }
 
-// 2. Test Arellano-Bond Difference GMM
+let fe = static_audit.fixed_effects;
+if fe.n_units != 6 || fe.n_time != 5 {
+    panic("Fixed effects dimension mismatch");
+}
+if fe.r2_within <= 0.0 {
+    panic("Fixed effects R^2 within must be positive");
+}
+if length(fe.unit_effects) != 6 {
+    panic("Fixed effects unit count mismatch");
+}
+
+let re = static_audit.random_effects;
+if re.theta_gls <= 0.0 || re.theta_gls >= 1.0 {
+    panic("GLS quasi-demeaning theta must be strictly bounded in (0, 1)");
+}
+
+let h = static_audit.hausman;
+if h.h_statistic < 0.0 {
+    panic("Hausman statistic must be non-negative");
+}
+
+let bp = static_audit.breusch_pagan;
+if bp.lm_statistic < 0.0 {
+    panic("Breusch-Pagan LM statistic must be non-negative");
+}
+
+// =========================================================================
+// 3. Dynamic Panel: Arellano-Bond Difference GMM (1991)
+// =========================================================================
 println("Testing Arellano-Bond Difference GMM...");
 let diff_gmm = fit_arellano_bond(y_panel, x_panel, n_units, n_time);
+render_arellano_bond_cockpit(diff_gmm);
+
 if diff_gmm.n_units != 6 {
     panic("Unit count must be 6");
 }
@@ -52,11 +99,17 @@ if diff_gmm.alpha <= 0.0 {
 if diff_gmm.beta <= 0.0 {
     panic("Exogenous beta estimate must be positive");
 }
-render_arellano_bond_cockpit(diff_gmm);
+if diff_gmm.ar2_p < 0.05 {
+    panic("AR(2) test must satisfy null of no second-order serial correlation (p >= 0.05)");
+}
 
-// 3. Test Blundell-Bond System GMM
+// =========================================================================
+// 4. Dynamic Panel: Blundell-Bond System GMM (1998)
+// =========================================================================
 println("Testing Blundell-Bond System GMM...");
 let sys_gmm = fit_blundell_bond(y_panel, x_panel, n_units, n_time, diff_gmm);
+render_blundell_bond_cockpit(sys_gmm);
+
 if !sys_gmm.converged {
     panic("System GMM must converge");
 }
@@ -70,9 +123,26 @@ if sys_gmm.alpha <= 0.0 {
 if sys_gmm.beta <= 0.0 {
     panic("System beta estimate must be positive");
 }
-render_blundell_bond_cockpit(sys_gmm);
 
-// 4. Test Complete Dynamic Panel Executive Audit
+// =========================================================================
+// 5. Cross-Sectional Dependence: Pesaran (2004) CD Test
+// =========================================================================
+println("Testing Pesaran (2004) CD Test for Cross-Sectional Dependence...");
+let cd_res = audit_cross_sectional_dependence(errors, n_units, n_time);
+if cd_res.p_value < 0.0 || cd_res.p_value > 1.0 {
+    panic("Pesaran CD p-value must be bounded in [0, 1]");
+}
+
+// =========================================================================
+// 6. Grammar of Graphics Plotting Generators
+// =========================================================================
+println("Testing Grammar of Graphics Plotting Generators...");
+let p_traj = plot_panel_trajectories(df_panel, "unit", "time", "y");
+let p_comp = plot_static_comparison(fe, re);
+
+// =========================================================================
+// 7. Complete Dynamic Panel Executive Audit
+// =========================================================================
 println("Testing Complete Dynamic Panel Executive Audit...");
 let audit = audit_panel_pipeline(y_panel, x_panel, n_units, n_time);
 if !audit.certified {

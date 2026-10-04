@@ -1,5 +1,6 @@
 // packages/ghl_panel/src/lib.gh
-// Dynamic Panel Econometrics Suite in Pure GHL (Arellano-Bond & Blundell-Bond)
+// Dynamic & Static Panel Econometrics Suite in Pure GHL
+// Pooled OLS, Fixed Effects, Random Effects, Hausman Test, Arellano-Bond, Blundell-Bond, and Pesaran CD.
 
 struct DynamicPanelAudit {
     diff_gmm: ArellanoBondResult,
@@ -7,6 +8,15 @@ struct DynamicPanelAudit {
     certified: bool
 }
 
+struct StaticPanelAudit {
+    pooled_ols: PooledOlsResult,
+    fixed_effects: FixedEffectsResult,
+    random_effects: RandomEffectsResult,
+    hausman: HausmanTestResult,
+    breusch_pagan: BreuschPaganResult
+}
+
+/// Runs full dynamic panel GMM audit (Difference GMM and System GMM).
 fn audit_panel_pipeline(y: Vector, x: Vector, n_units: i64, n_time: i64) -> DynamicPanelAudit {
     let diff = fit_arellano_bond(y, x, n_units, n_time);
     let sys = fit_blundell_bond(y, x, n_units, n_time, diff);
@@ -18,6 +28,32 @@ fn audit_panel_pipeline(y: Vector, x: Vector, n_units: i64, n_time: i64) -> Dyna
         system_gmm: sys,
         certified: cert
     }
+}
+
+/// Runs full static panel audit comparing Pooled OLS, Fixed Effects, and Random Effects with Hausman test.
+fn audit_static_panel(df: DataFrame, y_col: String, x_cols: Vector, unit_col: String) -> StaticPanelAudit {
+    let pols = fit_pooled_ols(df, y_col, x_cols);
+    let fe = fit_fixed_effects(df, y_col, x_cols, unit_col);
+    let re = fit_random_effects(df, y_col, x_cols, unit_col);
+    let h = test_hausman(fe, re);
+    let bp = test_breusch_pagan_panel(pols, df, unit_col);
+
+    static_panel_cockpit(fe, re, h);
+
+    StaticPanelAudit {
+        pooled_ols: pols,
+        fixed_effects: fe,
+        random_effects: re,
+        hausman: h,
+        breusch_pagan: bp
+    }
+}
+
+/// High-level audit for Cross-Sectional Dependence.
+fn audit_cross_sectional_dependence(residuals: Vector, n_units: i64, n_time: i64) -> PesaranCdResult {
+    let res = test_pesaran_cd(residuals, n_units, n_time);
+    pesaran_cd_cockpit(res);
+    res
 }
 
 fn render_panel_report(audit: DynamicPanelAudit) {

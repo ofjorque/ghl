@@ -1,0 +1,85 @@
+// packages/ghl_panel/src/cross_sectional_dependence.gh
+// Cross-Sectional Dependence Testing: Pesaran (2004) CD Test for Panel Residuals
+
+/// Results of Pesaran (2004) Cross-Sectional Dependence test.
+struct PesaranCdResult {
+    cd_statistic: f64,         // CD ~ N(0, 1) under H_0
+    p_value: f64,
+    mean_abs_rho: f64,         // Average absolute pairwise correlation
+    n_units: i64,
+    n_time: i64,
+    has_cross_sectional_dependence: bool // True if p < 0.05
+}
+
+/// Computes Pesaran (2004) Cross-Sectional Dependence (CD) test on panel residuals.
+/// Null hypothesis H_0: Residuals are cross-sectionally independent.
+fn test_pesaran_cd(residuals: Vector, n_units: i64, n_time: i64) -> PesaranCdResult {
+    if n_units < 2 || n_time < 3 {
+        panic("Pesaran CD test requires at least 2 units and 3 time periods.");
+    }
+
+    let n_f = 0.0 + n_units;
+    let t_f = 0.0 + n_time;
+
+    let mut sum_rho = 0.0;
+    let mut sum_abs_rho = 0.0;
+    let mut n_pairs = 0.0;
+
+    for i in 0..(n_units - 1) {
+        for j in (i + 1)..n_units {
+            let mut num = 0.0;
+            let mut den_i = 0.0;
+            let mut den_j = 0.0;
+
+            for t in 0..n_time {
+                let e_it = residuals[(i * n_time) + t];
+                let e_jt = residuals[(j * n_time) + t];
+                num = num + (e_it * e_jt);
+                den_i = den_i + (e_it * e_it);
+                den_j = den_j + (e_jt * e_jt);
+            }
+
+            let den = sqrt(den_i * den_j);
+            let rho_ij = if den > 0.00000001 { num / den } else { 0.0 };
+
+            sum_rho = sum_rho + rho_ij;
+            sum_abs_rho = sum_abs_rho + abs(rho_ij);
+            n_pairs = n_pairs + 1.0;
+        }
+    }
+
+    // CD formula: CD = sqrt(2T / (N(N-1))) * sum_{i < j} rho_ij
+    let factor = sqrt((2.0 * t_f) / (n_f * (n_f - 1.0)));
+    let cd_stat = factor * sum_rho;
+
+    let abs_cd = abs(cd_stat);
+    let p_val = 2.0 * (1.0 - normal_cdf(abs_cd, 0.0, 1.0));
+    let mean_abs_r = if n_pairs > 0.0 { sum_abs_rho / n_pairs } else { 0.0 };
+    let has_cd = p_val < 0.05;
+
+    PesaranCdResult {
+        cd_statistic: cd_stat,
+        p_value: p_val,
+        mean_abs_rho: mean_abs_r,
+        n_units: n_units,
+        n_time: n_time,
+        has_cross_sectional_dependence: has_cd
+    }
+}
+
+/// Builds Cockpit Deck for Pesaran CD test.
+fn pesaran_cd_cockpit(res: PesaranCdResult) {
+    let badge = if !res.has_cross_sectional_dependence {
+        "/ᐠ˵- ⩊ -˵マ ✧ CROSS-SECTIONAL INDEPENDENCE"
+    } else {
+        "≽(◉˕ ◉ ≼マ CROSS-SECTIONAL DEPENDENCE DETECTED"
+    };
+
+    let p = cockpit("Panel Econometrics: Pesaran (2004) CD Test", badge)
+        |> cockpit_add_kv("Pesaran CD Statistic", format("{:.4}", res.cd_statistic))
+        |> cockpit_add_kv("p-value", format("{:.4} [{}]", res.p_value, if res.has_cross_sectional_dependence { "REJECT INDEPENDENCE" } else { "FAIL TO REJECT" }))
+        |> cockpit_add_kv("Average Pairwise |ρ_ij|", format("{:.4}", res.mean_abs_rho))
+        |> cockpit_add_divider();
+
+    show_cockpit(p);
+}

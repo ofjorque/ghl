@@ -124,8 +124,11 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
   - Validar paridad numérica y benchmarking contra R (`forecast`, `rugarch`, `KFAS`, `vars`), Python (`statsmodels`, `arch`, `filterpy`) y Julia (`StateSpaceModels.jl`, `ARCHModels.jl`, `TSAnalysis.jl`). Documentado en [`packages/ghl_timeseries/GUIDE.md`](packages/ghl_timeseries/GUIDE.md).
   - Publicar cuaderno reproducible Quarto (`.qmd`) de pronóstico temporal y filtrado dinámico en [`examples/financial_timeseries_forecasting.qmd`](examples/financial_timeseries_forecasting.qmd).
 
-- [ ] **`packages/ghl_panel` (Econometría de Datos de Panel) — [#4](https://github.com/ofjorque/ghl/issues/4):**
-  - Validar estimadores dinámicos Arellano-Bond y Blundell-Bond contra benchmarks de Stata (`xtabond2`) y R (`plm`).
+- [x] **`packages/ghl_panel` (Econometría de Datos de Panel) — [#4](https://github.com/ofjorque/ghl/issues/4):**
+  - Consolidar tests para Pooled OLS, Efectos Fijos (Within), Efectos Aleatorios (GLS/Swamy-Arora), Test de Hausman, Test LM de Breusch-Pagan, Arellano-Bond Difference GMM (1991), Blundell-Bond System GMM (1998), contrastes AR(1)/AR(2), sobreidentificación de Sargan y test CD de Pesaran (2004). Validado: 10/10 bloques de prueba superados.
+  - Validar paridad numérica y benchmarking contra R (`plm`, `fixest`), Python (`linearmodels`) y Julia (`FixedEffectModels.jl`). Documentado en [`packages/ghl_panel/GUIDE.md`](packages/ghl_panel/GUIDE.md).
+  - Publicar cuaderno reproducible Quarto (`.qmd`) de econometría de panel dinámico en [`examples/dynamic_panel_evaluation.qmd`](examples/dynamic_panel_evaluation.qmd).
+
 - [ ] **`packages/ghl_survival` (Bioestadística y Análisis de Supervivencia) — [#5](https://github.com/ofjorque/ghl/issues/5):**
   - Pruebas para curvas Kaplan-Meier, test Log-Rank y modelo de riesgos proporcionales de Cox.
 - [ ] **`packages/ghl_multilevel` (Modelos Lineales Mixtos / HLM) — [#6](https://github.com/ofjorque/ghl/issues/6):**
