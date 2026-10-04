@@ -1,0 +1,26 @@
+// packages/ghl_db/src/lib.gh
+// Canonical entrypoint for ghl_db: Analytical SQL & Database Connectors
+
+use connection
+use sql
+use cockpit
+
+/// Connects to a database engine (SQLite or DuckDB/Memory).
+fn db_open(driver: String, uri: String) -> Record {
+    connect(driver, uri)
+}
+
+/// Connects to an in-memory SQLite database.
+fn db_open_sqlite() -> Record {
+    connect_sqlite_memory()
+}
+
+/// Connects to an in-memory DuckDB analytical engine.
+fn db_open_duckdb() -> Record {
+    connect_duckdb_memory()
+}
+
+/// Closes an open database connection.
+fn db_close(conn: Record) -> bool {
+    disconnect(conn)
+}

@@ -1026,6 +1026,7 @@ impl TypeEnv {
             "normal", "student_t", "fisher_f", "chisq", "gamma_dist", "beta_dist",
             "uniform", "exponential", "binomial", "poisson_dist",
             "conf_int", "p_value", "z_test_one_sample", "cor_test",
+            "db_connect", "db_disconnect", "db_execute", "db_query", "db_register", "db_tables", "query_sql",
         ] {
             env.insert(
                 name.into(),

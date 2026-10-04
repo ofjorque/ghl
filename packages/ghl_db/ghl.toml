@@ -1,0 +1,7 @@
+[package]
+name = "ghl_db"
+version = "0.1.0"
+authors = ["GHL Authors <dev@ghl-lang.org>"]
+description = "Analytical SQL connector for DuckDB and SQLite with zero-copy DataFrame virtual tables and NA provenance"
+edition = "2026"
+license = "MIT OR Apache-2.0"

@@ -47,6 +47,7 @@ pub mod feols;
 pub mod iv;
 pub mod regularized;
 pub mod cockpit;
+pub mod native_db;
 
 pub use value::{Value, JitFunction, FormulaParts};
 pub use feols::{fit_feols, FeolsVcovSpec};

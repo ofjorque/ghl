@@ -1,0 +1,50 @@
+// packages/ghl_db/src/connection.gh
+// Lifecycle and operations for SQLite and DuckDB connections
+
+/// Connects to a database engine.
+///
+/// Supported drivers:
+/// - "sqlite": Embedded relational database (OLTP). In-memory with ":memory:" or file-backed.
+/// - "duckdb" / "memory": High-performance columnar analytical engine (OLAP).
+fn connect(driver: String, uri: String) -> Record {
+    db_connect(driver, uri)
+}
+
+/// Connects to an in-memory SQLite database.
+fn connect_sqlite_memory() -> Record {
+    db_connect("sqlite", ":memory:")
+}
+
+/// Connects to an in-memory DuckDB analytical engine.
+fn connect_duckdb_memory() -> Record {
+    db_connect("duckdb", ":memory:")
+}
+
+/// Closes an open database connection.
+fn disconnect(conn: Record) -> bool {
+    db_disconnect(conn)
+}
+
+/// Executes a DDL or DML statement (CREATE TABLE, INSERT, UPDATE, DELETE).
+/// Returns the number of rows affected (i64).
+fn execute(conn: Record, sql_str: String) -> i64 {
+    db_execute(conn, sql_str)
+}
+
+/// Executes a SQL query and returns the results as a GHL DataFrame.
+/// Automatically maps database NULL values to GHL NA values with reason "db.null".
+fn query(conn: Record, sql_str: String) -> DataFrame {
+    db_query(conn, sql_str)
+}
+
+/// Registers an existing GHL DataFrame as a named table in the database.
+/// For SQLite: bulk-inserts the DataFrame into a new table.
+/// For DuckDB/Memory: registers the DataFrame as a zero-copy virtual table.
+fn register(conn: Record, table_name: String, df: DataFrame) -> bool {
+    db_register(conn, table_name, df)
+}
+
+/// Lists all table names available in the connected database.
+fn tables(conn: Record) -> Vector {
+    db_tables(conn)
+}

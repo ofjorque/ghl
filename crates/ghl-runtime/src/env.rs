@@ -304,6 +304,15 @@ impl RuntimeEnv {
         env.set("row_mins".into(), Value::NativeFn(native_row_mins));
         env.set("col_mins".into(), Value::NativeFn(native_col_mins));
 
+        // Database & Analytical SQL Engine (Issue #10)
+        env.set("db_connect".into(), Value::NativeFn(crate::native_db::native_db_connect));
+        env.set("db_disconnect".into(), Value::NativeFn(crate::native_db::native_db_disconnect));
+        env.set("db_execute".into(), Value::NativeFn(crate::native_db::native_db_execute));
+        env.set("db_query".into(), Value::NativeFn(crate::native_db::native_db_query));
+        env.set("db_register".into(), Value::NativeFn(crate::native_db::native_db_register));
+        env.set("db_tables".into(), Value::NativeFn(crate::native_db::native_db_tables));
+        env.set("query_sql".into(), Value::NativeFn(crate::native_db::native_query_sql));
+
         // Grammar of Graphics (RFC 16) Verbs
         env.set("plot".into(), Value::NativeFn(native_plot));
         env.set("ggplot".into(), Value::NativeFn(native_plot));

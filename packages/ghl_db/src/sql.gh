@@ -1,0 +1,22 @@
+// packages/ghl_db/src/sql.gh
+// High-level zero-copy analytical SQL over DataFrames
+
+/// Executes an ANSI SQL query over a collection of in-memory DataFrames without copying.
+///
+/// Example:
+/// ```ghl
+/// let res = sql("SELECT dept, AVG(salary) AS mean_sal FROM emps GROUP BY dept", { emps: df_employees });
+/// ```
+fn sql(sql_query: String, tables: Record) -> DataFrame {
+    query_sql(sql_query, tables)
+}
+
+/// Executes an ANSI SQL query directly over a single DataFrame (registered under table name `df`).
+///
+/// Example:
+/// ```ghl
+/// let high_earners = sql_df("SELECT * FROM df WHERE salary > 100000 ORDER BY salary DESC", df_employees);
+/// ```
+fn sql_df(sql_query: String, df: DataFrame) -> DataFrame {
+    query_sql(sql_query, { df: df })
+}

@@ -1,0 +1,150 @@
+// packages/ghl_db/tests/db_test.gh
+// End-to-end test suite for ghl_db (SQLite & DuckDB / Analytical SQL)
+
+fn test_sqlite_in_memory_pipeline() {
+    println("--- Testing SQLite in-memory lifecycle ---");
+    let conn = db_connect("sqlite", ":memory:");
+    assert(conn.is_connected, "Database should be connected");
+    assert(conn.driver == "sqlite", "Driver should be sqlite");
+
+    // 1. Create table
+    let ddl = "CREATE TABLE students (id INTEGER PRIMARY KEY, name TEXT, gpa REAL, graduated INTEGER)";
+    let exec_res = db_execute(conn, ddl);
+    assert(exec_res >= 0, "CREATE TABLE should succeed");
+
+    // 2. Insert records including a NULL value
+    let insert_sql = "INSERT INTO students (name, gpa, graduated) VALUES ('Alice', 3.9, 1), ('Bob', NULL, 0), ('Charlie', 3.4, 1)";
+    let rows_inserted = db_execute(conn, insert_sql);
+    println("Rows inserted: ", rows_inserted);
+
+    // 3. Query records
+    let df_students = db_query(conn, "SELECT * FROM students ORDER BY id ASC");
+    println("Queried students DataFrame rows: ", nrow(df_students));
+    assert(nrow(df_students) == 3, "Should return 3 student rows");
+
+    // 4. Verify NA mapping on NULL
+    let gpa_col = pull(df_students, "gpa");
+    assert(is_na(gpa_col[1]), "Bob's GPA should be NA because it was NULL in SQLite");
+    assert(!is_na(gpa_col[0]), "Alice's GPA should not be NA");
+    assert(!is_na(gpa_col[2]), "Charlie's GPA should not be NA");
+
+    // 5. Check table list
+    let tbls = db_tables(conn);
+    println("Tables in database: ", tbls);
+    assert(length(tbls) == 1, "Should have 1 table");
+    assert(tbls[0] == "students", "Table name should be students");
+
+    // 6. Clean disconnect
+    let closed = db_disconnect(conn);
+    assert(closed, "Disconnect should return true");
+    println("SQLite pipeline passed successfully!");
+}
+
+fn test_zero_copy_analytical_sql() {
+    println("--- Testing Zero-Copy Analytical SQL (query_sql) ---");
+    let df_sales = dataframe {
+        region: ["North", "South", "North", "East", "South", "North"],
+        product: ["Widget", "Gadget", "Widget", "Widget", "Gadget", "Gadget"],
+        revenue: [120.0, 85.5, 210.0, 95.0, 115.0, 150.0],
+        units: [10, 5, 15, 8, 10, 12]
+    };
+
+    let sql_query = "
+        SELECT 
+            region, 
+            COUNT(*) AS transaction_count, 
+            SUM(revenue) AS total_revenue, 
+            AVG(revenue) AS mean_revenue,
+            SUM(units) AS total_units
+        FROM sales 
+        WHERE revenue > 90.0
+        GROUP BY region 
+        ORDER BY total_revenue DESC
+    ";
+
+    let df_res = query_sql(sql_query, { sales: df_sales });
+    println("Analytical SQL result rows: ", nrow(df_res));
+    assert(nrow(df_res) >= 2, "Should group by regions with revenue > 90");
+
+    let reg_col = pull(df_res, "region");
+    println("Top revenue region: ", reg_col[0]);
+    assert(reg_col[0] == "North", "North should be top revenue region");
+
+    println("Zero-copy analytical SQL passed successfully!");
+}
+
+fn test_multi_table_sql_join() {
+    println("--- Testing Multi-Table SQL JOIN ---");
+    let df_customers = dataframe {
+        cust_id: [1, 2, 3],
+        name: ["Alice", "Bob", "Charlie"]
+    };
+
+    let df_orders = dataframe {
+        order_id: [101, 102, 103, 104],
+        cust_id: [1, 2, 1, 3],
+        amount: [250.0, 120.0, 310.0, 80.0]
+    };
+
+    let join_sql = "
+        SELECT 
+            c.name, 
+            COUNT(o.order_id) AS total_orders, 
+            SUM(o.amount) AS total_spent 
+        FROM customers c 
+        JOIN orders o ON c.cust_id = o.cust_id 
+        GROUP BY c.name 
+        ORDER BY total_spent DESC
+    ";
+
+    let df_joined = query_sql(join_sql, { customers: df_customers, orders: df_orders });
+    println("Joined DataFrame rows: ", nrow(df_joined));
+    assert(nrow(df_joined) == 3, "Should aggregate all 3 customers");
+
+    let names = pull(df_joined, "name");
+    assert(names[0] == "Alice", "Alice should have the highest total spent (250 + 310 = 560)");
+
+    println("Multi-table SQL JOIN passed successfully!");
+}
+
+fn test_dataframe_registration_to_sqlite() {
+    println("--- Testing DataFrame Registration into SQLite ---");
+    let conn = db_connect("sqlite", ":memory:");
+
+    let df_metrics = dataframe {
+        id: [1, 2, 3, 4],
+        sensor: ["alpha", "beta", "gamma", "delta"],
+        reading: [23.4, 45.1, 12.8, 89.2],
+        is_active: [true, true, false, true]
+    };
+
+    // Register dataframe as SQLite table
+    let reg_ok = db_register(conn, "sensors", df_metrics);
+    assert(reg_ok, "Register should succeed");
+
+    // Query back from SQLite with filter
+    let df_active = db_query(conn, "SELECT sensor, reading FROM sensors WHERE is_active = 1 ORDER BY reading DESC");
+    println("Active sensors rows: ", nrow(df_active));
+    assert(nrow(df_active) == 3, "Should return 3 active sensors");
+
+    let top_sensor = pull(df_active, "sensor");
+    assert(top_sensor[0] == "delta", "Delta should have highest reading");
+
+    db_disconnect(conn);
+    println("DataFrame registration into SQLite passed successfully!");
+}
+
+fn main() {
+    println("=================================================");
+    println("  Running ghl_db Test Suite                      ");
+    println("=================================================");
+    test_sqlite_in_memory_pipeline();
+    test_zero_copy_analytical_sql();
+    test_multi_table_sql_join();
+    test_dataframe_registration_to_sqlite();
+    println("=================================================");
+    println("  All ghl_db tests PASSED successfully!          ");
+    println("=================================================");
+}
+
+main();

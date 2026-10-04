@@ -1,0 +1,31 @@
+// packages/ghl_db/src/cockpit.gh
+// Terminal Cockpit Deck UI Panels for Database Introspection
+
+fn print_db_separator() {
+    println("├──────────────────────────────────────────────────────────────────────────────┤");
+}
+
+/// Renders a formatted Cockpit Deck card displaying active database connection status and tables.
+fn db_cockpit(conn: Record) {
+    let status_badge = if conn.is_connected {
+        "/ᐠ˵- ⩊ -˵マ ✧ CONNECTED"
+    } else {
+        "≽(◉˕ ◉ ≼マ CLOSED"
+    };
+
+    println("╭─ ghl_db Engine ─────────────────────────────────── ", status_badge, " ─╮");
+    println("│ Driver:     ", conn.driver);
+    println("│ URI:        ", conn.uri);
+    println("│ Handle ID:  ", conn.id);
+    print_db_separator();
+    println("│ Tables in Database:                                                          │");
+    let tbls = db_tables(conn);
+    if length(tbls) == 0 {
+        println("│   (No tables registered)                                                     │");
+    } else {
+        for i in 0..length(tbls) {
+            println("│   [", i + 1, "] ", tbls[i]);
+        }
+    }
+    println("╰──────────────────────────────────────────────────────────────────────────────╯");
+}
