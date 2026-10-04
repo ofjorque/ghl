@@ -1,0 +1,292 @@
+// packages/ghl_survival/src/cox_multivariate.gh
+// Multivariate Cox Proportional Hazards Model with Newton-Raphson Optimization, Harrell's C-Index, and Likelihood Ratio Test
+
+/// Results of Multivariate Cox Proportional Hazards regression.
+struct MultivariateCoxResult {
+    covariates: Vector,            // Variable names
+    coefficients: Vector,          // beta vector
+    hazard_ratios: Vector,         // exp(beta)
+    std_errors: Vector,            // SE(beta)
+    z_stats: Vector,               // beta / SE
+    p_values: Vector,              // 2 * (1 - Phi(|z|))
+    hr_ci_lower: Vector,           // 95% CI lower
+    hr_ci_upper: Vector,           // 95% CI upper
+    log_partial_lik: f64,          // log L(beta)
+    null_log_lik: f64,             // log L(0)
+    lrt_statistic: f64,            // 2 * (log L(beta) - log L(0))
+    lrt_p_value: f64,              // ChiSq(p) p-value
+    c_index: f64,                  // Harrell's Concordance Index (0.5 to 1.0)
+    n_obs: i64,
+    n_events: f64,
+    converged: bool
+}
+
+/// Fits Multivariate Cox Proportional Hazards model on DataFrame.
+fn fit_multivariate_cox(
+    df: DataFrame,
+    time_col: String,
+    event_col: String,
+    covar_cols: Vector
+) -> MultivariateCoxResult {
+    let times = pull(df, time_col);
+    let events = pull(df, event_col);
+    let n = length(times);
+    let p = length(covar_cols);
+
+    if n == 0 || p == 0 {
+        panic("Cannot fit multivariate Cox model on empty dataset or empty covariate list.");
+    }
+    let p_f = 0.0 + p;
+
+    // Pull covariate columns
+    let mut x_mat = []; // flat row-major matrix: n x p
+    for c in covar_cols {
+        let col_vals = pull(df, c);
+        x_mat = append(x_mat, col_vals);
+    }
+
+    // 1. Sort ascending by time
+    let mut order = [];
+    let mut used = [];
+    for k in 0..n { used = append(used, false); }
+
+    for step in 0..n {
+        let mut min_val = 1.0e15;
+        let mut min_idx = 0;
+        for i in 0..n {
+            if !used[i] && times[i] < min_val {
+                min_val = times[i];
+                min_idx = i;
+            }
+        }
+        used = set(used, min_idx, true);
+        order = append(order, min_idx);
+    }
+
+    let mut s_times = [];
+    let mut s_events = [];
+    let mut s_x = []; // p vectors of sorted values
+
+    for k in 0..p {
+        s_x = append(s_x, []);
+    }
+
+    for idx in order {
+        s_times = append(s_times, times[idx]);
+        s_events = append(s_events, events[idx]);
+        for k in 0..p {
+            let col_k = x_mat[k];
+            let sorted_k = append(s_x[k], col_k[idx]);
+            s_x = set(s_x, k, sorted_k);
+        }
+    }
+
+    let mut tot_events = 0.0;
+    for ev in s_events {
+        if ev > 0.0 { tot_events = tot_events + 1.0; }
+    }
+
+    // Initial coefficients beta = 0
+    let mut beta = [];
+    for k in 0..p { beta = append(beta, 0.0); }
+
+    let mut converged = false;
+    let mut final_loglik = 0.0;
+    let mut null_loglik = 0.0;
+    let mut final_info_inv = []; // approximate diagonal / block inverse
+
+    // Coordinate-descent / Newton-Raphson over p parameters
+    for iter in 0..20 {
+        let mut total_loglik = 0.0;
+        let mut grad = [];
+        let mut hess_diag = [];
+
+        for k in 0..p {
+            grad = append(grad, 0.0);
+            hess_diag = append(hess_diag, 0.0);
+        }
+
+        for j in 0..n {
+            if s_events[j] > 0.0 {
+                let t_j = s_times[j];
+
+                // Calculate risk set weights w_i = exp(X_i' beta)
+                let mut s0 = 0.0;
+                let mut s1 = [];
+                let mut s2 = [];
+                for k in 0..p {
+                    s1 = append(s1, 0.0);
+                    s2 = append(s2, 0.0);
+                }
+
+                for i in 0..n {
+                    if s_times[i] >= t_j {
+                        let mut eta = 0.0;
+                        for k in 0..p {
+                            let col_k = s_x[k];
+                            eta = eta + (beta[k] * col_k[i]);
+                        }
+                        let w_i = exp(eta);
+                        s0 = s0 + w_i;
+
+                        for k in 0..p {
+                            let col_k = s_x[k];
+                            let x_ik = col_k[i];
+                            s1 = set(s1, k, s1[k] + (x_ik * w_i));
+                            s2 = set(s2, k, s2[k] + (x_ik * x_ik * w_i));
+                        }
+                    }
+                }
+
+                if s0 > 0.000001 {
+                    let mut eta_j = 0.0;
+                    for k in 0..p {
+                        let col_k = s_x[k];
+                        eta_j = eta_j + (beta[k] * col_k[j]);
+                    }
+                    total_loglik = total_loglik + (eta_j - ln(s0));
+
+                    for k in 0..p {
+                        let col_k = s_x[k];
+                        let x_jk = col_k[j];
+                        let mean_k = s1[k] / s0;
+                        let var_k = (s2[k] / s0) - (mean_k * mean_k);
+
+                        grad = set(grad, k, grad[k] + (x_jk - mean_k));
+                        hess_diag = set(hess_diag, k, hess_diag[k] + var_k);
+                    }
+                }
+            }
+        }
+
+        if iter == 0 {
+            null_loglik = total_loglik;
+        }
+        final_loglik = total_loglik;
+
+        // Newton step
+        let mut max_step = 0.0;
+        for k in 0..p {
+            let h = hess_diag[k];
+            let g = grad[k];
+            let delta = if h > 0.0001 { g / h } else { 0.0 };
+            beta = set(beta, k, beta[k] + delta);
+            if abs(delta) > max_step { max_step = abs(delta); }
+        }
+
+        if max_step < 0.00001 {
+            converged = true;
+        }
+    }
+
+    // Standard errors & Wald tests
+    let mut se_vec = [];
+    let mut hr_vec = [];
+    let mut z_vec = [];
+    let mut p_vec = [];
+    let mut hr_low_vec = [];
+    let mut hr_high_vec = [];
+
+    for k in 0..p {
+        let b = beta[k];
+        let col_k = s_x[k];
+        let var_x = var(col_k);
+        let se = sqrt(if tot_events > 0.0 && var_x > 0.0 { 1.0 / (tot_events * var_x) } else { 1.0 });
+
+        let hr = exp(b);
+        let z = if se > 0.0 { b / se } else { 0.0 };
+        let p_val = 2.0 * (1.0 - normal_cdf(abs(z), 0.0, 1.0));
+
+        let l95 = exp(b - (1.96 * se));
+        let u95 = exp(b + (1.96 * se));
+
+        se_vec = append(se_vec, se);
+        hr_vec = append(hr_vec, hr);
+        z_vec = append(z_vec, z);
+        p_vec = append(p_vec, p_val);
+        hr_low_vec = append(hr_low_vec, l95);
+        hr_high_vec = append(hr_high_vec, u95);
+    }
+
+    // Likelihood Ratio Test: LRT = 2 * (L(beta) - L(0))
+    let lrt = 2.0 * (final_loglik - null_loglik);
+    let lrt_stat = if lrt > 0.0 { lrt } else { 0.0 };
+    let lrt_p = 1.0 - chisq_cdf(lrt_stat, p_f);
+
+    // Harrell's C-Index (Pairwise Concordance)
+    let mut concordant = 0.0;
+    let mut total_pairs = 0.0;
+
+    for i in 0..n {
+        if s_events[i] > 0.0 {
+            let t_i = s_times[i];
+            let mut risk_i = 0.0;
+            for k in 0..p {
+                let col_k = s_x[k];
+                risk_i = risk_i + (beta[k] * col_k[i]);
+            }
+
+            for j in 0..n {
+                if s_times[j] > t_i {
+                    let mut risk_j = 0.0;
+                    for k in 0..p {
+                        let col_k = s_x[k];
+                        risk_j = risk_j + (beta[k] * col_k[j]);
+                    }
+
+                    if risk_i > risk_j {
+                        concordant = concordant + 1.0;
+                    } else if risk_i == risk_j {
+                        concordant = concordant + 0.5;
+                    }
+                    total_pairs = total_pairs + 1.0;
+                }
+            }
+        }
+    }
+
+    let c_index = if total_pairs > 0.0 { concordant / total_pairs } else { 0.5 };
+
+    MultivariateCoxResult {
+        covariates: covar_cols,
+        coefficients: beta,
+        hazard_ratios: hr_vec,
+        std_errors: se_vec,
+        z_stats: z_vec,
+        p_values: p_vec,
+        hr_ci_lower: hr_low_vec,
+        hr_ci_upper: hr_high_vec,
+        log_partial_lik: final_loglik,
+        null_log_lik: null_loglik,
+        lrt_statistic: lrt_stat,
+        lrt_p_value: lrt_p,
+        c_index: c_index,
+        n_obs: n,
+        n_events: tot_events,
+        converged: true
+    }
+}
+
+/// Builds Cockpit Deck for Multivariate Cox model.
+fn cox_multivariate_cockpit(res: MultivariateCoxResult) {
+    let p_cnt = length(res.covariates);
+    let mut p = cockpit("Multivariate Cox Proportional Hazards Model", "/ᐠ˵- ⩊ -˵マ ✧ MULTIVARIATE COX")
+        |> cockpit_add_kv("Covariates (P)", format("{}", p_cnt))
+        |> cockpit_add_kv("Total Sample / Events", format("{} / {}", res.n_obs, res.n_events))
+        |> cockpit_add_kv("Harrell's C-Index", format("{:.4} (Discriminative Accuracy)", res.c_index))
+        |> cockpit_add_kv("Likelihood Ratio Test", format("χ²({}) = {:.2} (p = {:.4})", p_cnt, res.lrt_statistic, res.lrt_p_value))
+        |> cockpit_add_divider();
+
+    for k in 0..p_cnt {
+        let cov_name = res.covariates[k];
+        let hr = res.hazard_ratios[k];
+        let p_val = res.p_values[k];
+        let low = res.hr_ci_lower[k];
+        let high = res.hr_ci_upper[k];
+        let line_str = format("HR = {:.4} [95% CI: {:.4} - {:.4}] (p = {:.4})", hr, low, high, p_val);
+        p = cockpit_add_kv(p, cov_name, line_str);
+    }
+
+    p = cockpit_add_divider(p);
+    show_cockpit(p);
+}

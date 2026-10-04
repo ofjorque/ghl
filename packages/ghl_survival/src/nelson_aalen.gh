@@ -1,0 +1,143 @@
+// packages/ghl_survival/src/nelson_aalen.gh
+// Nelson-Aalen Non-Parametric Cumulative Hazard Estimator with Variance & Cockpit Telemetry
+
+/// Results of Nelson-Aalen cumulative hazard estimation.
+struct NelsonAalenResult {
+    timeline: Vector,              // Unique event times
+    cumulative_hazard: Vector,     // H(t) = sum_{t_i <= t} (d_i / n_i)
+    variance: Vector,              // Var(H(t)) = sum (d_i / n_i^2)
+    std_err: Vector,               // sqrt(Var)
+    ci_lower: Vector,              // H(t) * exp(-1.96 * se / H) or max(0, H - 1.96 * se)
+    ci_upper: Vector,
+    implied_survival: Vector,      // S_NA(t) = exp(-H(t))
+    n_total: i64,
+    n_events: f64
+}
+
+/// Fits the Nelson-Aalen non-parametric cumulative hazard estimator.
+fn fit_nelson_aalen(times: Vector, events: Vector) -> NelsonAalenResult {
+    let n = length(times);
+    if n == 0 {
+        return NelsonAalenResult {
+            timeline: [],
+            cumulative_hazard: [],
+            variance: [],
+            std_err: [],
+            ci_lower: [],
+            ci_upper: [],
+            implied_survival: [],
+            n_total: 0,
+            n_events: 0.0
+        };
+    }
+
+    // 1. Sort indices ascending by time
+    let mut order = [];
+    let mut used = [];
+    for k in 0..n {
+        used = append(used, false);
+    }
+    for step in 0..n {
+        let mut min_val = 1.0e15;
+        let mut min_idx = 0;
+        for i in 0..n {
+            if !used[i] && times[i] < min_val {
+                min_val = times[i];
+                min_idx = i;
+            }
+        }
+        used = set(used, min_idx, true);
+        order = append(order, min_idx);
+    }
+
+    let mut s_times = [];
+    let mut s_events = [];
+    for idx in order {
+        s_times = append(s_times, times[idx]);
+        s_events = append(s_events, events[idx]);
+    }
+
+    // 2. Accumulate Nelson-Aalen jumps
+    let mut timeline = [];
+    let mut cum_hazard = [];
+    let mut var_hazard = [];
+    let mut se_hazard = [];
+    let mut ci_low = [];
+    let mut ci_high = [];
+    let mut surv_implied = [];
+
+    let mut n_at_risk = 0.0 + n;
+    let mut h_acc = 0.0;
+    let mut var_acc = 0.0;
+    let mut tot_events = 0.0;
+
+    let mut i = 0;
+    while i < n {
+        let t_curr = s_times[i];
+        let mut d_curr = 0.0;
+        let mut c_curr = 0.0;
+        let mut same_time = true;
+
+        while i < n && same_time {
+            if s_times[i] == t_curr {
+                if s_events[i] > 0.0 {
+                    d_curr = d_curr + 1.0;
+                } else {
+                    c_curr = c_curr + 1.0;
+                }
+                i = i + 1;
+            } else {
+                same_time = false;
+            }
+        }
+
+        tot_events = tot_events + d_curr;
+
+        if d_curr > 0.0 && n_at_risk > 0.0 {
+            let jump = d_curr / n_at_risk;
+            h_acc = h_acc + jump;
+            var_acc = var_acc + (d_curr / (n_at_risk * n_at_risk));
+
+            let se = sqrt(var_acc);
+            let low = if (h_acc - (1.96 * se)) > 0.0 { h_acc - (1.96 * se) } else { 0.0 };
+            let high = h_acc + (1.96 * se);
+            let s_t = exp(0.0 - h_acc);
+
+            timeline = append(timeline, t_curr);
+            cum_hazard = append(cum_hazard, h_acc);
+            var_hazard = append(var_hazard, var_acc);
+            se_hazard = append(se_hazard, se);
+            ci_low = append(ci_low, low);
+            ci_high = append(ci_high, high);
+            surv_implied = append(surv_implied, s_t);
+        }
+
+        n_at_risk = n_at_risk - (d_curr + c_curr);
+    }
+
+    NelsonAalenResult {
+        timeline: timeline,
+        cumulative_hazard: cum_hazard,
+        variance: var_hazard,
+        std_err: se_hazard,
+        ci_lower: ci_low,
+        ci_upper: ci_high,
+        implied_survival: surv_implied,
+        n_total: n,
+        n_events: tot_events
+    }
+}
+
+/// Builds Cockpit Deck for Nelson-Aalen cumulative hazard.
+fn nelson_aalen_cockpit(res: NelsonAalenResult) {
+    let n_steps = length(res.cumulative_hazard);
+    let final_h = if n_steps > 0 { res.cumulative_hazard[n_steps - 1] } else { 0.0 };
+
+    let p = cockpit("Nelson-Aalen Cumulative Hazard Estimator", "/ᐠ˵- ⩊ -˵マ ✧ CUMULATIVE HAZARD")
+        |> cockpit_add_kv("Total Observations", format("{}", res.n_total))
+        |> cockpit_add_kv("Total Events", format("{}", res.n_events))
+        |> cockpit_add_kv("Terminal Cumulative Hazard H(t)", format("{:.4}", final_h))
+        |> cockpit_add_divider();
+
+    show_cockpit(p);
+}

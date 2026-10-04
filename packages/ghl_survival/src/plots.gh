@@ -1,0 +1,43 @@
+// packages/ghl_survival/src/plots.gh
+// Publication-Quality Grammar of Graphics Visualizations for Survival Analysis
+
+/// Generates a Publication-Quality Kaplan-Meier Survival Curve Plot.
+fn plot_km_curve(km: KMResult) -> Plot {
+    let df_km = dataframe {
+        time: km.timeline,
+        survival: km.survival,
+        lower: km.ci_lower,
+        upper: km.ci_upper
+    };
+
+    df_km |> plot(aes(col("time"), col("survival")))
+          |> geom_line()
+          |> geom_point()
+          |> labs("Kaplan-Meier Non-Parametric Survival Probability S(t)")
+}
+
+/// Generates a Cumulative Hazard Function Plot from Nelson-Aalen estimation.
+fn plot_cumulative_hazard(na: NelsonAalenResult) -> Plot {
+    let df_na = dataframe {
+        time: na.timeline,
+        hazard: na.cumulative_hazard
+    };
+
+    df_na |> plot(aes(col("time"), col("hazard")))
+          |> geom_line()
+          |> labs("Nelson-Aalen Cumulative Hazard Function H(t)")
+}
+
+/// Generates a Forest Plot comparing Multivariate Cox Hazard Ratios with 95% Confidence Intervals.
+fn plot_hazard_ratios(cox: MultivariateCoxResult) -> Plot {
+    let df_forest = dataframe {
+        covariate: cox.covariates,
+        hazard_ratio: cox.hazard_ratios,
+        ci_lower: cox.hr_ci_lower,
+        ci_upper: cox.hr_ci_upper
+    };
+
+    df_forest |> plot(aes(col("covariate"), col("hazard_ratio")))
+              |> geom_point()
+              |> labs("Multivariate Cox Proportional Hazards: Adjusted Hazard Ratios (95% CI)")
+}

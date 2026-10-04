@@ -1,0 +1,105 @@
+{
+  "timestamp": "2026-10-03 23:25:00",
+  "package": "ghl_survival",
+  "milestone": "v0.2.0",
+  "github_issue": 5,
+  "environment": {
+    "ghl_edition": "2026",
+    "compiler": "cranelift-jit",
+    "os": "windows-x86_64"
+  },
+  "references": {
+    "r": {
+      "packages": ["survival 3.5-8", "survminer 0.4.9"]
+    },
+    "python": {
+      "packages": ["lifelines 0.28.0", "scikit-survival 0.22.2"]
+    },
+    "julia": {
+      "packages": ["Survival.jl 0.3.0"]
+    }
+  },
+  "table": [
+    {
+      "method": "Kaplan-Meier Median Survival Time",
+      "ghl_val": 32.0,
+      "r_val": 32.0,
+      "python_val": 32.0,
+      "julia_val": 32.0,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Kaplan-Meier Greenwood Standard Error (t=25)",
+      "ghl_val": 0.1658,
+      "r_val": 0.1658,
+      "python_val": 0.1658,
+      "julia_val": 0.1659,
+      "delta": 0.0001,
+      "status": "Concordant"
+    },
+    {
+      "method": "Two-Sample Log-Rank Chi-Square (1 df)",
+      "ghl_val": 6.1315,
+      "r_val": 6.1315,
+      "python_val": 6.1315,
+      "julia_val": 6.1312,
+      "delta": 0.0003,
+      "status": "Concordant"
+    },
+    {
+      "method": "Log-Rank p-value",
+      "ghl_val": 0.0133,
+      "r_val": 0.0133,
+      "python_val": 0.0133,
+      "julia_val": 0.0133,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Nelson-Aalen Cumulative Hazard H(t=25)",
+      "ghl_val": 0.4952,
+      "r_val": 0.4952,
+      "python_val": 0.4952,
+      "julia_val": 0.4951,
+      "delta": 0.0001,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Multivariate Cox Harrell C-Index",
+      "ghl_val": 0.7619,
+      "r_val": 0.7619,
+      "python_val": 0.7619,
+      "julia_val": null,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Multivariate Cox Global LRT Chi-Square",
+      "ghl_val": 8.421,
+      "r_val": 8.421,
+      "python_val": 8.4208,
+      "julia_val": null,
+      "delta": 0.0002,
+      "status": "Concordant"
+    },
+    {
+      "method": "Schoenfeld Residuals PH Test (Treatment)",
+      "ghl_val": 0.124,
+      "r_val": 0.1242,
+      "python_val": 0.1239,
+      "julia_val": null,
+      "delta": 0.0003,
+      "status": "Concordant"
+    },
+    {
+      "method": "Weibull AFT Shape Parameter (gamma)",
+      "ghl_val": 1.2835,
+      "r_val": 1.2835,
+      "python_val": 1.2835,
+      "julia_val": 1.2831,
+      "delta": 0.0004,
+      "status": "Concordant"
+    }
+  ]
+}

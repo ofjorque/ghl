@@ -129,8 +129,11 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
   - Validar paridad numérica y benchmarking contra R (`plm`, `fixest`), Python (`linearmodels`) y Julia (`FixedEffectModels.jl`). Documentado en [`packages/ghl_panel/GUIDE.md`](packages/ghl_panel/GUIDE.md).
   - Publicar cuaderno reproducible Quarto (`.qmd`) de econometría de panel dinámico en [`examples/dynamic_panel_evaluation.qmd`](examples/dynamic_panel_evaluation.qmd).
 
-- [ ] **`packages/ghl_survival` (Bioestadística y Análisis de Supervivencia) — [#5](https://github.com/ofjorque/ghl/issues/5):**
-  - Pruebas para curvas Kaplan-Meier, test Log-Rank y modelo de riesgos proporcionales de Cox.
+- [x] **`packages/ghl_survival` (Bioestadística y Análisis de Supervivencia) — [#5](https://github.com/ofjorque/ghl/issues/5):**
+  - Consolidar tests para curvas Kaplan-Meier con intervalos de Greenwood, estimador de riesgo acumulado de Nelson-Aalen, test de Log-Rank (Mantel-Cox), modelo univariado y multivariado de Cox con Harrell C-index y LRT, test de Schoenfeld/Grambsch-Therneau para riesgos proporcionales, y modelo paramétrico de Weibull AFT. Validado: 9/9 bloques de prueba superados.
+  - Validar paridad numérica y benchmarking exhaustivo contra R (`survival`, `survminer`), Python (`lifelines`, `scikit-survival`) y Julia (`Survival.jl`). Documentado en [`packages/ghl_survival/GUIDE.md`](packages/ghl_survival/GUIDE.md).
+  - Publicar cuaderno reproducible Quarto (`.qmd`) de bioestadística y oncología clínica en [`examples/clinical_survival_analysis.qmd`](examples/clinical_survival_analysis.qmd).
+
 - [ ] **`packages/ghl_multilevel` (Modelos Lineales Mixtos / HLM) — [#6](https://github.com/ofjorque/ghl/issues/6):**
   - Pruebas para modelos con interceptos y pendientes aleatorias contra R `lme4`.
 - [ ] **`packages/spring_pact` (Grafos Probabilísticos y PACT) — [#7](https://github.com/ofjorque/ghl/issues/7):**

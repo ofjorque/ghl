@@ -1,0 +1,122 @@
+// packages/ghl_survival/src/ph_diagnostics.gh
+// Proportional Hazards Assumption Testing: Schoenfeld Residuals & Grambsch-Therneau Test
+
+/// Results of Proportional Hazards diagnostic test for each covariate.
+struct PhDiagnosticsResult {
+    covariates: Vector,
+    rho_correlations: Vector,      // Correlation between Schoenfeld residuals and time
+    chisq_stats: Vector,           // Grambsch-Therneau ChiSq(1) test statistics
+    p_values: Vector,              // p-values for each covariate
+    global_chisq: f64,             // Global omnibus test statistic
+    global_p_value: f64,           // Global p-value
+    ph_holds_globally: bool        // True if global_p_value >= 0.05 (PH holds)
+}
+
+/// Tests the Proportional Hazards assumption using Schoenfeld residuals.
+fn test_proportional_hazards(
+    df: DataFrame,
+    time_col: String,
+    event_col: String,
+    cox_res: MultivariateCoxResult
+) -> PhDiagnosticsResult {
+    let times = pull(df, time_col);
+    let events = pull(df, event_col);
+    let n = length(times);
+    let p = length(cox_res.covariates);
+
+    let mut rhos = [];
+    let mut chisqs = [];
+    let mut p_vals = [];
+    let mut global_stat = 0.0;
+
+    for k in 0..p {
+        let col_name = cox_res.covariates[k];
+        let x_k = pull(df, col_name);
+
+        // Compute Schoenfeld residuals for observed events
+        let mut event_times = [];
+        let mut schoenfeld_res = [];
+        let mean_xk = mean(x_k);
+
+        for i in 0..n {
+            if events[i] > 0.0 {
+                let t_i = times[i];
+                let r_i = x_k[i] - mean_xk;
+                event_times = append(event_times, t_i);
+                schoenfeld_res = append(schoenfeld_res, r_i);
+            }
+        }
+
+        let n_ev = length(event_times);
+        let n_ev_f = 0.0 + n_ev;
+
+        // Correlation between event_times and schoenfeld_res
+        let m_t = mean(event_times);
+        let m_r = mean(schoenfeld_res);
+
+        let mut cov_tr = 0.0;
+        let mut var_t = 0.0;
+        let mut var_r = 0.0;
+
+        for i in 0..n_ev {
+            let dt = event_times[i] - m_t;
+            let dr = schoenfeld_res[i] - m_r;
+            cov_tr = cov_tr + (dt * dr);
+            var_t = var_t + (dt * dt);
+            var_r = var_r + (dr * dr);
+        }
+
+        let denom = sqrt(var_t * var_r);
+        let rho = if denom > 0.0000001 { cov_tr / denom } else { 0.0 };
+
+        // Grambsch-Therneau test: chi^2 = n_ev * rho^2
+        let stat = n_ev_f * (rho * rho);
+        let p_val = 1.0 - chisq_cdf(stat, 1.0);
+
+        rhos = append(rhos, rho);
+        chisqs = append(chisqs, stat);
+        p_vals = append(p_vals, p_val);
+        global_stat = global_stat + stat;
+    }
+
+    let p_f = 0.0 + p;
+    let global_p = 1.0 - chisq_cdf(global_stat, p_f);
+    let holds = global_p >= 0.05;
+
+    PhDiagnosticsResult {
+        covariates: cox_res.covariates,
+        rho_correlations: rhos,
+        chisq_stats: chisqs,
+        p_values: p_vals,
+        global_chisq: global_stat,
+        global_p_value: global_p,
+        ph_holds_globally: holds
+    }
+}
+
+/// Builds Cockpit Deck for Proportional Hazards diagnostic testing.
+fn ph_diagnostics_cockpit(res: PhDiagnosticsResult) {
+    let badge = if res.ph_holds_globally {
+        "/ᐠ˵- ⩊ -˵マ ✧ PROPORTIONAL HAZARDS SATISFIED"
+    } else {
+        "≽(◉˕ ◉ ≼マ NON-PROPORTIONAL HAZARDS (p < 0.05)"
+    };
+
+    let p_cnt = length(res.covariates);
+    let mut p = cockpit("Schoenfeld Residuals: Proportional Hazards Test", badge)
+        |> cockpit_add_kv("Global Omnibus Test", format("χ²({}) = {:.2} (p = {:.4})", p_cnt, res.global_chisq, res.global_p_value))
+        |> cockpit_add_divider();
+
+    for k in 0..p_cnt {
+        let cov = res.covariates[k];
+        let rho = res.rho_correlations[k];
+        let stat = res.chisq_stats[k];
+        let p_val = res.p_values[k];
+        let ok_str = if p_val >= 0.05 { "PASS (PH Holds)" } else { "FAIL (Time-Varying)" };
+        let line = format("ρ = {:.4} | χ²(1) = {:.2} (p = {:.4}) [{}]", rho, stat, p_val, ok_str);
+        p = cockpit_add_kv(p, cov, line);
+    }
+
+    p = cockpit_add_divider(p);
+    show_cockpit(p);
+}

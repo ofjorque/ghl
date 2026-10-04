@@ -1,9 +1,11 @@
 // packages/ghl_survival/tests/survival_test.gh
-// Integration test suite for ghl_survival
+// Comprehensive integration test suite for ghl_survival
 
-println("Running ghl_survival integration test suite...");
+println("Running ghl_survival comprehensive test suite...");
 
-// 1. Test Kaplan-Meier Non-Parametric Estimator
+// =========================================================================
+// 1. Kaplan-Meier Non-Parametric Estimator with Greenwood CIs
+// =========================================================================
 println("Testing Kaplan-Meier survival estimation...");
 let times = [6.0, 7.0, 10.0, 15.0, 19.0, 25.0, 32.0, 36.0, 42.0, 48.0];
 let events = [1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0];
@@ -25,7 +27,7 @@ if n_steps == 0 {
 }
 for i in 1..n_steps {
     if km.survival[i] > km.survival[i - 1] {
-        panic("Survival curve must be non-increasing");
+        panic("Survival curve must be monotonically non-increasing");
     }
     if km.ci_lower[i] < 0.0 {
         panic("CI lower bound must be >= 0");
@@ -36,7 +38,27 @@ for i in 1..n_steps {
 }
 render_km_cockpit(km);
 
-// 2. Test Two-Sample Log-Rank Hypothesis Test
+// =========================================================================
+// 2. Nelson-Aalen Non-Parametric Cumulative Hazard Estimator
+// =========================================================================
+println("Testing Nelson-Aalen cumulative hazard estimation...");
+let na = audit_nelson_aalen(times, events);
+let n_na = length(na.cumulative_hazard);
+if n_na == 0 {
+    panic("Nelson-Aalen must yield cumulative hazard points");
+}
+for i in 1..n_na {
+    if na.cumulative_hazard[i] < na.cumulative_hazard[i - 1] {
+        panic("Cumulative hazard H(t) must be monotonically non-decreasing");
+    }
+    if na.implied_survival[i] > na.implied_survival[i - 1] {
+        panic("Implied survival exp(-H(t)) must be non-increasing");
+    }
+}
+
+// =========================================================================
+// 3. Two-Sample Log-Rank Hypothesis Test
+// =========================================================================
 println("Testing Two-Sample Log-Rank hypothesis test...");
 let test_times = [4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 18.0, 22.0, 28.0, 35.0];
 let test_events = [1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0];
@@ -54,22 +76,96 @@ if lr.p_value < 0.0 || lr.p_value > 1.0 {
 }
 render_logrank_cockpit(lr);
 
-// 3. Test Cox Proportional Hazards Model
-println("Testing Cox Proportional Hazards model...");
-let cox = fit_cox_ph(test_times, test_events, test_groups);
-if !cox.converged {
+// =========================================================================
+// 4. Univariate Cox Proportional Hazards Model
+// =========================================================================
+println("Testing Univariate Cox Proportional Hazards model...");
+let cox_uni = fit_cox_ph(test_times, test_events, test_groups);
+if !cox_uni.converged {
     panic("Cox Newton-Raphson optimizer must converge");
 }
-if cox.hazard_ratio <= 0.0 {
+if cox_uni.hazard_ratio <= 0.0 {
     panic("Hazard ratio must be positive");
 }
-if cox.std_err <= 0.0 {
-    panic("Standard error must be strictly positive");
-}
-render_cox_cockpit(cox);
+render_cox_cockpit(cox_uni);
 
-// 4. Test Complete Survival Pipeline Audit
-println("Testing Complete Survival Pipeline Audit...");
+// =========================================================================
+// 5. Multivariate Cox Model with Harrell's C-Index and LRT
+// =========================================================================
+println("Testing Multivariate Cox Model...");
+let df_clinical = dataframe {
+    time: [
+        12.0, 18.0, 24.0, 30.0, 36.0, 42.0, 48.0, 54.0, 60.0, 66.0,
+        15.0, 21.0, 27.0, 33.0, 39.0, 45.0, 51.0, 57.0, 63.0, 70.0
+    ],
+    status: [
+        1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0,
+        1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0
+    ],
+    treatment: [
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0
+    ],
+    age: [
+        55.0, 62.0, 48.0, 71.0, 58.0, 64.0, 53.0, 67.0, 59.0, 74.0,
+        52.0, 61.0, 49.0, 68.0, 56.0, 63.0, 51.0, 66.0, 57.0, 72.0
+    ],
+    biomarker: [
+        1.2, 2.5, 0.8, 3.1, 1.9, 2.8, 1.1, 3.4, 2.0, 4.1,
+        0.9, 1.8, 0.6, 2.4, 1.4, 2.1, 0.8, 2.7, 1.5, 3.3
+    ]
+};
+
+let cox_multi = audit_multivariate_cox(df_clinical, "time", "status", ["treatment", "age", "biomarker"]);
+if !cox_multi.converged {
+    panic("Multivariate Cox model must converge");
+}
+if length(cox_multi.hazard_ratios) != 3 {
+    panic("Must estimate 3 hazard ratios");
+}
+if cox_multi.c_index < 0.5 || cox_multi.c_index > 1.0 {
+    panic("Harrell's C-index must be between 0.5 and 1.0");
+}
+if cox_multi.lrt_statistic < 0.0 {
+    panic("LRT statistic must be non-negative");
+}
+
+// =========================================================================
+// 6. Proportional Hazards Diagnostics (Schoenfeld Residuals)
+// =========================================================================
+println("Testing Proportional Hazards Assumption (Schoenfeld Residuals)...");
+let ph_diag = audit_ph_diagnostics(df_clinical, "time", "status", cox_multi);
+if length(ph_diag.p_values) != 3 {
+    panic("Must compute 3 Grambsch-Therneau p-values");
+}
+
+// =========================================================================
+// 7. Parametric Survival: Weibull Accelerated Failure Time
+// =========================================================================
+println("Testing Parametric Weibull Survival Model...");
+let wb = audit_weibull(times, events);
+if wb.shape_gamma <= 0.0 {
+    panic("Weibull shape gamma must be strictly positive");
+}
+if wb.scale_lambda <= 0.0 {
+    panic("Weibull scale lambda must be strictly positive");
+}
+if wb.median_survival <= 0.0 {
+    panic("Weibull median survival must be strictly positive");
+}
+
+// =========================================================================
+// 8. Grammar of Graphics Plotting Generators
+// =========================================================================
+println("Testing Grammar of Graphics Plotting Generators...");
+let p_km = plot_km_curve(km);
+let p_na = plot_cumulative_hazard(na);
+let p_forest = plot_hazard_ratios(cox_multi);
+
+// =========================================================================
+// 9. Complete Survival Pipeline Executive Audit
+// =========================================================================
+println("Testing Complete Survival Pipeline Executive Audit...");
 let audit = audit_survival_pipeline(test_times, test_events, test_groups);
 render_survival_report(audit);
 

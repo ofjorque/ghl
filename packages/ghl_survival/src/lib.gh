@@ -1,13 +1,17 @@
 // packages/ghl_survival/src/lib.gh
-// Comprehensive Survival & Time-to-Event Analysis Suite in Pure GHL
+// Comprehensive Biostatistical & Survival Analysis Suite in Pure GHL
+// Kaplan-Meier, Log-Rank, Multivariate Cox, Nelson-Aalen, Schoenfeld PH Tests, and Weibull AFT.
 
 struct SurvivalPipelineAudit {
     km: KMResult,
     logrank: LogRankResult,
     cox: CoxResult,
+    nelson_aalen: NelsonAalenResult,
+    weibull: WeibullResult,
     overall_badge: String
 }
 
+/// Runs full survival analysis pipeline across non-parametric, semi-parametric, and parametric methods.
 fn audit_survival_pipeline(
     times: Vector,
     events: Vector,
@@ -16,6 +20,8 @@ fn audit_survival_pipeline(
     let km = fit_kaplan_meier(times, events);
     let lr = logrank_test(times, events, treatments);
     let cox = fit_cox_ph(times, events, treatments);
+    let na = fit_nelson_aalen(times, events);
+    let wb = fit_weibull(times, events);
 
     let badge = if cox.converged {
         "/ᐠ˵- ⩊ -˵マ ✧ SURVIVAL ANALYSIS CERTIFIED"
@@ -27,14 +33,46 @@ fn audit_survival_pipeline(
         km: km,
         logrank: lr,
         cox: cox,
+        nelson_aalen: na,
+        weibull: wb,
         overall_badge: badge
     }
+}
+
+/// High-level audit for Multivariate Cox regression with Harrell C-index.
+fn audit_multivariate_cox(df: DataFrame, time_col: String, event_col: String, covar_cols: Vector) -> MultivariateCoxResult {
+    let res = fit_multivariate_cox(df, time_col, event_col, covar_cols);
+    cox_multivariate_cockpit(res);
+    res
+}
+
+/// High-level audit for Nelson-Aalen cumulative hazard.
+fn audit_nelson_aalen(times: Vector, events: Vector) -> NelsonAalenResult {
+    let res = fit_nelson_aalen(times, events);
+    nelson_aalen_cockpit(res);
+    res
+}
+
+/// High-level audit for Proportional Hazards assumption testing via Schoenfeld residuals.
+fn audit_ph_diagnostics(df: DataFrame, time_col: String, event_col: String, cox_res: MultivariateCoxResult) -> PhDiagnosticsResult {
+    let res = test_proportional_hazards(df, time_col, event_col, cox_res);
+    ph_diagnostics_cockpit(res);
+    res
+}
+
+/// High-level audit for Weibull Accelerated Failure Time model.
+fn audit_weibull(times: Vector, events: Vector) -> WeibullResult {
+    let res = fit_weibull(times, events);
+    weibull_cockpit(res);
+    res
 }
 
 fn render_survival_report(audit: SurvivalPipelineAudit) {
     render_km_cockpit(audit.km);
     render_logrank_cockpit(audit.logrank);
     render_cox_cockpit(audit.cox);
+    nelson_aalen_cockpit(audit.nelson_aalen);
+    weibull_cockpit(audit.weibull);
 
     let summary = cockpit("Survival Pipeline: Executive Audit", audit.overall_badge)
         |> cockpit_add_kv("Total Observations", format("{}", audit.km.n_total))
@@ -47,6 +85,9 @@ fn render_survival_report(audit: SurvivalPipelineAudit) {
         |> cockpit_add_kv("Cox 95% CI Upper", format("{:.4}", audit.cox.hr_ci_upper))
         |> cockpit_add_kv("Cox P-Value", format("{:.6}", audit.cox.p_value))
         |> cockpit_add_divider()
-        |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ SURVIVAL METRICS VALIDATED: Non-parametric, rank, and semiparametric alignment verified.");
+        |> cockpit_add_kv("Weibull Shape γ", format("{:.4} ({})", audit.weibull.shape_gamma, audit.weibull.hazard_type))
+        |> cockpit_add_kv("Weibull Median Survival", format("{:.2} periods", audit.weibull.median_survival))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ SURVIVAL METRICS VALIDATED: Non-parametric, rank, semiparametric, and AFT alignment verified.");
     show_cockpit(summary);
 }
