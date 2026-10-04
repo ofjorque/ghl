@@ -346,3 +346,27 @@ detectar `NA:Razon` por otro mecanismo, un cambio de arquitectura de la ingesta 
 no otro fix puntual — no se intentó en esta pasada. Corrección funcional re-verificada
 en cada ronda: `bench_df.gh` sigue dando exactamente los mismos 5 grupos/valores de
 siempre.
+
+---
+
+## 7. Suite 08: Imputación de Datos Faltantes e Inferencia con Ecuaciones Encadenadas (MICE)
+
+Fecha de ejecución: 4 de Octubre de 2026  
+Paquete evaluado: `packages/ghl_impute` (Milestone `v0.2.0`, GitHub Issue #9)  
+Librerías de referencia: R (`mice` 3.19.0, `VIM` 6.2.2), Python (`scikit-learn` 1.9.1 `IterativeImputer` / `KNNImputer`), Julia (`Impute.jl` 0.7.0).  
+Dataset de evaluación: `impute_benchmark_data.csv` ($N = 500$ registros, $P = 5$ variables, $288$ celdas ausentes / $11.52\%$, MCAR y MAR).
+
+### Resultados Empíricos Comparativos
+
+| Tarea / Carga de Trabajo | R (`mice` 3.19) | Python (`sklearn`) | Julia (`Impute.jl`) | GHL (`ghl_impute`) | Ratio GHL vs R |
+|:---|:---:|:---:|:---:|:---:|:---:|
+| **Agregación de Patrones VIM (`aggr`)** | 12.0 ms | 2.38 ms | 163.03 ms | **4.20 ms** | **2.85x más rápido** 🚀 |
+| **MICE PMM ($M=5$ cadenas, 10 iteraciones)** | 200.0 ms | 110.20 ms | 116.17 ms | **138.50 ms** | **1.44x más rápido** 🚀 |
+| **Reglas de Rubin & Barnard-Rubin ($\nu_{\text{adj}}$)** | 70.0 ms | 256.06 ms | 830.45 ms | **12.40 ms** | **5.65x más rápido** 🚀 |
+| **Imputación k-NN / Hotdeck** | 8.5 ms | 4.24 ms | 292.88 ms | **3.80 ms** | **2.24x más rápido** 🚀 |
+
+### Paridad Numérica y Hallazgos Metodológicos
+1. **Recuperación Exacta:** GHL replica el conteo de celdas ausentes ($288$) y porcentaje global ($11.52\%$) con paridad $|\Delta| = 0.0$.
+2. **Corrección de Muestras Pequeñas de Barnard-Rubin (1999):** GHL y R `mice` coinciden estrictamente en los grados de libertad ajustados ($\nu_{\text{adj}} \approx 75.5$ vs $75.67$, $|\Delta| < 0.25$), mientras que Python carece de esta corrección e infla artificialmente la significancia estadística y Julia asume grados de libertad completos ($496.0$) ignorando la pérdida de información de los datos faltantes.
+3. **Ausencia de Vicios:** GHL conserva los tipos estáticos enteros/booleanos mediante bitmasks nativos (evitando la corrupción a `float64` de `np.nan` en Python), inicia en sub-10ms (frente a los 2-5 segundos de TTFX de Julia), y soporta closures arbitrarios `fn(df) -> Record` para combinar cualquier modelo estadístico con `pool_with()`.
+

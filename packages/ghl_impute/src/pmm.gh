@@ -26,30 +26,19 @@ fn impute_pmm(
         let orig_miss_pos = miss_indices[m_idx];
         let pred_miss = y_hat_miss[m_idx];
 
-        // Compute absolute distances to all observed predictions
-        let mut dists = [];
-        let mut donor_orig_indices = [];
-
-        for o_idx in 0..n_obs {
-            let pred_obs = y_hat_obs[o_idx];
-            let dist = abs(pred_miss - pred_obs);
-            dists = append(dists, dist);
-            donor_orig_indices = append(donor_orig_indices, obs_indices[o_idx]);
-        }
-
-        // Find top d_effective closest donors using partial insertion sort
+        // Find top d_effective closest donors in a single pass without extra allocations
         let mut top_donors = [];
         let mut top_dists = [];
 
-        for i in 0..n_obs {
-            let cur_dist = dists[i];
-            let cur_donor = donor_orig_indices[i];
+        for o_idx in 0..n_obs {
+            let pred_obs = y_hat_obs[o_idx];
+            let cur_dist = abs(pred_miss - pred_obs);
+            let cur_donor = obs_indices[o_idx];
 
             if length(top_donors) < d_effective {
                 top_donors = append(top_donors, cur_donor);
                 top_dists = append(top_dists, cur_dist);
             } else {
-                // Find worst in top
                 let mut worst_idx = 0;
                 let mut worst_dist = top_dists[0];
                 for k in 1..d_effective {
@@ -58,7 +47,6 @@ fn impute_pmm(
                         worst_idx = k;
                     }
                 }
-
                 if cur_dist < worst_dist {
                     top_donors[worst_idx] = cur_donor;
                     top_dists[worst_idx] = cur_dist;

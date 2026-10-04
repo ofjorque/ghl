@@ -1,0 +1,171 @@
+// benchmarks/scripts/suite_08_impute/bench_impute.gh
+// Cross-Language Benchmark: Missing Data Imputation in GHL (ghl_impute)
+
+use ghl_impute::*;
+
+let csv_path = "benchmarks/data/impute_benchmark_data.csv";
+let df = read_csv(csv_path);
+let n_rows = len(df);
+let col_names = colnames(df);
+let n_cols = length(col_names);
+
+fn calc_sd(vals: Vector) -> f64 {
+    let n = length(vals) * 1.0;
+    if n <= 1.0 { return 0.0; }
+    let m = mean(vals);
+    let mut sum_sq = 0.0;
+    for i in 0..length(vals) {
+        let diff = (vals[i] * 1.0) - m;
+        sum_sq = sum_sq + diff * diff;
+    }
+    sqrt(sum_sq / (n - 1.0))
+}
+
+// -----------------------------------------------------------------------------
+// Task 1: Missing Pattern Aggregation (vim_aggr)
+// -----------------------------------------------------------------------------
+let t0_pat = clock_now();
+let v_res = vim_aggr(df);
+let t1_pat = clock_now();
+let t_pat_ms = (t1_pat - t0_pat) * 1000.0;
+
+println("TASK_PATTERN_TIME_MS: " + format("{:.2}", t_pat_ms));
+println("TASK_MISSING_CELLS: " + format("{}", v_res.total_missing));
+println("TASK_MISSING_PCT: " + format("{:.2}", v_res.pct_total_missing));
+
+// -----------------------------------------------------------------------------
+// Task 2: MICE with Predictive Mean Matching (PMM, m=5, maxit=5)
+// -----------------------------------------------------------------------------
+let specs = [
+    MethodSpec { column: "bmi", method: "pmm" },
+    MethodSpec { column: "chl", method: "pmm" },
+    MethodSpec { column: "income", method: "pmm" }
+];
+
+let t0_mice = clock_now();
+let mice_res = impute_mice(df, 5, 5, specs, 42);
+let t1_mice = clock_now();
+let t_mice_ms = (t1_mice - t0_mice) * 1000.0;
+
+println("TASK_MICE_PMM_TIME_MS: " + format("{:.2}", t_mice_ms));
+
+let ds1 = mice_res.datasets[0];
+let chl_col = pull(ds1, "chl");
+let m_chl = mean(chl_col);
+let sd_chl = calc_sd(chl_col);
+
+println("TASK_PMM_IMP_MEAN: " + format("{:.4}", m_chl));
+println("TASK_PMM_IMP_SD: " + format("{:.4}", sd_chl));
+
+// -----------------------------------------------------------------------------
+// Task 3: Rubin's Rules Pooling with Barnard-Rubin (1999) df
+// -----------------------------------------------------------------------------
+
+// Model fitting function across each imputed dataset: chl ~ 1 + age + bmi + hyp
+fn fit_ols_model(ds: DataFrame) -> Record {
+    let y = pull(ds, "chl");
+    let x_age = pull(ds, "age");
+    let x_bmi = pull(ds, "bmi");
+    let x_hyp = pull(ds, "hyp");
+    let n = length(y);
+
+    // X matrix: [intercept, age, bmi, hyp] -> p = 4
+    let mut X = [];
+    for i in 0..n {
+        X = append(X, 1.0);
+        X = append(X, x_age[i] * 1.0);
+        X = append(X, x_bmi[i] * 1.0);
+        X = append(X, x_hyp[i] * 1.0);
+    }
+
+    let p = 4;
+    let mut XtX = [];
+    for j in 0..(p * p) {
+        XtX = append(XtX, 0.0);
+    }
+    let mut Xty = [];
+    for j in 0..p {
+        Xty = append(Xty, 0.0);
+    }
+
+    for i in 0..n {
+        let yi = y[i] * 1.0;
+        let base_i = i * p;
+        for j in 0..p {
+            let x_ij = X[base_i + j];
+            Xty[j] = Xty[j] + x_ij * yi;
+            let row_offset = j * p;
+            for k in 0..p {
+                let x_ik = X[base_i + k];
+                XtX[row_offset + k] = XtX[row_offset + k] + x_ij * x_ik;
+            }
+        }
+    }
+
+    let XtX_inv = invert_square_matrix(XtX, p);
+    let mut beta = [];
+    for j in 0..p {
+        let mut sum_b = 0.0;
+        let row_offset = j * p;
+        for k in 0..p {
+            sum_b = sum_b + XtX_inv[row_offset + k] * Xty[k];
+        }
+        beta = append(beta, sum_b);
+    }
+
+    let mut rss = 0.0;
+    for i in 0..n {
+        let base_i = i * p;
+        let mut yhat = 0.0;
+        for j in 0..p {
+            yhat = yhat + X[base_i + j] * beta[j];
+        }
+        let resid = y[i] * 1.0 - yhat;
+        rss = rss + resid * resid;
+    }
+
+    let sigma2 = rss / ((n - p) * 1.0);
+    let mut se = [];
+    for j in 0..p {
+        let var_j = sigma2 * XtX_inv[j * p + j];
+        se = append(se, sqrt(if var_j > 0.0 { var_j } else { 1e-8 }));
+    }
+
+    { coef: beta, se: se }
+}
+
+let t0_pool = clock_now();
+let pooled = pool_with(mice_res, fit_ols_model);
+let t1_pool = clock_now();
+let t_pool_ms = (t1_pool - t0_pool) * 1000.0;
+
+// Parameter 1 is age: [intercept, age, bmi, hyp]
+let qbar_age = pooled.coefficients[1];
+let se_age = pooled.std_errors[1];
+let tstat_age = pooled.t_stats[1];
+let df_age = pooled.df_adjusted[1];
+let riv_age = pooled.riv[1];
+let fmi_age = pooled.fmi[1];
+let t_var_age = se_age * se_age;
+let ubar_age = t_var_age / (1.0 + riv_age);
+let b_age = (riv_age * ubar_age) / (1.0 + 1.0 / (pooled.m * 1.0));
+
+println("TASK_POOL_TIME_MS: " + format("{:.2}", t_pool_ms));
+println("TASK_RUBIN_QBAR: " + format("{:.4}", qbar_age));
+println("TASK_RUBIN_SE: " + format("{:.4}", se_age));
+println("TASK_RUBIN_TSTAT: " + format("{:.4}", tstat_age));
+println("TASK_RUBIN_DF: " + format("{:.4}", df_age));
+println("TASK_RUBIN_UBAR: " + format("{:.6}", ubar_age));
+println("TASK_RUBIN_B: " + format("{:.6}", b_age));
+println("TASK_RUBIN_T: " + format("{:.6}", t_var_age));
+println("TASK_RUBIN_RIV: " + format("{:.4}", riv_age));
+println("TASK_RUBIN_FMI: " + format("{:.4}", fmi_age));
+
+// -----------------------------------------------------------------------------
+// Task 4: Hotdeck / Donor Sampling Imputation
+// -----------------------------------------------------------------------------
+let t0_hot = clock_now();
+let df_hot = vim_hotdeck(df, "chl", ["age", "hyp"], 42);
+let t1_hot = clock_now();
+let t_hot_ms = (t1_hot - t0_hot) * 1000.0;
+println("TASK_HOTDECK_TIME_MS: " + format("{:.2}", t_hot_ms));

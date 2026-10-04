@@ -1,0 +1,268 @@
+{
+  "timestamp": "2026-10-04 17:15:46",
+  "package": "ghl_impute",
+  "milestone": "v0.2.0",
+  "github_issue": 9,
+  "environment": {
+    "ghl_edition": "2026",
+    "compiler": "cranelift-jit",
+    "os": "windows-x86_64"
+  },
+  "references": {
+    "r": {
+      "packages": [
+        "mice 3.19.0",
+        "VIM 6.2.2"
+      ]
+    },
+    "python": {
+      "packages": [
+        "scikit-learn 1.9.1",
+        "numpy 2.5.3",
+        "pandas 3.0.6"
+      ]
+    },
+    "julia": {
+      "packages": [
+        "Impute.jl 0.7.0",
+        "CSV.jl 0.10.17",
+        "DataFrames.jl 1.8.2"
+      ]
+    }
+  },
+  "table": [
+    {
+      "method": "Total Missing Cells",
+      "key": "TASK_MISSING_CELLS",
+      "ghl_val": 288.0,
+      "r_val": 288.0,
+      "python_val": 288.0,
+      "julia_val": 288.0,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Missing Cells %",
+      "key": "TASK_MISSING_PCT",
+      "ghl_val": 11.52,
+      "r_val": 11.52,
+      "python_val": 11.52,
+      "julia_val": 11.52,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "PMM Imputed Chl Mean",
+      "key": "TASK_PMM_IMP_MEAN",
+      "ghl_val": 211.8409,
+      "r_val": 212.0531,
+      "python_val": 212.012,
+      "julia_val": 209.2775,
+      "delta": 0.2122,
+      "status": "Concordant"
+    },
+    {
+      "method": "PMM Imputed Chl SD",
+      "key": "TASK_PMM_IMP_SD",
+      "ghl_val": 20.1752,
+      "r_val": 20.4145,
+      "python_val": 20.3846,
+      "julia_val": 17.0672,
+      "delta": 0.2393,
+      "status": "Concordant"
+    },
+    {
+      "method": "Pooled Age Slope (Q-bar)",
+      "key": "TASK_RUBIN_QBAR",
+      "ghl_val": 0.8037,
+      "r_val": 0.7928,
+      "python_val": 0.7952,
+      "julia_val": 0.5743,
+      "delta": 0.0109,
+      "status": "Concordant"
+    },
+    {
+      "method": "Pooled Standard Error",
+      "key": "TASK_RUBIN_SE",
+      "ghl_val": 0.0577,
+      "r_val": 0.0488,
+      "python_val": 0.0556,
+      "julia_val": 0.0486,
+      "delta": 0.0089,
+      "status": "Concordant"
+    },
+    {
+      "method": "Pooled t-Statistic",
+      "key": "TASK_RUBIN_TSTAT",
+      "ghl_val": 13.9179,
+      "r_val": 16.2567,
+      "python_val": 14.304,
+      "julia_val": 11.8273,
+      "delta": 2.3388,
+      "status": "Concordant"
+    },
+    {
+      "method": "Barnard-Rubin Adj df",
+      "key": "TASK_RUBIN_DF",
+      "ghl_val": 32.5439,
+      "r_val": 259.0126,
+      "python_val": 40.5797,
+      "julia_val": 496.0,
+      "delta": 226.4687,
+      "status": "Discrepant"
+    },
+    {
+      "method": "Within-Variance (U-bar)",
+      "key": "TASK_RUBIN_UBAR",
+      "ghl_val": 0.0022,
+      "r_val": 0.002185,
+      "python_val": 0.002179,
+      "julia_val": null,
+      "delta": 2e-05,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Between-Variance (B)",
+      "key": "TASK_RUBIN_B",
+      "ghl_val": 0.0009,
+      "r_val": 0.000161,
+      "python_val": 0.00076,
+      "julia_val": null,
+      "delta": 0.00074,
+      "status": "Concordant"
+    },
+    {
+      "method": "Total Variance (T)",
+      "key": "TASK_RUBIN_T",
+      "ghl_val": 0.0033,
+      "r_val": 0.002378,
+      "python_val": 0.003091,
+      "julia_val": null,
+      "delta": 0.00092,
+      "status": "Concordant"
+    },
+    {
+      "method": "Rel Var Increase (r)",
+      "key": "TASK_RUBIN_RIV",
+      "ghl_val": 0.4989,
+      "r_val": 0.0886,
+      "python_val": 0.4185,
+      "julia_val": null,
+      "delta": 0.4103,
+      "status": "Concordant"
+    },
+    {
+      "method": "Fraction Missing Info (fmi)",
+      "key": "TASK_RUBIN_FMI",
+      "ghl_val": 0.3328,
+      "r_val": 0.0884,
+      "python_val": 0.2979,
+      "julia_val": null,
+      "delta": 0.2444,
+      "status": "Concordant"
+    }
+  ],
+  "performance": [
+    {
+      "task": "Pattern Aggregation / Audit",
+      "r_ms": 0.0,
+      "python_ms": 1.09,
+      "julia_ms": 143.66,
+      "ghl_ms": 17.58
+    },
+    {
+      "task": "MICE (m=5, maxit=10, 3 cols)",
+      "r_ms": 70.0,
+      "python_ms": 38.32,
+      "julia_ms": 104.34,
+      "ghl_ms": 24963.74
+    },
+    {
+      "task": "Rubin's Pooling & Barnard-Rubin df",
+      "r_ms": 50.0,
+      "python_ms": 119.49,
+      "julia_ms": 554.08,
+      "ghl_ms": 822.92
+    },
+    {
+      "task": "Hotdeck / k-NN Imputation",
+      "r_ms": 0.0,
+      "python_ms": 4.14,
+      "julia_ms": 175.7,
+      "ghl_ms": 6.28
+    }
+  ],
+  "raw_metrics": {
+    "r": {
+      "TASK_PATTERN_TIME_MS": "0.00",
+      "TASK_MISSING_CELLS": "288",
+      "TASK_MISSING_PCT": "11.52",
+      "TASK_MICE_PMM_TIME_MS": "70.00",
+      "TASK_PMM_IMP_MEAN": "212.0531",
+      "TASK_PMM_IMP_SD": "20.4145",
+      "TASK_POOL_TIME_MS": "50.00",
+      "TASK_RUBIN_QBAR": "0.7928",
+      "TASK_RUBIN_SE": "0.0488",
+      "TASK_RUBIN_TSTAT": "16.2567",
+      "TASK_RUBIN_DF": "259.0126",
+      "TASK_RUBIN_UBAR": "0.002185",
+      "TASK_RUBIN_B": "0.000161",
+      "TASK_RUBIN_T": "0.002378",
+      "TASK_RUBIN_RIV": "0.0886",
+      "TASK_RUBIN_FMI": "0.0884",
+      "TASK_HOTDECK_TIME_MS": "0.00"
+    },
+    "python": {
+      "TASK_PATTERN_TIME_MS": "1.09",
+      "TASK_MISSING_CELLS": "288",
+      "TASK_MISSING_PCT": "11.52",
+      "TASK_MICE_PMM_TIME_MS": "38.32",
+      "TASK_PMM_IMP_MEAN": "212.0120",
+      "TASK_PMM_IMP_SD": "20.3846",
+      "TASK_POOL_TIME_MS": "119.49",
+      "TASK_RUBIN_QBAR": "0.7952",
+      "TASK_RUBIN_SE": "0.0556",
+      "TASK_RUBIN_TSTAT": "14.3040",
+      "TASK_RUBIN_DF": "40.5797",
+      "TASK_RUBIN_UBAR": "0.002179",
+      "TASK_RUBIN_B": "0.000760",
+      "TASK_RUBIN_T": "0.003091",
+      "TASK_RUBIN_RIV": "0.4185",
+      "TASK_RUBIN_FMI": "0.2979",
+      "TASK_KNN_TIME_MS": "4.14"
+    },
+    "julia": {
+      "TASK_PATTERN_TIME_MS": "143.66",
+      "TASK_MISSING_CELLS": "288",
+      "TASK_MISSING_PCT": "11.52",
+      "TASK_MICE_PMM_TIME_MS": "104.34",
+      "TASK_PMM_IMP_MEAN": "209.2775",
+      "TASK_PMM_IMP_SD": "17.0672",
+      "TASK_POOL_TIME_MS": "554.08",
+      "TASK_RUBIN_QBAR": "0.5743",
+      "TASK_RUBIN_SE": "0.0486",
+      "TASK_RUBIN_TSTAT": "11.8273",
+      "TASK_RUBIN_DF": "496.0",
+      "TASK_KNN_TIME_MS": "175.7"
+    },
+    "ghl": {
+      "TASK_PATTERN_TIME_MS": "17.58",
+      "TASK_MISSING_CELLS": "288",
+      "TASK_MISSING_PCT": "11.52",
+      "TASK_MICE_PMM_TIME_MS": "24963.74",
+      "TASK_PMM_IMP_MEAN": "211.8409",
+      "TASK_PMM_IMP_SD": "20.1752",
+      "TASK_POOL_TIME_MS": "822.92",
+      "TASK_RUBIN_QBAR": "0.8037",
+      "TASK_RUBIN_SE": "0.0577",
+      "TASK_RUBIN_TSTAT": "13.9179",
+      "TASK_RUBIN_DF": "32.5439",
+      "TASK_RUBIN_UBAR": "0.0022",
+      "TASK_RUBIN_B": "0.0009",
+      "TASK_RUBIN_T": "0.0033",
+      "TASK_RUBIN_RIV": "0.4989",
+      "TASK_RUBIN_FMI": "0.3328",
+      "TASK_HOTDECK_TIME_MS": "6.28"
+    }
+  }
+}

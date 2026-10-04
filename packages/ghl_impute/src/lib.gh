@@ -1,15 +1,6 @@
 // packages/ghl_impute/src/lib.gh
 // Scientific Missing Data Imputation & Inference Toolkit for GHL
 
-use patterns::*;
-use vim::*;
-use vif::*;
-use pmm::*;
-use knn::*;
-use mice::*;
-use pool::*;
-use cockpit::*;
-
 /// High-level entry point for Multiple Imputation by Chained Equations (MICE) with default parameters.
 fn impute(df: DataFrame) -> MiceResult {
     impute_mice(df, 5, 5, [], 42)

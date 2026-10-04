@@ -177,6 +177,29 @@ fn impute_mice(
 
     let mut completed_datasets = [];
 
+    // Precompute missing and observed index lists for each incomplete column
+    let mut miss_idx_map = [];
+    let mut obs_idx_map = [];
+    let mut orig_col_map = [];
+    let n_miss_cols = length(miss_cols);
+
+    for target_col in miss_cols {
+        let orig_col = pull(df, target_col);
+        orig_col_map = append(orig_col_map, orig_col);
+        let orig_mask = is_na(orig_col);
+        let mut cur_obs = [];
+        let mut cur_miss = [];
+        for r in 0..n_rows {
+            if orig_mask[r] {
+                cur_miss = append(cur_miss, r);
+            } else {
+                cur_obs = append(cur_obs, r);
+            }
+        }
+        obs_idx_map = append(obs_idx_map, cur_obs);
+        miss_idx_map = append(miss_idx_map, cur_miss);
+    }
+
     // Outer loop over M multiple imputations
     for m_chain in 0..m {
         let chain_seed = seed + m_chain * 7919;
@@ -210,19 +233,11 @@ fn impute_mice(
 
         // Step 2: Fully Conditional Specification (FCS) iterations
         for iter in 0..max_iter {
-            for target_col in miss_cols {
-                let orig_col = pull(df, target_col);
-                let orig_mask = is_na(orig_col);
-
-                let mut obs_idx = [];
-                let mut miss_idx = [];
-                for r in 0..n_rows {
-                    if orig_mask[r] {
-                        miss_idx = append(miss_idx, r);
-                    } else {
-                        obs_idx = append(obs_idx, r);
-                    }
-                }
+            for c_idx in 0..n_miss_cols {
+                let target_col = miss_cols[c_idx];
+                let orig_col = orig_col_map[c_idx];
+                let obs_idx = obs_idx_map[c_idx];
+                let miss_idx = miss_idx_map[c_idx];
 
                 let n_obs = length(obs_idx);
                 let n_miss = length(miss_idx);
@@ -263,14 +278,21 @@ fn impute_mice(
                     current_df[target_col] = updated_y;
                 } else if method_spec == "pmm" || method_spec == "norm" {
                     let p_feat = length(pred_cols) + 1; // +1 for intercept
+                    let n_preds = length(pred_cols);
+
+                    // Pre-fetch predictor vectors to avoid repeated DataFrame lookups
+                    let mut pred_vectors = [];
+                    for p_name in pred_cols {
+                        pred_vectors = append(pred_vectors, pull(current_df, p_name));
+                    }
 
                     let mut X_obs = [];
                     let mut y_obs = [];
                     for o_pos in obs_idx {
                         y_obs = append(y_obs, orig_col[o_pos] * 1.0);
                         X_obs = append(X_obs, 1.0); // Intercept
-                        for p_name in pred_cols {
-                            let p_data = pull(current_df, p_name);
+                        for p_idx in 0..n_preds {
+                            let p_data = pred_vectors[p_idx];
                             X_obs = append(X_obs, p_data[o_pos] * 1.0);
                         }
                     }
@@ -278,8 +300,8 @@ fn impute_mice(
                     let mut X_miss = [];
                     for m_pos in miss_idx {
                         X_miss = append(X_miss, 1.0); // Intercept
-                        for p_name in pred_cols {
-                            let p_data = pull(current_df, p_name);
+                        for p_idx in 0..n_preds {
+                            let p_data = pred_vectors[p_idx];
                             X_miss = append(X_miss, p_data[m_pos] * 1.0);
                         }
                     }
