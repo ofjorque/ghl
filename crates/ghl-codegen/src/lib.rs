@@ -167,12 +167,19 @@ mod tests {
         let obj_bytes = aot.compile_module(&hir_module).expect("aot compilation ok");
 
         assert!(!obj_bytes.is_empty(), "Object bytes should not be empty");
-        // Verify that the bytes are a valid object file format parseable by `object`
         let obj_file = cranelift_object::object::File::parse(&*obj_bytes).expect("parse valid object file");
         use cranelift_object::object::{Object, ObjectSymbol};
         let symbols: Vec<_> = obj_file.symbols().filter_map(|s| s.name().ok()).collect();
-        assert!(symbols.contains(&"multiply"), "Emitted object should contain exported `multiply` symbol");
-        assert!(symbols.contains(&"square"), "Emitted object should contain exported `square` symbol");
+        assert!(
+            symbols.iter().any(|&s| s == "multiply" || s == "_multiply"),
+            "Emitted object should contain exported `multiply` symbol (found: {:?})",
+            symbols
+        );
+        assert!(
+            symbols.iter().any(|&s| s == "square" || s == "_square"),
+            "Emitted object should contain exported `square` symbol (found: {:?})",
+            symbols
+        );
     }
 
     #[test]
@@ -197,7 +204,11 @@ mod tests {
         let obj_file = cranelift_object::object::File::parse(&*obj_bytes).expect("parse valid object file");
         use cranelift_object::object::{Object, ObjectSymbol};
         let symbols: Vec<_> = obj_file.symbols().filter_map(|s| s.name().ok()).collect();
-        assert!(symbols.contains(&"__ghl_main"), "Object should export `__ghl_main`");
+        assert!(
+            symbols.iter().any(|&s| s == "__ghl_main" || s == "___ghl_main"),
+            "Object should export `__ghl_main` (found: {:?})",
+            symbols
+        );
     }
 
     #[test]

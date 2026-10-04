@@ -19,6 +19,14 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
+      - name: Free Disk Space (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -35,10 +43,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run Workspace Tests
-        run: cargo test --jobs 4
-
-      - name: Run Fuzz Robustness Tests
-        run: cargo test -p ghl-types --test fuzz_robustness --jobs 4
+        run: cargo test --workspace --jobs 4
 
       - name: Check GHL Canonical Code Formatting
         run: cargo run -p ghl-cli --jobs 4 -- fmt --check validation/reference/compare_r.ghl
