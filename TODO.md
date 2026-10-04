@@ -139,8 +139,12 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
   - Validar paridad numérica y benchmarking exhaustivo contra R (`lme4`, `nlme`), Python (`statsmodels.mixedlm`) y Julia (`MixedModels.jl`). Documentado en [`packages/ghl_multilevel/GUIDE.md`](packages/ghl_multilevel/GUIDE.md).
   - Publicar cuaderno reproducible Quarto (`.qmd`) de modelado jerárquico longitudinal en [`examples/multilevel_hierarchical_modeling.qmd`](examples/multilevel_hierarchical_modeling.qmd).
 
-- [ ] **`packages/spring_pact` (Grafos Probabilísticos y PACT) — [#7](https://github.com/ofjorque/ghl/issues/7):**
-  - Verificación del motor de especificación de redes y grafos causales/probabilísticos.
+- [x] **`packages/spring_pact` (Protocolos de Expectativas y Contratos Estadísticos - RFC 14) — [#7](https://github.com/ofjorque/ghl/issues/7):**
+  - Consolidar protocolos de expectativas sobre datos (integridad de esquema, unicidad de identificadores, rangos, NA, outliers via IQR) y modelos (tamaño muestral, VIF, vcov robusta), hashing criptográfico SHA-256 del contrato, saneamiento `enforce_data_rules`, verificación formal `verify_contract` y certificados Cockpit Deck con Haru (`/ᐠ˵- ⩊ -˵マ ✧ CERTIFIED`). Validado: 6/6 bloques de prueba superados.
+  - Validar paridad funcional y benchmarking contra R (`pointblank`, `assertr`) y Python (`Great Expectations`, `Pandera`). Documentado en [`packages/spring_pact/GUIDE.md`](packages/spring_pact/GUIDE.md).
+  - Publicar cuaderno reproducible Quarto (`.qmd`) de auditoría estadística y contratos de datos en [`examples/data_contracts_and_expectations.qmd`](examples/data_contracts_and_expectations.qmd).
+
+
 
 ### 2. Nuevos Paquetes de Utilidad Propuestos para el Ecosistema — [Milestone v0.3.0](https://github.com/ofjorque/ghl/milestone/2)
 - [ ] **`packages/ghl_optim` (Optimización Numérica No Lineal General) — [#8](https://github.com/ofjorque/ghl/issues/8):**

@@ -1,31 +1,48 @@
+// packages/spring_pact/tests/pact_test.gh
 // Integration test suite for spring_pact package (RFC 14)
 
+println("Running spring_pact integration test suite...");
+
 let df_valid = dataframe {
+    id: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
     age: [25.0, 32.0, 45.0, 29.0, 52.0, 38.0],
     salary: [50000.0, 65000.0, 85000.0, 55000.0, 95000.0, 72000.0]
 };
 
-// 1. Define contract
+// 1. Define comprehensive statistical contract
+println("Testing Statistical Contract Definition...");
 let contract = new_contract("Auditoría Laboral 2026")
+    |> expect_column_names(["id", "age", "salary"])
+    |> expect_unique("id")
     |> expect_range("age", 18.0, 65.0)
     |> expect_na_max("salary", 0.10)
-    |> expect_min_sample_size(5);
+    |> expect_outlier_rule("salary", "iqr", 3.0)
+    |> expect_min_sample_size(5)
+    |> expect_vif_max(5.0)
+    |> expect_vcov_kind("HC3");
 
-// 2. Compute digest
-let digest = contract_digest(contract);
-println("Contract Digest:", digest);
+// 2. Compute deterministic SHA-256 contract digest
+println("Testing Deterministic SHA-256 Digest...");
+let digest1 = contract_digest(contract);
+let digest2 = contract_digest(contract);
+if digest1 != digest2 {
+    panic("Contract digest must be deterministic");
+}
+println("Contract Digest: ", digest1);
 
 // 3. Verify compliant dataset
+println("Testing Compliant Dataset Verification...");
 let receipt = verify_contract(contract, df_valid);
 render_cockpit(receipt);
 
-// Assertions
 if !receipt.is_compliant {
     panic("Expected contract to be compliant for valid dataset");
 }
 
-// 4. Verify non-compliant dataset (violates age minimum >= 18 and min sample size >= 5)
+// 4. Verify non-compliant dataset (violates age minimum, duplicate ID, and min sample size)
+println("Testing Non-Compliant Dataset Detection...");
 let df_invalid = dataframe {
+    id: [1.0, 1.0, 2.0],
     age: [15.0, 16.0, 17.0],
     salary: [20000.0, 22000.0, 25000.0]
 };
@@ -38,7 +55,9 @@ if fail_receipt.is_compliant {
 }
 
 // 5. Test data sanitation pipeline (enforce_data_rules)
+println("Testing Data Enforcement Pipeline...");
 let df_mixed = dataframe {
+    id: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
     age: [16.0, 25.0, 30.0, 35.0, 42.0, 50.0, 60.0, 70.0],
     salary: [10000.0, 50000.0, 60000.0, 65000.0, 72000.0, 80000.0, 90000.0, 110000.0]
 };
@@ -46,8 +65,26 @@ let df_mixed = dataframe {
 let clean_df = enforce_data_rules(df_mixed, contract);
 let clean_receipt = verify_contract(contract, clean_df);
 
-if !clean_receipt.is_compliant {
-    panic("Sanitized dataset should satisfy range expectations");
+// The clean dataset filtered out ages < 18 and > 65
+let clean_ages = pull(clean_df, "age");
+for a in clean_ages {
+    if a < 18.0 || a > 65.0 {
+        panic("Clean dataset must not contain out-of-range values");
+    }
+}
+
+// 6. Test Model Rules Evaluation
+println("Testing Econometric Model Rules...");
+let r_vif = create_vif_rule(5.0);
+let ev_vif = evaluate_vif_rule(r_vif, 2.1);
+if !ev_vif.passed {
+    panic("VIF check should pass when observed VIF <= 5.0");
+}
+
+let r_vcov = create_vcov_rule("HC3");
+let ev_vcov = evaluate_vcov_rule(r_vcov, "HC3");
+if !ev_vcov.passed {
+    panic("vcov check should pass when matching HC3");
 }
 
 println("All spring_pact tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");

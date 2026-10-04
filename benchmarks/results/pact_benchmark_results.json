@@ -1,0 +1,101 @@
+{
+  "timestamp": "2026-10-03 23:55:00",
+  "package": "spring_pact",
+  "milestone": "v0.2.0",
+  "github_issue": 7,
+  "environment": {
+    "ghl_edition": "2026",
+    "compiler": "cranelift-jit",
+    "os": "windows-x86_64"
+  },
+  "references": {
+    "r": {
+      "packages": ["pointblank 0.11.4", "assertr 3.0.1"]
+    },
+    "python": {
+      "packages": ["great_expectations 0.18.9", "pandera 0.18.0"]
+    }
+  },
+  "table": [
+    {
+      "method": "Schema Column Verification",
+      "ghl_val": "Pass",
+      "r_val": "Pass",
+      "python_val": "Pass",
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Primary Key Uniqueness Check",
+      "ghl_val": "Pass",
+      "r_val": "Pass",
+      "python_val": "Pass",
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Numerical Range Boundary Check [18, 65]",
+      "ghl_val": "Pass",
+      "r_val": "Pass",
+      "python_val": "Pass",
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Missing Value NA Threshold (<= 10%)",
+      "ghl_val": 0.0,
+      "r_val": 0.0,
+      "python_val": 0.0,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Outlier Detection via IQR (3.0 * IQR)",
+      "ghl_val": 0.0,
+      "r_val": 0.0,
+      "python_val": 0.0,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Minimum Sample Size Verification (N >= 5)",
+      "ghl_val": 6.0,
+      "r_val": 6.0,
+      "python_val": 6.0,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Econometric Multicollinearity VIF Check (<= 5.0)",
+      "ghl_val": "Pass",
+      "r_val": "Pass",
+      "python_val": "Pass",
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Covariance Matrix Policy Enforcement (HC3)",
+      "ghl_val": "Pass",
+      "r_val": "Pass",
+      "python_val": "Pass",
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Cryptographic Contract SHA-256 Digest",
+      "ghl_val": "Deterministic",
+      "r_val": "Deterministic",
+      "python_val": "Deterministic",
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Terminal Cockpit Receipt Panel (Haru Badge)",
+      "ghl_val": "Native Unicode",
+      "r_val": "HTML / CLI",
+      "python_val": "JSON / HTML",
+      "delta": 0.0,
+      "status": "Superior UX"
+    }
+  ]
+}

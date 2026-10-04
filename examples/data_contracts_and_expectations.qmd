@@ -1,0 +1,141 @@
+---
+title: "Statistical Contracts & Data Expectation Protocols"
+subtitle: "Executable Data Contracts, Cryptographic SHA-256 Receipts, and Cockpit Auditing in GHL (RFC 14)"
+author: "GHL Statistical Auditing & Data Contracts Lab"
+date: "2026-10-03"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    code-fold: show
+    code-tools: true
+    smooth-scroll: true
+engine: markdown
+filters:
+  - ghl
+---
+
+## 1. Executive Summary & The Problem of Analytical Integrity
+
+In regulatory audits, clinical trials, and economic consulting, an unbridgeable trust gap often exists between the auditor who specifies an analysis and the practitioner who executes it:
+- **Data Cherry-Picking**: Silently dropping inconvenient observation ranges.
+- **Assumed Properties**: Running regressions despite severe multicollinearity ($VIF > 5$) or ignoring heteroscedasticity.
+- **P-Hacking & Protocol Drift**: Modifying data filtering rules iteratively to obtain desired p-values.
+
+**`spring_pact`** (RFC 14), named in honor of **Haru** (*Haru* = 春 = Spring 🐱🧡🤍), introduces **Executable Statistical Contracts**:
+- Declarative specifications of data rules and econometric assumptions.
+- Deterministic **SHA-256 cryptographic digest** of the analytical protocol.
+- Executable data sanitation pipeline (`enforce_data_rules`).
+- Automated compliance verification emitting a **Cockpit Deck Receipt** with Haru's certification badge (`/ᐠ˵- ⩊ -˵マ ✧ CERTIFIED`).
+
+---
+
+## 2. Defining the Agreed Statistical Contract
+
+The auditor specifies the immutable contract protocol before examining raw data:
+
+```{ghl}
+#| echo: true
+#| eval: true
+let contract = new_contract("Labor & Wage Equity Audit 2026")
+    |> expect_column_names(["id", "age", "salary"])
+    |> expect_unique("id")
+    |> expect_range("age", 18.0, 65.0)
+    |> expect_na_max("salary", 0.05)
+    |> expect_outlier_rule("salary", "iqr", 3.0)
+    |> expect_min_sample_size(5)
+    |> expect_vif_max(5.0)
+    |> expect_vcov_kind("HC3");
+
+// Deterministic cryptographic protocol digest
+let protocol_hash = contract_digest(contract);
+println("Agreed Protocol Hash (SHA-256): ", protocol_hash);
+```
+
+---
+
+## 3. Auditing Raw Data: Detecting Contract Violations
+
+Suppose an analyst attempts to run the analysis on a raw dataset containing underage employees and duplicate IDs:
+
+```{ghl}
+#| echo: true
+#| eval: true
+let df_raw = dataframe {
+    id: [101.0, 101.0, 103.0, 104.0],
+    age: [15.0, 16.0, 28.0, 34.0],
+    salary: [18000.0, 19500.0, 48000.0, 52000.0]
+};
+
+// Verify contract against raw data
+let raw_receipt = verify_contract(contract, df_raw);
+render_cockpit(raw_receipt);
+
+println("Raw dataset compliant: ", raw_receipt.is_compliant);
+```
+
+---
+
+## 4. Executable Data Sanitation Pipeline
+
+We enforce the contract rules using `enforce_data_rules()`, filtering out observations outside the agreed range:
+
+```{ghl}
+#| echo: true
+#| eval: true
+let df_workforce = dataframe {
+    id: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+    age: [16.0, 25.0, 32.0, 45.0, 29.0, 52.0, 38.0, 72.0],
+    salary: [12000.0, 50000.0, 65000.0, 85000.0, 55000.0, 95000.0, 72000.0, 120000.0]
+};
+
+println("Ingesting raw workforce data: N = ", nrow(df_workforce));
+
+// Enforce contract rules
+let clean_workforce = enforce_data_rules(df_workforce, contract);
+println("Sanitized workforce data: N = ", nrow(clean_workforce), " (underage and overage rows filtered)");
+```
+
+---
+
+## 5. Certification and Cockpit Deck Receipt
+
+The sanitized dataset is formally certified under the agreed protocol:
+
+```{ghl}
+#| echo: true
+#| eval: true
+let cert_receipt = verify_contract(contract, clean_workforce);
+render_cockpit(cert_receipt);
+
+println("Compliance Status: ", cert_receipt.is_compliant);
+println("Certified Contract Hash: ", cert_receipt.contract_hash);
+println("Certified Dataset Hash:  ", cert_receipt.dataset_hash);
+```
+
+---
+
+## 6. Functional Parity Validation Benchmarks
+
+| Expectation / Capability | GHL (`spring_pact`) | Python (`Great Expectations` / `Pandera`) | R (`pointblank`) | Concordance |
+|:---|:---:|:---:|:---:|:---:|
+| **Schema Integrity Check** | `expect_column_names` | `expect_table_columns_to_match` | `col_exists` | Exact |
+| **Primary Key Uniqueness** | `expect_unique` | `expect_column_values_to_be_unique` | `rows_distinct` | Exact |
+| **Numeric Range Boundary** | `expect_range` | `expect_column_values_to_be_between` | `col_vals_between` | Exact |
+| **Missing Values NA Threshold** | `expect_na_max` | `expect_column_values_to_not_be_null` | `col_vals_not_null` | Exact |
+| **Outlier Detection via IQR** | `expect_outlier_rule` | Custom IQR Validation | `col_vals_in_set` | Exact |
+| **Minimum Sample Size (N)** | `expect_min_sample_size` | `expect_table_row_count_to_be_between` | `row_count_match` | Exact |
+| **Econometric Multicollinearity** | `expect_vif_max` | External Script | External Script | Superior |
+| **Covariance Policy (HC3)** | `expect_vcov_kind` | External Script | External Script | Superior |
+| **Deterministic SHA-256 Digest** | `contract_digest` | Manual Hashlib | Manual Digest | Exact |
+| **Terminal Cockpit UX** | `render_cockpit` (Haru) | HTML / JSON | HTML Report | Superior UX |
+
+---
+
+## 7. Conclusion
+
+`packages/spring_pact` establishes:
+1. **Zero-Configuration Simplicity**: Pure GHL code without external YAML configs, databases, or heavy data contexts.
+2. **End-to-End Integrity**: Cryptographic SHA-256 protocol digest preventing post-hoc *p-hacking*.
+3. **Comprehensive Coverage**: Unifying data quality rules and econometric model assumptions into a single contract.

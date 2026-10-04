@@ -21,6 +21,8 @@ struct Contract {
     range_rules: Vector,
     na_rules: Vector,
     outlier_rules: Vector,
+    unique_rules: Vector,
+    schema_rules: Vector,
     vif_rules: Vector,
     sample_rules: Vector,
     vcov_rules: Vector
@@ -32,6 +34,8 @@ fn new_contract(name: String) -> Contract {
         range_rules: [],
         na_rules: [],
         outlier_rules: [],
+        unique_rules: [],
+        schema_rules: [],
         vif_rules: [],
         sample_rules: [],
         vcov_rules: []
@@ -45,6 +49,8 @@ fn expect_range(contract: Contract, col_name: String, min_val: f64, max_val: f64
         range_rules: append(contract.range_rules, rule),
         na_rules: contract.na_rules,
         outlier_rules: contract.outlier_rules,
+        unique_rules: contract.unique_rules,
+        schema_rules: contract.schema_rules,
         vif_rules: contract.vif_rules,
         sample_rules: contract.sample_rules,
         vcov_rules: contract.vcov_rules
@@ -58,6 +64,8 @@ fn expect_na_max(contract: Contract, col_name: String, threshold: f64) -> Contra
         range_rules: contract.range_rules,
         na_rules: append(contract.na_rules, rule),
         outlier_rules: contract.outlier_rules,
+        unique_rules: contract.unique_rules,
+        schema_rules: contract.schema_rules,
         vif_rules: contract.vif_rules,
         sample_rules: contract.sample_rules,
         vcov_rules: contract.vcov_rules
@@ -71,6 +79,38 @@ fn expect_outlier_rule(contract: Contract, col_name: String, method: String, fac
         range_rules: contract.range_rules,
         na_rules: contract.na_rules,
         outlier_rules: append(contract.outlier_rules, rule),
+        unique_rules: contract.unique_rules,
+        schema_rules: contract.schema_rules,
+        vif_rules: contract.vif_rules,
+        sample_rules: contract.sample_rules,
+        vcov_rules: contract.vcov_rules
+    }
+}
+
+fn expect_unique(contract: Contract, col_name: String) -> Contract {
+    let rule = create_unique_rule(col_name);
+    Contract {
+        name: contract.name,
+        range_rules: contract.range_rules,
+        na_rules: contract.na_rules,
+        outlier_rules: contract.outlier_rules,
+        unique_rules: append(contract.unique_rules, rule),
+        schema_rules: contract.schema_rules,
+        vif_rules: contract.vif_rules,
+        sample_rules: contract.sample_rules,
+        vcov_rules: contract.vcov_rules
+    }
+}
+
+fn expect_column_names(contract: Contract, expected_cols: Vector) -> Contract {
+    let rule = create_column_schema_rule(expected_cols);
+    Contract {
+        name: contract.name,
+        range_rules: contract.range_rules,
+        na_rules: contract.na_rules,
+        outlier_rules: contract.outlier_rules,
+        unique_rules: contract.unique_rules,
+        schema_rules: append(contract.schema_rules, rule),
         vif_rules: contract.vif_rules,
         sample_rules: contract.sample_rules,
         vcov_rules: contract.vcov_rules
@@ -84,6 +124,8 @@ fn expect_min_sample_size(contract: Contract, min_n: i64) -> Contract {
         range_rules: contract.range_rules,
         na_rules: contract.na_rules,
         outlier_rules: contract.outlier_rules,
+        unique_rules: contract.unique_rules,
+        schema_rules: contract.schema_rules,
         vif_rules: contract.vif_rules,
         sample_rules: append(contract.sample_rules, rule),
         vcov_rules: contract.vcov_rules
@@ -97,6 +139,8 @@ fn expect_vif_max(contract: Contract, max_vif: f64) -> Contract {
         range_rules: contract.range_rules,
         na_rules: contract.na_rules,
         outlier_rules: contract.outlier_rules,
+        unique_rules: contract.unique_rules,
+        schema_rules: contract.schema_rules,
         vif_rules: append(contract.vif_rules, rule),
         sample_rules: contract.sample_rules,
         vcov_rules: contract.vcov_rules
@@ -110,6 +154,8 @@ fn expect_vcov_kind(contract: Contract, expected_vcov: String) -> Contract {
         range_rules: contract.range_rules,
         na_rules: contract.na_rules,
         outlier_rules: contract.outlier_rules,
+        unique_rules: contract.unique_rules,
+        schema_rules: contract.schema_rules,
         vif_rules: contract.vif_rules,
         sample_rules: contract.sample_rules,
         vcov_rules: append(contract.vcov_rules, rule)
@@ -118,46 +164,55 @@ fn expect_vcov_kind(contract: Contract, expected_vcov: String) -> Contract {
 
 /// Generates a deterministic SHA-256 hash digest of the agreed contract specifications.
 fn contract_digest(contract: Contract) -> String {
-    let raw = format("contract:{}:{}:{}:{}:{}:{}",
+    let raw = format("contract:{}:{}:{}:{}:{}:{}:{}",
         contract.name,
         length(contract.range_rules),
         length(contract.na_rules),
         length(contract.outlier_rules),
+        length(contract.unique_rules),
         length(contract.vif_rules),
         length(contract.sample_rules)
     );
     format("sha256:{}", sha256(raw))
 }
 
-/// Verifies all contract rules against a dataset and optional model.
+/// Verifies all contract rules against a dataset.
 fn verify_contract(contract: Contract, df: DataFrame) -> AuditReceipt {
     let mut evals = [];
     let mut all_passed = true;
 
+    // Evaluate Schema Rules
+    for r in contract.schema_rules {
+        let ev = evaluate_column_schema_rule(r, df);
+        if !ev.passed { all_passed = false; }
+        evals = append(evals, ev);
+    }
+
+    // Evaluate Unique Rules
+    for r in contract.unique_rules {
+        let ev = evaluate_unique_rule(r, df);
+        if !ev.passed { all_passed = false; }
+        evals = append(evals, ev);
+    }
+
     // Evaluate Range Rules
     for r in contract.range_rules {
         let ev = evaluate_range_rule(r, df);
-        if !ev.passed {
-            all_passed = false;
-        }
+        if !ev.passed { all_passed = false; }
         evals = append(evals, ev);
     }
 
     // Evaluate NA Rules
     for r in contract.na_rules {
         let ev = evaluate_na_rule(r, df);
-        if !ev.passed {
-            all_passed = false;
-        }
+        if !ev.passed { all_passed = false; }
         evals = append(evals, ev);
     }
 
     // Evaluate Outlier Rules
     for r in contract.outlier_rules {
         let ev = evaluate_outlier_rule(r, df);
-        if !ev.passed {
-            all_passed = false;
-        }
+        if !ev.passed { all_passed = false; }
         evals = append(evals, ev);
     }
 
@@ -165,9 +220,7 @@ fn verify_contract(contract: Contract, df: DataFrame) -> AuditReceipt {
     let n_rows = nrow(df);
     for r in contract.sample_rules {
         let ev = evaluate_min_sample_rule(r, n_rows);
-        if !ev.passed {
-            all_passed = false;
-        }
+        if !ev.passed { all_passed = false; }
         evals = append(evals, ev);
     }
 
@@ -183,7 +236,7 @@ fn verify_contract(contract: Contract, df: DataFrame) -> AuditReceipt {
     }
 }
 
-/// Builds the Cockpit Deck receipt panel with Haru/Gojo badge.
+/// Builds the Cockpit Deck receipt panel with Haru badge.
 fn audit_cockpit(receipt: AuditReceipt) {
     let badge = if receipt.is_compliant {
         "/ᐠ˵- ⩊ -˵マ ✧ CERTIFIED"
@@ -218,4 +271,3 @@ fn render_cockpit(receipt: AuditReceipt) {
     let p = audit_cockpit(receipt);
     show_cockpit(p);
 }
-

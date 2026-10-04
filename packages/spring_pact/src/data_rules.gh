@@ -1,5 +1,5 @@
 // spring_pact :: Data Expectation Rules Module (RFC 14)
-// Defines data sanitation, validation, range, missingness, and outlier protocols.
+// Defines data sanitation, validation, range, missingness, outlier, uniqueness, and schema protocols.
 
 struct RangeRule {
     col_name: String,
@@ -16,6 +16,14 @@ struct OutlierRule {
     col_name: String,
     method: String,
     factor: f64
+}
+
+struct UniqueRule {
+    col_name: String
+}
+
+struct ColumnSchemaRule {
+    expected_cols: Vector
 }
 
 fn create_range_rule(col_name: String, min_val: f64, max_val: f64) -> RangeRule {
@@ -39,6 +47,14 @@ fn create_outlier_rule(col_name: String, method: String, factor: f64) -> Outlier
         method: method,
         factor: factor
     }
+}
+
+fn create_unique_rule(col_name: String) -> UniqueRule {
+    UniqueRule { col_name: col_name }
+}
+
+fn create_column_schema_rule(expected_cols: Vector) -> ColumnSchemaRule {
+    ColumnSchemaRule { expected_cols: expected_cols }
 }
 
 /// Evaluates whether a column's values satisfy the range expectation [min_val, max_val].
@@ -89,7 +105,12 @@ fn evaluate_outlier_rule(rule: OutlierRule, df: DataFrame) -> RuleEvaluation {
     let lower_bound = q25 - rule.factor * col_iqr;
     let upper_bound = q75 + rule.factor * col_iqr;
 
-    let outliers_count = sum(col_data < lower_bound || col_data > upper_bound);
+    let mut outliers_count = 0;
+    for v in col_data {
+        if v < lower_bound || v > upper_bound {
+            outliers_count = outliers_count + 1;
+        }
+    }
     let passed = outliers_count == 0;
 
     let exp_str = format("0 outliers via {} (factor = {})", rule.method, rule.factor);
@@ -97,6 +118,57 @@ fn evaluate_outlier_rule(rule: OutlierRule, df: DataFrame) -> RuleEvaluation {
 
     RuleEvaluation {
         rule: format("Outlier check on `{}`", rule.col_name),
+        expected: exp_str,
+        observed: obs_str,
+        passed: passed
+    }
+}
+
+/// Evaluates uniqueness of entries in a primary key or identifier column.
+fn evaluate_unique_rule(rule: UniqueRule, df: DataFrame) -> RuleEvaluation {
+    let col_data = pull(df, rule.col_name);
+    let n_total = length(col_data);
+    let mut has_dups = false;
+
+    for i in 0..n_total {
+        for j in (i + 1)..n_total {
+            if col_data[i] == col_data[j] {
+                has_dups = true;
+            }
+        }
+    }
+
+    let passed = !has_dups;
+    let exp_str = "Zero duplicate values";
+    let obs_str = if passed { "All values unique" } else { "Duplicate values detected" };
+
+    RuleEvaluation {
+        rule: format("Uniqueness check on `{}`", rule.col_name),
+        expected: exp_str,
+        observed: obs_str,
+        passed: passed
+    }
+}
+
+/// Evaluates whether all required schema columns are present in DataFrame.
+fn evaluate_column_schema_rule(rule: ColumnSchemaRule, df: DataFrame) -> RuleEvaluation {
+    let df_cols = colnames(df);
+    let mut missing_count = 0;
+
+    for c in rule.expected_cols {
+        let mut found = false;
+        for existing in df_cols {
+            if existing == c { found = true; }
+        }
+        if !found { missing_count = missing_count + 1; }
+    }
+
+    let passed = missing_count == 0;
+    let exp_str = format("All {} columns present", length(rule.expected_cols));
+    let obs_str = if passed { "Schema complete" } else { format("{} columns missing", missing_count) };
+
+    RuleEvaluation {
+        rule: "Schema Column Integrity",
         expected: exp_str,
         observed: obs_str,
         passed: passed
