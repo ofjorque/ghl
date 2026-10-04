@@ -1,0 +1,43 @@
+// packages/ghl_impute/src/lib.gh
+// Scientific Missing Data Imputation & Inference Toolkit for GHL
+
+use patterns::*;
+use vim::*;
+use vif::*;
+use pmm::*;
+use knn::*;
+use mice::*;
+use pool::*;
+use cockpit::*;
+
+/// High-level entry point for Multiple Imputation by Chained Equations (MICE) with default parameters.
+fn impute(df: DataFrame) -> MiceResult {
+    impute_mice(df, 5, 5, [], 42)
+}
+
+/// Full configuration entry point for Multiple Imputation by Chained Equations (MICE).
+fn impute_full(
+    df: DataFrame,
+    m: i64,
+    max_iter: i64,
+    methods: Vector,
+    seed: i64
+) -> MiceResult {
+    impute_mice(df, m, max_iter, methods, seed)
+}
+
+/// Fast single-dataset imputation using Predictive Mean Matching (PMM).
+fn quick_impute(df: DataFrame, seed: i64) -> DataFrame {
+    let res = impute_mice(df, 1, 5, [], seed);
+    res.datasets[0]
+}
+
+/// Pools models fitted across multiple imputed datasets using Rubin's Rules.
+fn pool(mice_res: MiceResult, model_fn: any) -> PooledResult {
+    pool_with(mice_res, model_fn)
+}
+
+/// Summarizes missing data patterns and combinations (VIM aggr equivalent).
+fn vim_summary(df: DataFrame) -> VimAggrResult {
+    vim_aggr(df)
+}

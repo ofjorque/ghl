@@ -1,0 +1,347 @@
+// packages/ghl_impute/src/mice.gh
+// Multivariate Imputation by Chained Equations (MICE) with Universal Model Plug-in
+
+struct MethodSpec {
+    column: String,
+    method: any
+}
+
+struct MiceResult {
+    datasets: Vector,
+    m: i64,
+    max_iter: i64,
+    methods: Vector,
+    incomplete_cols: Vector,
+    original_df: DataFrame
+}
+
+/// Inverts a symmetric positive-definite p x p correlation or Gram matrix using Gauss-Jordan elimination.
+fn invert_square_matrix(mat_data: Vector, p: i64) -> Vector {
+    let mut a = mat_data;
+    let mut inv = [];
+
+    // Initialize inv as identity matrix
+    for i in 0..p {
+        for j in 0..p {
+            if i == j {
+                inv = append(inv, 1.0);
+            } else {
+                inv = append(inv, 0.0);
+            }
+        }
+    }
+
+    for i in 0..p {
+        // Find pivot
+        let mut max_row = i;
+        let mut max_val = abs(a[i * p + i]);
+        for k in (i + 1)..p {
+            let val = abs(a[k * p + i]);
+            if val > max_val {
+                max_val = val;
+                max_row = k;
+            }
+        }
+
+        // Swap rows in a and inv
+        if max_row != i {
+            for j in 0..p {
+                let temp_a = a[i * p + j];
+                a[i * p + j] = a[max_row * p + j];
+                a[max_row * p + j] = temp_a;
+
+                let temp_inv = inv[i * p + j];
+                inv[i * p + j] = inv[max_row * p + j];
+                inv[max_row * p + j] = temp_inv;
+            }
+        }
+
+        let pivot = a[i * p + i];
+        let pivot_safe = if abs(pivot) < 1e-12 { 1e-12 } else { pivot };
+
+        // Divide current row by pivot
+        for j in 0..p {
+            a[i * p + j] = a[i * p + j] / pivot_safe;
+            inv[i * p + j] = inv[i * p + j] / pivot_safe;
+        }
+
+        // Eliminate other rows
+        for k in 0..p {
+            if k != i {
+                let factor = a[k * p + i];
+                for j in 0..p {
+                    a[k * p + j] = a[k * p + j] - factor * a[i * p + j];
+                    inv[k * p + j] = inv[k * p + j] - factor * inv[i * p + j];
+                }
+            }
+        }
+    }
+
+    inv
+}
+
+/// Solves linear regression beta = (X^T X + lambda I)^(-1) X^T y on numeric design matrix.
+fn fit_linear_weights(X_rows: Vector, y_vals: Vector, p_features: i64) -> Vector {
+    let n = length(y_vals);
+    if n == 0 || p_features == 0 {
+        return [];
+    }
+
+    // Build p x p matrix XtX and p x 1 vector Xty
+    let mut XtX = [];
+    for j in 0..(p_features * p_features) {
+        XtX = append(XtX, 0.0);
+    }
+
+    let mut Xty = [];
+    for j in 0..p_features {
+        Xty = append(Xty, 0.0);
+    }
+
+    for i in 0..n {
+        let yi = y_vals[i] * 1.0;
+        let base_i = i * p_features;
+
+        for j in 0..p_features {
+            let x_ij = X_rows[base_i + j];
+            Xty[j] = Xty[j] + x_ij * yi;
+
+            let row_offset = j * p_features;
+            for k in 0..p_features {
+                let x_ik = X_rows[base_i + k];
+                XtX[row_offset + k] = XtX[row_offset + k] + x_ij * x_ik;
+            }
+        }
+    }
+
+    // Ridge regularization on diagonal for numerical stability
+    for j in 0..p_features {
+        let diag_pos = j * p_features + j;
+        XtX[diag_pos] = XtX[diag_pos] + 1e-6;
+    }
+
+    let XtX_inv = invert_square_matrix(XtX, p_features);
+
+    // Compute beta = XtX_inv * Xty
+    let mut beta = [];
+    for j in 0..p_features {
+        let mut b_j = 0.0;
+        let offset = j * p_features;
+        for k in 0..p_features {
+            b_j = b_j + XtX_inv[offset + k] * Xty[k];
+        }
+        beta = append(beta, b_j);
+    }
+
+    beta
+}
+
+/// Evaluates linear prediction y_hat = X * beta for a design matrix.
+fn predict_linear(X_rows: Vector, beta: Vector, n_rows: i64, p_features: i64) -> Vector {
+    let mut preds = [];
+    for i in 0..n_rows {
+        let mut y_i = 0.0;
+        let base_i = i * p_features;
+        for j in 0..p_features {
+            y_i = y_i + X_rows[base_i + j] * beta[j];
+        }
+        preds = append(preds, y_i);
+    }
+    preds
+}
+
+/// Imputes a DataFrame using Multivariate Imputation by Chained Equations (MICE).
+/// Supports built-in methods ("pmm", "norm", "knn", "mean") and
+/// UNIVERSAL MODEL FUNCTIONS fn(df, target_col, obs_indices, miss_indices) -> Vector.
+fn impute_mice(
+    df: DataFrame,
+    m: i64,
+    max_iter: i64,
+    methods: Vector,
+    seed: i64
+) -> MiceResult {
+    let all_cols = colnames(df);
+    let miss_cols = missing_columns(df);
+    let n_rows = length(pull(df, all_cols[0]));
+
+    if length(miss_cols) == 0 {
+        return MiceResult {
+            datasets: [df],
+            m: 1,
+            max_iter: 0,
+            methods: methods,
+            incomplete_cols: [],
+            original_df: df
+        };
+    }
+
+    let mut completed_datasets = [];
+
+    // Outer loop over M multiple imputations
+    for m_chain in 0..m {
+        let chain_seed = seed + m_chain * 7919;
+
+        // Step 1: Initial pass — impute missing values with observed mean
+        let mut current_df = df;
+        for c_name in all_cols {
+            if has_missing(df, c_name) {
+                let col_raw = pull(df, c_name);
+                let na_mask = is_na(col_raw);
+                let mut sum_obs = 0.0;
+                let mut count_obs = 0.0;
+
+                for r in 0..n_rows {
+                    if !na_mask[r] {
+                        sum_obs = sum_obs + (col_raw[r] * 1.0);
+                        count_obs = count_obs + 1.0;
+                    }
+                }
+                let mean_val = if count_obs > 0.0 { sum_obs / count_obs } else { 0.0 };
+
+                let mut col_clean = col_raw;
+                for r in 0..n_rows {
+                    if na_mask[r] {
+                        col_clean[r] = mean_val;
+                    }
+                }
+                current_df[c_name] = col_clean;
+            }
+        }
+
+        // Step 2: Fully Conditional Specification (FCS) iterations
+        for iter in 0..max_iter {
+            for target_col in miss_cols {
+                let orig_col = pull(df, target_col);
+                let orig_mask = is_na(orig_col);
+
+                let mut obs_idx = [];
+                let mut miss_idx = [];
+                for r in 0..n_rows {
+                    if orig_mask[r] {
+                        miss_idx = append(miss_idx, r);
+                    } else {
+                        obs_idx = append(obs_idx, r);
+                    }
+                }
+
+                let n_obs = length(obs_idx);
+                let n_miss = length(miss_idx);
+
+                if n_miss == 0 || n_obs == 0 {
+                    continue;
+                }
+
+                // Determine method for this column
+                let mut method_spec: any = "pmm";
+                for spec in methods {
+                    if spec.column == target_col {
+                        method_spec = spec.method;
+                    }
+                }
+
+                // Identify other predictor columns
+                let mut pred_cols = [];
+                for c_name in all_cols {
+                    if c_name != target_col {
+                        pred_cols = append(pred_cols, c_name);
+                    }
+                }
+
+                if method_spec == "knn" {
+                    let imputed_vec = impute_knn_column(current_df, target_col, pred_cols, 5);
+                    current_df[target_col] = imputed_vec;
+                } else if method_spec == "mean" {
+                    let mut s = 0.0;
+                    for idx in obs_idx {
+                        s = s + (orig_col[idx] * 1.0);
+                    }
+                    let m_val = s / (n_obs * 1.0);
+                    let mut updated_y = pull(current_df, target_col);
+                    for idx in miss_idx {
+                        updated_y[idx] = m_val;
+                    }
+                    current_df[target_col] = updated_y;
+                } else if method_spec == "pmm" || method_spec == "norm" {
+                    let p_feat = length(pred_cols) + 1; // +1 for intercept
+
+                    let mut X_obs = [];
+                    let mut y_obs = [];
+                    for o_pos in obs_idx {
+                        y_obs = append(y_obs, orig_col[o_pos] * 1.0);
+                        X_obs = append(X_obs, 1.0); // Intercept
+                        for p_name in pred_cols {
+                            let p_data = pull(current_df, p_name);
+                            X_obs = append(X_obs, p_data[o_pos] * 1.0);
+                        }
+                    }
+
+                    let mut X_miss = [];
+                    for m_pos in miss_idx {
+                        X_miss = append(X_miss, 1.0); // Intercept
+                        for p_name in pred_cols {
+                            let p_data = pull(current_df, p_name);
+                            X_miss = append(X_miss, p_data[m_pos] * 1.0);
+                        }
+                    }
+
+                    let beta = fit_linear_weights(X_obs, y_obs, p_feat);
+                    let y_hat_obs = predict_linear(X_obs, beta, n_obs, p_feat);
+                    let y_hat_miss = predict_linear(X_miss, beta, n_miss, p_feat);
+
+                    if method_spec == "pmm" {
+                        let cur_y_full = pull(current_df, target_col);
+                        let imputed_y = impute_pmm(
+                            cur_y_full,
+                            y_hat_obs,
+                            y_hat_miss,
+                            obs_idx,
+                            miss_idx,
+                            5,
+                            chain_seed + iter * 31
+                        );
+                        current_df[target_col] = imputed_y;
+                    } else {
+                        // "norm" — Bayesian stochastic linear regression
+                        let mut ss_res = 0.0;
+                        for i in 0..n_obs {
+                            let diff = y_obs[i] - y_hat_obs[i];
+                            ss_res = ss_res + diff * diff;
+                        }
+                        let df_e = if n_obs > p_feat { (n_obs - p_feat) * 1.0 } else { 1.0 };
+                        let sigma_e = sqrt(ss_res / df_e);
+
+                        let mut cur_y = pull(current_df, target_col);
+                        for k in 0..n_miss {
+                            let m_pos = miss_idx[k];
+                            // Box-Muller random draw
+                            let u1 = abs((chain_seed * 48271 + k * 104729 + 17) % 2147483647) * 1.0 / 2147483647.0;
+                            let u2 = abs((chain_seed * 16807 + k * 65537 + 101) % 2147483647) * 1.0 / 2147483647.0;
+                            let u1_safe = if u1 < 1e-6 { 1e-6 } else { u1 };
+                            let z = sqrt(-2.0 * ln(u1_safe)) * cos(6.283185307179586 * u2);
+
+                            let stoch_val = y_hat_miss[k] + sigma_e * z;
+                            cur_y[m_pos] = stoch_val;
+                        }
+                        current_df[target_col] = cur_y;
+                    }
+                } else {
+                    // Universal Model Plug-in: User-provided callable model function
+                    // Signature: method_spec(current_df, target_col, obs_idx, miss_idx) -> Vector
+                    let custom_imputed_y = method_spec(current_df, target_col, obs_idx, miss_idx);
+                    current_df[target_col] = custom_imputed_y;
+                }
+            }
+        }
+
+        completed_datasets = append(completed_datasets, current_df);
+    }
+
+    MiceResult {
+        datasets: completed_datasets,
+        m: m,
+        max_iter: max_iter,
+        methods: methods,
+        incomplete_cols: miss_cols,
+        original_df: df
+    }
+}

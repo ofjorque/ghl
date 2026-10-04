@@ -227,6 +227,14 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "assert".into(),
+            Type::Function {
+                params: vec![Type::Bool, Type::Any],
+                ret: Box::new(Type::Unit),
+            },
+            false,
+        );
+        env.insert(
             "clock_now".into(),
             Type::Function {
                 params: vec![],

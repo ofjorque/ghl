@@ -151,8 +151,10 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
   - Implementar biblioteca de algoritmos de optimización matemática (BFGS, L-BFGS-B con cotas de caja, Nelder-Mead simplex, Levenberg-Marquardt para mínimos cuadrados no lineales). Validado: 5/5 bloques de prueba superados.
   - Exponer interfaz canónica para estimación de funciones de pérdida personalizadas, máxima verosimilitud (MLE) con errores estándar asintóticos vía matriz de información de Fisher, AIC/BIC, y paneles terminales Cockpit Deck (`optim_cockpit`, `mle_cockpit`, `nls_cockpit`). Documentado en [`packages/ghl_optim/GUIDE.md`](packages/ghl_optim/GUIDE.md).
   - Publicar cuaderno reproducible Quarto (`.qmd`) de optimización y calibración MLE en [`examples/nonlinear_optimization_and_mle.qmd`](examples/nonlinear_optimization_and_mle.qmd).
-- [ ] **`packages/ghl_impute` (Limpieza Científica y Datos Faltantes) — [#9](https://github.com/ofjorque/ghl/issues/9):**
-  - Algoritmos de imputación múltiple (tipo MICE y k-NN) integrados nativamente con la semántica de `NA:reason` de GHL.
+- [x] **`packages/ghl_impute` (Limpieza Científica y Datos Faltantes) — [#9](https://github.com/ofjorque/ghl/issues/9):**
+  - Implementar biblioteca de imputación científica multivariada: MICE (Predictive Mean Matching PMM, regresión estocástica bayesiana norm, k-NN ponderada por distancia Gower, media/mediana). Validado: 7/7 bloques de prueba superados.
+  - Soportar arquitectura plug-in de modelos universales arbitrarios (first-class closures en MICE), reglas de combinación de Rubin (1987) con corrección de grados de libertad para muestras pequeñas de Barnard-Rubin (1999), métricas de información faltante (RIV, FMI) y diagnósticos VIM/VIF con paneles Cockpit Deck (`vim_cockpit`, `impute_cockpit`, `pool_cockpit`, `vif_cockpit`). Documentado en [`packages/ghl_impute/GUIDE.md`](packages/ghl_impute/GUIDE.md).
+  - Publicar cuaderno reproducible Quarto (`.qmd`) de diagnóstico y multi-imputación de datos faltantes en [`examples/imputation_analysis.qmd`](examples/imputation_analysis.qmd).
 - [ ] **`packages/ghl_db` / Conectores SQL Extendido — [#10](https://github.com/ofjorque/ghl/issues/10):**
   - Conector nativo hacia DuckDB / SQLite para consultas SQL analíticas directamente sobre DataFrames y archivos Parquet.
 

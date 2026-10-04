@@ -1,0 +1,141 @@
+// packages/ghl_impute/src/knn.gh
+// k-Nearest Neighbors (k-NN) Imputation with Normalized Gower Distance
+
+/// Imputes missing entries in a target column using inverse-distance weighted k-Nearest Neighbors.
+fn impute_knn_column(
+    df: DataFrame,
+    target_col: String,
+    feature_cols: Vector,
+    k_neighbors: i64
+) -> Vector {
+    let y_raw = pull(df, target_col);
+    let n = length(y_raw);
+    let mask_y = is_na(y_raw);
+
+    let mut obs_rows = [];
+    let mut miss_rows = [];
+
+    for i in 0..n {
+        if mask_y[i] {
+            miss_rows = append(miss_rows, i);
+        } else {
+            obs_rows = append(obs_rows, i);
+        }
+    }
+
+    let n_obs = length(obs_rows);
+    let n_miss = length(miss_rows);
+
+    if n_miss == 0 || n_obs == 0 {
+        return y_raw;
+    }
+
+    let k_eff = if k_neighbors > n_obs { n_obs } else { k_neighbors };
+
+    // Compute min and max for each feature column for normalization
+    let mut f_mins = [];
+    let mut f_ranges = [];
+    let mut f_vecs = [];
+    let mut f_masks = [];
+
+    for f_name in feature_cols {
+        let f_vec = pull(df, f_name);
+        let f_mask = is_na(f_vec);
+        f_vecs = append(f_vecs, f_vec);
+        f_masks = append(f_masks, f_mask);
+
+        let mut min_val = 1e30;
+        let mut max_val = -1e30;
+
+        for i in 0..n {
+            if !f_mask[i] {
+                let f_v = f_vec[i] * 1.0;
+                if f_v < min_val { min_val = f_v; }
+                if f_v > max_val { max_val = f_v; }
+            }
+        }
+
+        let range_val = max_val - min_val;
+        let range_safe = if range_val < 1e-9 { 1.0 } else { range_val };
+
+        f_mins = append(f_mins, min_val);
+        f_ranges = append(f_ranges, range_safe);
+    }
+
+    let mut imputed_y = y_raw;
+    let n_feat = length(feature_cols);
+
+    for m_pos in miss_rows {
+        // Compute distance from m_pos to every observed donor row
+        let mut dists = [];
+        let mut donor_indices = [];
+
+        for o_pos in obs_rows {
+            let mut gower_sum = 0.0;
+            let mut valid_feats = 0.0;
+
+            for f_idx in 0..n_feat {
+                let f_vec = f_vecs[f_idx];
+                let f_mask = f_masks[f_idx];
+
+                if !f_mask[m_pos] && !f_mask[o_pos] {
+                    let v_m = f_vec[m_pos] * 1.0;
+                    let v_o = f_vec[o_pos] * 1.0;
+                    let diff = abs(v_m - v_o) / f_ranges[f_idx];
+                    gower_sum = gower_sum + diff;
+                    valid_feats = valid_feats + 1.0;
+                }
+            }
+
+            let dist = if valid_feats > 0.0 { gower_sum / valid_feats } else { 1.0 };
+            dists = append(dists, dist);
+            donor_indices = append(donor_indices, o_pos);
+        }
+
+        // Find k_eff nearest neighbors
+        let mut nn_donors = [];
+        let mut nn_dists = [];
+
+        for i in 0..n_obs {
+            let cur_dist = dists[i];
+            let cur_donor = donor_indices[i];
+
+            if length(nn_donors) < k_eff {
+                nn_donors = append(nn_donors, cur_donor);
+                nn_dists = append(nn_dists, cur_dist);
+            } else {
+                let mut worst_idx = 0;
+                let mut worst_dist = nn_dists[0];
+                for k in 1..k_eff {
+                    if nn_dists[k] > worst_dist {
+                        worst_dist = nn_dists[k];
+                        worst_idx = k;
+                    }
+                }
+                if cur_dist < worst_dist {
+                    nn_donors[worst_idx] = cur_donor;
+                    nn_dists[worst_idx] = cur_dist;
+                }
+            }
+        }
+
+        // Inverse distance weighted interpolation
+        let mut weight_sum = 0.0;
+        let mut val_sum = 0.0;
+
+        for k in 0..k_eff {
+            let d = nn_dists[k];
+            let donor_pos = nn_donors[k];
+            let donor_val = y_raw[donor_pos] * 1.0;
+
+            let w = 1.0 / (d + 1e-5);
+            weight_sum = weight_sum + w;
+            val_sum = val_sum + w * donor_val;
+        }
+
+        let imputed_val = if weight_sum > 0.0 { val_sum / weight_sum } else { 0.0 };
+        imputed_y[m_pos] = imputed_val;
+    }
+
+    imputed_y
+}

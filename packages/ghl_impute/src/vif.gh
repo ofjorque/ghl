@@ -1,0 +1,157 @@
+// packages/ghl_impute/src/vif.gh
+// Variance Inflation Factor (VIF) and Multicollinearity Screening
+
+struct VifResult {
+    table: DataFrame,
+    max_vif: f64,
+    has_severe: bool
+}
+
+
+/// Computes the Variance Inflation Factor (VIF) and tolerance for each predictor column.
+/// Uses the canonical correlation inversion theorem: VIF_j = (R_XX^(-1))_jj.
+fn vif(df: DataFrame, cols: Vector) -> VifResult {
+    let p = length(cols);
+    if p == 0 {
+        panic("VIF computation requires at least 1 predictor column");
+    }
+
+    if p == 1 {
+        let single_table = dataframe {
+            variable: cols,
+            vif: [1.0],
+            tolerance: [1.0],
+            severity: ["Low"]
+        };
+        return VifResult {
+            table: single_table,
+            max_vif: 1.0,
+            has_severe: false
+        };
+    }
+
+    // Extract complete cases for selected columns
+    let first_col = pull(df, cols[0]);
+    let n = length(first_col);
+
+    let mut col_masks = [];
+    for c_name in cols {
+        let col_vec = pull(df, c_name);
+        col_masks = append(col_masks, is_na(col_vec));
+    }
+
+    let mut valid_indices = [];
+    for i in 0..n {
+        let mut row_valid = true;
+        for c_idx in 0..p {
+            let mask = col_masks[c_idx];
+            if mask[i] {
+                row_valid = false;
+                break;
+            }
+        }
+        if row_valid {
+            valid_indices = append(valid_indices, i);
+        }
+    }
+
+    let n_valid = length(valid_indices);
+    if n_valid <= p {
+        panic("Insufficient complete observations to compute VIF matrix");
+    }
+
+    // Compute means and standard deviations
+    let mut col_means = [];
+    let mut col_sds = [];
+
+    for c_name in cols {
+        let raw_vec = pull(df, c_name);
+        let mut s = 0.0;
+        for idx in valid_indices {
+            s = s + (raw_vec[idx] * 1.0);
+        }
+        let m = s / (n_valid * 1.0);
+        col_means = append(col_means, m);
+
+        let mut ss = 0.0;
+        for idx in valid_indices {
+            let diff = (raw_vec[idx] * 1.0) - m;
+            ss = ss + diff * diff;
+        }
+        let sd_val = sqrt(ss / ((n_valid - 1) * 1.0));
+        let sd_safe = if sd_val < 1e-9 { 1e-9 } else { sd_val };
+        col_sds = append(col_sds, sd_safe);
+    }
+
+    // Build p x p correlation matrix
+    let mut r_mat = [];
+    for i in 0..p {
+        let col_i = pull(df, cols[i]);
+        let m_i = col_means[i];
+        let sd_i = col_sds[i];
+
+        for j in 0..p {
+            if i == j {
+                r_mat = append(r_mat, 1.0);
+            } else {
+                let col_j = pull(df, cols[j]);
+                let m_j = col_means[j];
+                let sd_j = col_sds[j];
+
+                let mut cov_ij = 0.0;
+                for idx in valid_indices {
+                    let zi = ((col_i[idx] * 1.0) - m_i) / sd_i;
+                    let zj = ((col_j[idx] * 1.0) - m_j) / sd_j;
+                    cov_ij = cov_ij + zi * zj;
+                }
+                let r_ij = cov_ij / ((n_valid - 1) * 1.0);
+                r_mat = append(r_mat, r_ij);
+            }
+        }
+    }
+
+    // Invert correlation matrix
+    let r_inv = invert_square_matrix(r_mat, p);
+
+    let mut vif_vals = [];
+    let mut tol_vals = [];
+    let mut severities = [];
+    let mut max_v = 1.0;
+    let mut has_sev = false;
+
+    for i in 0..p {
+        let raw_vif = r_inv[i * p + i];
+        let v = if raw_vif < 1.0 { 1.0 } else { raw_vif };
+        let tol = 1.0 / v;
+
+        let sev = if v >= 10.0 {
+            has_sev = true;
+            "Severe"
+        } else if v >= 5.0 {
+            "Moderate"
+        } else {
+            "Low"
+        };
+
+        if v > max_v {
+            max_v = v;
+        }
+
+        vif_vals = append(vif_vals, v);
+        tol_vals = append(tol_vals, tol);
+        severities = append(severities, sev);
+    }
+
+    let vif_df = dataframe {
+        variable: cols,
+        vif: vif_vals,
+        tolerance: tol_vals,
+        severity: severities
+    };
+
+    VifResult {
+        table: vif_df,
+        max_vif: max_v,
+        has_severe: has_sev
+    }
+}

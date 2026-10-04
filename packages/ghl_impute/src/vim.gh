@@ -1,0 +1,329 @@
+// packages/ghl_impute/src/vim.gh
+// Visualization and Imputation of Missing Values (VIM)
+// Inspired by Kowarik & Templ (VIM R Package / CRAN Missing Data Task View)
+
+struct VimAggrResult {
+    summary: DataFrame,
+    patterns: DataFrame,
+    n_rows: i64,
+    n_cols: i64,
+    total_missing: i64,
+    pct_total_missing: f64,
+    complete_cases: i64,
+    pct_complete_cases: f64
+}
+
+/// Aggregates missing values and patterns across columns (like VIM::aggr in R).
+/// Produces per-variable missing frequencies and distinct missingness pattern combinations.
+fn vim_aggr(df: DataFrame) -> VimAggrResult {
+    let col_names = colnames(df);
+    let n_cols = length(col_names);
+    if n_cols == 0 {
+        panic("VIM aggr requires a DataFrame with at least 1 column");
+    }
+
+    let n_rows = length(pull(df, col_names[0]));
+    let n_total_cells = n_rows * n_cols;
+
+    // 1. Per-variable missingness summary
+    let mut cols = [];
+    let mut miss_counts = [];
+    let mut obs_counts = [];
+    let mut miss_pcts = [];
+    let mut obs_pcts = [];
+
+    let mut col_na_masks = [];
+    let mut total_miss_cells = 0;
+
+    for c in col_names {
+        let v = pull(df, c);
+        let mask = is_na(v);
+        col_na_masks = append(col_na_masks, mask);
+
+        let mut n_miss = 0;
+        for i in 0..n_rows {
+            if mask[i] {
+                n_miss = n_miss + 1;
+            }
+        }
+        let n_obs = n_rows - n_miss;
+        let pct_m = if n_rows > 0 { (n_miss * 1.0 / (n_rows * 1.0)) * 100.0 } else { 0.0 };
+        let pct_o = if n_rows > 0 { (n_obs * 1.0 / (n_rows * 1.0)) * 100.0 } else { 0.0 };
+
+        total_miss_cells = total_miss_cells + n_miss;
+
+        cols = append(cols, c);
+        miss_counts = append(miss_counts, n_miss * 1.0);
+        obs_counts = append(obs_counts, n_obs * 1.0);
+        miss_pcts = append(miss_pcts, pct_m);
+        obs_pcts = append(obs_pcts, pct_o);
+    }
+
+    let summary_df = dataframe {
+        column: cols,
+        n_missing: miss_counts,
+        pct_missing: miss_pcts,
+        n_observed: obs_counts,
+        pct_observed: obs_pcts
+    };
+
+    // 2. Pattern combinations across rows
+    let mut pattern_strings = [];
+    let mut complete_count = 0;
+
+    for r in 0..n_rows {
+        let mut pat_str = "";
+        let mut row_has_na = false;
+
+        for c_idx in 0..n_cols {
+            let mask = col_na_masks[c_idx];
+            if mask[r] {
+                pat_str = pat_str + "1";
+                row_has_na = true;
+            } else {
+                pat_str = pat_str + "0";
+            }
+        }
+
+        if !row_has_na {
+            complete_count = complete_count + 1;
+        }
+
+        pattern_strings = append(pattern_strings, pat_str);
+    }
+
+    // Aggregate unique patterns
+    let mut unique_patterns = [];
+    let mut pattern_freqs = [];
+
+    for pat in pattern_strings {
+        let mut found_idx = -1;
+        for u_idx in 0..length(unique_patterns) {
+            if unique_patterns[u_idx] == pat {
+                found_idx = u_idx;
+                break;
+            }
+        }
+
+        if found_idx >= 0 {
+            pattern_freqs[found_idx] = pattern_freqs[found_idx] + 1;
+        } else {
+            unique_patterns = append(unique_patterns, pat);
+            pattern_freqs = append(pattern_freqs, 1);
+        }
+    }
+
+    let n_unique = length(unique_patterns);
+    let mut pat_ids = [];
+    let mut pat_pcts = [];
+    let mut pat_counts_f = [];
+
+    for i in 0..n_unique {
+        pat_ids = append(pat_ids, i + 1);
+        let cnt = pattern_freqs[i];
+        pat_counts_f = append(pat_counts_f, cnt * 1.0);
+        let pct = if n_rows > 0 { (cnt * 1.0 / (n_rows * 1.0)) * 100.0 } else { 0.0 };
+        pat_pcts = append(pat_pcts, pct);
+    }
+
+    let patterns_df = dataframe {
+        pattern_id: pat_ids,
+        combination: unique_patterns,
+        count: pat_counts_f,
+        pct: pat_pcts
+    };
+
+    let pct_total_miss = if n_total_cells > 0 {
+        (total_miss_cells * 1.0 / (n_total_cells * 1.0)) * 100.0
+    } else {
+        0.0
+    };
+
+    let pct_comp = if n_rows > 0 {
+        (complete_count * 1.0 / (n_rows * 1.0)) * 100.0
+    } else {
+        0.0
+    };
+
+    VimAggrResult {
+        summary: summary_df,
+        patterns: patterns_df,
+        n_rows: n_rows,
+        n_cols: n_cols,
+        total_missing: total_miss_cells,
+        pct_total_missing: pct_total_miss,
+        complete_cases: complete_count,
+        pct_complete_cases: pct_comp
+    }
+}
+
+/// Generates an ASCII / Unicode matrixplot of missing data (like VIM::matrixplot in R).
+/// Observed values are shown as '·' and missing values as '█'.
+/// If `sort_col` is provided, rows are sorted by that column to visualize MAR mechanisms.
+fn vim_matrixplot_sorted(df: DataFrame, sort_col: String, max_rows: i64) -> String {
+    let col_names = colnames(df);
+    let n_cols = length(col_names);
+    if n_cols == 0 {
+        return "(empty DataFrame)";
+    }
+
+    let n_rows = length(pull(df, col_names[0]));
+    let limit_rows = if max_rows > 0 && max_rows < n_rows { max_rows } else { n_rows };
+
+    // Row ordering: optionally sort by sort_col
+    let mut row_order = [];
+    for i in 0..n_rows {
+        row_order = append(row_order, i);
+    }
+
+    if sort_col != "" && has_column(df, sort_col) {
+        let sort_vals = pull(df, sort_col);
+        // Simple selection sort of indices by sort_vals
+        for i in 0..limit_rows {
+            let mut min_pos = i;
+            for j in (i + 1)..n_rows {
+                let idx_j = row_order[j];
+                let idx_min = row_order[min_pos];
+                let val_j = sort_vals[idx_j];
+                let val_min = sort_vals[idx_min];
+
+                if is_na(val_j) && !is_na(val_min) {
+                    // Place NAs at the end
+                } else if !is_na(val_j) && is_na(val_min) {
+                    min_pos = j;
+                } else if !is_na(val_j) && !is_na(val_min) {
+                    if (val_j * 1.0) < (val_min * 1.0) {
+                        min_pos = j;
+                    }
+                }
+            }
+            if min_pos != i {
+                let temp = row_order[i];
+                row_order[i] = row_order[min_pos];
+                row_order[min_pos] = temp;
+            }
+        }
+    }
+
+    // Build ASCII matrix string
+    let mut out = "VIM Matrixplot [· = Observed, █ = Missing (NA)]:\n";
+    let mut header = " Row │ ";
+    for c in col_names {
+        header = header + c + " ";
+    }
+    out = out + header + "\n";
+    let mut divider = "─────┼";
+    for k in 0..(length(header) - 5) {
+        divider = divider + "─";
+    }
+    out = out + divider + "\n";
+
+    for r_i in 0..limit_rows {
+        let orig_r = row_order[r_i];
+        let mut line = " " + to_string(orig_r) + " │ ";
+        for c in col_names {
+            let col_vec = pull(df, c);
+            let mask = is_na(col_vec);
+            if mask[orig_r] {
+                line = line + "█ ";
+            } else {
+                line = line + "· ";
+            }
+        }
+        out = out + line + "\n";
+    }
+
+    out
+}
+
+/// Generates an ASCII / Unicode matrixplot of missing data with default parameters.
+fn vim_matrixplot(df: DataFrame) -> String {
+    vim_matrixplot_sorted(df, "", 50)
+}
+
+/// Hot-Deck donor imputation (like VIM::hotdeck in R).
+/// Imputes missing entries in `target_col` by sampling donors from observed cases,
+/// optionally conditioned on matching the closest donor in `donor_pool_col`.
+fn vim_hotdeck(
+    df: DataFrame,
+    target_col: String,
+    donor_pool_col: String,
+    seed: i64
+) -> Vector {
+    let y_raw = pull(df, target_col);
+    let n = length(y_raw);
+    let mask_y = is_na(y_raw);
+
+    let mut obs_rows = [];
+    let mut miss_rows = [];
+    for i in 0..n {
+        if mask_y[i] {
+            miss_rows = append(miss_rows, i);
+        } else {
+            obs_rows = append(obs_rows, i);
+        }
+    }
+
+    let n_obs = length(obs_rows);
+    let n_miss = length(miss_rows);
+
+    if n_miss == 0 || n_obs == 0 {
+        return y_raw;
+    }
+
+    let mut imputed_y = y_raw;
+
+    if donor_pool_col != "" && has_column(df, donor_pool_col) {
+        // Nearest donor matching based on auxiliary donor_pool_col
+        let donor_col = pull(df, donor_pool_col);
+        let mask_d = is_na(donor_col);
+
+        for m_idx in miss_rows {
+            let target_aux = donor_col[m_idx];
+
+            let mut best_donor = obs_rows[0];
+            let mut min_diff = 1e30;
+
+            if !mask_d[m_idx] {
+                let target_f = target_aux * 1.0;
+                for o_idx in obs_rows {
+                    if !mask_d[o_idx] {
+                        let donor_f = donor_col[o_idx] * 1.0;
+                        let diff = abs(target_f - donor_f);
+                        if diff < min_diff {
+                            min_diff = diff;
+                            best_donor = o_idx;
+                        }
+                    }
+                }
+            } else {
+                // Random donor fallback
+                let r_idx = abs((seed * 1103515245 + m_idx * 12345) % n_obs);
+                best_donor = obs_rows[r_idx];
+            }
+
+            imputed_y[m_idx] = y_raw[best_donor];
+        }
+    } else {
+        // Unconditional random hot-deck donor draw
+        for m_idx in 0..n_miss {
+            let orig_m = miss_rows[m_idx];
+            let r_idx = abs((seed * 1103515245 + m_idx * 12345) % n_obs);
+            let donor = obs_rows[r_idx];
+            imputed_y[orig_m] = y_raw[donor];
+        }
+    }
+
+    imputed_y
+}
+
+/// Helper function to check if a DataFrame contains a named column.
+fn has_column(df: DataFrame, col_name: String) -> bool {
+    let cols = colnames(df);
+    for c in cols {
+        if c == col_name {
+            return true;
+        }
+    }
+    false
+}

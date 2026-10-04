@@ -487,7 +487,7 @@ impl TypeChecker {
                         let declared_ty = info.ty.clone();
                         match declared_ty {
                             Type::Vector(elem) => {
-                                if value_ty != Type::Any && value_ty != *elem && value_ty != Type::Vector(elem.clone()) {
+                                if value_ty != Type::Any && *elem != Type::Any && value_ty != *elem && value_ty != Type::Vector(elem.clone()) {
                                     self.diagnostics.push(
                                         Diagnostic::compute_error(
                                             "C0102",
@@ -502,6 +502,7 @@ impl TypeChecker {
                             }
                             Type::Matrix { elem, .. } => {
                                 if value_ty != Type::Any
+                                    && *elem != Type::Any
                                     && value_ty != *elem
                                     && value_ty != Type::Vector(elem.clone())
                                     && !matches!(value_ty, Type::Matrix { .. })
@@ -1165,8 +1166,15 @@ impl TypeChecker {
                 let mut actual_fields = Vec::new();
                 for (f_name, f_expr) in fields {
                     let f_ty = self.check_expr_ctx(f_expr, col_ctx);
+                    let mut unified_f_ty = f_ty.clone();
                     if let Some((_, expected_ty)) = defined_fields.iter().find(|(n, _)| n == f_name) {
-                        if f_ty.unify(expected_ty).is_none() {
+                        if let Some(u) = f_ty.unify(expected_ty) {
+                            if *expected_ty == Type::Any {
+                                unified_f_ty = Type::Any;
+                            } else {
+                                unified_f_ty = u;
+                            }
+                        } else {
                             self.diagnostics.push(
                                 Diagnostic::compute_error(
                                     "C0102",
@@ -1187,7 +1195,7 @@ impl TypeChecker {
                             .locate(&self.source_index, &self.source_file, &f_expr.span),
                         );
                     }
-                    actual_fields.push((f_name.clone(), f_ty));
+                    actual_fields.push((f_name.clone(), unified_f_ty));
                 }
 
                 Type::Struct {
@@ -1202,6 +1210,8 @@ impl TypeChecker {
                     Type::Record(fields) => {
                         if let Some((_, ty)) = fields.iter().find(|(n, _)| n == field) {
                             ty.clone()
+                        } else if fields.is_empty() {
+                            Type::Any
                         } else {
                             self.diagnostics.push(
                                 Diagnostic::compute_error(

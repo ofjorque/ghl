@@ -1,0 +1,78 @@
+// packages/ghl_impute/src/pmm.gh
+// Predictive Mean Matching (PMM) Imputation with Donor Sampling
+
+/// Imputes missing values of target_col using Predictive Mean Matching (PMM)
+/// against the donor pool from observed cases with d candidate donors (default d=5).
+fn impute_pmm(
+    y_raw: Vector,
+    y_hat_obs: Vector,
+    y_hat_miss: Vector,
+    obs_indices: Vector,
+    miss_indices: Vector,
+    d_candidates: i64,
+    seed: i64
+) -> Vector {
+    let n_obs = length(obs_indices);
+    let n_miss = length(miss_indices);
+    let mut imputed_y = y_raw;
+
+    if n_obs == 0 || n_miss == 0 {
+        return imputed_y;
+    }
+
+    let d_effective = if d_candidates > n_obs { n_obs } else { d_candidates };
+
+    for m_idx in 0..n_miss {
+        let orig_miss_pos = miss_indices[m_idx];
+        let pred_miss = y_hat_miss[m_idx];
+
+        // Compute absolute distances to all observed predictions
+        let mut dists = [];
+        let mut donor_orig_indices = [];
+
+        for o_idx in 0..n_obs {
+            let pred_obs = y_hat_obs[o_idx];
+            let dist = abs(pred_miss - pred_obs);
+            dists = append(dists, dist);
+            donor_orig_indices = append(donor_orig_indices, obs_indices[o_idx]);
+        }
+
+        // Find top d_effective closest donors using partial insertion sort
+        let mut top_donors = [];
+        let mut top_dists = [];
+
+        for i in 0..n_obs {
+            let cur_dist = dists[i];
+            let cur_donor = donor_orig_indices[i];
+
+            if length(top_donors) < d_effective {
+                top_donors = append(top_donors, cur_donor);
+                top_dists = append(top_dists, cur_dist);
+            } else {
+                // Find worst in top
+                let mut worst_idx = 0;
+                let mut worst_dist = top_dists[0];
+                for k in 1..d_effective {
+                    if top_dists[k] > worst_dist {
+                        worst_dist = top_dists[k];
+                        worst_idx = k;
+                    }
+                }
+
+                if cur_dist < worst_dist {
+                    top_donors[worst_idx] = cur_donor;
+                    top_dists[worst_idx] = cur_dist;
+                }
+            }
+        }
+
+        // Deterministic pseudo-random draw among top donors based on seed + m_idx
+        let pseudo_random = ((seed * 1103515245 + m_idx * 12345 + 101) % 2147483647);
+        let donor_choice_idx = abs(pseudo_random) % d_effective;
+        let selected_donor_pos = top_donors[donor_choice_idx];
+
+        imputed_y[orig_miss_pos] = y_raw[selected_donor_pos];
+    }
+
+    imputed_y
+}

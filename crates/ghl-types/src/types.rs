@@ -199,6 +199,12 @@ impl Type {
                 })
             }
             (Type::Record(f1), Type::Record(f2)) => {
+                if f1.is_empty() {
+                    return Some(Type::Record(f2.clone()));
+                }
+                if f2.is_empty() {
+                    return Some(Type::Record(f1.clone()));
+                }
                 if f1.len() != f2.len() {
                     return None;
                 }
@@ -263,6 +269,8 @@ impl Type {
                 "f64" | "float" | "F64" | "Float" => Type::F64,
                 "bool" | "Bool" => Type::Bool,
                 "str" | "string" | "String" => Type::String,
+                "any" | "Any" => Type::Any,
+                "Record" | "record" => Type::Record(Vec::new()),
                 "Vector" | "vector" => Type::Vector(Box::new(Type::Any)),
                 "DataFrame" | "dataframe" => Type::DataFrame(Vec::new()),
                 "Factor" | "factor" => Type::Factor {

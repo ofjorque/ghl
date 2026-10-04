@@ -1,0 +1,138 @@
+// packages/ghl_impute/src/cockpit.gh
+// Cockpit Deck Terminal Reports for Missing Data, VIM, and Imputation Pooling
+// Implemented via native GHL Cockpit Deck primitives (RFC 12 & RFC 14)
+
+/// Renders a terminal Cockpit card for VIM (Visualization and Imputation of Missing Values).
+fn vim_cockpit(aggr_res: VimAggrResult) {
+    let badge = if aggr_res.total_missing == 0 {
+        "/ᐠ˵- ⩊ -˵マ ✧ COMPLETE DATASET (NO NA)"
+    } else {
+        "/ᐠ˵- ⩊ -˵マ ✧ MISSING PATTERNS AGGREGATED"
+    };
+
+    let miss_pct_str = format("{} ({}%)", to_string(aggr_res.total_missing), to_string(aggr_res.pct_total_missing));
+    let comp_pct_str = format("{} ({}%)", to_string(aggr_res.complete_cases), to_string(aggr_res.pct_complete_cases));
+
+    let mut p = cockpit("ghl_impute VIM Missingness Summary", badge)
+        |> cockpit_add_kv("Rows", to_string(aggr_res.n_rows))
+        |> cockpit_add_kv("Cols", to_string(aggr_res.n_cols))
+        |> cockpit_add_kv("Missing Cells", miss_pct_str)
+        |> cockpit_add_kv("Complete Cases", comp_pct_str)
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Variable         Missing      Observed      % Missing");
+
+    let t = aggr_res.summary;
+    let cols = pull(t, "column");
+    let n_miss = pull(t, "n_missing");
+    let n_obs = pull(t, "n_observed");
+    let pct_miss = pull(t, "pct_missing");
+    let k = length(cols);
+
+    for i in 0..k {
+        let line = format("• {:<14} {:<12} {:<12} {}%", cols[i], to_string(n_miss[i] * 1.0), to_string(n_obs[i] * 1.0), to_string(pct_miss[i] * 1.0));
+        p = cockpit_add_line(p, line);
+    }
+
+    p = cockpit_add_divider(p);
+    p = cockpit_add_line(p, "Missingness Patterns (0 = Observed, 1 = Missing):");
+
+    let p_df = aggr_res.patterns;
+    let p_ids = pull(p_df, "pattern_id");
+    let p_combs = pull(p_df, "combination");
+    let p_counts = pull(p_df, "count");
+    let p_pcts = pull(p_df, "pct");
+    let n_pats = length(p_ids);
+
+    for i in 0..n_pats {
+        let line = format("  Pattern #{}: [{}]  Freq: {} ({}%)", to_string(p_ids[i]), p_combs[i], to_string(p_counts[i] * 1.0), to_string(p_pcts[i] * 1.0));
+        p = cockpit_add_line(p, line);
+    }
+
+    show_cockpit(p);
+}
+
+/// Renders a terminal Cockpit card for MICE multiple imputation.
+fn impute_cockpit(res: MiceResult) {
+    let n_ds = length(res.datasets);
+    let n_cols = length(res.incomplete_cols);
+
+    let mut p = cockpit("ghl_impute MICE Engine", "/ᐠ˵- ⩊ -˵マ ✧ IMPUTATION COMPLETE")
+        |> cockpit_add_kv("Completed Datasets (m)", to_string(n_ds))
+        |> cockpit_add_kv("Iterations (Gibbs)", to_string(res.max_iter))
+        |> cockpit_add_kv("Incomplete Columns", to_string(n_cols))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Imputed Variables & Selected Methods:");
+
+    for c_name in res.incomplete_cols {
+        let mut m_name = "PMM (Default Predictive Mean Matching, d=5)";
+        for spec in res.methods {
+            if spec.column == c_name {
+                let m_val = spec.method;
+                if m_val == "pmm" { m_name = "PMM (Predictive Mean Matching, d=5)"; }
+                else if m_val == "norm" { m_name = "Norm (Bayesian Stochastic Linear)"; }
+                else if m_val == "knn" { m_name = "k-NN (Gower Distance, k=5)"; }
+                else if m_val == "mean" { m_name = "Univariate Observed Mean"; }
+                else { m_name = "Universal Custom Model Plug-in"; }
+            }
+        }
+        let line = format("  • {} ──▶ {}", c_name, m_name);
+        p = cockpit_add_line(p, line);
+    }
+
+    show_cockpit(p);
+}
+
+/// Renders a terminal Cockpit card for Rubin's rules pooled estimation across m datasets.
+fn pool_cockpit(p_res: PooledResult) {
+    let mut p = cockpit("ghl_impute Rubin's Pooling", "/ᐠ˵- ⩊ -˵マ ✧ POOLED ESTIMATION")
+        |> cockpit_add_kv("Datasets (m)", to_string(p_res.m))
+        |> cockpit_add_kv("Degrees of Freedom", "Barnard-Rubin (1999) Small-Sample Adjusted")
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Parameter    Estimate      Std.Error      t-stat     Pr(>|t|)    RIV      FMI");
+
+    let t = p_res.table;
+    let terms = pull(t, "parameter");
+    let ests = pull(t, "estimate");
+    let ses = pull(t, "std_error");
+    let stats = pull(t, "statistic");
+    let pvals = pull(t, "p_value");
+    let rivs = pull(t, "riv");
+    let fmis = pull(t, "fmi");
+    let n = length(terms);
+
+    for i in 0..n {
+        let line = format("• {:<10} {:<13} {:<14} {:<10} {:<11} {:<8} {}", terms[i], to_string(ests[i] * 1.0), to_string(ses[i] * 1.0), to_string(stats[i] * 1.0), to_string(pvals[i] * 1.0), to_string(rivs[i] * 1.0), to_string(fmis[i] * 1.0));
+        p = cockpit_add_line(p, line);
+    }
+
+    show_cockpit(p);
+}
+
+/// Renders a terminal Cockpit card for Variance Inflation Factor (VIF) collinearity screening.
+fn vif_cockpit(vif_res: VifResult) {
+    let badge = if vif_res.has_severe {
+        "/ᐠ ¬`‸´¬ マ ⚠ SEVERE MULTICOLLINEARITY"
+    } else {
+        "/ᐠ˵- ⩊ -˵マ ✧ STABLE PREDICTOR MATRIX"
+    };
+
+    let mut p = cockpit("ghl_impute VIF Collinearity Screening", badge)
+        |> cockpit_add_kv("Max VIF", to_string(vif_res.max_vif))
+        |> cockpit_add_kv("Severe Multicollinearity (> 10.0)", to_string(vif_res.has_severe))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Predictor       VIF           Tolerance     Severity");
+
+    let t = vif_res.table;
+    let vars = pull(t, "variable");
+    let vifs = pull(t, "vif");
+    let tols = pull(t, "tolerance");
+    let sevs = pull(t, "severity");
+    let n = length(vars);
+
+    for i in 0..n {
+        let line = format("• {:<13} {:<13} {:<13} {}", vars[i], to_string(vifs[i] * 1.0), to_string(tols[i] * 1.0), sevs[i]);
+        p = cockpit_add_line(p, line);
+    }
+
+    show_cockpit(p);
+}

@@ -1,0 +1,184 @@
+// packages/ghl_impute/src/pool.gh
+// Rubin's Rules Pooling and Barnard-Rubin Degrees of Freedom for ANY Model
+
+struct PooledResult {
+    table: DataFrame,
+    m: i64,
+    coefficients: Vector,
+    std_errors: Vector,
+    t_stats: Vector,
+    p_values: Vector,
+    df_adjusted: Vector,
+    riv: Vector,
+    fmi: Vector
+}
+
+/// Computes the two-tailed Student-t / asymptotic Gaussian p-value.
+fn compute_p_value(t_stat: f64, df_val: f64) -> f64 {
+    let z = abs(t_stat);
+    // Accurate rational approximation to standard normal complementary error function
+    let p_approx = 0.3989422804014327 * exp(-0.5 * z * z);
+    let t_val = 1.0 / (1.0 + 0.2316419 * z);
+    let poly = t_val * (0.31938153 + t_val * (-0.356563782 + t_val * (1.781477937 + t_val * (-1.821255978 + t_val * 1.330274429))));
+    let tail = p_approx * poly;
+    let two_tailed = 2.0 * tail;
+    if two_tailed > 1.0 { 1.0 } else if two_tailed < 0.0 { 0.0 } else { two_tailed }
+}
+
+/// Pools parameter estimates and standard errors from m models using Rubin's Rules (1987)
+/// and Barnard-Rubin (1999) adjusted degrees of freedom.
+fn pool_estimates(coef_list: Vector, se_list: Vector, complete_df: f64) -> PooledResult {
+    let m = length(coef_list);
+    if m < 2 {
+        panic("Rubin's pooling requires at least m=2 imputed model fits");
+    }
+
+    let k_params = length(coef_list[0]);
+
+    let mut q_bar = [];
+    let mut u_bar = [];
+    let mut b_vec = [];
+    let mut t_vec = [];
+    let mut se_pooled = [];
+    let mut riv_vec = [];
+    let mut fmi_vec = [];
+    let mut df_adj_vec = [];
+    let mut t_stats = [];
+    let mut p_vals = [];
+    let mut ci_lower = [];
+    let mut ci_upper = [];
+    let mut param_names = [];
+
+    let m_f = m * 1.0;
+
+    for j in 0..k_params {
+        // 1. Pooled point estimate Q_bar = sum(Q_l) / m
+        let mut sum_q = 0.0;
+        let mut sum_u = 0.0;
+        for l in 0..m {
+            let q_lj = coef_list[l][j] * 1.0;
+            let se_lj = se_list[l][j] * 1.0;
+            sum_q = sum_q + q_lj;
+            sum_u = sum_u + (se_lj * se_lj);
+        }
+
+        let q_bar_j = sum_q / m_f;
+        let u_bar_j = sum_u / m_f; // Within-imputation variance
+
+        // 2. Between-imputation variance B_j = sum((Q_l - Q_bar)^2) / (m - 1)
+        let mut sum_b = 0.0;
+        for l in 0..m {
+            let q_lj = coef_list[l][j] * 1.0;
+            let diff = q_lj - q_bar_j;
+            sum_b = sum_b + diff * diff;
+        }
+        let b_j = sum_b / ((m - 1) * 1.0);
+
+        // 3. Total variance T_j = U_bar + (1 + 1/m) * B
+        let t_j = u_bar_j + (1.0 + (1.0 / m_f)) * b_j;
+        let se_j = sqrt(t_j);
+
+        // 4. Relative Increase in Variance (RIV) r = (1 + 1/m) * B / U_bar
+        let riv_j = if u_bar_j > 1e-12 {
+            (1.0 + (1.0 / m_f)) * b_j / u_bar_j
+        } else {
+            0.0
+        };
+
+        // 5. Fraction of Missing Information (FMI) lambda = (r + 2/(nu + 3)) / (r + 1)
+        let lambda_j = if riv_j > 0.0 { (riv_j) / (1.0 + riv_j) } else { 0.0 };
+
+        // 6. Barnard-Rubin (1999) small-sample adjusted degrees of freedom
+        // nu_old = (m - 1) * (1 + 1/r)^2
+        let nu_old = if riv_j > 1e-6 {
+            let inv_r = 1.0 / riv_j;
+            ((m - 1) * 1.0) * (1.0 + inv_r) * (1.0 + inv_r)
+        } else {
+            999999.0
+        };
+
+        // nu_obs = ((complete_df + 1) / (complete_df + 3)) * complete_df * (1 - lambda)
+        let nu_obs = ((complete_df + 1.0) / (complete_df + 3.0)) * complete_df * (1.0 - lambda_j);
+
+        // nu_adjusted = (nu_old * nu_obs) / (nu_old + nu_obs)
+        let nu_adj = if nu_old + nu_obs > 1e-6 {
+            (nu_old * nu_obs) / (nu_old + nu_obs)
+        } else {
+            complete_df
+        };
+
+        let t_stat = if se_j > 1e-12 { q_bar_j / se_j } else { 0.0 };
+        let p_val = compute_p_value(t_stat, nu_adj);
+
+        // 95% Confidence Interval (approximate 1.96 critical multiplier)
+        let ci_lo = q_bar_j - 1.96 * se_j;
+        let ci_hi = q_bar_j + 1.96 * se_j;
+
+        let p_name = "param_" + to_string(j + 1);
+
+        param_names = append(param_names, p_name);
+        q_bar = append(q_bar, q_bar_j);
+        se_pooled = append(se_pooled, se_j);
+        t_stats = append(t_stats, t_stat);
+        p_vals = append(p_vals, p_val);
+        df_adj_vec = append(df_adj_vec, nu_adj);
+        riv_vec = append(riv_vec, riv_j);
+        fmi_vec = append(fmi_vec, lambda_j);
+        ci_lower = append(ci_lower, ci_lo);
+        ci_upper = append(ci_upper, ci_hi);
+        u_bar = append(u_bar, u_bar_j);
+        b_vec = append(b_vec, b_j);
+        t_vec = append(t_vec, t_j);
+    }
+
+    let pooled_df = dataframe {
+        parameter: param_names,
+        estimate: q_bar,
+        std_error: se_pooled,
+        statistic: t_stats,
+        df: df_adj_vec,
+        p_value: p_vals,
+        ci_2_5: ci_lower,
+        ci_97_5: ci_upper,
+        riv: riv_vec,
+        fmi: fmi_vec
+    };
+
+    PooledResult {
+        table: pooled_df,
+        m: m,
+        coefficients: q_bar,
+        std_errors: se_pooled,
+        t_stats: t_stats,
+        p_values: p_vals,
+        df_adjusted: df_adj_vec,
+        riv: riv_vec,
+        fmi: fmi_vec
+    }
+}
+
+/// High-level pooling function: executes ANY model function over the m completed datasets
+/// and aggregates results using Rubin's Rules.
+fn pool_with(mice_res: MiceResult, model_fn: any) -> PooledResult {
+    let m = mice_res.m;
+    let mut coef_list = [];
+    let mut se_list = [];
+
+    for l in 0..m {
+        let df_l = mice_res.datasets[l];
+        let model_fit = model_fn(df_l);
+
+        // Extract coef and se from model_fit record
+        let c = model_fit.coef;
+        let s = model_fit.se;
+
+        coef_list = append(coef_list, c);
+        se_list = append(se_list, s);
+    }
+
+    let n_obs = length(pull(mice_res.original_df, colnames(mice_res.original_df)[0]));
+    let k_p = length(coef_list[0]);
+    let complete_df = if n_obs > k_p { (n_obs - k_p) * 1.0 } else { 30.0 };
+
+    pool_estimates(coef_list, se_list, complete_df)
+}

@@ -1,0 +1,88 @@
+// packages/ghl_impute/src/patterns.gh
+// Missing Data Pattern Analysis, Summary Statistics and NA Audit Trail
+
+/// Summarizes the extent and proportion of missingness across each column of a DataFrame.
+fn missing_summary(df: DataFrame) -> DataFrame {
+    let col_names = colnames(df);
+    let mut cols = [];
+    let mut totals = [];
+    let mut misses = [];
+    let mut pcts = [];
+
+    for name in col_names {
+        let col_data = pull(df, name);
+        let n = length(col_data);
+        let mask = is_na(col_data);
+        let mut n_na = 0.0;
+
+        for r in 0..n {
+            if mask[r] {
+                n_na = n_na + 1.0;
+            }
+        }
+
+        let n_total_f = n * 1.0;
+        let pct = if n_total_f > 0.0 { (n_na / n_total_f) * 100.0 } else { 0.0 };
+
+        cols = append(cols, name);
+        totals = append(totals, n_total_f);
+        misses = append(misses, n_na);
+        pcts = append(pcts, pct);
+    }
+
+    dataframe {
+        column: cols,
+        n_total: totals,
+        n_missing: misses,
+        pct_missing: pcts
+    }
+}
+
+/// Identifies all column names containing at least one missing value.
+fn missing_columns(df: DataFrame) -> Vector {
+    let col_names = colnames(df);
+    let mut miss_cols = [];
+
+    for name in col_names {
+        let col_data = pull(df, name);
+        let mask = is_na(col_data);
+        let n = length(col_data);
+        let mut has_na = false;
+
+        for r in 0..n {
+            if mask[r] {
+                has_na = true;
+                break;
+            }
+        }
+        if has_na {
+            miss_cols = append(miss_cols, name);
+        }
+    }
+
+    miss_cols
+}
+
+/// Checks whether a specific column contains missing values.
+fn has_missing(df: DataFrame, col_name: String) -> bool {
+    let col_data = pull(df, col_name);
+    let mask = is_na(col_data);
+    let n = length(col_data);
+    for r in 0..n {
+        if mask[r] {
+            return true;
+        }
+    }
+    false
+}
+
+/// Creates a boolean indicator DataFrame marking the exact coordinates of imputed cells.
+fn imputed_mask(df_orig: DataFrame, df_imputed: DataFrame) -> DataFrame {
+    let col_names = colnames(df_orig);
+    let mut mask_df = df_orig;
+    for name in col_names {
+        let orig_data = pull(df_orig, name);
+        mask_df[name] = is_na(orig_data);
+    }
+    mask_df
+}

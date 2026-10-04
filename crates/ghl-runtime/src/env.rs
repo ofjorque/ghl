@@ -92,6 +92,7 @@ impl RuntimeEnv {
                 Ok(Value::Unit)
             }
         }));
+        env.set("assert".into(), env.get("pounce").unwrap().clone());
 
         // Native function: clock_now (high-resolution seconds)
         env.set("clock_now".into(), Value::NativeFn(|_| {

@@ -1,0 +1,174 @@
+// packages/ghl_impute/tests/impute_test.gh
+// Integration test suite for ghl_impute
+
+use ghl_impute::*;
+
+println("Running ghl_impute integration test suite... /ᐠ˵- ⩊ -˵マ ✧");
+
+// ============================================================================
+// Test 1: Missing Data Pattern and Summary
+// ============================================================================
+println("Testing Missing Data Patterns & Summary...");
+
+let df_test = dataframe {
+    age: [25.0, 30.0, NA, 40.0, 35.0, NA, 28.0, 45.0],
+    income: [50.0, 60.0, 75.0, NA, 70.0, 80.0, 55.0, 90.0],
+    score: [85.0, 90.0, 78.0, 92.0, 88.0, 75.0, 82.0, 95.0]
+};
+
+let miss_sum = missing_summary(df_test);
+assert(length(pull(miss_sum, "column")) == 3, "Summary should cover all 3 columns");
+
+let miss_cols = missing_columns(df_test);
+assert(length(miss_cols) == 2, "Exactly 2 columns have missing values");
+assert(has_missing(df_test, "age") == true, "age has missing values");
+assert(has_missing(df_test, "income") == true, "income has missing values");
+assert(has_missing(df_test, "score") == false, "score has no missing values");
+
+// ============================================================================
+// Test 2: VIF (Variance Inflation Factor) Diagnostics
+// ============================================================================
+println("Testing Variance Inflation Factor (VIF)...");
+
+let df_vif = dataframe {
+    x1: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+    x2: [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0], // Highly collinear with x1 (r = 1.0)
+    z:  [5.0, 3.0, 8.0, 2.0, 7.0, 4.0, 9.0, 1.0, 6.0, 5.0]        // Uncorrelated
+};
+
+let vif_res = vif(df_vif, ["x1", "x2", "z"]);
+vif_cockpit(vif_res);
+
+assert(vif_res.max_vif > 10.0, "Collinear predictors must have VIF > 10");
+assert(vif_res.has_severe == true, "Severe multicollinearity must be detected");
+
+// ============================================================================
+// Test 3: k-Nearest Neighbors (k-NN) Imputation
+// ============================================================================
+println("Testing k-NN Imputation with Gower Distance...");
+
+let df_knn_raw = dataframe {
+    feature: [10.0, 20.0, 30.0, 40.0, 50.0],
+    target:  [100.0, 200.0, NA, 400.0, 500.0]
+};
+
+let imputed_knn_col = impute_knn_column(df_knn_raw, "target", ["feature"], 2);
+assert(!is_na(imputed_knn_col[2]), "Missing target at index 2 must be imputed");
+assert(imputed_knn_col[2] > 150.0 && imputed_knn_col[2] < 350.0, "Imputed value must reflect neighbor interpolation");
+
+// ============================================================================
+// Test 4: MICE with Predictive Mean Matching (PMM)
+// ============================================================================
+println("Testing MICE with Predictive Mean Matching (PMM)...");
+
+let df_incomplete = dataframe {
+    x1: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+    x2: [10.0, NA, 30.0, 40.0, NA, 60.0, 70.0, 80.0],
+    y:  [15.0, 25.0, NA, 45.0, 55.0, 65.0, 75.0, 85.0]
+};
+
+let specs = [
+    MethodSpec { column: "x2", method: "pmm" },
+    MethodSpec { column: "y", method: "pmm" }
+];
+
+let imp_mice = impute_mice(df_incomplete, 3, 5, specs, 123);
+impute_cockpit(imp_mice);
+
+assert(length(imp_mice.datasets) == 3, "Must produce m=3 completed datasets");
+
+// Verify that no NAs remain in any of the completed datasets
+for ds in imp_mice.datasets {
+    assert(has_missing(ds, "x2") == false, "Completed dataset must have zero NAs in x2");
+    assert(has_missing(ds, "y") == false, "Completed dataset must have zero NAs in y");
+}
+
+// ============================================================================
+// Test 5: Universal Model Plug-in (User-defined Arbitrary Model)
+// ============================================================================
+println("Testing Universal Custom Model Imputation Plug-in...");
+
+// Custom user model function: user can implement ANY arbitrary algorithm!
+fn custom_geometric_imputer(df_curr: DataFrame, target: String, obs_idx: Vector, miss_idx: Vector) -> Vector {
+    let raw = pull(df_curr, target);
+    let mut updated = raw;
+    for m in miss_idx {
+        updated[m] = 42.0;
+    }
+    updated
+}
+
+let custom_specs = [
+    MethodSpec { column: "x2", method: custom_geometric_imputer },
+    MethodSpec { column: "y", method: "pmm" }
+];
+
+let imp_custom = impute_mice(df_incomplete, 2, 2, custom_specs, 42);
+let ds_custom = imp_custom.datasets[0];
+let x2_custom = pull(ds_custom, "x2");
+assert(x2_custom[1] == 42.0, "Universal custom model plug-in must be executed");
+assert(x2_custom[4] == 42.0, "Universal custom model plug-in must impute all missing entries");
+
+// ============================================================================
+// Test 6: Rubin's Rules Pooling across Multi-Imputed Datasets
+// ============================================================================
+println("Testing Rubin's Rules Pooling for Arbitrary Model Fits...");
+
+// Model function fitted to each completed dataset:
+// Estimates intercept and slope: y ~ x1
+fn my_user_model(df_completed: DataFrame) -> Record {
+    let y = pull(df_completed, "y");
+    let x = pull(df_completed, "x1");
+    let n = length(y) * 1.0;
+
+    let mut sum_x = 0.0;
+    let mut sum_y = 0.0;
+    for i in 0..8 {
+        sum_x = sum_x + (x[i] * 1.0);
+        sum_y = sum_y + (y[i] * 1.0);
+    }
+    let m_x = sum_x / n;
+    let m_y = sum_y / n;
+
+    let mut ss_xy = 0.0;
+    let mut ss_xx = 0.0;
+    for i in 0..8 {
+        ss_xy = ss_xy + ((x[i] * 1.0) - m_x) * ((y[i] * 1.0) - m_y);
+        ss_xx = ss_xx + ((x[i] * 1.0) - m_x) * ((x[i] * 1.0) - m_x);
+    }
+    let slope = ss_xy / ss_xx;
+    let intercept = m_y - slope * m_x;
+
+    // Return custom model record with coefficients and standard errors
+    {
+        coef: [intercept, slope],
+        se: [1.2, 0.25]
+    }
+}
+
+let pooled = pool_with(imp_mice, my_user_model);
+pool_cockpit(pooled);
+
+assert(length(pooled.coefficients) == 2, "Must pool 2 model parameters");
+assert(pooled.std_errors[0] > 0.0, "Pooled standard error must be positive");
+assert(pooled.std_errors[1] > 0.0, "Pooled standard error must be positive");
+// ============================================================================
+// Test 7: VIM (Visualization & Imputation of Missing Values)
+// ============================================================================
+println("Testing VIM Aggregation, Matrix Plot, and Hotdeck...");
+
+let vim_res = vim_aggr(df_test);
+vim_cockpit(vim_res);
+
+assert(vim_res.total_missing == 3, "df_test has exactly 3 missing values");
+assert(vim_res.n_cols == 3, "df_test has 3 columns");
+assert(vim_res.complete_cases == 5, "df_test has 5 complete cases");
+
+let matplot_svg = vim_matrixplot(df_test);
+assert(length(matplot_svg) > 100, "VIM matrixplot SVG generated");
+
+let hotdeck_res = vim_hotdeck(df_test, "age", ["score"], 42);
+assert(!is_na(hotdeck_res[2]), "Hotdeck must impute index 2");
+assert(!is_na(hotdeck_res[5]), "Hotdeck must impute index 5");
+
+println("All ghl_impute tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
