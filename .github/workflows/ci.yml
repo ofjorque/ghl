@@ -3,24 +3,47 @@ name: GHL Multi-Platform CI
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'scratch/**'
+      - '.gitignore'
+      - 'LICENSE'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'scratch/**'
+      - '.gitignore'
+      - 'LICENSE'
+  workflow_dispatch:
+    inputs:
+      all_platforms:
+        description: 'Run full cross-platform matrix (Windows + macOS [10x billable min])'
+        type: boolean
+        default: false
+      run_benchmarks:
+        description: 'Run CLBG Performance Microbenchmarks'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
 
 jobs:
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+  test-linux:
+    name: Test (Ubuntu Linux)
+    runs-on: ubuntu-latest
 
     steps:
       - name: Free Disk Space (Linux)
-        if: runner.os == 'Linux'
         run: |
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
@@ -31,7 +54,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install System Dependencies (Linux)
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libfontconfig1-dev
@@ -48,11 +70,46 @@ jobs:
       - name: Check GHL Canonical Code Formatting
         run: cargo run -p ghl-cli --jobs 4 -- fmt --check validation/reference/compare_r.ghl
 
+  test-cross-platform:
+    name: Test (${{ matrix.os }})
+    if: github.event.inputs.all_platforms == 'true'
+    needs: test-linux
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Workspace Tests
+        run: cargo test --workspace --jobs 4
+
+      - name: Check GHL Canonical Code Formatting
+        run: cargo run -p ghl-cli --jobs 4 -- fmt --check validation/reference/compare_r.ghl
+
   performance-guard:
     name: Performance Regression Guard
+    if: github.event.inputs.run_benchmarks == 'true'
     runs-on: ubuntu-latest
-    needs: test
+    needs: test-linux
+
     steps:
+      - name: Free Disk Space (Linux)
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -63,6 +120,9 @@ jobs:
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Run CLBG Microbenchmarks
         run: |
