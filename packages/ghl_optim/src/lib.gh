@@ -1,0 +1,49 @@
+// packages/ghl_optim/src/lib.gh
+// Canonical library entrypoint for ghl_optim: General Numerical Optimization and MLE
+
+/// General unconstrained or box-constrained numerical optimizer.
+/// Supported methods:
+/// - "BFGS": Quasi-Newton method with Armijo backtracking line search.
+/// - "Nelder-Mead": Derivative-free simplex method for non-smooth objectives.
+/// - "L-BFGS-B": Projected Quasi-Newton method with box constraints [lower, upper].
+fn minimize(
+    f,
+    init: Vector,
+    method: String,
+    max_iter: i64,
+    tol: f64,
+    lower: Vector,
+    upper: Vector
+) -> Record {
+    if length(lower) > 0 || length(upper) > 0 || method == "L-BFGS-B" || method == "LBFGS-B" {
+        optim(f, init, "L-BFGS-B", max_iter, tol, lower, upper)
+    } else {
+        optim(f, init, method, max_iter, tol)
+    }
+}
+
+/// Convenience function for box-constrained optimization via L-BFGS-B.
+fn minimize_lbfgs_b(
+    f,
+    init: Vector,
+    lower: Vector,
+    upper: Vector
+) -> Record {
+    optim(f, init, "L-BFGS-B", 1000, 1e-6, lower, upper)
+}
+
+/// Convenience function for derivative-free simplex optimization via Nelder-Mead.
+fn minimize_nelder_mead(
+    f,
+    init: Vector
+) -> Record {
+    optim(f, init, "Nelder-Mead", 1000, 1e-6)
+}
+
+/// Convenience function for unconstrained Quasi-Newton optimization via BFGS.
+fn minimize_bfgs(
+    f,
+    init: Vector
+) -> Record {
+    optim(f, init, "BFGS", 1000, 1e-6)
+}

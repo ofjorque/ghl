@@ -1,0 +1,154 @@
+// packages/ghl_optim/tests/optim_test.gh
+// Integration test suite for ghl_optim: BFGS, Nelder-Mead, L-BFGS-B, NLS, and MLE
+
+println("Running ghl_optim integration test suite...");
+
+// 1. Test BFGS on Quadratic Surface
+println("Testing BFGS on Quadratic Surface...");
+fn quad_fn(par) {
+    let x = par[0];
+    let y = par[1];
+    (x - 3.0) * (x - 3.0) + (y + 2.0) * (y + 2.0)
+}
+
+let res_bfgs = optim(quad_fn, [0.0, 0.0], "BFGS", 1000, 1e-6);
+if !res_bfgs.converged {
+    panic("BFGS should converge");
+}
+if abs(res_bfgs.par[0] - 3.0) >= 1e-3 {
+    panic("BFGS x should be approx 3.0");
+}
+if abs(res_bfgs.par[1] - (-2.0)) >= 1e-3 {
+    panic("BFGS y should be approx -2.0");
+}
+if res_bfgs.value >= 1e-5 {
+    panic("BFGS min value should be approx 0.0");
+}
+optim_cockpit(res_bfgs);
+
+// 2. Test Nelder-Mead on Rosenbrock Banana Function
+println("Testing Nelder-Mead Simplex on Rosenbrock...");
+fn rosenbrock(par) {
+    let x = par[0];
+    let y = par[1];
+    100.0 * (y - x * x) * (y - x * x) + (1.0 - x) * (1.0 - x)
+}
+
+let res_nm = optim(rosenbrock, [-1.2, 1.0], "Nelder-Mead", 2000, 1e-5);
+if !res_nm.converged {
+    panic("Nelder-Mead should converge");
+}
+if abs(res_nm.par[0] - 1.0) >= 0.05 {
+    panic("Rosenbrock x should be approx 1.0");
+}
+if abs(res_nm.par[1] - 1.0) >= 0.05 {
+    panic("Rosenbrock y should be approx 1.0");
+}
+if res_nm.value >= 0.01 {
+    panic("Rosenbrock min value should be near 0");
+}
+
+// 3. Test L-BFGS-B Box Constraints
+println("Testing L-BFGS-B Box-Constrained Optimization...");
+fn quad_box(par) {
+    let x = par[0];
+    let y = par[1];
+    (x - 5.0) * (x - 5.0) + (y + 5.0) * (y + 5.0)
+}
+
+// Unconstrained min is (5.0, -5.0).
+// Box constraints: x in [0.0, 2.0], y in [-3.0, 0.0].
+// Clamped optimal point must be exactly (2.0, -3.0) with f(x, y) = 9 + 4 = 13.0.
+let res_box = optim(quad_box, [0.0, 0.0], "L-BFGS-B", 1000, 1e-6, [0.0, -3.0], [2.0, 0.0]);
+if !res_box.converged {
+    panic("L-BFGS-B should converge");
+}
+if abs(res_box.par[0] - 2.0) >= 1e-3 {
+    panic("Bounded x should be clamped at 2.0");
+}
+if abs(res_box.par[1] - (-3.0)) >= 1e-3 {
+    panic("Bounded y should be clamped at -3.0");
+}
+if abs(res_box.value - 13.0) >= 1e-2 {
+    panic("Constrained value should be 13.0");
+}
+
+// 4. Test Nonlinear Least Squares (NLS) Curve Fitting via Levenberg-Marquardt
+println("Testing Nonlinear Least Squares (Michaelis-Menten Kinetics)...");
+let x_data = [1.0, 2.0, 5.0, 10.0, 20.0];
+let y_data = [3.333333, 5.0, 7.142857, 8.333333, 9.090909];
+
+fn mm_residuals(par) {
+    let vmax = par[0];
+    let km = par[1];
+    let x = [1.0, 2.0, 5.0, 10.0, 20.0];
+    let y = [3.333333, 5.0, 7.142857, 8.333333, 9.090909];
+
+    let mut r = [];
+    for i in 0..5 {
+        let xi = x[i];
+        let yi = y[i];
+        let pred = (vmax * xi) / (km + xi);
+        r = append(r, yi - pred);
+    }
+    r
+}
+
+let nls_res = nls_fit(mm_residuals, [2.0, 1.0], y_data);
+if !nls_res.converged {
+    panic("NLS should converge");
+}
+if abs(nls_res.par[0] - 10.0) >= 0.1 {
+    panic("Estimated Vmax should be approx 10.0");
+}
+if abs(nls_res.par[1] - 2.0) >= 0.1 {
+    panic("Estimated Km should be approx 2.0");
+}
+if nls_res.r_squared <= 0.99 {
+    panic("R² should exceed 0.99");
+}
+nls_cockpit(nls_res);
+
+// 5. Test Maximum Likelihood Estimation (MLE) with Asymptotic Inference
+println("Testing Maximum Likelihood Estimation (Gaussian Mean & StdDev)...");
+let sample_data = [10.2, 9.8, 10.5, 10.1, 9.9, 10.0, 10.3, 9.7];
+let n_obs = length(sample_data);
+
+fn gaussian_neg_log_lik(par) {
+    let mu = par[0];
+    let sigma = par[1];
+    if sigma <= 0.001 {
+        return 1e10;
+    }
+
+    let y = [10.2, 9.8, 10.5, 10.1, 9.9, 10.0, 10.3, 9.7];
+    let n = 8.0;
+    let pi_val = 3.141592653589793;
+
+    let mut ss = 0.0;
+    for yi in y {
+        ss = ss + (yi - mu) * (yi - mu);
+    }
+
+    0.5 * n * ln(2.0 * pi_val) + n * ln(sigma) + (ss / (2.0 * sigma * sigma))
+}
+
+let mle_res = mle(gaussian_neg_log_lik, [8.0, 1.0], 8);
+if !mle_res.converged {
+    panic("MLE should converge");
+}
+if abs(mle_res.par[0] - 10.0625) >= 0.05 {
+    panic("Estimated mu should match sample mean (10.0625)");
+}
+if abs(mle_res.par[1] - 0.25) >= 0.1 {
+    panic("Estimated sigma should match MLE std dev (~0.25)");
+}
+if mle_res.se[0] <= 0.0 {
+    panic("Standard error for mu should be strictly positive");
+}
+if mle_res.p_value[0] >= 0.001 {
+    panic("Mu is significantly different from zero");
+}
+mle_cockpit(mle_res);
+
+println("All ghl_optim tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");

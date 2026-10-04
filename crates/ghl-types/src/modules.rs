@@ -185,6 +185,7 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("vcov".into(), any_fn()),
             ("sem".into(), any_fn_multi(2)),
             ("optim".into(), any_fn_multi(2)),
+            ("nls".into(), any_fn_multi(2)),
             ("sample_cov".into(), any_fn_multi(2)),
             ("feols".into(), any_fn_multi(2)),
             ("iv_regress".into(), any_fn_multi(2)),

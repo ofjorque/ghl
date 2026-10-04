@@ -269,6 +269,7 @@ impl RuntimeEnv {
         env.set("coef".into(), Value::NativeFn(native_coef));
         env.set("vcov".into(), Value::NativeFnCtx(native_vcov));
         env.set("optim".into(), Value::NativeFnCtx(crate::optim::native_optim));
+        env.set("nls".into(), Value::NativeFnCtx(crate::optim::native_nls));
         env.set("sample_cov".into(), Value::NativeFn(crate::sem::native_sample_cov));
         env.set("__sem_fit_core".into(), Value::NativeFn(crate::sem::native_sem_fit_core));
         env.set("sem".into(), Value::NativeFn(crate::sem::native_sem));

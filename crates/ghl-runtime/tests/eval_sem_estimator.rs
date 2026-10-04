@@ -204,3 +204,85 @@ fn test_sem_one_factor_cfa_end_to_end() {
         panic!("Expected Matrix from vcov(), found {:?}", v);
     }
 }
+
+#[test]
+fn test_optim_bounded_lbfgs_b() {
+    let src = r#"
+        fn quad(par) {
+            let x = par[0];
+            let y = par[1];
+            (x - 5.0) * (x - 5.0) + (y + 5.0) * (y + 5.0)
+        }
+
+        // Unconstrained min is (5.0, -5.0).
+        // With bounds lower = [0.0, -3.0], upper = [2.0, 0.0],
+        // the constrained min must be exactly (2.0, -3.0).
+        let res = optim(quad, [0.0, 0.0], "L-BFGS-B", 1000, 1e-6, [0.0, -3.0], [2.0, 0.0]);
+        res
+    "#;
+
+    let (_, res) = run_ghl(src);
+    if let Value::Record(fields) = res {
+        let par = fields.get("par").expect("par field");
+        let conv = fields.get("converged").expect("converged field");
+        let val = fields.get("value").expect("value field");
+
+        if let Value::Bool(b) = conv {
+            assert!(b, "L-BFGS-B should converge");
+        }
+        if let Value::Vector(vd) = par {
+            let p0 = vd[0].as_f64().unwrap();
+            let p1 = vd[1].as_f64().unwrap();
+            assert!((p0 - 2.0).abs() < 1e-3, "Expected bounded x ≈ 2.0, got {}", p0);
+            assert!((p1 - (-3.0)).abs() < 1e-3, "Expected bounded y ≈ -3.0, got {}", p1);
+        }
+        if let Value::F64(v) = val {
+            assert!((v - 13.0).abs() < 1e-2, "Expected f(2, -3) ≈ 13.0, got {}", v);
+        }
+    } else {
+        panic!("Expected Record from optim()");
+    }
+}
+
+#[test]
+fn test_nls_levenberg_marquardt() {
+    let src = r#"
+        fn michaelis_residuals(par) {
+            let vmax = par[0];
+            let km = par[1];
+
+            let x = [1.0, 2.0, 5.0, 10.0, 20.0];
+            let y = [3.333333, 5.0, 7.142857, 8.333333, 9.090909];
+
+            let mut r = [];
+            for i in 0..5 {
+                let xi = x[i];
+                let yi = y[i];
+                let pred = (vmax * xi) / (km + xi);
+                r = append(r, yi - pred);
+            }
+            r
+        }
+
+        let res = nls(michaelis_residuals, [2.0, 1.0], 500, 1e-6);
+        res
+    "#;
+
+    let (_, res) = run_ghl(src);
+    if let Value::Record(fields) = res {
+        let par = fields.get("par").expect("par field");
+        let conv = fields.get("converged").expect("converged field");
+
+        if let Value::Bool(b) = conv {
+            assert!(b, "NLS Levenberg-Marquardt should converge");
+        }
+        if let Value::Vector(vd) = par {
+            let vmax = vd[0].as_f64().unwrap();
+            let km = vd[1].as_f64().unwrap();
+            assert!((vmax - 10.0).abs() < 0.1, "Expected Vmax ≈ 10.0, got {}", vmax);
+            assert!((km - 2.0).abs() < 0.1, "Expected Km ≈ 2.0, got {}", km);
+        }
+    } else {
+        panic!("Expected Record from nls()");
+    }
+}

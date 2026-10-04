@@ -147,9 +147,10 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
 
 
 ### 2. Nuevos Paquetes de Utilidad Propuestos para el Ecosistema — [Milestone v0.3.0](https://github.com/ofjorque/ghl/milestone/2)
-- [ ] **`packages/ghl_optim` (Optimización Numérica No Lineal General) — [#8](https://github.com/ofjorque/ghl/issues/8):**
-  - Implementar biblioteca de algoritmos de optimización matemática (BFGS, L-BFGS-B, Nelder-Mead, Levenberg-Marquardt).
-  - Exponer interfaz canónica para estimación de funciones de pérdida personalizadas y máxima verosimilitud (MLE).
+- [x] **`packages/ghl_optim` (Optimización Numérica No Lineal General) — [#8](https://github.com/ofjorque/ghl/issues/8):**
+  - Implementar biblioteca de algoritmos de optimización matemática (BFGS, L-BFGS-B con cotas de caja, Nelder-Mead simplex, Levenberg-Marquardt para mínimos cuadrados no lineales). Validado: 5/5 bloques de prueba superados.
+  - Exponer interfaz canónica para estimación de funciones de pérdida personalizadas, máxima verosimilitud (MLE) con errores estándar asintóticos vía matriz de información de Fisher, AIC/BIC, y paneles terminales Cockpit Deck (`optim_cockpit`, `mle_cockpit`, `nls_cockpit`). Documentado en [`packages/ghl_optim/GUIDE.md`](packages/ghl_optim/GUIDE.md).
+  - Publicar cuaderno reproducible Quarto (`.qmd`) de optimización y calibración MLE en [`examples/nonlinear_optimization_and_mle.qmd`](examples/nonlinear_optimization_and_mle.qmd).
 - [ ] **`packages/ghl_impute` (Limpieza Científica y Datos Faltantes) — [#9](https://github.com/ofjorque/ghl/issues/9):**
   - Algoritmos de imputación múltiple (tipo MICE y k-NN) integrados nativamente con la semántica de `NA:reason` de GHL.
 - [ ] **`packages/ghl_db` / Conectores SQL Extendido — [#10](https://github.com/ofjorque/ghl/issues/10):**

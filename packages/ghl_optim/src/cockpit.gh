@@ -1,0 +1,78 @@
+// packages/ghl_optim/src/cockpit.gh
+// Terminal Cockpit Deck UI Panels for Numerical Optimization & MLE
+
+fn print_separator() {
+    println("├──────────────────────────────────────────────────────────────────────────────┤");
+}
+
+/// Renders a formatted Cockpit Deck card for general numerical optimization.
+fn optim_cockpit(res: Record) {
+    let conv_badge = if res.converged {
+        "/ᐠ˵- ⩊ -˵マ ✧ CONVERGED"
+    } else {
+        "≽(◉˕ ◉ ≼マ NOT CONVERGED"
+    };
+
+    println("╭─ ghl_optim Engine ──────────────────────────────── ", conv_badge, " ─╮");
+    println("│ Objective Value: ", res.value);
+    println("│ Iterations:      ", res.iterations);
+    println("│ Status Message:  ", res.message);
+    print_separator();
+    println("│ Parameter Vector:                                                            │");
+    let par = res.par;
+    for i in 0..length(par) {
+        println("│   θ[", i, "] = ", par[i]);
+    }
+    println("╰──────────────────────────────────────────────────────────────────────────────╯");
+}
+
+/// Renders a formatted Cockpit Deck card for Maximum Likelihood Estimation (MLE).
+fn mle_cockpit(res: MleResult) {
+    let conv_badge = if res.converged {
+        "/ᐠ˵- ⩊ -˵マ ✧ MLE CONVERGED"
+    } else {
+        "≽(◉˕ ◉ ≼マ DIVERGED"
+    };
+
+    println("╭─ ghl_optim Maximum Likelihood Report ───────────── ", conv_badge, " ─╮");
+    println("│ Log-Likelihood: ", res.log_lik, " | AIC: ", res.aic, " | BIC: ", res.bic);
+    println("│ Iterations:     ", res.iterations, " | Status: ", res.message);
+    print_separator();
+    println("│ Parameter       Estimate      Std.Error      z-value      Pr(>|z|)    95% CI │");
+    let k = length(res.par);
+    for i in 0..k {
+        let est = res.par[i];
+        let se_val = res.se[i];
+        let z_val = res.z_stat[i];
+        let p_val = res.p_value[i];
+        let l_val = res.ci_lower[i];
+        let u_val = res.ci_upper[i];
+        println("│ θ[", i, "]           ", est, "      ", se_val, "      ", z_val, "      ", p_val, "  [", l_val, ", ", u_val, "]");
+    }
+    println("╰──────────────────────────────────────────────────────────────────────────────╯");
+}
+
+/// Renders a formatted Cockpit Deck card for Nonlinear Least Squares (NLS).
+fn nls_cockpit(res: NlsResult) {
+    let conv_badge = if res.converged {
+        "/ᐠ˵- ⩊ -˵マ ✧ NLS FIT"
+    } else {
+        "≽(◉˕ ◉ ≼マ DIVERGED"
+    };
+
+    println("╭─ ghl_optim Nonlinear Least Squares ─────────────── ", conv_badge, " ─╮");
+    println("│ Residual Sum of Squares (SS_res): ", res.residual_sum_squares);
+    println("│ Residual Standard Error (s):      ", res.residual_std_error);
+    println("│ Coefficient of Determination R²:  ", res.r_squared);
+    print_separator();
+    println("│ Parameter       Estimate      Std.Error      t-value      Pr(>|t|)           │");
+    let k = length(res.par);
+    for i in 0..k {
+        let est = res.par[i];
+        let se_val = res.se[i];
+        let t_val = res.t_stat[i];
+        let p_val = res.p_value[i];
+        println("│ β[", i, "]           ", est, "      ", se_val, "      ", t_val, "      ", p_val);
+    }
+    println("╰──────────────────────────────────────────────────────────────────────────────╯");
+}

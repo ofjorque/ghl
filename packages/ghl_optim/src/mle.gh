@@ -1,0 +1,158 @@
+// packages/ghl_optim/src/mle.gh
+// Maximum Likelihood Estimation (MLE) and Asymptotic Statistical Inference
+
+struct MleResult {
+    par: Vector,
+    log_lik: f64,
+    aic: f64,
+    bic: f64,
+    se: Vector,
+    z_stat: Vector,
+    p_value: Vector,
+    ci_lower: Vector,
+    ci_upper: Vector,
+    converged: bool,
+    iterations: i64,
+    message: String
+}
+
+/// Standard normal cumulative distribution function approximation (Abramowitz & Stegun).
+fn norm_cdf_approx(z: f64) -> f64 {
+    if z < -7.0 {
+        return 0.0;
+    }
+    if z > 7.0 {
+        return 1.0;
+    }
+
+    let b1 = 0.319381530;
+    let b2 = -0.356563782;
+    let b3 = 1.781477937;
+    let b4 = -1.821255978;
+    let b5 = 1.330274429;
+    let p = 0.2316419;
+
+    let abs_z = abs(z);
+    let t = 1.0 / (1.0 + p * abs_z);
+    let pdf = 0.3989422804014327 * exp(-0.5 * abs_z * abs_z);
+    let poly = t * (b1 + t * (b2 + t * (b3 + t * (b4 + t * b5))));
+    let tail = pdf * poly;
+
+    if z >= 0.0 {
+        1.0 - tail
+    } else {
+        tail
+    }
+}
+
+/// Computes asymptotic standard errors from the observed Fisher Information (negative log-likelihood Hessian).
+fn compute_mle_standard_errors(neg_log_lik_fn, opt_par: Vector, min_val: f64) -> Vector {
+    let k = length(opt_par);
+    let mut se_vec = [];
+
+    if k == 1 {
+        let p0 = opt_par[0];
+        let h = 1e-4 * (1.0 + abs(p0));
+        let f_plus = neg_log_lik_fn([p0 + h]);
+        let f_minus = neg_log_lik_fn([p0 - h]);
+        let h_diag = (f_plus - 2.0 * min_val + f_minus) / (h * h);
+        let var0 = if h_diag > 1e-9 { 1.0 / h_diag } else { 1.0 };
+        return [sqrt(var0)];
+    }
+
+    if k == 2 {
+        let p0 = opt_par[0];
+        let p1 = opt_par[1];
+        let h0 = 1e-4 * (1.0 + abs(p0));
+        let h1 = 1e-4 * (1.0 + abs(p1));
+
+        let h00 = (neg_log_lik_fn([p0 + h0, p1]) - 2.0 * min_val + neg_log_lik_fn([p0 - h0, p1])) / (h0 * h0);
+        let h11 = (neg_log_lik_fn([p0, p1 + h1]) - 2.0 * min_val + neg_log_lik_fn([p0, p1 - h1])) / (h1 * h1);
+
+        let f_pp = neg_log_lik_fn([p0 + h0, p1 + h1]);
+        let f_pm = neg_log_lik_fn([p0 + h0, p1 - h1]);
+        let f_mp = neg_log_lik_fn([p0 - h0, p1 + h1]);
+        let f_mm = neg_log_lik_fn([p0 - h0, p1 - h1]);
+        let h01 = (f_pp - f_pm - f_mp + f_mm) / (4.0 * h0 * h1);
+
+        let det = h00 * h11 - h01 * h01;
+        if det > 1e-10 {
+            let v00 = h11 / det;
+            let v11 = h00 / det;
+            let se0 = if v00 > 0.0 { sqrt(v00) } else { 1.0 / sqrt(max([h00, 1e-6])) };
+            let se1 = if v11 > 0.0 { sqrt(v11) } else { 1.0 / sqrt(max([h11, 1e-6])) };
+            return [se0, se1];
+        }
+    }
+
+    // General k-dimensional diagonal Hessian approximation
+    for i in 0..k {
+        let pi = opt_par[i];
+        let h = 1e-4 * (1.0 + abs(pi));
+
+        let mut p_plus = opt_par;
+        p_plus[i] = pi + h;
+        let mut p_minus = opt_par;
+        p_minus[i] = pi - h;
+
+        let f_plus = neg_log_lik_fn(p_plus);
+        let f_minus = neg_log_lik_fn(p_minus);
+        let h_ii = (f_plus - 2.0 * min_val + f_minus) / (h * h);
+
+        let se_i = if h_ii > 1e-9 {
+            sqrt(1.0 / h_ii)
+        } else {
+            1.0
+        };
+        se_vec = append(se_vec, se_i);
+    }
+
+    se_vec
+}
+
+/// Fits a model via Maximum Likelihood Estimation (MLE) with asymptotic standard errors,
+/// z-statistics, p-values, 95% confidence intervals, and AIC/BIC information criteria.
+fn mle(neg_log_lik_fn, init_params: Vector, nobs: i64) -> MleResult {
+    let opt_res = optim(neg_log_lik_fn, init_params, "BFGS", 1000, 1e-6);
+
+    let k = length(opt_res.par);
+    let log_lik = -opt_res.value;
+    let n_eff = if nobs > 0 { nobs * 1.0 } else { (k * 20) * 1.0 };
+
+    let aic_val = 2.0 * (k * 1.0) - 2.0 * log_lik;
+    let bic_val = (k * 1.0) * ln(n_eff) - 2.0 * log_lik;
+
+    let se_vec = compute_mle_standard_errors(neg_log_lik_fn, opt_res.par, opt_res.value);
+
+    let mut z_vec = [];
+    let mut p_vec = [];
+    let mut ci_l = [];
+    let mut ci_u = [];
+
+    for i in 0..k {
+        let theta_i = opt_res.par[i];
+        let se_i = se_vec[i];
+        let z_i = theta_i / se_i;
+        let p_i = 2.0 * (1.0 - norm_cdf_approx(abs(z_i)));
+
+        z_vec = append(z_vec, z_i);
+        p_vec = append(p_vec, p_i);
+        ci_l = append(ci_l, theta_i - 1.96 * se_i);
+        ci_u = append(ci_u, theta_i + 1.96 * se_i);
+    }
+
+    MleResult {
+        par: opt_res.par,
+        log_lik: log_lik,
+        aic: aic_val,
+        bic: bic_val,
+        se: se_vec,
+        z_stat: z_vec,
+        p_value: p_vec,
+        ci_lower: ci_l,
+        ci_upper: ci_u,
+        converged: opt_res.converged,
+        iterations: opt_res.iterations,
+        message: opt_res.message
+    }
+}

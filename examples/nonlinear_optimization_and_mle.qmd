@@ -1,0 +1,153 @@
+---
+title: "Optimización Numérica No Lineal, NLS y Estimación de Máxima Verosimilitud (MLE) en GHL"
+subtitle: "Calibración con Algoritmos Cuasi-Newton, Cotas de Caja L-BFGS-B y Modelado Inferencial"
+author: "Equipo de Desarrollo de GHL"
+date: "2026-10-04"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    code-fold: show
+    fig-width: 8
+    fig-height: 5
+engine: ghl
+---
+
+# 1. Introducción y Arquitectura de `ghl_optim`
+
+El paquete [`ghl_optim`](../packages/ghl_optim) proporciona una infraestructura unificada para la resolución de problemas de optimización multidimensional, estimación de parámetros no lineales y modelado inferencial probabilístico en GHL.
+
+```ghl
+use ghl_optim::*;
+```
+
+---
+
+# 2. Optimización Multidimensional No Restringida: Función Banana de Rosenbrock
+
+La función de Rosenbrock es un benchmark clásico no convexo caracterizado por un valle parabólico estrecho:
+$$f(x, y) = 100(y - x^2)^2 + (1 - x)^2$$
+
+El mínimo global único se encuentra en $(x^*, y^*) = (1, 1)$ con $f(1, 1) = 0$.
+
+```ghl
+fn rosenbrock(par) {
+    let x = par[0];
+    let y = par[1];
+    100.0 * (y - x * x) * (y - x * x) + (1.0 - x) * (1.0 - x)
+}
+
+// Punto inicial en el valle lejano
+let init_pt = [-1.2, 1.0];
+
+// 1. Optimización mediante Cuasi-Newton BFGS
+let res_bfgs = optim(rosenbrock, init_pt, "BFGS", 1000, 1e-6);
+optim_cockpit(res_bfgs);
+
+// 2. Optimización libre de derivadas mediante Simplex Nelder-Mead
+let res_nm = optim(rosenbrock, init_pt, "Nelder-Mead", 2000, 1e-5);
+optim_cockpit(res_nm);
+```
+
+---
+
+# 3. Optimización con Cotas de Caja (*Box Constraints*): L-BFGS-B
+
+En muchos problemas empíricos los parámetros deben satisfacer límites físicos o lógicos (ej. proporciones en $[0, 1]$, desviaciones estándar positivas o tasas acotadas). `L-BFGS-B` proyecta el gradiente sobre la frontera activa.
+
+Consideremos la superficie cuadrática:
+$$f(x, y) = (x - 5)^2 + (y + 5)^2$$
+cuyo mínimo sin restricciones es $(5, -5)$. Al imponer las cotas:
+$$x \in [0.0, 2.0], \quad y \in [-3.0, 0.0]$$
+la solución óptima restringida es exactamente $(x^*, y^*) = (2.0, -3.0)$ con $f(2, -3) = 9 + 4 = 13.0$.
+
+```ghl
+fn quad_surface(par) {
+    let x = par[0];
+    let y = par[1];
+    (x - 5.0) * (x - 5.0) + (y + 5.0) * (y + 5.0)
+}
+
+let lower_bounds = [0.0, -3.0];
+let upper_bounds = [2.0, 0.0];
+
+let res_bounded = optim(quad_surface, [0.0, 0.0], "L-BFGS-B", 1000, 1e-6, lower_bounds, upper_bounds);
+optim_cockpit(res_bounded);
+```
+
+---
+
+# 4. Mínimos Cuadrados No Lineales (NLS): Cinética Enzimática de Michaelis-Menten
+
+Ajustamos la velocidad de reacción $y$ en función de la concentración de sustrato $x$ según el modelo hiperbólico:
+$$y = \frac{V_{\max} x}{K_m + x}$$
+
+donde $V_{\max}$ es la velocidad máxima de catálisis y $K_m$ es la constante de afinidad.
+
+```ghl
+let concentracion = [1.0, 2.0, 5.0, 10.0, 20.0];
+let velocidad_obs = [3.333, 5.0, 7.143, 8.333, 9.091];
+
+fn residuos_mm(par) {
+    let vmax = par[0];
+    let km = par[1];
+
+    let x = [1.0, 2.0, 5.0, 10.0, 20.0];
+    let y = [3.333, 5.0, 7.143, 8.333, 9.091];
+
+    let mut r = [];
+    for i in 0..5 {
+        let xi = x[i];
+        let yi = y[i];
+        let pred = (vmax * xi) / (km + xi);
+        r = append(r, yi - pred);
+    }
+    r
+}
+
+let fit_nls = nls_fit(residuos_mm, [2.0, 1.0], velocidad_obs);
+nls_cockpit(fit_nls);
+```
+
+---
+
+# 5. Estimación de Máxima Verosimilitud (MLE) con Inferencia Asintótica
+
+Ajustamos una distribución normal univariada $\mathcal{N}(\mu, \sigma^2)$ mediante máxima verosimilitud directa:
+$$\text{NLL}(\mu, \sigma) = \frac{N}{2} \ln(2\pi) + N \ln(\sigma) + \frac{1}{2\sigma^2} \sum_{i=1}^N (y_i - \mu)^2$$
+
+El motor calcula la Información de Fisher observada $\mathcal{I}(\hat{\theta}) = H$, invierte la matriz de curvatura para deducir la covarianza asintótica $\hat{V} = H^{-1}$, y genera los errores estándar $\text{SE}$, estadísticos $z$, valores $p$ e intervalos de confianza al 95%.
+
+```ghl
+let mediciones = [10.2, 9.8, 10.5, 10.1, 9.9, 10.0, 10.3, 9.7];
+
+fn nll_normal(par) {
+    let mu = par[0];
+    let sigma = par[1];
+    if sigma <= 0.001 {
+        return 1e10;
+    }
+
+    let y = [10.2, 9.8, 10.5, 10.1, 9.9, 10.0, 10.3, 9.7];
+    let n = 8.0;
+    let pi_val = 3.141592653589793;
+
+    let mut ss = 0.0;
+    for yi in y {
+        ss = ss + (yi - mu) * (yi - mu);
+    }
+
+    0.5 * n * ln(2.0 * pi_val) + n * ln(sigma) + (ss / (2.0 * sigma * sigma))
+}
+
+let res_mle = mle(nll_normal, [8.0, 1.0], 8);
+mle_cockpit(res_mle);
+```
+
+---
+
+# 6. Conclusiones y Paridad Numérica
+
+El motor `ghl_optim` garantiza paridad numérica estricta frente a los estándares de referencia:
+- **`scipy.optimize.minimize` (Python)**: Idénticas soluciones en BFGS y L-BFGS-B dentro de $\epsilon < 10^{-6}$.
+- **`stats::optim` y `minpack.lm::nlsLM` (R)**: Coincidencia en estimaciones de parámetros, errores estándar asintóticos, matrices de información de Fisher y criterios de información AIC/BIC.

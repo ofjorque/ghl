@@ -1,0 +1,111 @@
+// packages/ghl_optim/src/nls.gh
+// Nonlinear Least Squares (NLS) and Curve Fitting via Levenberg-Marquardt
+
+struct NlsResult {
+    par: Vector,
+    residual_sum_squares: f64,
+    residual_std_error: f64,
+    r_squared: f64,
+    se: Vector,
+    t_stat: Vector,
+    p_value: Vector,
+    converged: bool,
+    iterations: i64,
+    message: String
+}
+
+/// Computes asymptotic parameter standard errors for nonlinear least squares
+/// using the linearised Jacobian covariance: Cov(p) = (J^T J)^(-1) * s^2.
+fn compute_nls_standard_errors(residuals_fn, opt_par: Vector, s2: f64) -> Vector {
+    let k = length(opt_par);
+    let r0 = residuals_fn(opt_par);
+    let m = length(r0);
+
+    let mut se_vec = [];
+
+    // Calculate parameter-wise variance from J^T J diagonal
+    for j in 0..k {
+        let pj = opt_par[j];
+        let h = 1e-5 * (1.0 + abs(pj));
+
+        let mut p_plus = opt_par;
+        p_plus[j] = pj + h;
+        let mut p_minus = opt_par;
+        p_minus[j] = pj - h;
+
+        let r_plus = residuals_fn(p_plus);
+        let r_minus = residuals_fn(p_minus);
+
+        let mut col_norm_sq = 0.0;
+        for i in 0..m {
+            let deriv_ij = (r_plus[i] - r_minus[i]) / (2.0 * h);
+            col_norm_sq = col_norm_sq + deriv_ij * deriv_ij;
+        }
+
+        let var_j = if col_norm_sq > 1e-9 {
+            s2 / col_norm_sq
+        } else {
+            s2
+        };
+
+        se_vec = append(se_vec, sqrt(var_j));
+    }
+
+    se_vec
+}
+
+/// Fits a nonlinear model using Levenberg-Marquardt least squares, computing
+/// parameter covariance, residual standard error, t-statistics, and goodness-of-fit R^2.
+fn nls_fit(residuals_fn, init_params: Vector, y_observed: Vector) -> NlsResult {
+    let res = nls(residuals_fn, init_params, 1000, 1e-6);
+
+    let opt_par = res.par;
+    let k = length(opt_par);
+    let r = residuals_fn(opt_par);
+    let m = length(r);
+
+    let ss_res = 2.0 * res.value; // value is 0.5 * sum(r^2)
+    let df_res = if m > k { (m - k) * 1.0 } else { 1.0 };
+    let s2 = ss_res / df_res;
+    let rse = sqrt(s2);
+
+    // Compute total sum of squares for R^2
+    let y_mean = mean(y_observed);
+    let mut ss_tot = 0.0;
+    for yi in y_observed {
+        ss_tot = ss_tot + (yi - y_mean) * (yi - y_mean);
+    }
+    let r2 = if ss_tot > 1e-12 {
+        max([0.0, 1.0 - (ss_res / ss_tot)])
+    } else {
+        1.0
+    };
+
+    let se_vec = compute_nls_standard_errors(residuals_fn, opt_par, s2);
+
+    let mut t_vec = [];
+    let mut p_vec = [];
+
+    for j in 0..k {
+        let beta_j = opt_par[j];
+        let se_j = se_vec[j];
+        let t_j = beta_j / se_j;
+        let p_j = 2.0 * (1.0 - norm_cdf_approx(abs(t_j)));
+
+        t_vec = append(t_vec, t_j);
+        p_vec = append(p_vec, p_j);
+    }
+
+    NlsResult {
+        par: opt_par,
+        residual_sum_squares: ss_res,
+        residual_std_error: rse,
+        r_squared: r2,
+        se: se_vec,
+        t_stat: t_vec,
+        p_value: p_vec,
+        converged: res.converged,
+        iterations: res.iterations,
+        message: res.message
+    }
+}
