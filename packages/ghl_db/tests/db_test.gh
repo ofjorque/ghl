@@ -28,11 +28,17 @@ fn test_sqlite_in_memory_pipeline() {
     assert(!is_na(gpa_col[0]), "Alice's GPA should not be NA");
     assert(!is_na(gpa_col[2]), "Charlie's GPA should not be NA");
 
-    // 5. Check table list
+    // 5. Check table list & Cockpit Panel
     let tbls = db_tables(conn);
     println("Tables in database: ", tbls);
     assert(length(tbls) == 1, "Should have 1 table");
     assert(tbls[0] == "students", "Table name should be students");
+    let p = cockpit("ghl_db Test", "/ᐠ˵- ⩊ -˵マ ✧ TEST")
+        |> cockpit_add_kv("Driver", conn.driver)
+        |> cockpit_add_kv("Tables Count", to_string(length(tbls)))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("All student tables verified.");
+    show_cockpit(p);
 
     // 6. Clean disconnect
     let closed = db_disconnect(conn);

@@ -1,31 +1,45 @@
 // packages/ghl_db/src/cockpit.gh
-// Terminal Cockpit Deck UI Panels for Database Introspection
+// Terminal Cockpit Deck UI Panels for Database Introspection (RFC 14)
 
-fn print_db_separator() {
-    println("├──────────────────────────────────────────────────────────────────────────────┤");
-}
-
-/// Renders a formatted Cockpit Deck card displaying active database connection status and tables.
-fn db_cockpit(conn: Record) {
-    let status_badge = if conn.is_connected {
+/// Builds a visual Cockpit Deck panel displaying active database connection status and tables.
+fn build_db_cockpit(conn: Record) {
+    let badge = if conn.is_connected {
         "/ᐠ˵- ⩊ -˵マ ✧ CONNECTED"
     } else {
         "≽(◉˕ ◉ ≼マ CLOSED"
     };
 
-    println("╭─ ghl_db Engine ─────────────────────────────────── ", status_badge, " ─╮");
-    println("│ Driver:     ", conn.driver);
-    println("│ URI:        ", conn.uri);
-    println("│ Handle ID:  ", conn.id);
-    print_db_separator();
-    println("│ Tables in Database:                                                          │");
+    let mut p = cockpit("ghl_db Database Connection", badge)
+        |> cockpit_add_kv("Driver", conn.driver)
+        |> cockpit_add_kv("URI / Path", conn.uri)
+        |> cockpit_add_kv("Handle ID", to_string(conn.id))
+        |> cockpit_add_divider();
+
     let tbls = db_tables(conn);
-    if length(tbls) == 0 {
-        println("│   (No tables registered)                                                     │");
+    let n_tbls = length(tbls);
+    p = cockpit_add_kv(p, "Total Tables", to_string(n_tbls));
+
+    if n_tbls == 0 {
+        p = cockpit_add_line(p, "  (No tables registered in database)");
     } else {
-        for i in 0..length(tbls) {
-            println("│   [", i + 1, "] ", tbls[i]);
+        p = cockpit_add_line(p, "Registered Tables:");
+        for i in 0..n_tbls {
+            let line = format("  • [{}] {}", to_string(i + 1), tbls[i]);
+            p = cockpit_add_line(p, line);
         }
     }
-    println("╰──────────────────────────────────────────────────────────────────────────────╯");
+
+    p = cockpit_add_divider(p);
+    if conn.is_connected {
+        p = cockpit_add_line(p, "/ᐠ˵- ⩊ -˵マ ✧ Database engine online and ready for SQL queries.");
+    } else {
+        p = cockpit_add_line(p, "≽(◉˕ ◉ ≼マ Database handle closed.");
+    }
+    p
+}
+
+/// Renders the Cockpit Deck card directly to the terminal stdout using native show_cockpit().
+fn db_cockpit(conn: Record) {
+    let p = build_db_cockpit(conn);
+    show_cockpit(p);
 }

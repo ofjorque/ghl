@@ -1,44 +1,60 @@
 // packages/ghl_optim/src/cockpit.gh
-// Terminal Cockpit Deck UI Panels for Numerical Optimization & MLE
+// Terminal Cockpit Deck UI Panels for Numerical Optimization & MLE (RFC 14)
 
-fn print_separator() {
-    println("├──────────────────────────────────────────────────────────────────────────────┤");
-}
-
-/// Renders a formatted Cockpit Deck card for general numerical optimization.
-fn optim_cockpit(res: Record) {
+/// Builds a visual Cockpit Deck panel for general numerical optimization.
+fn build_optim_cockpit(res: Record) {
     let conv_badge = if res.converged {
         "/ᐠ˵- ⩊ -˵マ ✧ CONVERGED"
     } else {
         "≽(◉˕ ◉ ≼マ NOT CONVERGED"
     };
 
-    println("╭─ ghl_optim Engine ──────────────────────────────── ", conv_badge, " ─╮");
-    println("│ Objective Value: ", res.value);
-    println("│ Iterations:      ", res.iterations);
-    println("│ Status Message:  ", res.message);
-    print_separator();
-    println("│ Parameter Vector:                                                            │");
+    let mut p = cockpit("ghl_optim Numerical Engine", conv_badge)
+        |> cockpit_add_kv("Objective Value", to_string(res.value))
+        |> cockpit_add_kv("Iterations", to_string(res.iterations))
+        |> cockpit_add_kv("Status Message", to_string(res.message))
+        |> cockpit_add_divider();
+
+    p = cockpit_add_line(p, "Parameter Vector:");
     let par = res.par;
     for i in 0..length(par) {
-        println("│   θ[", i, "] = ", par[i]);
+        let line = format("  • θ[{}] = {}", to_string(i), to_string(par[i]));
+        p = cockpit_add_line(p, line);
     }
-    println("╰──────────────────────────────────────────────────────────────────────────────╯");
+
+    p = cockpit_add_divider(p);
+    if res.converged {
+        p = cockpit_add_line(p, "/ᐠ˵- ⩊ -˵マ ✧ Optimization converged within requested tolerance.");
+    } else {
+        p = cockpit_add_line(p, "≽(◉˕ ◉ ≼マ Solver reached maximum iterations or encountered numerical issues.");
+    }
+    p
 }
 
-/// Renders a formatted Cockpit Deck card for Maximum Likelihood Estimation (MLE).
-fn mle_cockpit(res: MleResult) {
+/// Renders a formatted Cockpit Deck card for general numerical optimization.
+fn optim_cockpit(res: Record) {
+    let p = build_optim_cockpit(res);
+    show_cockpit(p);
+}
+
+/// Builds a visual Cockpit Deck panel for Maximum Likelihood Estimation (MLE).
+fn build_mle_cockpit(res: MleResult) {
     let conv_badge = if res.converged {
         "/ᐠ˵- ⩊ -˵マ ✧ MLE CONVERGED"
     } else {
         "≽(◉˕ ◉ ≼マ DIVERGED"
     };
 
-    println("╭─ ghl_optim Maximum Likelihood Report ───────────── ", conv_badge, " ─╮");
-    println("│ Log-Likelihood: ", res.log_lik, " | AIC: ", res.aic, " | BIC: ", res.bic);
-    println("│ Iterations:     ", res.iterations, " | Status: ", res.message);
-    print_separator();
-    println("│ Parameter       Estimate      Std.Error      z-value      Pr(>|z|)    95% CI │");
+    let ic_str = format("AIC: {} | BIC: {}", to_string(res.aic), to_string(res.bic));
+
+    let mut p = cockpit("ghl_optim Maximum Likelihood Report", conv_badge)
+        |> cockpit_add_kv("Log-Likelihood", to_string(res.log_lik))
+        |> cockpit_add_kv("Information Criteria", ic_str)
+        |> cockpit_add_kv("Iterations", to_string(res.iterations))
+        |> cockpit_add_kv("Status Message", res.message)
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Parameter       Estimate      Std.Error      z-value      Pr(>|z|)    95% CI");
+
     let k = length(res.par);
     for i in 0..k {
         let est = res.par[i];
@@ -47,32 +63,61 @@ fn mle_cockpit(res: MleResult) {
         let p_val = res.p_value[i];
         let l_val = res.ci_lower[i];
         let u_val = res.ci_upper[i];
-        println("│ θ[", i, "]           ", est, "      ", se_val, "      ", z_val, "      ", p_val, "  [", l_val, ", ", u_val, "]");
+        let line = format("• θ[{}]        {:<12} {:<12} {:<12} {:<12} [{}, {}]", to_string(i), to_string(est), to_string(se_val), to_string(z_val), to_string(p_val), to_string(l_val), to_string(u_val));
+        p = cockpit_add_line(p, line);
     }
-    println("╰──────────────────────────────────────────────────────────────────────────────╯");
+
+    p = cockpit_add_divider(p);
+    if res.converged {
+        p = cockpit_add_line(p, "/ᐠ˵- ⩊ -˵マ ✧ Fisher Information matrix inverted; standard errors asymptotic valid.");
+    } else {
+        p = cockpit_add_line(p, "≽(◉˕ ◉ ≼マ Optimization diverged or Hessian not positive definite.");
+    }
+    p
 }
 
-/// Renders a formatted Cockpit Deck card for Nonlinear Least Squares (NLS).
-fn nls_cockpit(res: NlsResult) {
+/// Renders a formatted Cockpit Deck card for Maximum Likelihood Estimation (MLE).
+fn mle_cockpit(res: MleResult) {
+    let p = build_mle_cockpit(res);
+    show_cockpit(p);
+}
+
+/// Builds a visual Cockpit Deck panel for Nonlinear Least Squares (NLS).
+fn build_nls_cockpit(res: NlsResult) {
     let conv_badge = if res.converged {
         "/ᐠ˵- ⩊ -˵マ ✧ NLS FIT"
     } else {
         "≽(◉˕ ◉ ≼マ DIVERGED"
     };
 
-    println("╭─ ghl_optim Nonlinear Least Squares ─────────────── ", conv_badge, " ─╮");
-    println("│ Residual Sum of Squares (SS_res): ", res.residual_sum_squares);
-    println("│ Residual Standard Error (s):      ", res.residual_std_error);
-    println("│ Coefficient of Determination R²:  ", res.r_squared);
-    print_separator();
-    println("│ Parameter       Estimate      Std.Error      t-value      Pr(>|t|)           │");
+    let mut p = cockpit("ghl_optim Nonlinear Least Squares", conv_badge)
+        |> cockpit_add_kv("Residual SS (SS_res)", to_string(res.residual_sum_squares))
+        |> cockpit_add_kv("Residual Std Error (s)", to_string(res.residual_std_error))
+        |> cockpit_add_kv("R-squared (R²)", to_string(res.r_squared))
+        |> cockpit_add_divider()
+        |> cockpit_add_line("Parameter       Estimate      Std.Error      t-value      Pr(>|t|)");
+
     let k = length(res.par);
     for i in 0..k {
         let est = res.par[i];
         let se_val = res.se[i];
         let t_val = res.t_stat[i];
         let p_val = res.p_value[i];
-        println("│ β[", i, "]           ", est, "      ", se_val, "      ", t_val, "      ", p_val);
+        let line = format("• β[{}]        {:<12} {:<12} {:<12} {}", to_string(i), to_string(est), to_string(se_val), to_string(t_val), to_string(p_val));
+        p = cockpit_add_line(p, line);
     }
-    println("╰──────────────────────────────────────────────────────────────────────────────╯");
+
+    p = cockpit_add_divider(p);
+    if res.converged {
+        p = cockpit_add_line(p, "/ᐠ˵- ⩊ -˵マ ✧ Levenberg-Marquardt optimizer converged to local residual minimum.");
+    } else {
+        p = cockpit_add_line(p, "≽(◉˕ ◉ ≼マ Levenberg-Marquardt did not converge.");
+    }
+    p
+}
+
+/// Renders a formatted Cockpit Deck card for Nonlinear Least Squares (NLS).
+fn nls_cockpit(res: NlsResult) {
+    let p = build_nls_cockpit(res);
+    show_cockpit(p);
 }
