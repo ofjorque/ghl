@@ -1,0 +1,114 @@
+{
+  "timestamp": "2026-10-03 23:10:00",
+  "package": "ghl_timeseries",
+  "milestone": "v0.2.0",
+  "github_issue": 3,
+  "environment": {
+    "ghl_edition": "2026",
+    "compiler": "cranelift-jit",
+    "os": "windows-x86_64"
+  },
+  "references": {
+    "r": {
+      "packages": ["forecast 8.21.1", "tseries 0.10-54", "rugarch 1.4-9", "KFAS 1.5.0", "vars 1.5-6"]
+    },
+    "python": {
+      "packages": ["statsmodels 0.14.1", "arch 6.2.0", "filterpy 1.4.5", "pmdarima 2.0.4"]
+    },
+    "julia": {
+      "packages": ["StateSpaceModels.jl 0.6.4", "ARCHModels.jl 0.3.1", "TSAnalysis.jl 0.2.1"]
+    }
+  },
+  "table": [
+    {
+      "method": "ADF Test Statistic (t_ADF)",
+      "ghl_val": -3.125,
+      "r_val": -3.1248,
+      "python_val": -3.1249,
+      "julia_val": -3.1245,
+      "delta": 0.0002,
+      "status": "Concordant"
+    },
+    {
+      "method": "ADF 5% Critical Value",
+      "ghl_val": -2.88,
+      "r_val": -2.88,
+      "python_val": -2.88,
+      "julia_val": -2.88,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "PACF Lag 1 (phi_1,1)",
+      "ghl_val": 0.6542,
+      "r_val": 0.6542,
+      "python_val": 0.6542,
+      "julia_val": 0.6542,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Ljung-Box Q Statistic (lags=3)",
+      "ghl_val": 4.182,
+      "r_val": 4.182,
+      "python_val": 4.182,
+      "julia_val": 4.182,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "AR(1) Parameter (phi_1)",
+      "ghl_val": 0.9946,
+      "r_val": 0.9945,
+      "python_val": 0.9946,
+      "julia_val": 0.9944,
+      "delta": 0.0001,
+      "status": "Concordant"
+    },
+    {
+      "method": "GARCH(1, 1) Persistence (alpha + beta)",
+      "ghl_val": 0.7062,
+      "r_val": 0.706,
+      "python_val": 0.7063,
+      "julia_val": 0.7061,
+      "delta": 0.0002,
+      "status": "Concordant"
+    },
+    {
+      "method": "GARCH Unconditional Volatility",
+      "ghl_val": 0.0187,
+      "r_val": 0.0187,
+      "python_val": 0.0187,
+      "julia_val": 0.0187,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Kalman Filter Steady-State Gain (K)",
+      "ghl_val": 0.3904,
+      "r_val": 0.3904,
+      "python_val": 0.3904,
+      "julia_val": 0.3904,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Kalman Smoothed RTS MSE",
+      "ghl_val": 0.184,
+      "r_val": 0.1842,
+      "python_val": 0.1839,
+      "julia_val": 0.1841,
+      "delta": 0.0002,
+      "status": "Concordant"
+    },
+    {
+      "method": "Granger Causality F-Statistic",
+      "ghl_val": 4.582,
+      "r_val": 4.582,
+      "python_val": 4.582,
+      "julia_val": 4.582,
+      "delta": 0.0,
+      "status": "Exact Match"
+    }
+  ]
+}

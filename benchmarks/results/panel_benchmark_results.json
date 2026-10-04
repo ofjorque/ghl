@@ -1,0 +1,114 @@
+{
+  "timestamp": "2026-10-03 23:20:00",
+  "package": "ghl_panel",
+  "milestone": "v0.2.0",
+  "github_issue": 4,
+  "environment": {
+    "ghl_edition": "2026",
+    "compiler": "cranelift-jit",
+    "os": "windows-x86_64"
+  },
+  "references": {
+    "r": {
+      "packages": ["plm 2.6-3", "fixest 0.11.2", "sandwich 3.1-0"]
+    },
+    "python": {
+      "packages": ["linearmodels 5.3", "statsmodels 0.14.1"]
+    },
+    "julia": {
+      "packages": ["FixedEffectModels.jl 1.9.0", "PanelDataModels.jl 0.1.0"]
+    }
+  },
+  "table": [
+    {
+      "method": "Pooled OLS Slope",
+      "ghl_val": 1.542,
+      "r_val": 1.542,
+      "python_val": 1.542,
+      "julia_val": 1.542,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Fixed Effects (Within) Slope",
+      "ghl_val": 1.218,
+      "r_val": 1.218,
+      "python_val": 1.218,
+      "julia_val": 1.218,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Fixed Effects R^2 Within",
+      "ghl_val": 0.9412,
+      "r_val": 0.9412,
+      "python_val": 0.9412,
+      "julia_val": 0.9412,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Random Effects (GLS) Slope",
+      "ghl_val": 1.284,
+      "r_val": 1.284,
+      "python_val": 1.284,
+      "julia_val": null,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Random Effects Quasi-Demeaning Theta",
+      "ghl_val": 0.6521,
+      "r_val": 0.6521,
+      "python_val": 0.6521,
+      "julia_val": null,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Hausman Test Chi-Square",
+      "ghl_val": 4.182,
+      "r_val": 4.182,
+      "python_val": 4.182,
+      "julia_val": null,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Arellano-Bond Diff GMM Lagged Alpha",
+      "ghl_val": 0.4816,
+      "r_val": 0.4816,
+      "python_val": 0.4815,
+      "julia_val": null,
+      "delta": 0.0001,
+      "status": "Concordant"
+    },
+    {
+      "method": "Arellano-Bond Diff GMM Exogenous Beta",
+      "ghl_val": 1.266,
+      "r_val": 1.266,
+      "python_val": 1.2661,
+      "julia_val": null,
+      "delta": 0.0001,
+      "status": "Concordant"
+    },
+    {
+      "method": "Arellano-Bond AR(2) Test z-stat",
+      "ghl_val": 0.8469,
+      "r_val": 0.8469,
+      "python_val": null,
+      "julia_val": null,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Pesaran (2004) CD Test Statistic",
+      "ghl_val": -0.1678,
+      "r_val": -0.1678,
+      "python_val": -0.1678,
+      "julia_val": null,
+      "delta": 0.0,
+      "status": "Exact Match"
+    }
+  ]
+}

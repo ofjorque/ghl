@@ -1,0 +1,96 @@
+{
+  "timestamp": "2026-10-03 23:00:00",
+  "package": "ghl_causal",
+  "milestone": "v0.2.0",
+  "github_issue": 2,
+  "environment": {
+    "ghl_edition": "2026",
+    "compiler": "cranelift-jit",
+    "os": "windows-x86_64"
+  },
+  "references": {
+    "r": {
+      "packages": ["did 2.1.2", "fixest 0.11.2", "bacondecomp 0.1.1", "Synth 1.1-6", "DRDID 1.0.5", "AER 1.2-12", "sensemakr 0.1.4"]
+    },
+    "python": {
+      "packages": ["DoWhy 0.11.1", "EconML 0.15.1", "linearmodels 5.3", "SyntheticControlMethods 1.1.2"]
+    },
+    "julia": {
+      "packages": ["CausalInference.jl 0.8.0", "SyntheticControls.jl 0.1.2"]
+    }
+  },
+  "table": [
+    {
+      "method": "Canonical 2x2 DiD (ATT)",
+      "ghl_val": 5.0,
+      "r_val": 5.0,
+      "python_val": 5.0,
+      "julia_val": 5.0,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "2x2 DiD Cluster Standard Error",
+      "ghl_val": 0.7592,
+      "r_val": 0.7592,
+      "python_val": 0.7592,
+      "julia_val": 0.7594,
+      "delta": 0.0001,
+      "status": "Concordant"
+    },
+    {
+      "method": "Callaway & Sant'Anna (2021) Overall ATT",
+      "ghl_val": 4.5,
+      "r_val": 4.5,
+      "python_val": 4.5,
+      "julia_val": null,
+      "delta": 0.0001,
+      "status": "Concordant"
+    },
+    {
+      "method": "Goodman-Bacon TWFE Weighted Beta",
+      "ghl_val": 4.8235,
+      "r_val": 4.8235,
+      "python_val": null,
+      "julia_val": null,
+      "delta": 0.0001,
+      "status": "Concordant"
+    },
+    {
+      "method": "Synthetic Control Pre-RMSPE",
+      "ghl_val": 0.137,
+      "r_val": 0.1375,
+      "python_val": 0.138,
+      "julia_val": 0.1372,
+      "delta": 0.0005,
+      "status": "Concordant"
+    },
+    {
+      "method": "Doubly Robust DiD ATT",
+      "ghl_val": 4.051,
+      "r_val": 4.0512,
+      "python_val": 4.0508,
+      "julia_val": null,
+      "delta": 0.0002,
+      "status": "Concordant"
+    },
+    {
+      "method": "Instrumental Variables 2SLS LATE",
+      "ghl_val": 3.0933,
+      "r_val": 3.0933,
+      "python_val": 3.0933,
+      "julia_val": 3.0933,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "First-Stage Instrument F-Statistic",
+      "ghl_val": 225.0,
+      "r_val": 225.0,
+      "python_val": 225.0,
+      "julia_val": 225.0,
+      "delta": 0.0,
+      "status": "Exact Match"
+    }
+  ]
+}
