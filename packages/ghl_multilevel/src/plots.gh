@@ -1,0 +1,28 @@
+// packages/ghl_multilevel/src/plots.gh
+// Publication-Quality Grammar of Graphics Visualizations for Multilevel & Hierarchical Models
+
+/// Generates a Caterpillar Plot of Empirical Bayes BLUPs sorted by rank.
+fn plot_blup_caterpillar(res: MixedModelResult) -> Plot {
+    let n_g = res.n_groups;
+    let mut g_labels = [];
+    for g in 0..n_g {
+        g_labels = append(g_labels, format("Cluster_{}", g));
+    }
+
+    let df_blup = dataframe {
+        cluster: g_labels,
+        u_intercept: res.blup_intercepts
+    };
+
+    df_blup |> plot(aes(col("cluster"), col("u_intercept")))
+            |> geom_point()
+            |> labs("Empirical Bayes BLUP Cluster Random Intercepts (Caterpillar Plot)")
+}
+
+/// Generates a Multilevel Clustered Trajectory Plot across groups.
+fn plot_multilevel_trajectories(df: DataFrame, group_col: String, x_col: String, y_col: String) -> Plot {
+    df |> plot(aes(col(x_col), col(y_col)))
+       |> geom_line()
+       |> geom_point()
+       |> labs("Multilevel Trajectories across Hierarchical Clusters")
+}

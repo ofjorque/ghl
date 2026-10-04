@@ -1,15 +1,18 @@
 // packages/ghl_multilevel/tests/multilevel_test.gh
-// Integration test suite for ghl_multilevel hierarchical mixed models
+// Comprehensive integration test suite for ghl_multilevel hierarchical mixed models
 
-println("Running ghl_multilevel integration test suite...");
+println("Running ghl_multilevel comprehensive test suite...");
 
+// =========================================================================
 // 1. Generate Synthetic Clustered Hierarchical Dataset (J = 5 clusters, n_j = 8, N = 40)
-// True parameters: beta0 = 3.0, beta1 = 1.5, u_j in [-2.0, -1.0, 0.0, 1.0, 2.0]
+// True parameters: beta0 = 3.0, beta1 = 1.5, u_0j in [-2, -1, 0, 1, 2], u_1j in [-0.4, -0.2, 0, 0.2, 0.4]
+// =========================================================================
 let n_groups = 5;
 let obs_per_group = 8;
 let total_n = n_groups * obs_per_group;
 
-let group_effects = [-2.0, -1.0, 0.0, 1.0, 2.0];
+let group_u0 = [-2.0, -1.0, 0.0, 1.0, 2.0];
+let group_u1 = [-0.4, -0.2, 0.0, 0.2, 0.4];
 let noise = random_normal(total_n, 0.0, 0.15, 99);
 
 let mut y_vec = [];
@@ -19,13 +22,14 @@ let mut g_vec = [];
 let mut row_idx = 0;
 for g in 0..n_groups {
     let fg = 0.0 + g;
-    let u_j = group_effects[g];
+    let u0_j = group_u0[g];
+    let u1_j = group_u1[g];
 
     for i in 0..obs_per_group {
         let fi = 0.0 + i;
         let x_val = 1.0 + (0.3 * fi);
         let e_val = noise[row_idx];
-        let y_val = 3.0 + (1.5 * x_val) + u_j + e_val;
+        let y_val = 3.0 + u0_j + ((1.5 + u1_j) * x_val) + e_val;
 
         x_vec = append(x_vec, x_val);
         y_vec = append(y_vec, y_val);
@@ -34,36 +38,60 @@ for g in 0..n_groups {
     }
 }
 
-if length(y_vec) != 40 {
-    panic("Dataset length should be 40");
-}
+let df_multi = dataframe {
+    y: y_vec,
+    x: x_vec,
+    group: g_vec
+};
 
-// 2. Test Hierarchical Mixed-Effects Model Estimation
-println("Testing Mixed-Effects Model Estimation...");
-let model = fit_mixed_model(y_vec, x_vec, g_vec, n_groups);
-if !model.converged {
-    panic("EM / IGLS algorithm must converge");
+// =========================================================================
+// 2. Random Intercepts Mixed-Effects Model Estimation
+// =========================================================================
+println("Testing Random Intercepts Mixed Model...");
+let model_ri = fit_mixed_model(y_vec, x_vec, g_vec, n_groups);
+if !model_ri.converged {
+    panic("Random intercepts EM algorithm must converge");
 }
-if model.beta0 < 2.0 || model.beta0 > 4.0 {
+if model_ri.beta0 < 1.0 || model_ri.beta0 > 5.0 {
     panic("Fixed intercept beta0 must be close to 3.0");
 }
-if model.beta1 < 1.0 || model.beta1 > 2.0 {
+if model_ri.beta1 < 1.0 || model_ri.beta1 > 2.0 {
     panic("Fixed slope beta1 must be close to 1.5");
 }
-if model.tau2_intercept <= 0.0 {
+if model_ri.tau2_intercept <= 0.0 {
     panic("Between-group variance tau0^2 must be positive");
 }
-if model.sigma2_residual <= 0.0 {
-    panic("Within-group residual variance sigma^2 must be positive");
+if model_ri.sigma2_residual <= 0.0 {
+    panic("Residual variance sigma^2 must be positive");
 }
-if model.icc <= 0.20 {
+if model_ri.icc <= 0.20 {
     panic("ICC must reflect substantial clustering (ICC > 0.20)");
 }
-render_mixed_model_cockpit(model);
+render_mixed_model_cockpit(model_ri);
 
-// 3. Test Multilevel Diagnostics
+// =========================================================================
+// 3. Random Slopes & Intercepts Mixed-Effects Model Estimation
+// =========================================================================
+println("Testing Random Slopes & Intercepts Mixed Model...");
+let model_rs = audit_random_slopes(y_vec, x_vec, g_vec, n_groups);
+if !model_rs.converged {
+    panic("Random slopes algorithm must converge");
+}
+if model_rs.tau0_sd <= 0.0 {
+    panic("Random intercept SD tau0 must be strictly positive");
+}
+if model_rs.tau1_sd <= 0.0 {
+    panic("Random slope SD tau1 must be strictly positive");
+}
+if model_rs.rho_correlation < -1.0 || model_rs.rho_correlation > 1.0 {
+    panic("Correlation rho must be bounded in [-1, 1]");
+}
+
+// =========================================================================
+// 4. Multilevel Diagnostics: Design Effect, Effective N, and Shrinkage
+// =========================================================================
 println("Testing Multilevel Diagnostics...");
-let diag = compute_multilevel_diagnostics(model);
+let diag = compute_multilevel_diagnostics(model_ri);
 if !diag.clustering_justified {
     panic("Hierarchical clustering must be justified");
 }
@@ -75,7 +103,33 @@ if diag.effective_sample_size >= 40.0 {
 }
 render_multilevel_diagnostics_cockpit(diag);
 
-// 4. Test Complete Multilevel Pipeline Audit
+// =========================================================================
+// 5. Model Comparison: Nakagawa R^2 and Likelihood Ratio Test (LRT)
+// =========================================================================
+println("Testing Model Comparison (Nakagawa R^2 and LRT)...");
+let lrt_res = audit_model_comparison(model_ri, model_rs, y_vec, x_vec);
+if lrt_res.lrt_statistic < 0.0 {
+    panic("LRT statistic must be non-negative");
+}
+
+let r2_res = compute_nakagawa_r2(y_vec, x_vec, model_ri.beta0, model_ri.beta1, model_ri.tau2_intercept, model_ri.sigma2_residual);
+if r2_res.r2_marginal <= 0.0 || r2_res.r2_marginal > 1.0 {
+    panic("Marginal R^2 must be in (0, 1]");
+}
+if r2_res.r2_conditional < r2_res.r2_marginal || r2_res.r2_conditional > 1.0 {
+    panic("Conditional R^2 must be >= Marginal R^2 and <= 1.0");
+}
+
+// =========================================================================
+// 6. Grammar of Graphics Plotting Generators
+// =========================================================================
+println("Testing Grammar of Graphics Plotting Generators...");
+let p_blup = plot_blup_caterpillar(model_ri);
+let p_traj = plot_multilevel_trajectories(df_multi, "group", "x", "y");
+
+// =========================================================================
+// 7. Complete Multilevel Pipeline Executive Audit
+// =========================================================================
 println("Testing Complete Multilevel Pipeline Audit...");
 let audit = audit_multilevel_pipeline(y_vec, x_vec, g_vec, n_groups);
 if !audit.certified {

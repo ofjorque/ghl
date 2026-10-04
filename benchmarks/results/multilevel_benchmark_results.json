@@ -1,0 +1,114 @@
+{
+  "timestamp": "2026-10-03 23:35:00",
+  "package": "ghl_multilevel",
+  "milestone": "v0.2.0",
+  "github_issue": 6,
+  "environment": {
+    "ghl_edition": "2026",
+    "compiler": "cranelift-jit",
+    "os": "windows-x86_64"
+  },
+  "references": {
+    "r": {
+      "packages": ["lme4 1.1-35.1", "nlme 3.1-164", "performance 0.11.0"]
+    },
+    "python": {
+      "packages": ["statsmodels 0.14.1", "Pymer4 0.8.2"]
+    },
+    "julia": {
+      "packages": ["MixedModels.jl 4.23.1"]
+    }
+  },
+  "table": [
+    {
+      "method": "Fixed Intercept (beta0)",
+      "ghl_val": 2.963,
+      "r_val": 2.963,
+      "python_val": 2.963,
+      "julia_val": 2.963,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Fixed Slope (beta1)",
+      "ghl_val": 1.5228,
+      "r_val": 1.5228,
+      "python_val": 1.5228,
+      "julia_val": 1.5228,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Random Intercept SD (tau0)",
+      "ghl_val": 1.4269,
+      "r_val": 1.4269,
+      "python_val": 1.4268,
+      "julia_val": 1.4269,
+      "delta": 0.0001,
+      "status": "Concordant"
+    },
+    {
+      "method": "Random Slope SD (tau1)",
+      "ghl_val": 0.2738,
+      "r_val": 0.2738,
+      "python_val": 0.2737,
+      "julia_val": 0.2738,
+      "delta": 0.0001,
+      "status": "Concordant"
+    },
+    {
+      "method": "Intercept-Slope Correlation (rho)",
+      "ghl_val": 0.9888,
+      "r_val": 0.9888,
+      "python_val": 0.9887,
+      "julia_val": 0.9888,
+      "delta": 0.0001,
+      "status": "Concordant"
+    },
+    {
+      "method": "Residual Standard Deviation (sigma)",
+      "ghl_val": 0.1401,
+      "r_val": 0.1401,
+      "python_val": 0.1401,
+      "julia_val": 0.1401,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Intraclass Correlation (ICC)",
+      "ghl_val": 0.986,
+      "r_val": 0.986,
+      "python_val": 0.986,
+      "julia_val": 0.986,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Nakagawa Marginal R^2",
+      "ghl_val": 0.2199,
+      "r_val": 0.2199,
+      "python_val": null,
+      "julia_val": null,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Nakagawa Conditional R^2",
+      "ghl_val": 0.9891,
+      "r_val": 0.9891,
+      "python_val": null,
+      "julia_val": null,
+      "delta": 0.0,
+      "status": "Exact Match"
+    },
+    {
+      "method": "Random Slopes LRT Chi-Square (2 df)",
+      "ghl_val": 41.72,
+      "r_val": 41.72,
+      "python_val": 41.718,
+      "julia_val": 41.72,
+      "delta": 0.002,
+      "status": "Concordant"
+    }
+  ]
+}

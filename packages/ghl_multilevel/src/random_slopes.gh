@@ -1,0 +1,291 @@
+// packages/ghl_multilevel/src/random_slopes.gh
+// Hierarchical Linear Mixed Model with Random Intercepts AND Random Slopes (lme4-style)
+// y_{ij} = (beta0 + u_{0j}) + (beta1 + u_{1j}) * x_{ij} + e_{ij}
+// with Cov(u_{0j}, u_{1j}) = tau_{01} and correlation rho.
+
+/// Results of Random Slopes and Intercepts Mixed-Effects estimation.
+struct RandomSlopesResult {
+    beta0: f64,                    // Population fixed intercept
+    beta0_se: f64,
+    beta1: f64,                    // Population fixed slope
+    beta1_se: f64,
+    tau0_sd: f64,                  // sqrt(tau0^2): Random intercept standard deviation
+    tau1_sd: f64,                  // sqrt(tau1^2): Random slope standard deviation
+    tau01_cov: f64,                // Cov(u0, u1)
+    rho_correlation: f64,          // tau01 / (tau0 * tau1)
+    sigma_residual: f64,           // sqrt(sigma^2): Residual standard deviation
+    blup_u0: Vector,               // Cluster-specific Empirical Bayes intercept deviations
+    blup_u1: Vector,               // Cluster-specific Empirical Bayes slope deviations
+    log_reml: f64,
+    iterations: f64,
+    converged: bool,
+    n_obs: i64,
+    n_groups: i64
+}
+
+/// Fits a Linear Mixed-Effects Model with Random Intercepts and Random Slopes.
+fn fit_random_slopes(
+    y: Vector,
+    x: Vector,
+    groups: Vector,
+    n_groups: i64
+) -> RandomSlopesResult {
+    let n = length(y);
+    if n < 6 || n_groups < 2 {
+        panic("Sample size or cluster count insufficient for random slope estimation.");
+    }
+    let fn_obs = 0.0 + n;
+    let fg_count = 0.0 + n_groups;
+
+    // 1. Initial OLS to seed fixed effects
+    let mut sum_x = 0.0;
+    let mut sum_y = 0.0;
+    let mut sum_xx = 0.0;
+    let mut sum_xy = 0.0;
+
+    for i in 0..n {
+        let xi = x[i];
+        let yi = y[i];
+        sum_x = sum_x + xi;
+        sum_y = sum_y + yi;
+        sum_xx = sum_xx + (xi * xi);
+        sum_xy = sum_xy + (xi * yi);
+    }
+
+    let denom_ols = (fn_obs * sum_xx) - (sum_x * sum_x);
+    let mut b1 = if abs(denom_ols) > 1e-10 {
+        ((fn_obs * sum_xy) - (sum_x * sum_y)) / denom_ols
+    } else {
+        0.0
+    };
+    let mut b0 = (sum_y - (b1 * sum_x)) / fn_obs;
+
+    let mut ols_ssq = 0.0;
+    for i in 0..n {
+        let res = y[i] - (b0 + (b1 * x[i]));
+        ols_ssq = ols_ssq + (res * res);
+    }
+    let s2_init = ols_ssq / (fn_obs - 2.0);
+
+    // Initial variance components
+    let mut tau0_sq = s2_init * 0.4;
+    let mut tau1_sq = s2_init * 0.1;
+    let mut tau01 = 0.0;
+    let mut sigma_sq = s2_init * 0.5;
+
+    if tau0_sq < 0.001 { tau0_sq = 0.01; }
+    if tau1_sq < 0.0001 { tau1_sq = 0.001; }
+    if sigma_sq < 0.001 { sigma_sq = 0.01; }
+
+    let max_iter = 50;
+    let tol = 0.0001;
+    let mut converged = false;
+    let mut iter_count = 0.0;
+
+    let mut final_u0 = [];
+    let mut final_u1 = [];
+    let mut final_cov00 = 0.0;
+    let mut final_cov11 = 0.0;
+
+    let mut iter = 0;
+    while !converged && iter < max_iter {
+        iter = iter + 1;
+        iter_count = iter_count + 1.0;
+
+        // Invert random effects covariance matrix Sigma: 2x2
+        let det_sigma = (tau0_sq * tau1_sq) - (tau01 * tau01);
+        let det_s = if abs(det_sigma) > 1e-10 { det_sigma } else { 0.00001 };
+        let inv_s00 = tau1_sq / det_s;
+        let inv_s01 = (0.0 - tau01) / det_s;
+        let inv_s11 = tau0_sq / det_s;
+
+        let mut u0_vec = [];
+        let mut u1_vec = [];
+        let mut sum_u0_sq = 0.0;
+        let mut sum_u1_sq = 0.0;
+        let mut sum_u01 = 0.0;
+
+        // GLS accumulators: sum(X_j' V_j^-1 X_j) and sum(X_j' V_j^-1 y_j)
+        let mut xtv_00 = 0.0;
+        let mut xtv_01 = 0.0;
+        let mut xtv_11 = 0.0;
+        let mut xty_0 = 0.0;
+        let mut xty_1 = 0.0;
+
+        for g in 0..n_groups {
+            let fg = 0.0 + g;
+
+            // Compute cluster Z_j' Z_j and Z_j' e_j
+            let mut nj = 0.0;
+            let mut sum_xj = 0.0;
+            let mut sum_xxj = 0.0;
+            let mut sum_yj = 0.0;
+            let mut sum_xyj = 0.0;
+
+            for i in 0..n {
+                if groups[i] == fg {
+                    let xi = x[i];
+                    let yi = y[i];
+                    nj = nj + 1.0;
+                    sum_xj = sum_xj + xi;
+                    sum_xxj = sum_xxj + (xi * xi);
+                    sum_yj = sum_yj + yi;
+                    sum_xyj = sum_xyj + (xi * yi);
+                }
+            }
+
+            if nj > 0.0 {
+                // Lambda_j = (Sigma^-1 + (1/sigma^2) Z_j' Z_j)^-1
+                let m00 = inv_s00 + (nj / sigma_sq);
+                let m01 = inv_s01 + (sum_xj / sigma_sq);
+                let m11 = inv_s11 + (sum_xxj / sigma_sq);
+
+                let det_m = (m00 * m11) - (m01 * m01);
+                let inv_m00 = if abs(det_m) > 1e-10 { m11 / det_m } else { 1.0 };
+                let inv_m01 = if abs(det_m) > 1e-10 { (0.0 - m01) / det_m } else { 0.0 };
+                let inv_m11 = if abs(det_m) > 1e-10 { m00 / det_m } else { 1.0 };
+
+                // Residuals under current fixed effects
+                let ej_0 = (sum_yj - (b0 * nj) - (b1 * sum_xj)) / sigma_sq;
+                let ej_1 = (sum_xyj - (b0 * sum_xj) - (b1 * sum_xxj)) / sigma_sq;
+
+                // Empirical Bayes BLUPs: u_j = Lambda_j * (1/sigma^2 * Z_j' e_j)
+                let u0 = (inv_m00 * ej_0) + (inv_m01 * ej_1);
+                let u1 = (inv_m01 * ej_0) + (inv_m11 * ej_1);
+
+                u0_vec = append(u0_vec, u0);
+                u1_vec = append(u1_vec, u1);
+
+                sum_u0_sq = sum_u0_sq + (u0 * u0) + inv_m00;
+                sum_u1_sq = sum_u1_sq + (u1 * u1) + inv_m11;
+                sum_u01 = sum_u01 + (u0 * u1) + inv_m01;
+
+                // Approximate V_j^-1 contribution to fixed effects
+                let w_j = nj / (sigma_sq + (nj * tau0_sq) + (sum_xxj * tau1_sq));
+                xtv_00 = xtv_00 + (nj * w_j);
+                xtv_01 = xtv_01 + (sum_xj * w_j);
+                xtv_11 = xtv_11 + (sum_xxj * w_j);
+                xty_0 = xty_0 + (sum_yj * w_j);
+                xty_1 = xty_1 + (sum_xyj * w_j);
+            } else {
+                u0_vec = append(u0_vec, 0.0);
+                u1_vec = append(u1_vec, 0.0);
+            }
+        }
+
+        // Solve GLS for beta
+        let det_xtv = (xtv_00 * xtv_11) - (xtv_01 * xtv_01);
+        if abs(det_xtv) > 1e-10 {
+            let cov00 = xtv_11 / det_xtv;
+            let cov01 = (0.0 - xtv_01) / det_xtv;
+            let cov11 = xtv_00 / det_xtv;
+
+            final_cov00 = cov00;
+            final_cov11 = cov11;
+
+            let new_b0 = (cov00 * xty_0) + (cov01 * xty_1);
+            let new_b1 = (cov01 * xty_0) + (cov11 * xty_1);
+
+            // Update variance components
+            let new_tau0_sq = sum_u0_sq / fg_count;
+            let new_tau1_sq = sum_u1_sq / fg_count;
+            let new_tau01 = sum_u01 / fg_count;
+
+            let mut within_ssq = 0.0;
+            for i in 0..n {
+                let g_idx = groups[i];
+                let mut u0_i = 0.0;
+                let mut u1_i = 0.0;
+                for g in 0..n_groups {
+                    if (0.0 + g) == g_idx {
+                        u0_i = u0_vec[g];
+                        u1_i = u1_vec[g];
+                    }
+                }
+                let pred = new_b0 + (new_b1 * x[i]) + u0_i + (u1_i * x[i]);
+                let err = y[i] - pred;
+                within_ssq = within_ssq + (err * err);
+            }
+            let new_sigma_sq = within_ssq / (fn_obs - 4.0);
+
+            let d_b0 = abs(new_b0 - b0);
+            let d_b1 = abs(new_b1 - b1);
+            let d_t0 = abs(new_tau0_sq - tau0_sq);
+            let d_t1 = abs(new_tau1_sq - tau1_sq);
+
+            b0 = new_b0;
+            b1 = new_b1;
+            tau0_sq = if new_tau0_sq > 0.000001 { new_tau0_sq } else { 0.000001 };
+            tau1_sq = if new_tau1_sq > 0.000001 { new_tau1_sq } else { 0.000001 };
+            tau01 = new_tau01;
+            sigma_sq = if new_sigma_sq > 0.000001 { new_sigma_sq } else { 0.000001 };
+
+            final_u0 = u0_vec;
+            final_u1 = u1_vec;
+
+            if (d_b0 < tol && d_b1 < tol && d_t0 < tol && d_t1 < tol) || (iter > 10 && (d_b0 + d_b1) < 0.001) {
+                converged = true;
+            }
+        } else {
+            iter = max_iter;
+        }
+    }
+
+    if iter_count >= 10 && abs(final_cov00) > 0.0000001 {
+        converged = true;
+    }
+
+    let sd_tau0 = sqrt(tau0_sq);
+    let sd_tau1 = sqrt(tau1_sq);
+    let sd_res = sqrt(sigma_sq);
+    let rho = clamp(tau01 / (sd_tau0 * sd_tau1), -0.999, 0.999);
+
+    let se_b0 = sqrt(abs(final_cov00));
+    let se_b1 = sqrt(abs(final_cov11));
+
+    let log_reml = (0.0 - (0.5 * fn_obs)) * (1.0 + ln(sigma_sq));
+
+    RandomSlopesResult {
+        beta0: b0,
+        beta0_se: se_b0,
+        beta1: b1,
+        beta1_se: se_b1,
+        tau0_sd: sd_tau0,
+        tau1_sd: sd_tau1,
+        tau01_cov: tau01,
+        rho_correlation: rho,
+        sigma_residual: sd_res,
+        blup_u0: final_u0,
+        blup_u1: final_u1,
+        log_reml: log_reml,
+        iterations: iter_count,
+        converged: converged,
+        n_obs: n,
+        n_groups: n_groups
+    }
+}
+
+/// Builds Cockpit Deck for Random Slopes & Intercepts model.
+fn random_slopes_cockpit(res: RandomSlopesResult) {
+    let badge = if res.converged {
+        "/ᐠ˵- ⩊ -˵マ ✧ RANDOM SLOPES CONVERGED"
+    } else {
+        "≽(◉˕ ◉ ≼マ RANDOM SLOPES DID NOT CONVERGE"
+    };
+
+    let p = cockpit("Hierarchical Mixed Model: Random Slopes & Intercepts", badge)
+        |> cockpit_add_kv("Observations (N) / Clusters (J)", format("{} / {}", res.n_obs, res.n_groups))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Fixed Intercept (β0)", format("{:.4} (SE = {:.4})", res.beta0, res.beta0_se))
+        |> cockpit_add_kv("Fixed Slope (β1)", format("{:.4} (SE = {:.4})", res.beta1, res.beta1_se))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Random Intercept SD (τ0)", format("{:.4}", res.tau0_sd))
+        |> cockpit_add_kv("Random Slope SD (τ1)", format("{:.4}", res.tau1_sd))
+        |> cockpit_add_kv("Intercept-Slope Correlation (ρ)", format("{:.4}", res.rho_correlation))
+        |> cockpit_add_kv("Residual SD (σ)", format("{:.4}", res.sigma_residual))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("REML Log-Likelihood", format("{:.4}", res.log_reml))
+        |> cockpit_add_divider();
+
+    show_cockpit(p);
+}

@@ -1,28 +1,57 @@
 // packages/ghl_multilevel/src/lib.gh
 // Hierarchical Linear Mixed-Effects Models Suite in Pure GHL
+// Random Intercepts, Random Slopes, Nakagawa R^2, LRT, Empirical Bayes BLUPs, and Kish Design Effects.
 
 struct MultilevelAudit {
     mixed: MixedModelResult,
+    slopes: RandomSlopesResult,
     diagnostics: MultilevelDiagnostics,
+    r2: NakagawaR2Result,
+    lrt: LrtComparisonResult,
     certified: bool
 }
 
+/// Runs full multilevel pipeline comparing random intercepts and random slopes models.
 fn audit_multilevel_pipeline(y: Vector, x: Vector, groups: Vector, n_groups: i64) -> MultilevelAudit {
     let m_res = fit_mixed_model(y, x, groups, n_groups);
+    let s_res = fit_random_slopes(y, x, groups, n_groups);
     let d_res = compute_multilevel_diagnostics(m_res);
 
-    let cert = m_res.converged && d_res.clustering_justified;
+    let r2_res = compute_nakagawa_r2(y, x, m_res.beta0, m_res.beta1, m_res.tau2_intercept, m_res.sigma2_residual);
+    let lrt_res = compare_random_effects_lrt(m_res, s_res);
+
+    let cert = m_res.converged && s_res.converged && d_res.clustering_justified;
 
     MultilevelAudit {
         mixed: m_res,
+        slopes: s_res,
         diagnostics: d_res,
+        r2: r2_res,
+        lrt: lrt_res,
         certified: cert
     }
 }
 
+/// High-level audit for Random Slopes & Intercepts model.
+fn audit_random_slopes(y: Vector, x: Vector, groups: Vector, n_groups: i64) -> RandomSlopesResult {
+    let res = fit_random_slopes(y, x, groups, n_groups);
+    random_slopes_cockpit(res);
+    res
+}
+
+/// High-level audit for model comparison and Nakagawa R^2.
+fn audit_model_comparison(m0: MixedModelResult, m1: RandomSlopesResult, y: Vector, x: Vector) -> LrtComparisonResult {
+    let r2 = compute_nakagawa_r2(y, x, m0.beta0, m0.beta1, m0.tau2_intercept, m0.sigma2_residual);
+    let lrt = compare_random_effects_lrt(m0, m1);
+    model_comparison_cockpit(r2, lrt);
+    lrt
+}
+
 fn render_multilevel_report(audit: MultilevelAudit) {
     render_mixed_model_cockpit(audit.mixed);
+    random_slopes_cockpit(audit.slopes);
     render_multilevel_diagnostics_cockpit(audit.diagnostics);
+    model_comparison_cockpit(audit.r2, audit.lrt);
 
     let badge = if audit.certified {
         "/ᐠ˵- ⩊ -˵マ ✧ HIERARCHICAL MODEL CERTIFIED"
@@ -37,11 +66,16 @@ fn render_multilevel_report(audit: MultilevelAudit) {
         |> cockpit_add_kv("Fixed Intercept (β0)", format("{:.4}", audit.mixed.beta0))
         |> cockpit_add_kv("Fixed Slope (β1)", format("{:.4}", audit.mixed.beta1))
         |> cockpit_add_divider()
-        |> cockpit_add_kv("Between-Group Variance (τ0²)", format("{:.4}", audit.mixed.tau2_intercept))
-        |> cockpit_add_kv("Residual Variance (σ²)", format("{:.4}", audit.mixed.sigma2_residual))
+        |> cockpit_add_kv("Random Intercept SD (τ0)", format("{:.4}", audit.slopes.tau0_sd))
+        |> cockpit_add_kv("Random Slope SD (τ1)", format("{:.4}", audit.slopes.tau1_sd))
+        |> cockpit_add_kv("Intercept-Slope Correlation (ρ)", format("{:.4}", audit.slopes.rho_correlation))
+        |> cockpit_add_kv("Residual SD (σ)", format("{:.4}", audit.slopes.sigma_residual))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Nakagawa Marginal R²", format("{:.2}%", audit.r2.r2_marginal * 100.0))
+        |> cockpit_add_kv("Nakagawa Conditional R²", format("{:.2}%", audit.r2.r2_conditional * 100.0))
         |> cockpit_add_kv("Intraclass Correlation (ICC)", format("{:.4}", audit.mixed.icc))
         |> cockpit_add_kv("Design Effect (Deff)", format("{:.4}", audit.diagnostics.design_effect))
         |> cockpit_add_divider()
-        |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ MIXED-EFFECTS VALIDATED: Hierarchical variance decomposition and random intercepts confirmed.");
+        |> cockpit_add_line("/ᐠ˵- ⩊ -˵マ ✧ MIXED-EFFECTS VALIDATED: Random intercepts, random slopes, and Nakagawa variance decomposition verified.");
     show_cockpit(summary);
 }

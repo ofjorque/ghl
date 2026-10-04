@@ -1,0 +1,93 @@
+// packages/ghl_multilevel/src/model_comparison.gh
+// Model Comparison & Goodness-of-Fit: Nakagawa & Schielzeth (2013) R^2 and Likelihood Ratio Tests
+
+/// Results of Nakagawa & Schielzeth R^2 variance partitioning.
+struct NakagawaR2Result {
+    r2_marginal: f64,              // Variance explained by fixed effects alone
+    r2_conditional: f64,           // Variance explained by both fixed and random effects
+    var_fixed: f64,                // Var(X * beta)
+    var_random: f64,               // tau^2
+    var_residual: f64              // sigma^2
+}
+
+/// Results of Likelihood Ratio Test comparing Random Intercepts vs Random Slopes.
+struct LrtComparisonResult {
+    lrt_statistic: f64,            // 2 * (logLik_slope - logLik_intercept)
+    degrees_of_freedom: i64,       // 2 df (tau1^2 and tau01)
+    p_value: f64,                  // ChiSq p-value
+    preferred_model: String,       // "Random Slopes & Intercepts" if p < 0.05 else "Random Intercepts Only"
+    random_slope_justified: bool
+}
+
+/// Computes Nakagawa & Schielzeth (2013) Marginal and Conditional R^2.
+fn compute_nakagawa_r2(
+    y: Vector,
+    x: Vector,
+    b0: f64,
+    b1: f64,
+    tau_total: f64,
+    sigma2_res: f64
+) -> NakagawaR2Result {
+    let n = length(y);
+    let mut fixed_preds = [];
+    for i in 0..n {
+        fixed_preds = append(fixed_preds, b0 + (b1 * x[i]));
+    }
+    let s2_fixed = var(fixed_preds);
+
+    let denom = s2_fixed + tau_total + sigma2_res;
+    let r2_m = if denom > 0.0000001 { s2_fixed / denom } else { 0.0 };
+    let r2_c = if denom > 0.0000001 { (s2_fixed + tau_total) / denom } else { 0.0 };
+
+    NakagawaR2Result {
+        r2_marginal: clamp(r2_m, 0.0, 1.0),
+        r2_conditional: clamp(r2_c, 0.0, 1.0),
+        var_fixed: s2_fixed,
+        var_random: tau_total,
+        var_residual: sigma2_res
+    }
+}
+
+/// Likelihood Ratio Test comparing Random Intercepts model vs Random Slopes model.
+fn compare_random_effects_lrt(
+    m_intercept: MixedModelResult,
+    m_slopes: RandomSlopesResult
+) -> LrtComparisonResult {
+    let diff_lik = 2.0 * (m_slopes.log_reml - m_intercept.log_reml);
+    let lrt_stat = if diff_lik > 0.0 { diff_lik } else { 0.0 };
+    let p_val = 1.0 - chisq_cdf(lrt_stat, 2.0);
+
+    let justified = p_val < 0.05;
+    let pref = if justified {
+        "Random Slopes & Intercepts"
+    } else {
+        "Random Intercepts Only (Parsimonious)"
+    };
+
+    LrtComparisonResult {
+        lrt_statistic: lrt_stat,
+        degrees_of_freedom: 2,
+        p_value: p_val,
+        preferred_model: pref,
+        random_slope_justified: justified
+    }
+}
+
+/// Builds Cockpit Deck for Model Comparison & R^2.
+fn model_comparison_cockpit(r2: NakagawaR2Result, lrt: LrtComparisonResult) {
+    let badge = if lrt.random_slope_justified {
+        "/ᐠ˵- ⩊ -˵マ ✧ RANDOM SLOPES JUSTIFIED (p < 0.05)"
+    } else {
+        "/ᐠ˵- ⩊ -˵マ ✧ RANDOM INTERCEPT SUFFICIENT (PARSIMONIOUS)"
+    };
+
+    let p = cockpit("Multilevel Model Evaluation: Nakagawa R² & LRT", badge)
+        |> cockpit_add_kv("Marginal R² (Fixed Effects Only)", format("{:.2}%", r2.r2_marginal * 100.0))
+        |> cockpit_add_kv("Conditional R² (Fixed + Random)", format("{:.2}%", r2.r2_conditional * 100.0))
+        |> cockpit_add_divider()
+        |> cockpit_add_kv("Random Effects Structure LRT", format("χ²(2) = {:.2} (p = {:.4})", lrt.lrt_statistic, lrt.p_value))
+        |> cockpit_add_kv("Recommended Architecture", lrt.preferred_model)
+        |> cockpit_add_divider();
+
+    show_cockpit(p);
+}

@@ -134,8 +134,11 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
   - Validar paridad numérica y benchmarking exhaustivo contra R (`survival`, `survminer`), Python (`lifelines`, `scikit-survival`) y Julia (`Survival.jl`). Documentado en [`packages/ghl_survival/GUIDE.md`](packages/ghl_survival/GUIDE.md).
   - Publicar cuaderno reproducible Quarto (`.qmd`) de bioestadística y oncología clínica en [`examples/clinical_survival_analysis.qmd`](examples/clinical_survival_analysis.qmd).
 
-- [ ] **`packages/ghl_multilevel` (Modelos Lineales Mixtos / HLM) — [#6](https://github.com/ofjorque/ghl/issues/6):**
-  - Pruebas para modelos con interceptos y pendientes aleatorias contra R `lme4`.
+- [x] **`packages/ghl_multilevel` (Modelos Lineales Mixtos / HLM) — [#6](https://github.com/ofjorque/ghl/issues/6):**
+  - Consolidar tests para modelos con Interceptos Aleatorios, Pendientes Aleatorias (*Random Slopes*), estimación de covarianza intercepto-pendiente ($\tau_{01}$) y correlación ($\rho$), BLUPs empíricos de Bayes, $R^2$ Marginal y Condicional de Nakagawa & Schielzeth (2013), test LRT de estructura aleatoria $\chi^2(2)$, y Efecto de Diseño de Kish (Deff). Validado: 8/8 bloques de prueba superados.
+  - Validar paridad numérica y benchmarking exhaustivo contra R (`lme4`, `nlme`), Python (`statsmodels.mixedlm`) y Julia (`MixedModels.jl`). Documentado en [`packages/ghl_multilevel/GUIDE.md`](packages/ghl_multilevel/GUIDE.md).
+  - Publicar cuaderno reproducible Quarto (`.qmd`) de modelado jerárquico longitudinal en [`examples/multilevel_hierarchical_modeling.qmd`](examples/multilevel_hierarchical_modeling.qmd).
+
 - [ ] **`packages/spring_pact` (Grafos Probabilísticos y PACT) — [#7](https://github.com/ofjorque/ghl/issues/7):**
   - Verificación del motor de especificación de redes y grafos causales/probabilísticos.
 
