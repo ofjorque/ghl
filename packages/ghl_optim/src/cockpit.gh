@@ -9,10 +9,12 @@ fn build_optim_cockpit(res: Record) {
         "≽(◉˕ ◉ ≼マ NOT CONVERGED"
     };
 
+    let conv_theme = if res.converged { "emerald" } else { "magenta" };
     let mut p = cockpit("ghl_optim Numerical Engine", conv_badge)
         |> cockpit_add_kv("Objective Value", to_string(res.value))
         |> cockpit_add_kv("Iterations", to_string(res.iterations))
         |> cockpit_add_kv("Status Message", to_string(res.message))
+        |> cockpit_add_circle(if res.converged { 100 } else { 0 }, 100, "Convergence Status", conv_theme)
         |> cockpit_add_divider();
 
     p = cockpit_add_line(p, "Parameter Vector:");
@@ -46,12 +48,14 @@ fn build_mle_cockpit(res: MleResult) {
     };
 
     let ic_str = format("AIC: {} | BIC: {}", to_string(res.aic), to_string(res.bic));
+    let mle_theme = if res.converged { "emerald" } else { "magenta" };
 
     let mut p = cockpit("ghl_optim Maximum Likelihood Report", conv_badge)
         |> cockpit_add_kv("Log-Likelihood", to_string(res.log_lik))
         |> cockpit_add_kv("Information Criteria", ic_str)
         |> cockpit_add_kv("Iterations", to_string(res.iterations))
         |> cockpit_add_kv("Status Message", res.message)
+        |> cockpit_add_circle(if res.converged { 100 } else { 0 }, 100, "MLE Convergence", mle_theme)
         |> cockpit_add_divider()
         |> cockpit_add_line("Parameter       Estimate      Std.Error      z-value      Pr(>|z|)    95% CI");
 
@@ -90,10 +94,15 @@ fn build_nls_cockpit(res: NlsResult) {
         "≽(◉˕ ◉ ≼マ DIVERGED"
     };
 
+    let r2_pct = to_int(res.r_squared * 100.0);
+    let nls_theme = if res.converged { "emerald" } else { "magenta" };
+
     let mut p = cockpit("ghl_optim Nonlinear Least Squares", conv_badge)
         |> cockpit_add_kv("Residual SS (SS_res)", to_string(res.residual_sum_squares))
         |> cockpit_add_kv("Residual Std Error (s)", to_string(res.residual_std_error))
         |> cockpit_add_kv("R-squared (R²)", to_string(res.r_squared))
+        |> cockpit_add_progress(r2_pct, 100, "Variance Explained (R²)", "emerald")
+        |> cockpit_add_circle(if res.converged { 100 } else { 0 }, 100, "Levenberg-Marquardt", nls_theme)
         |> cockpit_add_divider()
         |> cockpit_add_line("Parameter       Estimate      Std.Error      t-value      Pr(>|t|)");
 

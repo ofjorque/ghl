@@ -36,10 +36,18 @@ fn timeseries_audit_cockpit(audit: TimeSeriesAudit) {
         "≽(◉˕ ◉ ≼マ HIGH RISK DYNAMICS"
     };
 
-    let p = cockpit("GHL TimeSeries: Integrated Econometric Certification", badge)
+    let mut cert_count = 0;
+    if audit.kalman_result.is_converged { cert_count = cert_count + 1; }
+    if audit.arima_result.is_stationary { cert_count = cert_count + 1; }
+    if audit.garch_result.is_stationary { cert_count = cert_count + 1; }
+    let cert_theme = if audit.is_fully_certified { "emerald" } else { "magenta" };
+
+    let mut p = cockpit("GHL TimeSeries: Integrated Econometric Certification", badge)
         |> cockpit_add_kv("Kalman Filter", if audit.kalman_result.is_converged { "CONVERGED (Steady Gain)" } else { "HIGH NOISE VARIANCE" })
         |> cockpit_add_kv("ARIMA Stationarity", if audit.arima_result.is_stationary { "STATIONARY (Causal Roots)" } else { "EXPLOSIVE / UNIT ROOT" })
         |> cockpit_add_kv("GARCH Volatility", if audit.garch_result.is_stationary { "MEAN-REVERTING" } else { "INTEGRATED GARCH" })
+        |> cockpit_add_progress(cert_count, 3, "Econometric Health", cert_theme)
+        |> cockpit_add_circle(cert_count, 3, "Certification", cert_theme)
         |> cockpit_add_divider()
         |> cockpit_add_kv("Long-Run Volatility", format("{:.4}", audit.garch_result.long_run_vol))
         |> cockpit_add_kv("Final State Level", format("{:.4}", audit.kalman_result.final_state))

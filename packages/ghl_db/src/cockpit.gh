@@ -9,10 +9,12 @@ fn build_db_cockpit(conn: Record) {
         "≽(◉˕ ◉ ≼マ CLOSED"
     };
 
+    let db_theme = if conn.is_connected { "emerald" } else { "magenta" };
     let mut p = cockpit("ghl_db Database Connection", badge)
         |> cockpit_add_kv("Driver", conn.driver)
         |> cockpit_add_kv("URI / Path", conn.uri)
         |> cockpit_add_kv("Handle ID", to_string(conn.id))
+        |> cockpit_add_circle(if conn.is_connected { 1 } else { 0 }, 1, "Connection Health", db_theme)
         |> cockpit_add_divider();
 
     let tbls = db_tables(conn);

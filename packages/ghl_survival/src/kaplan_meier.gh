@@ -139,18 +139,22 @@ fn fit_kaplan_meier(times: Vector, events: Vector) -> KMResult {
 }
 
 fn km_cockpit(km: KMResult) {
+    let n_steps = length(km.survival);
+    let final_surv = if n_steps > 0 { km.survival[n_steps - 1] } else { 1.0 };
+    let final_surv_pct = to_int(final_surv * 100.0);
+
     let p = cockpit("Kaplan-Meier Survival Estimator", "/ᐠ˵- ⩊ -˵マ ✧ SURVIVAL ESTIMATED")
         |> cockpit_add_kv("Total Sample (N)", format("{}", km.n_total))
         |> cockpit_add_kv("Observed Events (d)", format("{}", km.n_events))
-        |> cockpit_add_kv("Right-Censored (c)", format("{}", km.n_censored));
+        |> cockpit_add_kv("Right-Censored (c)", format("{}", km.n_censored))
+        |> cockpit_add_progress(km.n_events, km.n_total, "Observed Events", "magenta")
+        |> cockpit_add_circle(final_surv_pct, 100, "Terminal Survival", "emerald");
 
     let med_display = if km.median_survival >= 0.0 { format("{:.2}", km.median_survival) } else { "Not Reached (> t_max)" };
     let p2 = p
         |> cockpit_add_kv("Median Survival Time (t50)", med_display)
         |> cockpit_add_divider();
 
-    let n_steps = length(km.survival);
-    let final_surv = if n_steps > 0 { km.survival[n_steps - 1] } else { 1.0 };
     let p3 = p2
         |> cockpit_add_kv("Terminal Survival S(t_max)", format("{:.4}", final_surv))
         |> cockpit_add_line("Survival Trajectory (Step Curve):")

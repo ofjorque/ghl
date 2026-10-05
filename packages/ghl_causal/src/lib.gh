@@ -39,10 +39,17 @@ fn causal_audit_cockpit(audit: CausalAudit) {
     let pt_status = if audit.parallel_trends.is_validated { "VALIDATED (p >= 0.05)" } else { "VIOLATION SUSPECTED" };
     let es_status = if audit.event_study.pre_trends_pass { "PASSED (null holds)" } else { "NON-ZERO LEADS DETECTED" };
 
+    let mut cert_count = 0;
+    if audit.parallel_trends.is_validated { cert_count = cert_count + 1; }
+    if audit.event_study.pre_trends_pass { cert_count = cert_count + 1; }
+    let cert_theme = if audit.is_fully_certified { "emerald" } else { "magenta" };
+
     let p = cockpit("GHL Causal: Final Causal Inference Certification", badge)
         |> cockpit_add_kv("Parallel Trends", pt_status)
         |> cockpit_add_kv("Treatment Effect (ATT)", format("{:.4} (p = {:.4})", audit.did_result.att, audit.did_result.p_value))
         |> cockpit_add_kv("Event Study Leads", es_status)
+        |> cockpit_add_progress(cert_count, 2, "Identification Criteria", cert_theme)
+        |> cockpit_add_circle(cert_count, 2, "Causal Certification", cert_theme)
         |> cockpit_add_divider();
 
     if audit.is_fully_certified {

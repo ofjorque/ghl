@@ -244,10 +244,21 @@ fn audit_cockpit(receipt: AuditReceipt) {
         "≽(◉˕ ◉ ≼マ VIOLATED"
     };
 
+    let mut passed_count = 0;
+    let total_count = length(receipt.evaluations);
+    for ev in receipt.evaluations {
+        if ev.passed {
+            passed_count = passed_count + 1;
+        }
+    }
+    let pact_theme = if receipt.is_compliant { "emerald" } else { "magenta" };
+
     let mut p = cockpit("spring_pact Compliance Certificate", badge)
         |> cockpit_add_kv("Contract Name", receipt.contract_name)
         |> cockpit_add_kv("Contract Hash", receipt.contract_hash)
         |> cockpit_add_kv("Dataset Hash", receipt.dataset_hash)
+        |> cockpit_add_progress(passed_count, total_count, "Rule Compliance", pact_theme)
+        |> cockpit_add_circle(passed_count, total_count, "Pass Rate", pact_theme)
         |> cockpit_add_divider()
         |> cockpit_add_line("Rule                         Expected          Observed       Status");
 

@@ -18,6 +18,8 @@ fn vim_cockpit(aggr_res: VimAggrResult) {
         |> cockpit_add_kv("Cols", to_string(aggr_res.n_cols))
         |> cockpit_add_kv("Missing Cells", miss_pct_str)
         |> cockpit_add_kv("Complete Cases", comp_pct_str)
+        |> cockpit_add_progress(aggr_res.complete_cases, aggr_res.n_rows, "Complete Cases", "emerald")
+        |> cockpit_add_circle(aggr_res.total_missing, aggr_res.n_rows * aggr_res.n_cols, "Missing Cells", "magenta")
         |> cockpit_add_divider()
         |> cockpit_add_line("Variable         Missing      Observed      % Missing");
 
@@ -60,6 +62,8 @@ fn impute_cockpit(res: MiceResult) {
         |> cockpit_add_kv("Completed Datasets (m)", to_string(n_ds))
         |> cockpit_add_kv("Iterations (Gibbs)", to_string(res.max_iter))
         |> cockpit_add_kv("Incomplete Columns", to_string(n_cols))
+        |> cockpit_add_progress(n_ds, n_ds, "Imputed Datasets", "haru")
+        |> cockpit_add_circle(res.max_iter, res.max_iter, "Gibbs Sampling", "emerald")
         |> cockpit_add_divider()
         |> cockpit_add_line("Imputed Variables & Selected Methods:");
 
@@ -116,9 +120,11 @@ fn vif_cockpit(vif_res: VifResult) {
         "/ᐠ˵- ⩊ -˵マ ✧ STABLE PREDICTOR MATRIX"
     };
 
+    let vif_theme = if vif_res.has_severe { "magenta" } else { "emerald" };
     let mut p = cockpit("ghl_impute VIF Collinearity Screening", badge)
         |> cockpit_add_kv("Max VIF", to_string(vif_res.max_vif))
         |> cockpit_add_kv("Severe Multicollinearity (> 10.0)", to_string(vif_res.has_severe))
+        |> cockpit_add_circle(if vif_res.has_severe { 20 } else { 100 }, 100, "Predictor Matrix Stability", vif_theme)
         |> cockpit_add_divider()
         |> cockpit_add_line("Predictor       VIF           Tolerance     Severity");
 
