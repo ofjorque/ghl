@@ -212,6 +212,17 @@ impl GlobalTelemetryState {
 }
 
 static TELEMETRY: Mutex<GlobalTelemetryState> = Mutex::new(GlobalTelemetryState::new());
+static PROGRESS_DELAY_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Configure artificial progress delay in milliseconds per update step (0 disables delay).
+pub fn set_progress_delay_ms(delay_ms: u64) {
+    PROGRESS_DELAY_MS.store(delay_ms, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Retrieve currently configured progress delay in milliseconds.
+pub fn get_progress_delay_ms() -> u64 {
+    PROGRESS_DELAY_MS.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Format duration into human-readable MM:SS or HH:MM:SS.
 pub fn format_duration(d: Duration) -> String {
@@ -459,11 +470,12 @@ pub fn update_progress_bar(
     let start_time = st.start_time.unwrap_or(now);
     let last_render = st.last_render.unwrap_or(now);
 
+    let delay = get_progress_delay_ms();
     let is_done = current >= total;
     let throttle_dur = Duration::from_millis(33); // ~30 FPS throttle
 
-    // Throttle checks
-    if !is_done && now.duration_since(last_render) < throttle_dur {
+    // Throttle checks (bypass when explicit progress delay is active)
+    if delay == 0 && !is_done && now.duration_since(last_render) < throttle_dur {
         return;
     }
 
@@ -487,6 +499,9 @@ pub fn update_progress_bar(
         // In-place carriage return with line erase
         print!("\r\x1b[2K{line}");
         let _ = std::io::stdout().flush();
+        if delay > 0 {
+            std::thread::sleep(Duration::from_millis(delay));
+        }
     } else {
         // Non-TTY / CI: report only on 10% milestone transitions or completion
         let pct = if total > 0 {
@@ -522,8 +537,9 @@ pub fn update_progress_spinner(
     let start_time = st.start_time.unwrap_or(now);
     let last_render = st.last_render.unwrap_or(now);
 
+    let delay = get_progress_delay_ms();
     let throttle_dur = Duration::from_millis(60); // 16 FPS for pleasant spinner rotation
-    if now.duration_since(last_render) < throttle_dur {
+    if delay == 0 && now.duration_since(last_render) < throttle_dur {
         return;
     }
 
@@ -537,6 +553,9 @@ pub fn update_progress_spinner(
     if caps.is_tty {
         print!("\r\x1b[2K{line}");
         let _ = std::io::stdout().flush();
+        if delay > 0 {
+            std::thread::sleep(Duration::from_millis(delay));
+        }
     }
 }
 

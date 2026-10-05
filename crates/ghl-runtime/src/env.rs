@@ -685,6 +685,10 @@ impl RuntimeEnv {
         env.set("progress_bar".into(),              Value::NativeFn(crate::cockpit::native_progress_bar));
         env.set("progress_spinner".into(),          Value::NativeFn(crate::cockpit::native_progress_spinner));
         env.set("progress_done".into(),             Value::NativeFn(crate::cockpit::native_progress_done));
+        env.set("sleep".into(),                     Value::NativeFn(crate::cockpit::native_sleep));
+        env.set("sleep_ms".into(),                  Value::NativeFn(crate::cockpit::native_sleep));
+        env.set("set_progress_delay".into(),        Value::NativeFn(crate::cockpit::native_set_progress_delay));
+        env.set("progress_set_delay".into(),        Value::NativeFn(crate::cockpit::native_set_progress_delay));
 
         env
     }

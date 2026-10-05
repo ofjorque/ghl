@@ -5,8 +5,8 @@
 //! render rich, responsive terminal cards without hardcoded string formatting.
 
 use ghl_diagnostics::{
-    finish_progress, update_progress_bar, update_progress_spinner, CockpitPanel, Diagnostic,
-    ProgressTheme, RenderCaps, Sparkline, SpinnerStyle,
+    finish_progress, set_progress_delay_ms, update_progress_bar, update_progress_spinner,
+    CockpitPanel, Diagnostic, ProgressTheme, RenderCaps, Sparkline, SpinnerStyle,
 };
 use crate::value::Value;
 
@@ -344,4 +344,30 @@ pub fn native_cockpit_add_circle(args: Vec<Value>) -> Result<Value, Diagnostic> 
     let mut panel = panel;
     panel.add_circle(label, current, total, theme);
     Ok(Value::CockpitPanel(Box::new(panel)))
+}
+
+/// Pauses current thread execution for the specified number of milliseconds.
+///
+/// Signature: `sleep(ms: Int | Float) -> ()`
+pub fn native_sleep(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let ms = args.first()
+        .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+        .unwrap_or(0)
+        .max(0) as u64;
+    if ms > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
+    Ok(Value::Unit)
+}
+
+/// Configures artificial delay in milliseconds per progress step (for visual monitoring/demos).
+///
+/// Signature: `set_progress_delay(delay_ms: Int) -> ()`
+pub fn native_set_progress_delay(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let delay = args.first()
+        .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+        .unwrap_or(0)
+        .max(0) as u64;
+    set_progress_delay_ms(delay);
+    Ok(Value::Unit)
 }

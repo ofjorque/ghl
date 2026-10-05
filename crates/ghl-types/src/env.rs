@@ -1198,6 +1198,7 @@ impl TypeEnv {
             "format_cockpit", "cockpit_format", "sparkline", "cockpit_sparkline",
             "cockpit_add_progress", "cockpit_add_circle",
             "progress_bar", "progress_spinner", "progress_done",
+            "sleep", "sleep_ms", "set_progress_delay", "progress_set_delay",
         ] {
             env.insert(
                 name.into(),

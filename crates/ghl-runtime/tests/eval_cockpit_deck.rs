@@ -105,3 +105,19 @@ fn test_progress_spinner_and_done_runtime() {
     let res = eval_source(src).expect("spinner loop should evaluate successfully");
     assert_eq!(res, Value::Unit);
 }
+
+#[test]
+fn test_sleep_and_progress_delay_runtime() {
+    let src = r#"
+        set_progress_delay(5);
+        sleep(10);
+        sleep_ms(5);
+        for i in 1..=3 {
+            progress_bar(i, 3, "Delayed Bar", "step: " + string(i), "emerald");
+        }
+        progress_done("Finished delayed bar");
+        set_progress_delay(0);
+    "#;
+    let res = eval_source(src).expect("sleep and delayed progress should evaluate successfully");
+    assert_eq!(res, Value::Unit);
+}
