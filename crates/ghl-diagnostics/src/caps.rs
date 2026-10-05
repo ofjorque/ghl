@@ -117,6 +117,72 @@ impl RenderCaps {
                 }
             }
         }
+
+        #[cfg(windows)]
+        {
+            #[repr(C)]
+            struct COORD {
+                x: i16,
+                y: i16,
+            }
+            #[repr(C)]
+            struct SMALL_RECT {
+                left: i16,
+                top: i16,
+                right: i16,
+                bottom: i16,
+            }
+            #[repr(C)]
+            struct CONSOLE_SCREEN_BUFFER_INFO {
+                size: COORD,
+                cursor_pos: COORD,
+                attributes: u16,
+                window: SMALL_RECT,
+                max_window_size: COORD,
+            }
+            unsafe extern "system" {
+                fn GetStdHandle(nStdHandle: i32) -> *mut std::ffi::c_void;
+                fn GetConsoleScreenBufferInfo(
+                    hConsoleOutput: *mut std::ffi::c_void,
+                    lpConsoleScreenBufferInfo: *mut CONSOLE_SCREEN_BUFFER_INFO,
+                ) -> i32;
+            }
+
+            unsafe {
+                let handle = GetStdHandle(-11); // STD_OUTPUT_HANDLE = -11
+                if !handle.is_null() && handle != (-1isize as *mut std::ffi::c_void) {
+                    let mut info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::zeroed();
+                    if GetConsoleScreenBufferInfo(handle, &mut info) != 0 {
+                        let w = (info.window.right - info.window.left + 1) as usize;
+                        if w >= 40 {
+                            return w;
+                        }
+                    }
+                }
+            }
+        }
+
+        #[cfg(unix)]
+        {
+            #[repr(C)]
+            struct winsize {
+                ws_row: u16,
+                ws_col: u16,
+                ws_xpixel: u16,
+                ws_ypixel: u16,
+            }
+            unsafe extern "C" {
+                fn ioctl(fd: i32, request: u64, ...) -> i32;
+            }
+            unsafe {
+                let mut ws: winsize = std::mem::zeroed();
+                const TIOCGWINSZ: u64 = 0x5413;
+                if ioctl(1, TIOCGWINSZ, &mut ws) == 0 && ws.ws_col >= 40 {
+                    return ws.ws_col as usize;
+                }
+            }
+        }
+
         80
     }
 

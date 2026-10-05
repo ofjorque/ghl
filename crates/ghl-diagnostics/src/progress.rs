@@ -13,6 +13,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::caps::RenderCaps;
+use crate::panel::visual_width;
 #[cfg(test)]
 use crate::panel::strip_ansi;
 
@@ -238,6 +239,38 @@ pub fn format_duration(d: Duration) -> String {
 }
 
 /// Renders a single-line progress bar string with full telemetry and theme styling.
+/// Clamps a rendered line strictly to max_width visual characters, preserving ANSI escape syntax.
+fn clamp_line_to_width(out: &str, max_width: usize, color_enabled: bool) -> String {
+    if visual_width(out) <= max_width {
+        return out.to_string();
+    }
+    let mut clean = String::new();
+    let mut count = 0;
+    let mut in_escape = false;
+    for ch in out.chars() {
+        if ch == '\x1b' {
+            in_escape = true;
+            clean.push(ch);
+        } else if in_escape {
+            clean.push(ch);
+            if ch == 'm' {
+                in_escape = false;
+            }
+        } else {
+            if count >= max_width {
+                break;
+            }
+            clean.push(ch);
+            count += 1;
+        }
+    }
+    if color_enabled {
+        clean.push_str("\x1b[0m");
+    }
+    clean
+}
+
+/// Renders a single-line progress bar string with full telemetry and theme styling.
 pub fn render_progress_line(
     current: i64,
     total: i64,
@@ -253,6 +286,9 @@ pub fn render_progress_line(
     let fraction = (clamped_curr as f64 / total as f64).clamp(0.0, 1.0);
     let pct = fraction * 100.0;
 
+    // Safety margin of 1 column so the cursor never hits the right edge and wraps
+    let max_width = caps.width.saturating_sub(1).max(35);
+
     // Spinner glyph prefix
     let spinner = SpinnerStyle::Dots.glyph(frame, caps.unicode_enabled);
     let styled_spinner = theme.colorize(caps, fraction, spinner);
@@ -265,7 +301,7 @@ pub fn render_progress_line(
         0.0
     };
 
-    let time_str = if clamped_curr >= total {
+    let full_time_str = if clamped_curr >= total {
         format!("[{}, {:.1} it/s]", format_duration(elapsed), it_per_sec)
     } else if it_per_sec > 0.01 {
         let remaining_secs = ((total - clamped_curr) as f64 / it_per_sec).max(0.0);
@@ -279,35 +315,53 @@ pub fn render_progress_line(
     } else {
         format!("[{}<??, 0.0 it/s]", format_duration(elapsed))
     };
+    let compact_time_str = format!("[{}]", format_duration(elapsed));
 
-    // Width management for the bar itself
-    let term_width = caps.width.max(50);
-    // Overhead: spinner (2) + label + percentage (7) + counter (clamped/total) + time_str + details
     let counter_str = format!("({clamped_curr}/{total})");
     let pct_str = format!("{pct:>5.1}%");
 
-    // Static text length
-    let fixed_len = 2
-        + if label.is_empty() { 0 } else { label.len() + 1 }
-        + 2 // brackets "[ ]"
-        + 1 + pct_str.len()
-        + 1 + counter_str.len()
-        + 1 + time_str.len()
-        + if details.is_empty() { 0 } else { 3 + details.len() };
-
-    let bar_width = if term_width > fixed_len + 10 {
-        (term_width - fixed_len).min(30)
+    // Dynamic label truncation if needed to preserve budget
+    let label_str = if visual_width(label) > 22 && max_width < 100 {
+        let mut truncated: String = label.chars().take(20).collect();
+        truncated.push(if caps.unicode_enabled { '…' } else { '.' });
+        truncated
     } else {
-        10
+        label.to_string()
     };
 
+    let spinner_w = 2; // glyph + space
+    let label_w = if label_str.is_empty() { 0 } else { visual_width(&label_str) + 1 };
+    let pct_w = pct_str.len() + 1;
+    let counter_w = counter_str.len() + 1;
+
+    let mut use_full_time = true;
+    let mut use_counter = true;
+
+    // Check budget with full time
+    let mut fixed_w = spinner_w + label_w + pct_w + counter_w + full_time_str.len() + 3; // brackets "[ ]"
+    if fixed_w + 10 > max_width {
+        use_full_time = false;
+        fixed_w = spinner_w + label_w + pct_w + counter_w + compact_time_str.len() + 3;
+    }
+    if fixed_w + 8 > max_width {
+        use_counter = false;
+        fixed_w = fixed_w.saturating_sub(counter_w);
+    }
+
+    let time_str = if use_full_time { full_time_str } else { compact_time_str };
+
+    let available_for_bar = max_width.saturating_sub(fixed_w);
+    let bar_width = available_for_bar.clamp(6, 20);
     let bar_graphic = build_bar_graphic(fraction, bar_width, theme, caps);
+
+    let current_used = fixed_w + bar_width;
+    let remaining_for_details = max_width.saturating_sub(current_used);
 
     let mut out = String::new();
     out.push_str(&styled_spinner);
     out.push(' ');
-    if !label.is_empty() {
-        out.push_str(&caps.bold(label));
+    if !label_str.is_empty() {
+        out.push_str(&caps.bold(&label_str));
         out.push(' ');
     }
     out.push('[');
@@ -327,27 +381,37 @@ pub fn render_progress_line(
         out.push_str(&pct_str);
     }
 
-    out.push(' ');
-    out.push_str(&caps.dim(&counter_str));
-    out.push(' ');
+    if use_counter {
+        out.push(' ');
+        out.push_str(&caps.dim(&counter_str));
+    }
 
-    // Styled telemetry (muted cyan)
+    out.push(' ');
     if caps.color_enabled {
         let _ = write!(out, "\x1b[36m{time_str}\x1b[0m");
     } else {
         out.push_str(&time_str);
     }
 
-    if !details.is_empty() {
+    if !details.is_empty() && remaining_for_details >= 8 {
+        let details_budget = remaining_for_details.saturating_sub(3); // account for " | "
+        let details_clean = if visual_width(details) > details_budget {
+            let mut s: String = details.chars().take(details_budget.saturating_sub(1)).collect();
+            s.push(if caps.unicode_enabled { '…' } else { '.' });
+            s
+        } else {
+            details.to_string()
+        };
+
         out.push_str(" | ");
         if caps.color_enabled {
-            let _ = write!(out, "\x1b[38;5;120m{details}\x1b[0m");
+            let _ = write!(out, "\x1b[38;5;120m{details_clean}\x1b[0m");
         } else {
-            out.push_str(details);
+            out.push_str(&details_clean);
         }
     }
 
-    out
+    clamp_line_to_width(&out, max_width, caps.color_enabled)
 }
 
 /// Helper to render the filled and empty portions of a progress bar.
@@ -444,7 +508,8 @@ pub fn render_spinner_line(
         }
     }
 
-    out
+    let max_width = caps.width.saturating_sub(1).max(35);
+    clamp_line_to_width(&out, max_width, caps.color_enabled)
 }
 
 /// Primary public function to update an in-place progress bar from script/runtime.

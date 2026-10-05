@@ -211,7 +211,7 @@ fn fit_mhrm_configured(
 
         let stage_label = if is_burnin { "Burn-in" } else if is_polyak { "Polyak Avg" } else { "Robbins-Monro SA" };
         let details = format("{} | Acc: {:.1}% | Gain: {:.3}", stage_label, cycle_rate * 100.0, current_gain);
-        progress_bar(cycle + 1, total_cycles, "MHRM Stochastic Calibration", details, "gradient");
+        progress_bar(cycle + 1, total_cycles, "MHRM Calibration", details, "gradient");
     }
     progress_done("MHRM high-dimensional calibration completed.");
 
