@@ -62,14 +62,7 @@ impl RenderCaps {
                 return false;
             }
         }
-        #[cfg(unix)]
-        {
-            unsafe { libc_isatty(1) == 1 }
-        }
-        #[cfg(not(unix))]
-        {
-            true
-        }
+        std::io::IsTerminal::is_terminal(&std::io::stdout())
     }
 
     fn detect_color(is_tty: bool) -> bool {

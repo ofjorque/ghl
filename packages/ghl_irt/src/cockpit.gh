@@ -352,11 +352,16 @@ fn render_mhrm_cockpit(audit: MhrmAudit) {
         mdisc_vals = append(mdisc_vals, it.mdisc);
     }
 
+    let mhrm_theme = if audit.stochastic_efficiency_certified { "emerald" } else { "haru" };
+    let acc_pct = to_int(m.acceptance_rate * 100.0);
+
     let p = cockpit("GHL Psychometrics: Metropolis-Hastings Robbins-Monro (MHRM)", badge)
         |> cockpit_add_kv("Estimation Method", "Stochastic Approximation MHRM (Cai, 2010)")
         |> cockpit_add_kv("Latent Dimensions (D)", format("{}", m.n_dimensions))
         |> cockpit_add_kv("Manifest Items (J)", format("{}", m.n_items))
         |> cockpit_add_kv("Sample Size (N)", format("{}", m.n_persons))
+        |> cockpit_add_progress(m.stage3_polyak_cycles, m.total_cycles, "Polyak Stabilization", mhrm_theme)
+        |> cockpit_add_circle(acc_pct, 100, "M-H Proposal Acceptance", mhrm_theme)
         |> cockpit_add_divider()
         |> cockpit_add_kv("Quadrature Nodes Avoided", format("{:.0} (15^D)", audit.quadrature_nodes_avoided))
         |> cockpit_add_kv("Total Stochastic Cycles", format("{}", m.total_cycles))

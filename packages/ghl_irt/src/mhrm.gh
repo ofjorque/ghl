@@ -208,7 +208,12 @@ fn fit_mhrm_configured(
             polyak_c = polyak_c + c_vec;
             polyak_a = polyak_a + a_matrix;
         }
+
+        let stage_label = if is_burnin { "Burn-in" } else if is_polyak { "Polyak Avg" } else { "Robbins-Monro SA" };
+        let details = format("{} | Acc: {:.1}% | Gain: {:.3}", stage_label, cycle_rate * 100.0, current_gain);
+        progress_bar(cycle + 1, total_cycles, "MHRM Stochastic Calibration", details, "gradient");
     }
+    progress_done("MHRM high-dimensional calibration completed.");
 
     // 5. Finalize parameter estimates
     let use_polyak = polyak_count > 0.0;
