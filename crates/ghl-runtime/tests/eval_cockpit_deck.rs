@@ -57,3 +57,51 @@ fn test_sparkline_generation() {
         panic!("expected string, got {:?}", res);
     }
 }
+
+#[test]
+fn test_cockpit_panel_progress_and_circle() {
+    let src = r#"
+        let p = cockpit("Solver Diagnostics", "CONVERGED")
+            |> cockpit_add_kv("Iterations", "150")
+            |> cockpit_add_progress(150, 200, "Budget", "emerald")
+            |> cockpit_add_circle(100, 100, "Warmup", "haru")
+            |> cockpit_add_circle(45, 100, "Sampling", "cyan");
+
+        let text = format_cockpit(p);
+        text
+    "#;
+    let res = eval_source(src).expect("evaluation should succeed");
+    if let Value::String(s) = res {
+        assert!(s.contains("Solver Diagnostics"), "text should have title: {}", s);
+        assert!(s.contains("Budget"), "text should contain Budget progress label: {}", s);
+        assert!(s.contains("75.0%"), "text should contain 75.0%: {}", s);
+        assert!(s.contains("Warmup"), "text should contain Warmup: {}", s);
+        assert!(s.contains("Sampling"), "text should contain Sampling: {}", s);
+    } else {
+        panic!("expected string, got {:?}", res);
+    }
+}
+
+#[test]
+fn test_progress_bar_and_done_runtime() {
+    let src = r#"
+        for i in 1..=5 {
+            progress_bar(i, 5, "MCMC Sampling", "step: " + string(i), "gradient");
+        }
+        progress_done("MCMC Sampling converged.");
+    "#;
+    let res = eval_source(src).expect("progress bar loop should evaluate successfully");
+    assert_eq!(res, Value::Unit);
+}
+
+#[test]
+fn test_progress_spinner_and_done_runtime() {
+    let src = r#"
+        for i in 1..=3 {
+            progress_spinner("Streaming Query", "rows: " + string(i * 100), "dots", "cyan");
+        }
+        progress_done("Streaming complete.");
+    "#;
+    let res = eval_source(src).expect("spinner loop should evaluate successfully");
+    assert_eq!(res, Value::Unit);
+}

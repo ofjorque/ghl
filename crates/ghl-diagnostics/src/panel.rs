@@ -4,12 +4,25 @@
 //! or plain ASCII boxes (`+-+`, `| |`, `+-+`), title headers, badges, and strict width clipping.
 
 use crate::caps::RenderCaps;
+use crate::progress::{build_bar_graphic, circle_disc_glyph, ProgressTheme};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PanelItem {
     Line(String),
     KeyValue { key: String, val: String },
     Divider,
+    ProgressBar {
+        label: String,
+        current: i64,
+        total: i64,
+        theme: String,
+    },
+    CircleProgress {
+        label: String,
+        current: i64,
+        total: i64,
+        theme: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +61,26 @@ impl CockpitPanel {
 
     pub fn add_divider(&mut self) -> &mut Self {
         self.items.push(PanelItem::Divider);
+        self
+    }
+
+    pub fn add_progress(&mut self, label: impl Into<String>, current: i64, total: i64, theme: impl Into<String>) -> &mut Self {
+        self.items.push(PanelItem::ProgressBar {
+            label: label.into(),
+            current,
+            total,
+            theme: theme.into(),
+        });
+        self
+    }
+
+    pub fn add_circle(&mut self, label: impl Into<String>, current: i64, total: i64, theme: impl Into<String>) -> &mut Self {
+        self.items.push(PanelItem::CircleProgress {
+            label: label.into(),
+            current,
+            total,
+            theme: theme.into(),
+        });
         self
     }
 
@@ -139,6 +172,84 @@ impl CockpitPanel {
                         format!("{}: {}{pad}", caps.bold(key), val)
                     };
                     out.push_str(&format!("{} {} {}\n", caps.dim(&vt.to_string()), content, caps.dim(&vt.to_string())));
+                }
+                PanelItem::ProgressBar { label, current, total, theme } => {
+                    let tot = (*total).max(1);
+                    let cur = (*current).clamp(0, tot);
+                    let fraction = (cur as f64 / tot as f64).clamp(0.0, 1.0);
+                    let pct_str = format!("{:>5.1}%", fraction * 100.0);
+                    let ratio_str = format!("({cur}/{tot})");
+                    let theme_parsed = ProgressTheme::parse(theme);
+
+                    let l_len = if label.is_empty() { 0 } else { visual_width(label) + 1 };
+                    let meta_len = pct_str.len() + 1 + ratio_str.len() + 2;
+                    let available = inner_width.saturating_sub(l_len + meta_len + 2);
+                    let bar_w = available.clamp(6, 24);
+
+                    let graphic = build_bar_graphic(fraction, bar_w, theme_parsed, caps);
+
+                    let mut content = String::new();
+                    if !label.is_empty() {
+                        content.push_str(&caps.bold(label));
+                        content.push(' ');
+                    }
+                    content.push('[');
+                    content.push_str(&graphic);
+                    content.push(']');
+                    content.push(' ');
+                    if caps.color_enabled {
+                        let pct_color = if fraction >= 1.0 { "\x1b[1;32m" } else { "\x1b[1;33m" };
+                        content.push_str(&format!("{pct_color}{pct_str}\x1b[0m"));
+                    } else {
+                        content.push_str(&pct_str);
+                    }
+                    content.push(' ');
+                    content.push_str(&caps.dim(&ratio_str));
+
+                    let vlen = visual_width(&content);
+                    let padded_line = if vlen > inner_width {
+                        truncate_with_ellipsis(&content, inner_width, caps.unicode_enabled)
+                    } else {
+                        let pad = " ".repeat(inner_width - vlen);
+                        format!("{content}{pad}")
+                    };
+                    out.push_str(&format!("{} {} {}\n", caps.dim(&vt.to_string()), padded_line, caps.dim(&vt.to_string())));
+                }
+                PanelItem::CircleProgress { label, current, total, theme } => {
+                    let tot = (*total).max(1);
+                    let cur = (*current).clamp(0, tot);
+                    let fraction = (cur as f64 / tot as f64).clamp(0.0, 1.0);
+                    let theme_parsed = ProgressTheme::parse(theme);
+                    let glyph = circle_disc_glyph(fraction, caps.unicode_enabled);
+                    let colored_glyph = theme_parsed.colorize(caps, fraction, glyph);
+
+                    let pct_str = format!("{:>5.1}%", fraction * 100.0);
+                    let ratio_str = format!("({cur}/{tot})");
+
+                    let mut content = String::new();
+                    if !label.is_empty() {
+                        content.push_str(&caps.bold(label));
+                        content.push(' ');
+                    }
+                    content.push_str(&colored_glyph);
+                    content.push(' ');
+                    if caps.color_enabled {
+                        let pct_color = if fraction >= 1.0 { "\x1b[1;32m" } else { "\x1b[1;33m" };
+                        content.push_str(&format!("{pct_color}{pct_str}\x1b[0m"));
+                    } else {
+                        content.push_str(&pct_str);
+                    }
+                    content.push(' ');
+                    content.push_str(&caps.dim(&ratio_str));
+
+                    let vlen = visual_width(&content);
+                    let padded_line = if vlen > inner_width {
+                        truncate_with_ellipsis(&content, inner_width, caps.unicode_enabled)
+                    } else {
+                        let pad = " ".repeat(inner_width - vlen);
+                        format!("{content}{pad}")
+                    };
+                    out.push_str(&format!("{} {} {}\n", caps.dim(&vt.to_string()), padded_line, caps.dim(&vt.to_string())));
                 }
             }
         }
@@ -250,5 +361,27 @@ mod tests {
         let text = "\x1b[1m\x1b[32mSuccess\x1b[0m";
         assert_eq!(strip_ansi(text), "Success");
         assert_eq!(visual_width(text), 7);
+    }
+
+    #[test]
+    fn test_panel_with_progress_and_circle() {
+        let width = 60;
+        let caps = RenderCaps::rich_terminal(width);
+        let mut panel = CockpitPanel::new("MCMC Status");
+        panel.add_progress("Convergence", 80, 100, "emerald");
+        panel.add_circle("Warmup", 100, 100, "haru");
+        panel.add_circle("Sampling", 45, 100, "cyan");
+
+        let rendered = panel.render(&caps);
+        for (i, line) in rendered.lines().enumerate() {
+            let line_len = visual_width(line);
+            assert_eq!(
+                line_len, width as usize,
+                "Line {i} visual width {line_len} does not match target width {width}: {line:?}"
+            );
+        }
+        assert!(rendered.contains("80.0%"));
+        assert!(rendered.contains("●"));
+        assert!(rendered.contains("◑"));
     }
 }

@@ -14,12 +14,17 @@
 
 pub mod caps;
 pub mod panel;
+pub mod progress;
 pub mod registry;
 pub mod sparkline;
 pub mod table;
 
 pub use caps::RenderCaps;
-pub use panel::CockpitPanel;
+pub use panel::{CockpitPanel, PanelItem};
+pub use progress::{
+    circle_disc_glyph, finish_progress, render_progress_line, render_spinner_line,
+    update_progress_bar, update_progress_spinner, ProgressTheme, SpinnerStyle,
+};
 pub use registry::{SemanticCode, SymbolEntry, SymbolRegistry};
 pub use sparkline::Sparkline;
 pub use table::{CockpitTable, TableAlignment, TableColumn};

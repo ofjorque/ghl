@@ -1196,6 +1196,8 @@ impl TypeEnv {
             "cockpit", "cockpit_with_badge", "cockpit_add_kv", "cockpit_add_line",
             "cockpit_add_divider", "render_cockpit", "show_cockpit", "cockpit_render",
             "format_cockpit", "cockpit_format", "sparkline", "cockpit_sparkline",
+            "cockpit_add_progress", "cockpit_add_circle",
+            "progress_bar", "progress_spinner", "progress_done",
         ] {
             env.insert(
                 name.into(),

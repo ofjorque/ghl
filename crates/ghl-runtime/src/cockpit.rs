@@ -4,7 +4,10 @@
 //! directly to the runtime so packages like `spring_pact` and `ghl_causal` can
 //! render rich, responsive terminal cards without hardcoded string formatting.
 
-use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps, Sparkline};
+use ghl_diagnostics::{
+    finish_progress, update_progress_bar, update_progress_spinner, CockpitPanel, Diagnostic,
+    ProgressTheme, RenderCaps, Sparkline, SpinnerStyle,
+};
 use crate::value::Value;
 
 /// Creates a new `CockpitPanel` card with an optional badge.
@@ -173,4 +176,172 @@ pub fn native_sparkline(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let caps = RenderCaps::detect();
     let rendered = Sparkline::render(&values, max_len, &caps);
     Ok(Value::String(rendered))
+}
+
+/// Updates an in-place single-line progress bar with telemetry and color theme.
+///
+/// Signature: `progress_bar(current: Int, total: Int, [label: String, details: String, theme: String]) -> ()`
+pub fn native_progress_bar(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 2 {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`progress_bar()` requires at least 2 arguments: (current, total, [label, details, theme])",
+        ));
+    }
+
+    let current = args[0]
+        .as_i64()
+        .or_else(|| args[0].as_f64().map(|f| f as i64))
+        .unwrap_or(0);
+    let total = args[1]
+        .as_i64()
+        .or_else(|| args[1].as_f64().map(|f| f as i64))
+        .unwrap_or(1);
+
+    let label = args.get(2).map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_default();
+
+    let details = args.get(3).map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_default();
+
+    let theme_str = args.get(4).map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_else(|| "cyan".to_string());
+
+    let theme = ProgressTheme::parse(&theme_str);
+    let caps = RenderCaps::detect();
+
+    update_progress_bar(current, total, &label, &details, theme, &caps);
+    Ok(Value::Unit)
+}
+
+/// Updates an in-place indeterminate spinner with animation and color theme.
+///
+/// Signature: `progress_spinner(label: String, [details: String, style: String, theme: String]) -> ()`
+pub fn native_progress_spinner(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let label = args.first().map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_default();
+
+    let details = args.get(1).map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_default();
+
+    let style_str = args.get(2).map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_else(|| "dots".to_string());
+
+    let theme_str = args.get(3).map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_else(|| "cyan".to_string());
+
+    let style = SpinnerStyle::parse(&style_str);
+    let theme = ProgressTheme::parse(&theme_str);
+    let caps = RenderCaps::detect();
+
+    update_progress_spinner(&label, &details, style, theme, &caps);
+    Ok(Value::Unit)
+}
+
+/// Finalizes the active progress bar or spinner with an optional message.
+///
+/// Signature: `progress_done([message: String]) -> ()`
+pub fn native_progress_done(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    let message = args.first().map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_default();
+
+    let caps = RenderCaps::detect();
+    finish_progress(&message, &caps);
+    Ok(Value::Unit)
+}
+
+/// Adds a progress bar component to an existing `CockpitPanel`.
+///
+/// Signature: `cockpit_add_progress(panel: CockpitPanel, current: Int, total: Int, [label: String, theme: String]) -> CockpitPanel`
+pub fn native_cockpit_add_progress(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 3 {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`cockpit_add_progress()` requires at least 3 arguments: (panel, current, total, [label, theme])",
+        ));
+    }
+
+    let panel = match &args[0] {
+        Value::CockpitPanel(p) => (**p).clone(),
+        other => return Err(Diagnostic::compute_error("C0202", format!("`cockpit_add_progress()` expects a CockpitPanel, found `{}`", other.type_name()))),
+    };
+
+    let current = args[1]
+        .as_i64()
+        .or_else(|| args[1].as_f64().map(|f| f as i64))
+        .unwrap_or(0);
+    let total = args[2]
+        .as_i64()
+        .or_else(|| args[2].as_f64().map(|f| f as i64))
+        .unwrap_or(1);
+
+    let label = args.get(3).map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_default();
+
+    let theme = args.get(4).map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_else(|| "cyan".to_string());
+
+    let mut panel = panel;
+    panel.add_progress(label, current, total, theme);
+    Ok(Value::CockpitPanel(Box::new(panel)))
+}
+
+/// Adds a compact circular progress disc to an existing `CockpitPanel`.
+///
+/// Signature: `cockpit_add_circle(panel: CockpitPanel, current: Int, total: Int, [label: String, theme: String]) -> CockpitPanel`
+pub fn native_cockpit_add_circle(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if args.len() < 3 {
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`cockpit_add_circle()` requires at least 3 arguments: (panel, current, total, [label, theme])",
+        ));
+    }
+
+    let panel = match &args[0] {
+        Value::CockpitPanel(p) => (**p).clone(),
+        other => return Err(Diagnostic::compute_error("C0202", format!("`cockpit_add_circle()` expects a CockpitPanel, found `{}`", other.type_name()))),
+    };
+
+    let current = args[1]
+        .as_i64()
+        .or_else(|| args[1].as_f64().map(|f| f as i64))
+        .unwrap_or(0);
+    let total = args[2]
+        .as_i64()
+        .or_else(|| args[2].as_f64().map(|f| f as i64))
+        .unwrap_or(1);
+
+    let label = args.get(3).map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_default();
+
+    let theme = args.get(4).map(|v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }).unwrap_or_else(|| "cyan".to_string());
+
+    let mut panel = panel;
+    panel.add_circle(label, current, total, theme);
+    Ok(Value::CockpitPanel(Box::new(panel)))
 }

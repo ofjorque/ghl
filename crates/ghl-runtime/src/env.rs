@@ -132,6 +132,20 @@ impl RuntimeEnv {
             }).unwrap_or_default();
             Ok(Value::String(val))
         }));
+        env.set("string".into(), Value::NativeFn(|args| {
+            let val = args.first().map(|v| match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            }).unwrap_or_default();
+            Ok(Value::String(val))
+        }));
+        env.set("as_string".into(), Value::NativeFn(|args| {
+            let val = args.first().map(|v| match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            }).unwrap_or_default();
+            Ok(Value::String(val))
+        }));
         env.set("to_int".into(), Value::NativeFn(|args| {
             let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`to_int()` requires 1 argument"))?;
             match val {
@@ -666,6 +680,11 @@ impl RuntimeEnv {
         env.set("cockpit_format".into(),            Value::NativeFn(crate::cockpit::native_format_cockpit));
         env.set("sparkline".into(),                 Value::NativeFn(crate::cockpit::native_sparkline));
         env.set("cockpit_sparkline".into(),         Value::NativeFn(crate::cockpit::native_sparkline));
+        env.set("cockpit_add_progress".into(),      Value::NativeFn(crate::cockpit::native_cockpit_add_progress));
+        env.set("cockpit_add_circle".into(),        Value::NativeFn(crate::cockpit::native_cockpit_add_circle));
+        env.set("progress_bar".into(),              Value::NativeFn(crate::cockpit::native_progress_bar));
+        env.set("progress_spinner".into(),          Value::NativeFn(crate::cockpit::native_progress_spinner));
+        env.set("progress_done".into(),             Value::NativeFn(crate::cockpit::native_progress_done));
 
         env
     }
