@@ -169,8 +169,11 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
   - Telemetría interactiva in-place en una sola línea (`\r\x1b[2K`) con sub-bloques Unicode (`█`, `▉`, `▊`, `▋`, `▌`, `▍`, `▎`, `▏`), fallback ASCII y temas vibrantes (`cyan`, `haru`, `emerald`, `magenta`, `gradient`).
   - Motor de spinners animados (`dots`, `circle`, `arc`, `pie`, `haru`, `ascii`) y discos (`○`, `◔`, `◑`, `◕`, `●`) integrados en runtime (`progress_bar`, `progress_spinner`, `progress_done`) y tarjetas Cockpit Deck.
   - Detección de ancho de consola interactiva en Windows Terminal mediante API Win32 (`GetConsoleScreenBufferInfo`) con visual width clamping sin saltos de línea indeseados.
-- [ ] **Pipeline de Releases Automatizados y Empaquetado VSIX — [#12](https://github.com/ofjorque/ghl/issues/12):**
-  - Empaquetado automático de binarios optimizados (Linux, macOS, Windows) y extensión VS Code / Positron al publicar tags `v*.*.*`.
+- [x] **Pipeline de Releases Automatizados y Empaquetado VSIX — [#12](https://github.com/ofjorque/ghl/issues/12):**
+  - Workflow automatizado `.github/workflows/release.yml` gatillado en tags `v*` y `workflow_dispatch`.
+  - Compilación optimizada en perfil release (LTO thin, codegen-units 1, strip de símbolos) para 5 plataformas: `x86_64-linux`, `aarch64-linux`, `aarch64-darwin`, `x86_64-darwin`, `x86_64-windows`.
+  - Empaquetado automático de la extensión para VS Code / Positron (`ghl-lang.vsix`) usando `@vscode/vsce`.
+  - Generación de sumas de verificación criptográficas `SHA256SUMS.txt` y publicación automática del Release oficial en GitHub.
 - [ ] **Generador de Documentación HTML Estática (`ghl doc`) — [#13](https://github.com/ofjorque/ghl/issues/13):**
   - Extracción de comentarios `///` y renderizado de sitio web estático moderno con fórmulas KaTeX y buscador en cliente.
 

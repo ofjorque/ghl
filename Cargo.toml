@@ -47,5 +47,9 @@ needless_range_loop = "allow"
 if_same_then_else = "allow"
 match_like_matches_macro = "allow"
 new_without_default = "allow"
-
-
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

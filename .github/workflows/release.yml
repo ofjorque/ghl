@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag name for testing (e.g., v0.1.0)'
+        required: false
+        default: 'v0.1.0'
 
 permissions:
   contents: write
@@ -13,29 +19,71 @@ jobs:
     name: Build Binary (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact_name: ghl-x86_64-unknown-linux-gnu.tar.gz
             binary_name: ghl
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: ghl-x86_64-pc-windows-msvc.zip
-            binary_name: ghl.exe
+            use_cross: false
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: ghl-aarch64-unknown-linux-gnu.tar.gz
+            binary_name: ghl
+            use_cross: true
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: ghl-aarch64-apple-darwin.tar.gz
             binary_name: ghl
+            use_cross: false
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: ghl-x86_64-apple-darwin.tar.gz
+            binary_name: ghl
+            use_cross: false
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: ghl-x86_64-pc-windows-msvc.zip
+            binary_name: ghl.exe
+            use_cross: false
 
     steps:
+      - name: Free Disk Space (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Install System Dependencies (Linux Native)
+        if: runner.os == 'Linux' && !matrix.use_cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev
+
+      - name: Install ARM64 Cross Toolchain & Dependencies (Linux)
+        if: runner.os == 'Linux' && matrix.use_cross
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu pkg-config libfontconfig1-dev:arm64
+          echo "PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
       - name: Build Release Binary
         run: cargo build --release --target ${{ matrix.target }} -p ghl-cli
@@ -44,12 +92,20 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" -DestinationPath "${{ matrix.artifact_name }}"
+          New-Item -ItemType Directory -Force -Path stage
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" stage/
+          Copy-Item README.md stage/
+          Copy-Item LICENSE stage/
+          Compress-Archive -Path stage/* -DestinationPath "${{ matrix.artifact_name }}"
 
       - name: Package Unix Artifact
         if: matrix.os != 'windows-latest'
         run: |
-          tar -czf "${{ matrix.artifact_name }}" -C "target/${{ matrix.target }}/release" "${{ matrix.binary_name }}"
+          mkdir -p stage
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" stage/
+          cp README.md stage/
+          cp LICENSE stage/
+          tar -czf "${{ matrix.artifact_name }}" -C stage .
 
       - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
@@ -74,13 +130,13 @@ jobs:
         run: |
           npm ci
           npm run compile
-          npx -y @vscode/vsce package --no-git-tag-version
+          npx -y @vscode/vsce package --no-git-tag-version --no-dependencies -o ../../ghl-lang.vsix
 
       - name: Upload VSIX Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ghl-extension-vsix
-          path: editors/vscode/*.vsix
+          name: ghl-lang.vsix
+          path: ghl-lang.vsix
 
   publish-release:
     name: Publish GitHub Release
@@ -91,9 +147,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release_artifacts
+          merge-multiple: true
+
+      - name: Generate SHA256 Checksums
+        working-directory: release_artifacts
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          echo "=== SHA256 Checksums ==="
+          cat SHA256SUMS.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release_artifacts/**/*
+          files: |
+            release_artifacts/*
           generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
