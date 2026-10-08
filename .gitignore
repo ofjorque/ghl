@@ -43,3 +43,6 @@ examples/target/
 # Massive validation datasets (Roadmap 05)
 validation/data/
 validation/snapshots/*.svg
+
+# Local scratch and experiments
+scratch/
