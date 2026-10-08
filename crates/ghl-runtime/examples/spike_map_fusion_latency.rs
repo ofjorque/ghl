@@ -13,11 +13,11 @@
 //!
 //! Usage: `cargo run --release --example spike_map_fusion_latency -p ghl-runtime -- <n>`
 
-use std::time::Instant;
-use ghl_syntax::parser::parse;
+use ghl_runtime::Interpreter;
 use ghl_runtime::value::Value;
 use ghl_runtime::vector_data::VectorData;
-use ghl_runtime::Interpreter;
+use ghl_syntax::parser::parse;
+use std::time::Instant;
 
 const REPEATS: u32 = 5;
 
@@ -27,7 +27,9 @@ fn run(code: &str, base_vector: &VectorData) -> std::time::Duration {
     for _ in 0..REPEATS {
         let mut interp = Interpreter::new();
         // Clones `VectorData` (cheap Arc clone), avoiding copying the underlying `Vec<f64>`.
-        interp.env.set("x".to_string(), Value::Vector(base_vector.clone()));
+        interp
+            .env
+            .set("x".to_string(), Value::Vector(base_vector.clone()));
         let start = Instant::now();
         interp.eval_program(&program).expect("evaluation ok");
         best = best.min(start.elapsed());
@@ -37,7 +39,10 @@ fn run(code: &str, base_vector: &VectorData) -> std::time::Duration {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let n: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(2_000_000);
+    let n: usize = args
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2_000_000);
 
     println!("N = {n} elements");
 
@@ -57,10 +62,14 @@ fn main() {
     "#;
 
     let best_chained = run(chained, &base_vector);
-    println!("  Chained (6 full Vectors, legacy path): min over {REPEATS} runs: {best_chained:>10.3?}");
+    println!(
+        "  Chained (6 full Vectors, legacy path): min over {REPEATS} runs: {best_chained:>10.3?}"
+    );
 
     let best_fused = run(fused, &base_vector);
-    println!("  Fused map() (1 pass, new path):        min over {REPEATS} runs: {best_fused:>10.3?}");
+    println!(
+        "  Fused map() (1 pass, new path):        min over {REPEATS} runs: {best_fused:>10.3?}"
+    );
 
     if !best_fused.is_zero() {
         let speedup = best_chained.as_secs_f64() / best_fused.as_secs_f64();

@@ -5,12 +5,12 @@
 //! 2. Cross-Language Parity vs R, Python (statsmodels/SciPy), Julia
 //! 3. Deep System Batteries: SVG visual snapshots, Taylor gradient tests, PRNG statistical tests, Kleene 3VL
 
-use std::path::{Path, PathBuf};
 use ghl_runtime::eval::Interpreter;
 use ghl_runtime::neko::VcovKind;
 use ghl_runtime::polars_bridge::build_dataframe;
 use ghl_runtime::value::Value;
 use ghl_syntax::parser::parse;
+use std::path::{Path, PathBuf};
 
 fn find_nist_file(name: &str) -> PathBuf {
     let candidates = [
@@ -39,7 +39,10 @@ fn parse_nist_dat(path: &Path) -> (Vec<String>, Vec<Vec<f64>>) {
             in_data = true;
             rows.clear();
             let header_part = trimmed.trim_start_matches("Data:").trim();
-            col_names = header_part.split_whitespace().map(|s| s.to_string()).collect();
+            col_names = header_part
+                .split_whitespace()
+                .map(|s| s.to_string())
+                .collect();
             continue;
         }
         if in_data {
@@ -55,7 +58,11 @@ fn parse_nist_dat(path: &Path) -> (Vec<String>, Vec<Vec<f64>>) {
             }
         }
     }
-    assert!(!rows.is_empty(), "Parsed 0 data rows from {}", path.display());
+    assert!(
+        !rows.is_empty(),
+        "Parsed 0 data rows from {}",
+        path.display()
+    );
     (col_names, rows)
 }
 
@@ -123,7 +130,10 @@ fn test_nist_strd_longley() {
             assert!(
                 rel_err < 1e-4,
                 "Longley coefficient B{} error too high: est={}, cert={}, rel_err={}",
-                i, est, cert, rel_err
+                i,
+                est,
+                cert,
+                rel_err
             );
         }
 
@@ -131,7 +141,8 @@ fn test_nist_strd_longley() {
         assert!(
             (m.r_squared - cert_r2).abs() < 1e-6,
             "Longley R² error: est={}, cert={}",
-            m.r_squared, cert_r2
+            m.r_squared,
+            cert_r2
         );
     } else {
         panic!("Expected ModelFit");
@@ -178,9 +189,18 @@ fn test_nist_strd_pontius() {
         let b1_cert = 0.732059160401003e-6;
         let b2_cert = -0.316081871345029e-14;
 
-        assert!((m.coefficients[0] - b0_cert).abs() < 1e-8, "Pontius B0 error");
-        assert!((m.coefficients[1] - b1_cert).abs() < 1e-10, "Pontius B1 error");
-        assert!((m.coefficients[2] - b2_cert).abs() < 1e-18, "Pontius B2 error");
+        assert!(
+            (m.coefficients[0] - b0_cert).abs() < 1e-8,
+            "Pontius B0 error"
+        );
+        assert!(
+            (m.coefficients[1] - b1_cert).abs() < 1e-10,
+            "Pontius B1 error"
+        );
+        assert!(
+            (m.coefficients[2] - b2_cert).abs() < 1e-18,
+            "Pontius B2 error"
+        );
 
         assert!(
             (m.r_squared - 0.999999900178537).abs() < 1e-8,
@@ -229,7 +249,8 @@ fn test_nist_strd_wampler1() {
             assert!(
                 (m.coefficients[i] - 1.0).abs() < 1e-4,
                 "Wampler1 B{} deviation: est={}",
-                i, m.coefficients[i]
+                i,
+                m.coefficients[i]
             );
         }
         assert!((m.r_squared - 1.0).abs() < 1e-6, "Wampler1 R² deviation");
@@ -275,7 +296,9 @@ fn test_nist_strd_wampler2() {
             assert!(
                 (m.coefficients[i] - cert[i]).abs() < 1e-4,
                 "Wampler2 B{} deviation: est={}, cert={}",
-                i, m.coefficients[i], cert[i]
+                i,
+                m.coefficients[i],
+                cert[i]
             );
         }
         assert!((m.r_squared - 1.0).abs() < 1e-6, "Wampler2 R² deviation");
@@ -416,7 +439,10 @@ fn test_hc_covariances_hc0_to_hc3_ordering() {
         let var_hc2 = v_hc2[3];
         let var_hc3 = v_hc3[3];
 
-        assert!(var_hc1 > var_hc0, "HC1 must exceed HC0 (df correction n/(n-p))");
+        assert!(
+            var_hc1 > var_hc0,
+            "HC1 must exceed HC0 (df correction n/(n-p))"
+        );
         assert!(var_hc2 > var_hc0, "HC2 must exceed HC0 under leverage");
         assert!(var_hc3 > var_hc2, "HC3 must exceed HC2 under leverage");
     } else {
@@ -470,7 +496,11 @@ fn test_linalg_svd_qr_eigen_parity() {
         assert_eq!(ev.len(), 3);
         // Trace of symmetric matrix = sum of eigenvalues: 4 + 2 + 3 = 9.0
         let sum_ev: f64 = ev.iter().sum();
-        assert!((sum_ev - 9.0).abs() < 1e-10, "Trace equals eigenvalue sum: {}", sum_ev);
+        assert!(
+            (sum_ev - 9.0).abs() < 1e-10,
+            "Trace equals eigenvalue sum: {}",
+            sum_ev
+        );
     } else {
         panic!("Expected Vector for eigenvalues");
     }
@@ -512,10 +542,14 @@ fn test_visual_snapshots_svg_and_themes() {
         let val = interp.env.get(var).expect("plot var exists");
         if let Value::Plot(spec) = val {
             let svg_path = snapshot_dir.join(name);
-            spec.save_file(&svg_path.to_string_lossy()).expect("SVG save succeeds");
+            spec.save_file(&svg_path.to_string_lossy())
+                .expect("SVG save succeeds");
             assert!(svg_path.exists());
             let svg_content = std::fs::read_to_string(&svg_path).unwrap();
-            assert!(svg_content.contains("<svg"), "SVG must have root <svg element");
+            assert!(
+                svg_content.contains("<svg"),
+                "SVG must have root <svg element"
+            );
             assert!(svg_content.contains("</svg>"), "SVG must have closing tag");
         } else {
             panic!("Expected Plot value for {}", var);
@@ -540,7 +574,12 @@ fn test_taylor_finite_difference_gradient_check() {
         let err = (finite_diff - exact_grad).abs();
         if let Some(p_err) = prev_err {
             // First-order forward difference error should decrease linearly with h
-            assert!(err < p_err, "Error must decrease with smaller step size: err={}, prev={}", err, p_err);
+            assert!(
+                err < p_err,
+                "Error must decrease with smaller step size: err={}, prev={}",
+                err,
+                p_err
+            );
         }
         prev_err = Some(err);
     }
@@ -645,5 +684,8 @@ fn test_kleene_3vl_complete_truth_tables() {
     assert_eq!(interp.env.get("not_t"), Some(Value::Bool(false)));
     assert_eq!(interp.env.get("not_f"), Some(Value::Bool(true)));
     assert!(matches!(interp.env.get("not_na"), Some(Value::NA(None))));
-    assert_eq!(interp.env.get("not_na_named"), Some(Value::NA(Some("SensorFailure".to_string()))));
+    assert_eq!(
+        interp.env.get("not_na_named"),
+        Some(Value::NA(Some("SensorFailure".to_string())))
+    );
 }

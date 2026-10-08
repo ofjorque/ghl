@@ -8,9 +8,9 @@
 //!
 //! Usage: `cargo run --release --example spike_dataframe_clone_latency -p ghl-runtime -- <n_reasons>`
 
+use ghl_runtime::na_reasons::NaReasonTable;
 use std::sync::Arc;
 use std::time::Instant;
-use ghl_runtime::na_reasons::NaReasonTable;
 
 const REPEATS: u32 = 50;
 
@@ -37,7 +37,9 @@ fn main() {
         let _cloned = table.clone();
         best_deep = best_deep.min(start.elapsed());
     }
-    println!("  Clone entire NaReasonTable (legacy path): min over {REPEATS} runs: {best_deep:>10.3?}");
+    println!(
+        "  Clone entire NaReasonTable (legacy path): min over {REPEATS} runs: {best_deep:>10.3?}"
+    );
 
     let mut best_arc = std::time::Duration::MAX;
     for _ in 0..REPEATS {
@@ -45,7 +47,9 @@ fn main() {
         let _cloned = Arc::clone(&arc_table);
         best_arc = best_arc.min(start.elapsed());
     }
-    println!("  Clone Arc<NaReasonTable> (new path):      min over {REPEATS} runs: {best_arc:>10.3?}");
+    println!(
+        "  Clone Arc<NaReasonTable> (new path):      min over {REPEATS} runs: {best_arc:>10.3?}"
+    );
 
     if !best_arc.is_zero() {
         let speedup = best_deep.as_secs_f64() / best_arc.as_secs_f64();

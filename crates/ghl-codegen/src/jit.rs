@@ -1,13 +1,13 @@
 //! High-performance JIT execution engine backed by Cranelift.
 
-use std::collections::HashMap;
+use crate::compiler::FunctionCompiler;
+use crate::host;
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 use ghl_diagnostics::Diagnostic;
 use ghl_ir::HirModule;
-use crate::compiler::FunctionCompiler;
-use crate::host;
+use std::collections::HashMap;
 
 pub struct JitEngine {
     pub module: JITModule,
@@ -28,18 +28,22 @@ impl JitEngine {
         let mut flag_builder = settings::builder();
         flag_builder
             .set("use_colocated_libcalls", "false")
-            .map_err(|e| Diagnostic::compute_error("C0410", format!("Cranelift flag error: {e}")))?;
-        flag_builder
-            .set("is_pic", "false")
-            .map_err(|e| Diagnostic::compute_error("C0411", format!("Cranelift flag error: {e}")))?;
+            .map_err(|e| {
+                Diagnostic::compute_error("C0410", format!("Cranelift flag error: {e}"))
+            })?;
+        flag_builder.set("is_pic", "false").map_err(|e| {
+            Diagnostic::compute_error("C0411", format!("Cranelift flag error: {e}"))
+        })?;
 
         let isa_builder = cranelift_native::builder().map_err(|e| {
             Diagnostic::compute_error("C0412", format!("Host ISA unsupported by Cranelift: {e}"))
         })?;
 
-        let isa = isa_builder.finish(settings::Flags::new(flag_builder)).map_err(|e| {
-            Diagnostic::compute_error("C0413", format!("Failed to configure native ISA: {e}"))
-        })?;
+        let isa = isa_builder
+            .finish(settings::Flags::new(flag_builder))
+            .map_err(|e| {
+                Diagnostic::compute_error("C0413", format!("Failed to configure native ISA: {e}"))
+            })?;
 
         let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
         host::register_jit_symbols(&mut builder);
@@ -57,7 +61,10 @@ impl JitEngine {
     }
 
     /// Compile all functions in a `HirModule` to executable native machine code.
-    pub fn compile_module(&mut self, hir: &HirModule) -> Result<&HashMap<String, *const u8>, Diagnostic> {
+    pub fn compile_module(
+        &mut self,
+        hir: &HirModule,
+    ) -> Result<&HashMap<String, *const u8>, Diagnostic> {
         let mut func_ids = HashMap::new();
         let mut signatures = HashMap::new();
 
@@ -69,16 +76,23 @@ impl JitEngine {
             let mut sig = self.module.make_signature();
             for param in &func.params {
                 sig.params
-                    .push(AbiParam::new(FunctionCompiler::<JITModule>::to_clif_type(param.ty)));
+                    .push(AbiParam::new(FunctionCompiler::<JITModule>::to_clif_type(
+                        param.ty,
+                    )));
             }
             sig.returns
-                .push(AbiParam::new(FunctionCompiler::<JITModule>::to_clif_type(func.return_ty)));
+                .push(AbiParam::new(FunctionCompiler::<JITModule>::to_clif_type(
+                    func.return_ty,
+                )));
 
             let func_id = self
                 .module
                 .declare_function(name, Linkage::Export, &sig)
                 .map_err(|e| {
-                    Diagnostic::compute_error("C0414", format!("Failed to declare JIT function `{name}`: {e}"))
+                    Diagnostic::compute_error(
+                        "C0414",
+                        format!("Failed to declare JIT function `{name}`: {e}"),
+                    )
                 })?;
 
             func_ids.insert(name.clone(), func_id);
@@ -97,16 +111,24 @@ impl JitEngine {
                 compiler.compile_function(func)?;
             }
 
-            self.module.define_function(func_id, &mut self.ctx).map_err(|e| {
-                Diagnostic::compute_error("C0415", format!("Failed to define JIT function `{name}`: {e}"))
-            })?;
+            self.module
+                .define_function(func_id, &mut self.ctx)
+                .map_err(|e| {
+                    Diagnostic::compute_error(
+                        "C0415",
+                        format!("Failed to define JIT function `{name}`: {e}"),
+                    )
+                })?;
 
             self.module.clear_context(&mut self.ctx);
         }
 
         // 3. Finalize definitions and commit executable memory pages
         self.module.finalize_definitions().map_err(|e| {
-            Diagnostic::compute_error("C0416", format!("Failed to finalize JIT module definitions: {e}"))
+            Diagnostic::compute_error(
+                "C0416",
+                format!("Failed to finalize JIT module definitions: {e}"),
+            )
         })?;
 
         // 4. Retrieve native code pointers for defined module functions
@@ -127,27 +149,31 @@ impl JitEngine {
 
     /// Retrieve a callable native function taking 0 arguments and returning i64.
     pub fn get_fn_i64_0(&self, name: &str) -> Option<extern "C" fn() -> i64> {
-        self.get_fn_ptr(name).map(|ptr| unsafe { std::mem::transmute(ptr) })
+        self.get_fn_ptr(name)
+            .map(|ptr| unsafe { std::mem::transmute(ptr) })
     }
 
     /// Retrieve a callable native function taking 1 i64 and returning i64.
     pub fn get_fn_i64_1(&self, name: &str) -> Option<extern "C" fn(i64) -> i64> {
-        self.get_fn_ptr(name).map(|ptr| unsafe { std::mem::transmute(ptr) })
+        self.get_fn_ptr(name)
+            .map(|ptr| unsafe { std::mem::transmute(ptr) })
     }
 
     /// Retrieve a callable native function taking 2 i64 and returning i64.
     pub fn get_fn_i64_2(&self, name: &str) -> Option<extern "C" fn(i64, i64) -> i64> {
-        self.get_fn_ptr(name).map(|ptr| unsafe { std::mem::transmute(ptr) })
+        self.get_fn_ptr(name)
+            .map(|ptr| unsafe { std::mem::transmute(ptr) })
     }
 
     /// Retrieve a callable native function taking 1 f64 and returning f64.
     pub fn get_fn_f64_1(&self, name: &str) -> Option<extern "C" fn(f64) -> f64> {
-        self.get_fn_ptr(name).map(|ptr| unsafe { std::mem::transmute(ptr) })
+        self.get_fn_ptr(name)
+            .map(|ptr| unsafe { std::mem::transmute(ptr) })
     }
 
     /// Retrieve a callable native function taking 2 f64 and returning f64.
     pub fn get_fn_f64_2(&self, name: &str) -> Option<extern "C" fn(f64, f64) -> f64> {
-        self.get_fn_ptr(name).map(|ptr| unsafe { std::mem::transmute(ptr) })
+        self.get_fn_ptr(name)
+            .map(|ptr| unsafe { std::mem::transmute(ptr) })
     }
 }
-

@@ -1,5 +1,8 @@
 # GHL: Generalized Hypothesis Language (`.gh` / `.ghl`)
 
+[![CI](https://github.com/ofjorque/ghl/actions/workflows/ci.yml/badge.svg)](https://github.com/ofjorque/ghl/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
+
 > **GHL** (*Generalized Hypothesis Language* — secretamente inspirado en los gatos **Gojo & Haru**) es un lenguaje de programación generalista, compilado a código nativo de alto rendimiento, con semántica de primer nivel para computación estadística, análisis de datos y modelado probabilístico.
 
 ```

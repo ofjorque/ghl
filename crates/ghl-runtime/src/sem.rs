@@ -11,16 +11,16 @@
 //! - Numerical Hessian inversion for parameter standard errors, z-statistics, and p-values.
 //! - Baseline independence model evaluation for comparative fit indices.
 
-use std::sync::Arc;
-use std::collections::{BTreeMap, HashSet};
-use faer::prelude::*;
+use crate::optim::minimize_bfgs;
+use crate::value::Value;
 use faer::Mat;
-use polars_core::prelude::*;
-use statrs::distribution::{ContinuousCDF, Normal, ChiSquared};
+use faer::prelude::*;
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::FormulaOp;
-use crate::value::Value;
-use crate::optim::minimize_bfgs;
+use polars_core::prelude::*;
+use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
+use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // 1. Sample Covariance Matrix Computation
@@ -51,7 +51,10 @@ pub fn compute_sample_covariance(
             )
         })?;
         let ca = s.cast(&DataType::Float64).map_err(|e| {
-            Diagnostic::compute_error("C0202", format!("Failed to cast column `{col}` to Float64: {e}"))
+            Diagnostic::compute_error(
+                "C0202",
+                format!("Failed to cast column `{col}` to Float64: {e}"),
+            )
         })?;
         series_vec.push(ca);
     }
@@ -178,7 +181,12 @@ impl ParsedSemModel {
 
         // 1. First pass: identify latent variables (LHS of `=~`)
         for eq in equations {
-            if let Value::Formula { op: FormulaOp::Measurement, response, .. } = eq {
+            if let Value::Formula {
+                op: FormulaOp::Measurement,
+                response,
+                ..
+            } = eq
+            {
                 if !latent_set.contains(response) {
                     latent_set.push(response.clone());
                 }
@@ -188,14 +196,23 @@ impl ParsedSemModel {
         // 2. Second pass: identify observed variables
         for eq in equations {
             match eq {
-                Value::Formula { op: FormulaOp::Measurement, terms, .. } => {
+                Value::Formula {
+                    op: FormulaOp::Measurement,
+                    terms,
+                    ..
+                } => {
                     for term in terms {
                         if !latent_set.contains(term) && !observed_set.contains(term) {
                             observed_set.push(term.clone());
                         }
                     }
                 }
-                Value::Formula { op: FormulaOp::Regression, response, terms, .. } => {
+                Value::Formula {
+                    op: FormulaOp::Regression,
+                    response,
+                    terms,
+                    ..
+                } => {
                     if !latent_set.contains(response) && !observed_set.contains(response) {
                         observed_set.push(response.clone());
                     }
@@ -205,7 +222,12 @@ impl ParsedSemModel {
                         }
                     }
                 }
-                Value::Formula { op: FormulaOp::Covariance, response, terms, .. } => {
+                Value::Formula {
+                    op: FormulaOp::Covariance,
+                    response,
+                    terms,
+                    ..
+                } => {
                     if !latent_set.contains(response) && !observed_set.contains(response) {
                         observed_set.push(response.clone());
                     }
@@ -218,7 +240,10 @@ impl ParsedSemModel {
                 other => {
                     return Err(Diagnostic::statistical_error(
                         "S0200",
-                        format!("SEM specification requires formula equations, found `{}`", other.type_name()),
+                        format!(
+                            "SEM specification requires formula equations, found `{}`",
+                            other.type_name()
+                        ),
                     ));
                 }
             }
@@ -238,10 +263,12 @@ impl ParsedSemModel {
         all_variables.extend(latent_set.clone());
 
         let var_index = |name: &str| -> Result<usize, Diagnostic> {
-            all_variables
-                .iter()
-                .position(|v| v == name)
-                .ok_or_else(|| Diagnostic::statistical_error("S0200", format!("Unknown variable `{name}` in SEM spec")))
+            all_variables.iter().position(|v| v == name).ok_or_else(|| {
+                Diagnostic::statistical_error(
+                    "S0200",
+                    format!("Unknown variable `{name}` in SEM spec"),
+                )
+            })
         };
 
         let mut fixed_params = Vec::new();
@@ -251,7 +278,12 @@ impl ParsedSemModel {
         // 3. Process equations
         for eq in equations {
             match eq {
-                Value::Formula { op: FormulaOp::Measurement, response: latent, terms: indicators, .. } => {
+                Value::Formula {
+                    op: FormulaOp::Measurement,
+                    response: latent,
+                    terms: indicators,
+                    ..
+                } => {
                     let latent_idx = var_index(latent)?;
                     for (i, ind) in indicators.iter().enumerate() {
                         let ind_idx = var_index(ind)?;
@@ -283,7 +315,12 @@ impl ParsedSemModel {
                         }
                     }
                 }
-                Value::Formula { op: FormulaOp::Regression, response: lhs, terms: rhs_list, .. } => {
+                Value::Formula {
+                    op: FormulaOp::Regression,
+                    response: lhs,
+                    terms: rhs_list,
+                    ..
+                } => {
                     let lhs_idx = var_index(lhs)?;
                     for rhs in rhs_list {
                         let rhs_idx = var_index(rhs)?;
@@ -300,7 +337,12 @@ impl ParsedSemModel {
                         });
                     }
                 }
-                Value::Formula { op: FormulaOp::Covariance, response: v1, terms: v2_list, .. } => {
+                Value::Formula {
+                    op: FormulaOp::Covariance,
+                    response: v1,
+                    terms: v2_list,
+                    ..
+                } => {
                     let v1_idx = var_index(v1)?;
                     for v2 in v2_list {
                         let v2_idx = var_index(v2)?;
@@ -441,7 +483,9 @@ pub fn compute_model_implied_covariance(
 
     let faer_ima = Mat::from_fn(k, k, |i, j| i_minus_a[i * k + j]);
     let lu = faer_ima.partial_piv_lu();
-    let min_pivot = (0..k).map(|i| lu.U()[(i, i)].abs()).fold(f64::INFINITY, f64::min);
+    let min_pivot = (0..k)
+        .map(|i| lu.U()[(i, i)].abs())
+        .fold(f64::INFINITY, f64::min);
     if min_pivot < 1e-12 {
         return Err(Diagnostic::statistical_error(
             "S0101",
@@ -457,7 +501,7 @@ pub fn compute_model_implied_covariance(
     let faer_s = Mat::from_fn(k, k, |i, j| mat_s[i * k + j]);
     let ms = &m_mat * &faer_s;
     let m_trans = m_mat.transpose();
-    let v_mat = &ms * &m_trans;
+    let v_mat = &ms * m_trans;
 
     // Extract top-left p x p block (observed covariance Sigma)
     let mut sigma = vec![0.0; p * p];
@@ -555,10 +599,7 @@ pub struct SemFitOutput {
     pub implied_cov: Vec<f64>,
 }
 
-pub fn fit_sem_model(
-    spec: &[Value],
-    df: &DataFrame,
-) -> Result<SemFitOutput, Diagnostic> {
+pub fn fit_sem_model(spec: &[Value], df: &DataFrame) -> Result<SemFitOutput, Diagnostic> {
     let model = ParsedSemModel::parse(spec)?;
     let p = model.p();
     let df_stat = model.degrees_of_freedom();
@@ -588,7 +629,11 @@ pub fn fit_sem_model(
                 // Factor loading or regression initial value
                 let var_ind = s_mat[param.row * p + param.row];
                 let var_marker = s_mat[0];
-                let ratio = if var_marker > 0.0 { (var_ind / var_marker).sqrt() } else { 1.0 };
+                let ratio = if var_marker > 0.0 {
+                    (var_ind / var_marker).sqrt()
+                } else {
+                    1.0
+                };
                 init_theta.push(ratio.clamp(0.2, 5.0));
             }
             RamMatrix::S => {
@@ -609,9 +654,8 @@ pub fn fit_sem_model(
     }
 
     // 3. Optimize Wishart ML discrepancy using BFGS
-    let objective = |theta: &[f64]| -> f64 {
-        evaluate_wishart_f_ml(&model, &s_mat, log_det_s, theta)
-    };
+    let objective =
+        |theta: &[f64]| -> f64 { evaluate_wishart_f_ml(&model, &s_mat, log_det_s, theta) };
 
     let opt_res = minimize_bfgs(objective, &init_theta, 1500, 1e-7);
     let hat_theta = opt_res.par;
@@ -620,7 +664,10 @@ pub fn fit_sem_model(
     let chisq = ((n - 1) as f64) * f_min;
     let p_val = if df_stat > 0 {
         let chi_dist = ChiSquared::new(df_stat as f64).map_err(|e| {
-            Diagnostic::compute_error("C0201", format!("Failed to create ChiSquared distribution: {e}"))
+            Diagnostic::compute_error(
+                "C0201",
+                format!("Failed to create ChiSquared distribution: {e}"),
+            )
         })?;
         (1.0 - chi_dist.cdf(chisq)).clamp(0.0, 1.0)
     } else {
@@ -768,7 +815,12 @@ pub fn fit_sem_model(
         "conf_low" => col_ci_low,
         "conf_high" => col_ci_high,
     )
-    .map_err(|e| Diagnostic::compute_error("C0202", format!("Failed to build parameters DataFrame: {e}")))?;
+    .map_err(|e| {
+        Diagnostic::compute_error(
+            "C0202",
+            format!("Failed to build parameters DataFrame: {e}"),
+        )
+    })?;
 
     Ok(SemFitOutput {
         n_obs: n,
@@ -806,7 +858,10 @@ pub fn native_sem_fit_core(args: Vec<Value>) -> Result<Value, Diagnostic> {
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `sem()` must be a `sem_spec {{ ... }}`, found `{}`", other.type_name()),
+                format!(
+                    "First argument of `sem()` must be a `sem_spec {{ ... }}`, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -816,7 +871,10 @@ pub fn native_sem_fit_core(args: Vec<Value>) -> Result<Value, Diagnostic> {
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("Second argument of `sem()` must be a DataFrame, found `{}`", other.type_name()),
+                format!(
+                    "Second argument of `sem()` must be a DataFrame, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -833,12 +891,29 @@ pub fn native_sem_fit_core(args: Vec<Value>) -> Result<Value, Diagnostic> {
     record.insert("baseline_chisq".to_string(), Value::F64(fit.baseline_chisq));
     record.insert("baseline_df".to_string(), Value::I64(fit.baseline_df));
     record.insert("srmr".to_string(), Value::F64(fit.srmr));
-    record.insert("parameters".to_string(), Value::DataFrame {
-        frame: fit.parameters_df,
-        na_reasons: Arc::new(crate::na_reasons::NaReasonTable::new()),
-    });
-    record.insert("sample_cov".to_string(), Value::Matrix { rows: fit.p, cols: fit.p, data: Arc::new(fit.sample_cov) });
-    record.insert("implied_cov".to_string(), Value::Matrix { rows: fit.p, cols: fit.p, data: Arc::new(fit.implied_cov) });
+    record.insert(
+        "parameters".to_string(),
+        Value::DataFrame {
+            frame: fit.parameters_df,
+            na_reasons: Arc::new(crate::na_reasons::NaReasonTable::new()),
+        },
+    );
+    record.insert(
+        "sample_cov".to_string(),
+        Value::Matrix {
+            rows: fit.p,
+            cols: fit.p,
+            data: Arc::new(fit.sample_cov),
+        },
+    );
+    record.insert(
+        "implied_cov".to_string(),
+        Value::Matrix {
+            rows: fit.p,
+            cols: fit.p,
+            data: Arc::new(fit.implied_cov),
+        },
+    );
 
     Ok(Value::Record(Arc::new(record)))
 }
@@ -857,28 +932,45 @@ pub fn native_sample_cov(args: Vec<Value>) -> Result<Value, Diagnostic> {
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("`sample_cov()` requires a DataFrame, found `{}`", other.type_name()),
+                format!(
+                    "`sample_cov()` requires a DataFrame, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
 
     let cols: Vec<String> = if let Some(cols_arg) = args.get(1) {
         match cols_arg {
-            Value::Vector(vd) => vd.iter().filter_map(|v| v.as_str().map(ToString::to_string)).collect(),
+            Value::Vector(vd) => vd
+                .iter()
+                .filter_map(|v| v.as_str().map(ToString::to_string))
+                .collect(),
             other => {
                 return Err(Diagnostic::compute_error(
                     "C0202",
-                    format!("`sample_cov()` second argument must be a Vector of column names, found `{}`", other.type_name()),
+                    format!(
+                        "`sample_cov()` second argument must be a Vector of column names, found `{}`",
+                        other.type_name()
+                    ),
                 ));
             }
         }
     } else {
-        frame.get_column_names().iter().map(|s| s.to_string()).collect()
+        frame
+            .get_column_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
     };
 
     let (_, _, s_mat, _) = compute_sample_covariance(frame, &cols)?;
     let p = cols.len();
-    Ok(Value::Matrix { rows: p, cols: p, data: Arc::new(s_mat) })
+    Ok(Value::Matrix {
+        rows: p,
+        cols: p,
+        data: Arc::new(s_mat),
+    })
 }
 
 /// `sem(spec, df)` — Main Structural Equation Modeling entrypoint.
@@ -897,7 +989,10 @@ pub fn native_sem(args: Vec<Value>) -> Result<Value, Diagnostic> {
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `sem()` must be a `sem_spec {{ ... }}` or Formula, found `{}`", other.type_name()),
+                format!(
+                    "First argument of `sem()` must be a `sem_spec {{ ... }}` or Formula, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -907,7 +1002,10 @@ pub fn native_sem(args: Vec<Value>) -> Result<Value, Diagnostic> {
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("Second argument of `sem()` must be a DataFrame, found `{}`", other.type_name()),
+                format!(
+                    "Second argument of `sem()` must be a DataFrame, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -918,18 +1016,38 @@ pub fn native_sem(args: Vec<Value>) -> Result<Value, Diagnostic> {
     // CFI: 1 - max(chisq - df, 0) / max(baseline_chisq - baseline_df, chisq - df, 0)
     let d_model = (fit.chisq - fit.df as f64).max(0.0);
     let d_null = (fit.baseline_chisq - fit.baseline_df as f64).max(0.0);
-    let cfi_raw = if d_null > 0.0 { 1.0 - (d_model / d_null) } else { 1.0 };
+    let cfi_raw = if d_null > 0.0 {
+        1.0 - (d_model / d_null)
+    } else {
+        1.0
+    };
     let cfi = cfi_raw.clamp(0.0, 1.0);
 
     // TLI / NNFI: ((baseline_chisq / baseline_df) - (chisq / df)) / ((baseline_chisq / baseline_df) - 1)
-    let null_ratio = if fit.baseline_df > 0 { fit.baseline_chisq / fit.baseline_df as f64 } else { 1.0 };
-    let model_ratio = if fit.df > 0 { fit.chisq / fit.df as f64 } else { 1.0 };
+    let null_ratio = if fit.baseline_df > 0 {
+        fit.baseline_chisq / fit.baseline_df as f64
+    } else {
+        1.0
+    };
+    let model_ratio = if fit.df > 0 {
+        fit.chisq / fit.df as f64
+    } else {
+        1.0
+    };
     let tli_denom = null_ratio - 1.0;
-    let tli = if tli_denom.abs() > 1e-12 { (null_ratio - model_ratio) / tli_denom } else { 1.0 };
+    let tli = if tli_denom.abs() > 1e-12 {
+        (null_ratio - model_ratio) / tli_denom
+    } else {
+        1.0
+    };
 
     // RMSEA: sqrt(max(0, (chisq - df) / ((n_obs - 1) * df)))
     let rmsea_denom = ((fit.n_obs - 1) * fit.df.max(1) as usize) as f64;
-    let rmsea = if rmsea_denom > 0.0 { (d_model / rmsea_denom).max(0.0).sqrt() } else { 0.0 };
+    let rmsea = if rmsea_denom > 0.0 {
+        (d_model / rmsea_denom).max(0.0).sqrt()
+    } else {
+        0.0
+    };
 
     let mut fields = BTreeMap::new();
     fields.insert("chisq".to_string(), Value::F64(fit.chisq));
@@ -943,20 +1061,29 @@ pub fn native_sem(args: Vec<Value>) -> Result<Value, Diagnostic> {
     fields.insert("f_min".to_string(), Value::F64(fit.f_min));
     fields.insert("baseline_chisq".to_string(), Value::F64(fit.baseline_chisq));
     fields.insert("baseline_df".to_string(), Value::I64(fit.baseline_df));
-    fields.insert("parameters".to_string(), Value::DataFrame {
-        frame: fit.parameters_df,
-        na_reasons: Arc::new(crate::na_reasons::NaReasonTable::new()),
-    });
-    fields.insert("sample_cov".to_string(), Value::Matrix {
-        rows: fit.p,
-        cols: fit.p,
-        data: Arc::new(fit.sample_cov),
-    });
-    fields.insert("implied_cov".to_string(), Value::Matrix {
-        rows: fit.p,
-        cols: fit.p,
-        data: Arc::new(fit.implied_cov),
-    });
+    fields.insert(
+        "parameters".to_string(),
+        Value::DataFrame {
+            frame: fit.parameters_df,
+            na_reasons: Arc::new(crate::na_reasons::NaReasonTable::new()),
+        },
+    );
+    fields.insert(
+        "sample_cov".to_string(),
+        Value::Matrix {
+            rows: fit.p,
+            cols: fit.p,
+            data: Arc::new(fit.sample_cov),
+        },
+    );
+    fields.insert(
+        "implied_cov".to_string(),
+        Value::Matrix {
+            rows: fit.p,
+            cols: fit.p,
+            data: Arc::new(fit.implied_cov),
+        },
+    );
 
     Ok(Value::Struct {
         name: "SemResult".to_string(),

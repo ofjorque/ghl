@@ -1,6 +1,6 @@
-use ghl_syntax::parser::parse;
 use ghl_runtime::eval::Interpreter;
 use ghl_runtime::value::Value;
+use ghl_syntax::parser::parse;
 
 #[test]
 fn test_1d_vector_comprehension_with_range() {

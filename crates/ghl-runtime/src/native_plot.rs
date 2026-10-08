@@ -4,13 +4,13 @@
 //! Provides multi-layer composition, color grouping with Okabe-Ito palettes,
 //! interactive Vega-Lite JSON export, and Positron Plots pane integration.
 
-use std::collections::BTreeMap;
+use crate::na_reasons::NaReasonTable;
+use crate::value::Value;
 use ghl_diagnostics::{Diagnostic, RenderCaps};
 use ghl_plot::{AestheticMap, DataSeries, GeomLayer, PlotSpec};
 use ghl_types::ContrastScheme;
 use polars_core::prelude::DataFrame;
-use crate::na_reasons::NaReasonTable;
-use crate::value::Value;
+use std::collections::BTreeMap;
 
 // =========================================================================
 // Grammar of Graphics (std::plot - RFC 16) Native Functions
@@ -22,14 +22,20 @@ fn extract_raw_string(v: &Value) -> String {
         Value::I64(n) => n.to_string(),
         Value::F64(x) => x.to_string(),
         Value::Bool(b) => b.to_string(),
-        Value::Factor { levels, indices, .. } => {
-            indices.first().and_then(|&i| levels.get(i)).cloned().unwrap_or_default()
-        }
+        Value::Factor {
+            levels, indices, ..
+        } => indices
+            .first()
+            .and_then(|&i| levels.get(i))
+            .cloned()
+            .unwrap_or_default(),
         Value::NA(None) => "NA".to_string(),
         Value::NA(Some(r)) => format!("NA:{}", r),
         other => {
             let s = other.render_styled(&RenderCaps::ascii_plain(80));
-            ghl_diagnostics::panel::strip_ansi(&s).trim_matches('"').to_string()
+            ghl_diagnostics::panel::strip_ansi(&s)
+                .trim_matches('"')
+                .to_string()
         }
     }
 }
@@ -107,7 +113,10 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
             // Pre-populate columns cache with all dataframe columns
             for col_name in frame.get_column_names() {
-                let vals: Vec<String> = col_values(col_name).iter().map(extract_raw_string).collect();
+                let vals: Vec<String> = col_values(col_name)
+                    .iter()
+                    .map(extract_raw_string)
+                    .collect();
                 plot_spec.columns_cache.insert(col_name.to_string(), vals);
             }
 
@@ -129,7 +138,8 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 plot_spec = plot_spec.with_mapping(aes.clone());
                 let xs = col_f64(&aes.x);
                 if xs.is_empty() {
-                    let cats: Vec<String> = col_values(&aes.x).iter().map(extract_raw_string).collect();
+                    let cats: Vec<String> =
+                        col_values(&aes.x).iter().map(extract_raw_string).collect();
                     plot_spec = plot_spec.with_categories(cats);
                 } else {
                     plot_spec = plot_spec.with_x_data(xs.clone());
@@ -148,7 +158,10 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
                 // Shape aesthetic mapping
                 let shape_col: Vec<String> = if let Some(ref shape_name) = aes.shape {
-                    let sh_vals: Vec<String> = col_values(shape_name).iter().map(extract_raw_string).collect();
+                    let sh_vals: Vec<String> = col_values(shape_name)
+                        .iter()
+                        .map(extract_raw_string)
+                        .collect();
                     plot_spec.shape_data = sh_vals.clone();
                     plot_spec.labels.shape_label = Some(shape_name.clone());
                     sh_vals
@@ -166,10 +179,15 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     if let Some(ref color_name) = aes.color {
                         let color_col = col_values(color_name);
                         let n = xs.len().min(ys.len()).min(color_col.len());
-                        let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>)> = BTreeMap::new();
+                        let mut groups: BTreeMap<
+                            String,
+                            (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>),
+                        > = BTreeMap::new();
                         for i in 0..n {
                             let g_key = extract_raw_string(&color_col[i]);
-                            let entry = groups.entry(g_key).or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                            let entry = groups.entry(g_key).or_insert_with(|| {
+                                (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+                            });
                             entry.0.push(xs[i]);
                             entry.1.push(ys[i]);
                             if let Some(&sz) = size_col.get(i) {
@@ -196,10 +214,15 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     } else if let Some(ref _shape_name) = aes.shape {
                         // If color is not specified but shape is, group by shape for legend entries
                         let n = xs.len().min(ys.len()).min(shape_col.len());
-                        let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>)> = BTreeMap::new();
+                        let mut groups: BTreeMap<
+                            String,
+                            (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>),
+                        > = BTreeMap::new();
                         for i in 0..n {
                             let g_key = shape_col[i].clone();
-                            let entry = groups.entry(g_key.clone()).or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                            let entry = groups.entry(g_key.clone()).or_insert_with(|| {
+                                (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+                            });
                             entry.0.push(xs[i]);
                             entry.1.push(ys[i]);
                             if let Some(&sz) = size_col.get(i) {
@@ -229,7 +252,12 @@ pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 if let Some(ref fc) = aes.facet_col {
                     if let Some(col) = plot_spec.columns_cache.get(fc) {
                         plot_spec.facet_data = col.clone();
-                        plot_spec.facet = Some(ghl_plot::FacetSpec::wrap(fc.clone(), None, None, ghl_plot::FacetScales::Fixed));
+                        plot_spec.facet = Some(ghl_plot::FacetSpec::wrap(
+                            fc.clone(),
+                            None,
+                            None,
+                            ghl_plot::FacetScales::Fixed,
+                        ));
                     }
                 }
                 if let Some(ref fr) = aes.facet_row {
@@ -269,16 +297,17 @@ pub(crate) fn extract_layer_data_from_df(
 ) -> ghl_plot::LayerData {
     let mut layer_data = ghl_plot::LayerData::new();
     let col_values = |name: &str| -> Vec<Value> {
-        crate::polars_bridge::pull_column_as_values(frame, na_reasons, name)
-            .unwrap_or_default()
+        crate::polars_bridge::pull_column_as_values(frame, na_reasons, name).unwrap_or_default()
     };
-    let col_f64 = |name: &str| -> Vec<f64> {
-        col_values(name).iter().filter_map(|v| v.as_f64()).collect()
-    };
+    let col_f64 =
+        |name: &str| -> Vec<f64> { col_values(name).iter().filter_map(|v| v.as_f64()).collect() };
 
     // Pre-populate columns cache with all dataframe columns
     for col_name in frame.get_column_names() {
-        let vals: Vec<String> = col_values(col_name).iter().map(extract_raw_string).collect();
+        let vals: Vec<String> = col_values(col_name)
+            .iter()
+            .map(extract_raw_string)
+            .collect();
         layer_data.columns_cache.insert(col_name.to_string(), vals);
     }
 
@@ -300,7 +329,10 @@ pub(crate) fn extract_layer_data_from_df(
         };
 
         let shape_col: Vec<String> = if let Some(ref shape_name) = aes.shape {
-            let sh_vals: Vec<String> = col_values(shape_name).iter().map(extract_raw_string).collect();
+            let sh_vals: Vec<String> = col_values(shape_name)
+                .iter()
+                .map(extract_raw_string)
+                .collect();
             layer_data.shape_values = sh_vals.clone();
             sh_vals
         } else {
@@ -314,10 +346,13 @@ pub(crate) fn extract_layer_data_from_df(
             if let Some(ref color_name) = aes.color {
                 let color_col = col_values(color_name);
                 let n = xs.len().min(ys.len()).min(color_col.len());
-                let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>)> = BTreeMap::new();
+                let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>)> =
+                    BTreeMap::new();
                 for i in 0..n {
                     let g_key = extract_raw_string(&color_col[i]);
-                    let entry = groups.entry(g_key).or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                    let entry = groups
+                        .entry(g_key)
+                        .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
                     entry.0.push(xs[i]);
                     entry.1.push(ys[i]);
                     if let Some(&sz) = size_col.get(i) {
@@ -373,23 +408,21 @@ fn parse_geom_layer_args(args: Vec<Value>) -> ParsedGeomConfig {
             Value::Aesthetic(m) => {
                 mapping = Some(m);
             }
-            Value::NamedArg(name, val) => {
-                match name.as_str() {
-                    "data" => {
-                        if let Value::DataFrame { frame, na_reasons } = *val {
-                            df_val = Some((frame, na_reasons));
-                        }
-                    }
-                    "mapping" | "aes" => {
-                        if let Value::Aesthetic(m) = *val {
-                            mapping = Some(m);
-                        }
-                    }
-                    _ => {
-                        extra_named.insert(name, *val);
+            Value::NamedArg(name, val) => match name.as_str() {
+                "data" => {
+                    if let Value::DataFrame { frame, na_reasons } = *val {
+                        df_val = Some((frame, na_reasons));
                     }
                 }
-            }
+                "mapping" | "aes" => {
+                    if let Value::Aesthetic(m) = *val {
+                        mapping = Some(m);
+                    }
+                }
+                _ => {
+                    extra_named.insert(name, *val);
+                }
+            },
             other => {
                 extra_pos.push(other);
             }
@@ -437,20 +470,29 @@ fn finalize_geom_layer(
                 let (xs, ys) = layer.effective_xy(&p);
                 match crate::plot_stats::simple_linear_fit(xs, ys) {
                     Some(fit) => GeomLayer {
-                        kind: ghl_plot::GeomKind::Smooth { fit: Some(fit), se: *se },
+                        kind: ghl_plot::GeomKind::Smooth {
+                            fit: Some(fit),
+                            se: *se,
+                        },
                         mapping: layer.mapping.clone(),
                         data: layer.data.clone(),
                     },
                     None => layer,
                 }
             }
-            ghl_plot::GeomKind::Boxplot { stats: None, multi_stats } if multi_stats.is_empty() => {
+            ghl_plot::GeomKind::Boxplot {
+                stats: None,
+                multi_stats,
+            } if multi_stats.is_empty() => {
                 let (xs, ys) = layer.effective_xy(&p);
                 if !p.categories.is_empty() && !ys.is_empty() {
                     let n = p.categories.len().min(ys.len());
                     let mut grouped: BTreeMap<String, Vec<f64>> = BTreeMap::new();
                     for i in 0..n {
-                        grouped.entry(p.categories[i].clone()).or_default().push(ys[i]);
+                        grouped
+                            .entry(p.categories[i].clone())
+                            .or_default()
+                            .push(ys[i]);
                     }
                     let mut group_stats = Vec::new();
                     for (cat, vals) in grouped {
@@ -460,7 +502,10 @@ fn finalize_geom_layer(
                     }
                     if !group_stats.is_empty() {
                         GeomLayer {
-                            kind: ghl_plot::GeomKind::Boxplot { stats: None, multi_stats: group_stats },
+                            kind: ghl_plot::GeomKind::Boxplot {
+                                stats: None,
+                                multi_stats: group_stats,
+                            },
                             mapping: layer.mapping.clone(),
                             data: layer.data.clone(),
                         }
@@ -470,7 +515,10 @@ fn finalize_geom_layer(
                 } else {
                     match crate::plot_stats::five_number_summary(xs) {
                         Some(stats) => GeomLayer {
-                            kind: ghl_plot::GeomKind::Boxplot { stats: Some(stats), multi_stats: Vec::new() },
+                            kind: ghl_plot::GeomKind::Boxplot {
+                                stats: Some(stats),
+                                multi_stats: Vec::new(),
+                            },
                             mapping: layer.mapping.clone(),
                             data: layer.data.clone(),
                         },
@@ -490,7 +538,10 @@ fn finalize_geom_layer(
 
 pub(crate) fn native_geom_point(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let parsed = parse_geom_layer_args(args);
-    let size = parsed.extra_named.get("size").and_then(|v| v.as_f64())
+    let size = parsed
+        .extra_named
+        .get("size")
+        .and_then(|v| v.as_f64())
         .or_else(|| parsed.extra_pos.first().and_then(|v| v.as_f64()));
     let glyph = parsed.extra_named.get("glyph").and_then(|v| match v {
         Value::String(s) => s.chars().next(),
@@ -509,8 +560,18 @@ pub(crate) fn native_geom_point(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub(crate) fn native_geom_line(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let parsed = parse_geom_layer_args(args);
-    let width = parsed.extra_named.get("width").and_then(|v| v.as_i64()).map(|w| w as u32)
-        .or_else(|| parsed.extra_pos.first().and_then(|v| v.as_i64()).map(|w| w as u32));
+    let width = parsed
+        .extra_named
+        .get("width")
+        .and_then(|v| v.as_i64())
+        .map(|w| w as u32)
+        .or_else(|| {
+            parsed
+                .extra_pos
+                .first()
+                .and_then(|v| v.as_i64())
+                .map(|w| w as u32)
+        });
     let layer = match width {
         Some(w) => GeomLayer {
             kind: ghl_plot::GeomKind::Line { width: Some(w) },
@@ -530,7 +591,10 @@ pub(crate) fn native_geom_smooth(args: Vec<Value>) -> Result<Value, Diagnostic> 
 
 pub(crate) fn native_geom_histogram(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let parsed = parse_geom_layer_args(args);
-    let bins = parsed.extra_named.get("bins").and_then(|v| v.as_i64())
+    let bins = parsed
+        .extra_named
+        .get("bins")
+        .and_then(|v| v.as_i64())
         .or_else(|| parsed.extra_pos.first().and_then(|v| v.as_i64()))
         .unwrap_or(8) as usize;
     let layer = GeomLayer::histogram(bins);
@@ -612,14 +676,30 @@ pub(crate) fn native_labs(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 
     if let Some(mut p) = plot_opt {
-        if let Some(t) = title { p.labels.title = Some(t); }
-        if let Some(s) = subtitle { p.labels.subtitle = Some(s); }
-        if let Some(x) = x_label { p.labels.x_label = Some(x); }
-        if let Some(y) = y_label { p.labels.y_label = Some(y); }
-        if let Some(c) = color_label { p.labels.color_label = Some(c); }
-        if let Some(sz) = size_label { p.labels.size_label = Some(sz); }
-        if let Some(sh) = shape_label { p.labels.shape_label = Some(sh); }
-        if let Some(cap) = caption { p.labels.caption = Some(cap); }
+        if let Some(t) = title {
+            p.labels.title = Some(t);
+        }
+        if let Some(s) = subtitle {
+            p.labels.subtitle = Some(s);
+        }
+        if let Some(x) = x_label {
+            p.labels.x_label = Some(x);
+        }
+        if let Some(y) = y_label {
+            p.labels.y_label = Some(y);
+        }
+        if let Some(c) = color_label {
+            p.labels.color_label = Some(c);
+        }
+        if let Some(sz) = size_label {
+            p.labels.size_label = Some(sz);
+        }
+        if let Some(sh) = shape_label {
+            p.labels.shape_label = Some(sh);
+        }
+        if let Some(cap) = caption {
+            p.labels.caption = Some(cap);
+        }
         Ok(Value::Plot(Box::new(p)))
     } else {
         Ok(Value::Labels(ghl_plot::PlotLabels {
@@ -643,7 +723,10 @@ pub(crate) fn native_scale_x_log10(args: Vec<Value>) -> Result<Value, Diagnostic
             Ok(Value::Plot(Box::new(p)))
         }
         None => Ok(Value::Scale(ghl_plot::ScaleModifier::XLog10)),
-        _ => Err(Diagnostic::compute_error("C0315", "`scale_x_log10()` requires a Plot as first argument")),
+        _ => Err(Diagnostic::compute_error(
+            "C0315",
+            "`scale_x_log10()` requires a Plot as first argument",
+        )),
     }
 }
 
@@ -655,7 +738,10 @@ pub(crate) fn native_scale_y_log10(args: Vec<Value>) -> Result<Value, Diagnostic
             Ok(Value::Plot(Box::new(p)))
         }
         None => Ok(Value::Scale(ghl_plot::ScaleModifier::YLog10)),
-        _ => Err(Diagnostic::compute_error("C0315", "`scale_y_log10()` requires a Plot as first argument")),
+        _ => Err(Diagnostic::compute_error(
+            "C0315",
+            "`scale_y_log10()` requires a Plot as first argument",
+        )),
     }
 }
 
@@ -671,23 +757,21 @@ pub(crate) fn native_scale_size(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 plot_opt = Some(*p);
             }
             Value::NamedArg(name, val) => match name.as_str() {
-                "range" => {
-                    match val.as_ref() {
-                        Value::Vector(v) => {
-                            if let Some(r0) = v.iter().nth(0).and_then(|x| x.as_f64()) {
-                                min_size = Some(r0);
-                            }
-                            if let Some(r1) = v.iter().nth(1).and_then(|x| x.as_f64()) {
-                                max_size = Some(r1);
-                            }
+                "range" => match val.as_ref() {
+                    Value::Vector(v) => {
+                        if let Some(r0) = v.first().and_then(|x| x.as_f64()) {
+                            min_size = Some(r0);
                         }
-                        other => {
-                            if let Some(n) = other.as_f64() {
-                                min_size = Some(n);
-                            }
+                        if let Some(r1) = v.get(1).and_then(|x| x.as_f64()) {
+                            max_size = Some(r1);
                         }
                     }
-                }
+                    other => {
+                        if let Some(n) = other.as_f64() {
+                            min_size = Some(n);
+                        }
+                    }
+                },
                 "min" => min_size = val.as_f64(),
                 "max" => max_size = val.as_f64(),
                 _ => {}
@@ -699,10 +783,10 @@ pub(crate) fn native_scale_size(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let mut pos_idx = 0;
     if min_size.is_none() && pos_idx < pos_args.len() {
         if let Value::Vector(v) = &pos_args[pos_idx] {
-            if let Some(r0) = v.iter().nth(0).and_then(|x| x.as_f64()) {
+            if let Some(r0) = v.first().and_then(|x| x.as_f64()) {
                 min_size = Some(r0);
             }
-            if let Some(r1) = v.iter().nth(1).and_then(|x| x.as_f64()) {
+            if let Some(r1) = v.get(1).and_then(|x| x.as_f64()) {
                 max_size = Some(r1);
             }
             pos_idx += 1;
@@ -830,7 +914,7 @@ pub(crate) fn native_beside(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
         return Err(Diagnostic::compute_error(
             "C0322",
-            "`beside(p1, p2)` requires two Plot arguments (or `p1 |> beside(p2)`)"
+            "`beside(p1, p2)` requires two Plot arguments (or `p1 |> beside(p2)`)",
         ));
     }
     match (&args[0], &args[1]) {
@@ -840,7 +924,7 @@ pub(crate) fn native_beside(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         _ => Err(Diagnostic::compute_error(
             "C0322",
-            "`beside()` arguments must be Plots"
+            "`beside()` arguments must be Plots",
         )),
     }
 }
@@ -849,7 +933,7 @@ pub(crate) fn native_stack(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
         return Err(Diagnostic::compute_error(
             "C0323",
-            "`stack(p1, p2)` requires two Plot arguments (or `p1 |> stack(p2)`)"
+            "`stack(p1, p2)` requires two Plot arguments (or `p1 |> stack(p2)`)",
         ));
     }
     match (&args[0], &args[1]) {
@@ -859,32 +943,53 @@ pub(crate) fn native_stack(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         _ => Err(Diagnostic::compute_error(
             "C0323",
-            "`stack()` arguments must be Plots"
+            "`stack()` arguments must be Plots",
         )),
     }
 }
 
 pub(crate) fn native_factor(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Err(Diagnostic::compute_error("C0201", "`factor(x, [levels], [contrast])` requires at least 1 argument"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`factor(x, [levels], [contrast])` requires at least 1 argument",
+        ));
     }
     let (items, given_levels) = match &args[0] {
         Value::Vector(v) => (v.clone(), None),
-        Value::Factor { levels, indices, .. } => {
-            let str_items: Vec<Value> = indices.iter().map(|&i| Value::String(levels[i].clone())).collect();
-            (crate::vector_data::VectorData::from_values(str_items), Some(levels.clone()))
+        Value::Factor {
+            levels, indices, ..
+        } => {
+            let str_items: Vec<Value> = indices
+                .iter()
+                .map(|&i| Value::String(levels[i].clone()))
+                .collect();
+            (
+                crate::vector_data::VectorData::from_values(str_items),
+                Some(levels.clone()),
+            )
         }
         other => {
-            return Err(Diagnostic::compute_error("C0201", format!("`factor()` argument must be a Vector, found `{}`", other.type_name())));
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                format!(
+                    "`factor()` argument must be a Vector, found `{}`",
+                    other.type_name()
+                ),
+            ));
         }
     };
 
     let explicit_levels: Option<Vec<String>> = if let Some(l_arg) = args.get(1) {
         match l_arg {
-            Value::Vector(v) => Some(v.iter().map(|val| match val {
-                Value::String(s) => s.clone(),
-                other => format!("{other}"),
-            }).collect()),
+            Value::Vector(v) => Some(
+                v.iter()
+                    .map(|val| match val {
+                        Value::String(s) => s.clone(),
+                        other => format!("{other}"),
+                    })
+                    .collect(),
+            ),
             _ => None,
         }
     } else {
@@ -897,9 +1002,13 @@ pub(crate) fn native_factor(args: Vec<Value>) -> Result<Value, Diagnostic> {
         let mut set = std::collections::BTreeSet::new();
         for v in items.iter() {
             match v {
-                Value::String(s) => { set.insert(s.clone()); }
+                Value::String(s) => {
+                    set.insert(s.clone());
+                }
                 Value::NA(_) => {}
-                other => { set.insert(format!("{other}")); }
+                other => {
+                    set.insert(format!("{other}"));
+                }
             }
         }
         set.into_iter().collect()
@@ -936,7 +1045,10 @@ pub(crate) fn native_factor(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub(crate) fn native_ordered_factor(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let mut factor_val = native_factor(args)?;
-    if let Value::Factor { ordered, contrast, .. } = &mut factor_val {
+    if let Value::Factor {
+        ordered, contrast, ..
+    } = &mut factor_val
+    {
         *ordered = true;
         if *contrast == ContrastScheme::Treatment {
             *contrast = ContrastScheme::Polynomial;
@@ -952,9 +1064,14 @@ pub(crate) fn native_levels(args: Vec<Value>) -> Result<Value, Diagnostic> {
     match target {
         Value::Factor { levels, .. } => {
             let vals = levels.iter().map(|s| Value::String(s.clone())).collect();
-            Ok(Value::Vector(crate::vector_data::VectorData::from_values(vals)))
+            Ok(Value::Vector(crate::vector_data::VectorData::from_values(
+                vals,
+            )))
         }
-        other => Err(Diagnostic::compute_error("C0201", format!("`levels()` expects a Factor, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`levels()` expects a Factor, found `{}`", other.type_name()),
+        )),
     }
 }
 
@@ -977,9 +1094,16 @@ pub(crate) fn native_show(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis())
                     .unwrap_or(0);
-                let plot_path = std::path::Path::new(&plots_dir).join(format!("ghl_plot_{}_{}.svg", std::process::id(), timestamp));
+                let plot_path = std::path::Path::new(&plots_dir).join(format!(
+                    "ghl_plot_{}_{}.svg",
+                    std::process::id(),
+                    timestamp
+                ));
                 if let Err(e) = p.save_file(&plot_path.to_string_lossy()) {
-                    eprintln!("{} [Plots Pane] Warning: failed to save SVG plot: {e}", caps.gojo("/ᐠ ¬`‸´¬ マ"));
+                    eprintln!(
+                        "{} [Plots Pane] Warning: failed to save SVG plot: {e}",
+                        caps.gojo("/ᐠ ¬`‸´¬ マ")
+                    );
                 }
             }
         }
@@ -992,7 +1116,10 @@ pub(crate) fn native_show(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub(crate) fn native_view(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let df_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`view()` requires a DataFrame: `view(df)` or `df |> view()`")
+        Diagnostic::compute_error(
+            "C0201",
+            "`view()` requires a DataFrame: `view(df)` or `df |> view()`",
+        )
     })?;
 
     let (nrow, ncol) = match df_val {
@@ -1000,7 +1127,10 @@ pub(crate) fn native_view(args: Vec<Value>) -> Result<Value, Diagnostic> {
         other => {
             return Err(Diagnostic::compute_error(
                 "C0201",
-                format!("`view()` requires a DataFrame, found `{}`", other.type_name()),
+                format!(
+                    "`view()` requires a DataFrame, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -1016,7 +1146,10 @@ pub(crate) fn native_view(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     crate::io::write_parquet_file(df_val, &path_str)?;
 
-    let opened = if let Ok(mut child) = std::process::Command::new("positron").arg(&path_str).spawn() {
+    let opened = if let Ok(mut child) = std::process::Command::new("positron")
+        .arg(&path_str)
+        .spawn()
+    {
         let _ = child.wait();
         true
     } else if let Ok(mut child) = std::process::Command::new("code").arg(&path_str).spawn() {
@@ -1027,9 +1160,15 @@ pub(crate) fn native_view(args: Vec<Value>) -> Result<Value, Diagnostic> {
     };
 
     if opened {
-        println!("ฅ(•⩊ •マ [Data Explorer] Opened {} ({} rows, {} cols) in Positron Data Explorer", filename, nrow, ncol);
+        println!(
+            "ฅ(•⩊ •マ [Data Explorer] Opened {} ({} rows, {} cols) in Positron Data Explorer",
+            filename, nrow, ncol
+        );
     } else {
-        println!("ฅ(•⩊ •マ [Data Explorer] Exported {} ({} rows, {} cols) to:\n   {}", filename, nrow, ncol, path_str);
+        println!(
+            "ฅ(•⩊ •マ [Data Explorer] Exported {} ({} rows, {} cols) to:\n   {}",
+            filename, nrow, ncol, path_str
+        );
         println!("   ฅ(•⩊ •マ Haru ready! Open this Parquet file in Positron Data Explorer");
     }
 
@@ -1053,7 +1192,10 @@ pub(crate) fn native_boxplot(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub(crate) fn native_save(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let plot_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0310", "`save()` / `ggsave()` requires a Plot as first argument")
+        Diagnostic::compute_error(
+            "C0310",
+            "`save()` / `ggsave()` requires a Plot as first argument",
+        )
     })?;
 
     let path_val = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| {
@@ -1066,7 +1208,10 @@ pub(crate) fn native_save(args: Vec<Value>) -> Result<Value, Diagnostic> {
     match plot_val {
         Value::Plot(p) => {
             p.save_file(path_val).map_err(|e| {
-                Diagnostic::compute_error("C0312", format!("Failed to export plot to `{path_val}`: {e}"))
+                Diagnostic::compute_error(
+                    "C0312",
+                    format!("Failed to export plot to `{path_val}`: {e}"),
+                )
             })?;
             println!("ฅ(•⩊ •マ Haru successfully exported plot to `{}`", path_val);
             Ok(Value::Unit)
@@ -1080,14 +1225,25 @@ pub(crate) fn native_save(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub(crate) fn native_to_vega_json(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let plot_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0316", "`to_vega_json()` requires a Plot as first argument")
+        Diagnostic::compute_error(
+            "C0316",
+            "`to_vega_json()` requires a Plot as first argument",
+        )
     })?;
     match plot_val {
         Value::Plot(p) => {
-            let json = p.to_vega_json().map_err(|e| Diagnostic::compute_error("C0317", e))?;
+            let json = p
+                .to_vega_json()
+                .map_err(|e| Diagnostic::compute_error("C0317", e))?;
             Ok(Value::String(json))
         }
-        other => Err(Diagnostic::compute_error("C0316", format!("`to_vega_json()` requires a Plot, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::compute_error(
+            "C0316",
+            format!(
+                "`to_vega_json()` requires a Plot, found `{}`",
+                other.type_name()
+            ),
+        )),
     }
 }
 
@@ -1099,16 +1255,23 @@ pub(crate) fn native_to_svg(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let height = args.get(2).and_then(|v| v.as_i64()).unwrap_or(600) as u32;
     match plot_val {
         Value::Plot(p) => {
-            let svg = p.to_svg(width, height).map_err(|e| Diagnostic::compute_error("C0319", e))?;
+            let svg = p
+                .to_svg(width, height)
+                .map_err(|e| Diagnostic::compute_error("C0319", e))?;
             Ok(Value::String(svg))
         }
-        other => Err(Diagnostic::compute_error("C0318", format!("`to_svg()` requires a Plot, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::compute_error(
+            "C0318",
+            format!("`to_svg()` requires a Plot, found `{}`", other.type_name()),
+        )),
     }
 }
 
 fn extract_facet_var_name(v: &Value) -> String {
     match v {
-        Value::Formula { response, terms, .. } => {
+        Value::Formula {
+            response, terms, ..
+        } => {
             if !terms.is_empty() && terms[0] != "." {
                 terms[0].clone()
             } else if !response.is_empty() && response != "." {
@@ -1180,7 +1343,7 @@ pub(crate) fn native_facet_wrap(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if variable.is_empty() {
         return Err(Diagnostic::compute_error(
             "C0320",
-            "`facet_wrap()` requires a faceting variable (e.g. `facet_wrap(\"species\")` or `facet_wrap(~ species)`)"
+            "`facet_wrap()` requires a faceting variable (e.g. `facet_wrap(\"species\")` or `facet_wrap(~ species)`)",
         ));
     }
 
@@ -1227,7 +1390,9 @@ pub(crate) fn native_facet_grid(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 }
                 _ => {}
             },
-            Value::Formula { response, terms, .. } => {
+            Value::Formula {
+                response, terms, ..
+            } => {
                 if !response.is_empty() && response != "." {
                     row_var = Some(response.clone());
                 }
@@ -1264,7 +1429,7 @@ pub(crate) fn native_facet_grid(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if row_var.is_none() && col_var.is_none() {
         return Err(Diagnostic::compute_error(
             "C0321",
-            "`facet_grid()` requires at least a row or column variable (e.g. `facet_grid(drv ~ cyl)` or `facet_grid(rows = \"drv\", cols = \"cyl\")`)"
+            "`facet_grid()` requires at least a row or column variable (e.g. `facet_grid(drv ~ cyl)` or `facet_grid(rows = \"drv\", cols = \"cyl\")`)",
         ));
     }
 

@@ -39,7 +39,11 @@ fn test_iv_just_identified() {
         if let Value::Vector(vd) = coefs {
             let b0 = vd[0].as_f64().unwrap();
             let b1 = vd[1].as_f64().unwrap();
-            assert!((b0 - 2.0).abs() < 1e-4, "Expected intercept ≈ 2.0, got {}", b0);
+            assert!(
+                (b0 - 2.0).abs() < 1e-4,
+                "Expected intercept ≈ 2.0, got {}",
+                b0
+            );
             assert!((b1 - 3.0).abs() < 1e-4, "Expected slope ≈ 3.0, got {}", b1);
         } else {
             panic!("Expected Vector for coefficients");
@@ -65,7 +69,10 @@ fn test_iv_just_identified() {
         }
 
         // Just-identified models cannot compute Sargan overidentification test
-        assert!(sargan.is_na(), "Just-identified model should have NA Sargan stat");
+        assert!(
+            sargan.is_na(),
+            "Just-identified model should have NA Sargan stat"
+        );
     } else {
         panic!("Expected IvResult struct");
     }
@@ -103,9 +110,21 @@ fn test_iv_overidentified_with_exogenous() {
             let b0 = vd[0].as_f64().unwrap();
             let b_w = vd[1].as_f64().unwrap();
             let b_x = vd[2].as_f64().unwrap();
-            assert!((b0 - 5.0).abs() < 1e-3, "Expected intercept ≈ 5.0, got {}", b0);
-            assert!((b_w - 2.0).abs() < 1e-3, "Expected w coeff ≈ 2.0, got {}", b_w);
-            assert!((b_x - 4.0).abs() < 1e-3, "Expected x coeff ≈ 4.0, got {}", b_x);
+            assert!(
+                (b0 - 5.0).abs() < 1e-3,
+                "Expected intercept ≈ 5.0, got {}",
+                b0
+            );
+            assert!(
+                (b_w - 2.0).abs() < 1e-3,
+                "Expected w coeff ≈ 2.0, got {}",
+                b_w
+            );
+            assert!(
+                (b_x - 4.0).abs() < 1e-3,
+                "Expected x coeff ≈ 4.0, got {}",
+                b_x
+            );
         }
 
         // Overidentified: df_sargan = 2 - 1 = 1
@@ -138,7 +157,10 @@ fn test_iv_underidentified_order_condition_s0101() {
     "#;
 
     let (_, res) = run_ghl(src);
-    assert!(res.is_err(), "Underidentified model should fail order condition");
+    assert!(
+        res.is_err(),
+        "Underidentified model should fail order condition"
+    );
     let err = res.err().unwrap();
     assert_eq!(err.code, "S0101");
     assert!(err.message.contains("Order condition failed"));
@@ -187,11 +209,26 @@ fn test_iv_neko_verbs_and_summary() {
     let (_, res) = run_ghl(src);
     let val = res.expect("neko verbs should succeed on IvResult");
     if let Value::Record(fields) = val {
-        assert!(matches!(fields.get("tidy").unwrap(), Value::DataFrame { .. }), "tidy() should return DataFrame");
-        assert!(matches!(fields.get("glance").unwrap(), Value::DataFrame { .. }), "glance() should return DataFrame");
-        assert!(matches!(fields.get("coef").unwrap(), Value::Vector(_)), "coef() should return Vector");
-        assert!(matches!(fields.get("residuals").unwrap(), Value::Vector(_)), "residuals() should return Vector");
-        assert!(matches!(fields.get("vcov").unwrap(), Value::Matrix { .. }), "vcov() should return Matrix");
+        assert!(
+            matches!(fields.get("tidy").unwrap(), Value::DataFrame { .. }),
+            "tidy() should return DataFrame"
+        );
+        assert!(
+            matches!(fields.get("glance").unwrap(), Value::DataFrame { .. }),
+            "glance() should return DataFrame"
+        );
+        assert!(
+            matches!(fields.get("coef").unwrap(), Value::Vector(_)),
+            "coef() should return Vector"
+        );
+        assert!(
+            matches!(fields.get("residuals").unwrap(), Value::Vector(_)),
+            "residuals() should return Vector"
+        );
+        assert!(
+            matches!(fields.get("vcov").unwrap(), Value::Matrix { .. }),
+            "vcov() should return Matrix"
+        );
     } else {
         panic!("Expected Record of NEKO outputs");
     }
@@ -212,7 +249,14 @@ fn test_model_matrix_primitive() {
     let (_, res) = run_ghl(src);
     let val = res.expect("model_matrix should succeed");
     if let Value::Record(fields) = val {
-        assert!(matches!(fields.get("x").unwrap(), Value::Matrix { rows: 4, cols: 3, .. }));
+        assert!(matches!(
+            fields.get("x").unwrap(),
+            Value::Matrix {
+                rows: 4,
+                cols: 3,
+                ..
+            }
+        ));
         assert!(matches!(fields.get("y").unwrap(), Value::Vector(_)));
         assert_eq!(fields.get("n_obs").unwrap().as_i64().unwrap(), 4);
         assert_eq!(fields.get("p_cols").unwrap().as_i64().unwrap(), 3);

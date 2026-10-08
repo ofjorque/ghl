@@ -20,7 +20,11 @@ impl SyntaxError {
 
 impl std::fmt::Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} (bytes {}..{})", self.message, self.span.start, self.span.end)
+        write!(
+            f,
+            "{} (bytes {}..{})",
+            self.message, self.span.start, self.span.end
+        )
     }
 }
 
@@ -80,7 +84,9 @@ impl SourceIndex {
         } else {
             self.len
         };
-        (line_start + character as usize).min(next_line_start).min(self.len)
+        (line_start + character as usize)
+            .min(next_line_start)
+            .min(self.len)
     }
 
     /// Returns the start byte offset of `line` (0-indexed).

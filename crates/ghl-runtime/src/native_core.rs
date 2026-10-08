@@ -3,16 +3,16 @@
 //! Split out of `env.rs` for maintainability; native fn names are still
 //! referenced unqualified from `RuntimeEnv::with_prelude()` via glob imports.
 
-use ghl_diagnostics::{Diagnostic, RenderCaps};
-use polars_core::prelude::*;
-use rand::{RngExt, SeedableRng};
-use rand::distr::Distribution;
-use rayon::prelude::*;
-use statrs::distribution::{Continuous, ContinuousCDF, Gamma, Normal};
 use crate::eval::Interpreter;
 use crate::polars_bridge;
 use crate::value::Value;
 use crate::vector_data::VectorData;
+use ghl_diagnostics::{Diagnostic, RenderCaps};
+use polars_core::prelude::*;
+use rand::distr::Distribution;
+use rand::{RngExt, SeedableRng};
+use rayon::prelude::*;
+use statrs::distribution::{Continuous, ContinuousCDF, Gamma, Normal};
 
 // Built-in Native Functions
 
@@ -39,7 +39,12 @@ pub(crate) fn native_sha256(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let text = match args.first() {
         Some(Value::String(s)) => s.clone(),
         Some(other) => format!("{}", other),
-        None => return Err(Diagnostic::compute_error("C0201", "`sha256()` requires an argument")),
+        None => {
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                "`sha256()` requires an argument",
+            ));
+        }
     };
     let mut hasher = Sha256::new();
     hasher.update(text.as_bytes());
@@ -48,7 +53,11 @@ pub(crate) fn native_sha256(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_is_vector(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    Ok(Value::Bool(args.first().map(|v| matches!(v, Value::Vector(_))).unwrap_or(false)))
+    Ok(Value::Bool(
+        args.first()
+            .map(|v| matches!(v, Value::Vector(_)))
+            .unwrap_or(false),
+    ))
 }
 
 pub(crate) fn native_help(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -65,7 +74,9 @@ pub(crate) fn native_help(args: Vec<Value>) -> Result<Value, Diagnostic> {
         } else {
             return Err(Diagnostic::compute_error(
                 "C0204",
-                format!("No documentation found for `{name}`. Type `help()` to list common functions."),
+                format!(
+                    "No documentation found for `{name}`. Type `help()` to list common functions."
+                ),
             ));
         }
     }
@@ -86,12 +97,16 @@ pub(crate) fn native_help(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// decision documented in TODO.md, not an oversight: unlike `summarize()`'s per-group
 /// aggregation, a single `Vector` has no "which group's reason wins" ambiguity to hide
 /// behind, so there's no reason to throw the specific reason away here.
-pub(crate) fn vector_native_reduce(vd: &crate::vector_data::VectorData, kind: &str) -> Result<Value, Diagnostic> {
+pub(crate) fn vector_native_reduce(
+    vd: &crate::vector_data::VectorData,
+    kind: &str,
+) -> Result<Value, Diagnostic> {
     if let Some(na) = vd.first_na() {
         return Ok(na);
     }
     let column = vd.column();
-    let reduce_err = |e: PolarsError| Diagnostic::compute_error("C0210", format!("`{kind}()` failed: {e}"));
+    let reduce_err =
+        |e: PolarsError| Diagnostic::compute_error("C0210", format!("`{kind}()` failed: {e}"));
     let scalar = match kind {
         "mean" => column.mean_reduce(),
         "sum" => column.sum_reduce(),
@@ -99,7 +114,8 @@ pub(crate) fn vector_native_reduce(vd: &crate::vector_data::VectorData, kind: &s
         "max" => column.max_reduce(),
         "median" => column.median_reduce(),
         other => unreachable!("vector_native_reduce: unknown kind `{other}`"),
-    }.map_err(reduce_err)?;
+    }
+    .map_err(reduce_err)?;
     Ok(polars_bridge::any_value_to_plain_value(scalar.value()))
 }
 
@@ -109,7 +125,10 @@ pub(crate) fn native_mean(args: Vec<Value>) -> Result<Value, Diagnostic> {
     })?;
 
     match vec_val {
-        Value::ColRef(name) => Ok(Value::AggSpec { kind: "mean".into(), col: Some(name.clone()) }),
+        Value::ColRef(name) => Ok(Value::AggSpec {
+            kind: "mean".into(),
+            col: Some(name.clone()),
+        }),
         Value::Vector(vd) => {
             if vd.is_empty() {
                 return Ok(Value::NA(Some("EmptyVector".into())));
@@ -124,12 +143,15 @@ pub(crate) fn native_mean(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_sum(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let vec_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`sum()` requires 1 argument")
-    })?;
+    let vec_val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`sum()` requires 1 argument"))?;
 
     match vec_val {
-        Value::ColRef(name) => Ok(Value::AggSpec { kind: "sum".into(), col: Some(name.clone()) }),
+        Value::ColRef(name) => Ok(Value::AggSpec {
+            kind: "sum".into(),
+            col: Some(name.clone()),
+        }),
         Value::Vector(vd) => {
             if vd.is_empty() {
                 // Matches the old boxed loop's `sum = 0.0; has_float = false` starting
@@ -150,12 +172,15 @@ pub(crate) fn native_sum(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_var(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let vec_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`var()` requires 1 argument")
-    })?;
+    let vec_val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`var()` requires 1 argument"))?;
 
     match vec_val {
-        Value::ColRef(name) => Ok(Value::AggSpec { kind: "var".into(), col: Some(name.clone()) }),
+        Value::ColRef(name) => Ok(Value::AggSpec {
+            kind: "var".into(),
+            col: Some(name.clone()),
+        }),
         Value::Vector(vd) => {
             if vd.len() < 2 {
                 return Err(Diagnostic::statistical_warning(
@@ -166,7 +191,8 @@ pub(crate) fn native_var(args: Vec<Value>) -> Result<Value, Diagnostic> {
             if let Some(na) = vd.first_na() {
                 return Ok(na);
             }
-            let reduce_err = |e: PolarsError| Diagnostic::compute_error("C0210", format!("`var()` failed: {e}"));
+            let reduce_err =
+                |e: PolarsError| Diagnostic::compute_error("C0210", format!("`var()` failed: {e}"));
             let scalar = vd.column().var_reduce(1).map_err(reduce_err)?;
             Ok(polars_bridge::any_value_to_plain_value(scalar.value()))
         }
@@ -179,7 +205,10 @@ pub(crate) fn native_var(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub(crate) fn native_std_dev(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if let Some(Value::ColRef(name)) = args.first() {
-        return Ok(Value::AggSpec { kind: "std_dev".into(), col: Some(name.clone()) });
+        return Ok(Value::AggSpec {
+            kind: "std_dev".into(),
+            col: Some(name.clone()),
+        });
     }
     let var_val = native_var(args)?;
     if let Value::F64(v) = var_val {
@@ -190,36 +219,48 @@ pub(crate) fn native_std_dev(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_min(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let vec_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`min()` requires 1 argument")
-    })?;
+    let vec_val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`min()` requires 1 argument"))?;
 
     match vec_val {
-        Value::ColRef(name) => Ok(Value::AggSpec { kind: "min".into(), col: Some(name.clone()) }),
+        Value::ColRef(name) => Ok(Value::AggSpec {
+            kind: "min".into(),
+            col: Some(name.clone()),
+        }),
         Value::Vector(vd) => {
             if vd.is_empty() {
                 return Ok(Value::NA(None));
             }
             vector_native_reduce(vd, "min")
         }
-        _ => Err(Diagnostic::compute_error("C0202", "`min()` expects a Vector")),
+        _ => Err(Diagnostic::compute_error(
+            "C0202",
+            "`min()` expects a Vector",
+        )),
     }
 }
 
 pub(crate) fn native_max(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let vec_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`max()` requires 1 argument")
-    })?;
+    let vec_val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`max()` requires 1 argument"))?;
 
     match vec_val {
-        Value::ColRef(name) => Ok(Value::AggSpec { kind: "max".into(), col: Some(name.clone()) }),
+        Value::ColRef(name) => Ok(Value::AggSpec {
+            kind: "max".into(),
+            col: Some(name.clone()),
+        }),
         Value::Vector(vd) => {
             if vd.is_empty() {
                 return Ok(Value::NA(None));
             }
             vector_native_reduce(vd, "max")
         }
-        _ => Err(Diagnostic::compute_error("C0202", "`max()` expects a Vector")),
+        _ => Err(Diagnostic::compute_error(
+            "C0202",
+            "`max()` expects a Vector",
+        )),
     }
 }
 
@@ -256,7 +297,10 @@ pub(crate) fn seeded_rng(seed: i64) -> rand_xoshiro::Xoshiro256PlusPlus {
 /// `rand::rng()` (thread-local, OS-seeded) -- not reproducible, unchanged from before.
 pub(crate) fn native_random_uniform(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let n = args.first().and_then(|v| v.as_i64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`random_uniform()` requires an integer length argument")
+        Diagnostic::compute_error(
+            "C0201",
+            "`random_uniform()` requires an integer length argument",
+        )
     })?;
     if n < 0 {
         return Err(Diagnostic::compute_error(
@@ -296,7 +340,11 @@ const RNG_CHUNK_SIZE: usize = 1024;
 /// `.jump()` before the parallel `par_chunks_mut` loop starts, so which chunk lands on
 /// which thread never affects the output -- same reproducibility guarantee as
 /// `bootstrap_mean`, just chunked instead of per-replica.
-pub(crate) fn sample_distribution<D: Distribution<f64> + Sync>(n: usize, dist: &D, seed: Option<i64>) -> Vec<f64> {
+pub(crate) fn sample_distribution<D: Distribution<f64> + Sync>(
+    n: usize,
+    dist: &D,
+    seed: Option<i64>,
+) -> Vec<f64> {
     match seed {
         Some(seed) => {
             if n < crate::eval::PARALLEL_THRESHOLD {
@@ -346,18 +394,31 @@ pub(crate) fn sample_distribution<D: Distribution<f64> + Sync>(n: usize, dist: &
 /// there's one dependency to reason about instead of two.
 pub(crate) fn native_random_normal(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let n = args.first().and_then(|v| v.as_i64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`random_normal()` requires an integer length as its first argument")
+        Diagnostic::compute_error(
+            "C0201",
+            "`random_normal()` requires an integer length as its first argument",
+        )
     })?;
     if n < 0 {
-        return Err(Diagnostic::compute_error("C0201", format!("`random_normal()` length must be non-negative, found {n}")));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`random_normal()` length must be non-negative, found {n}"),
+        ));
     }
     let mean = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`random_normal()` second argument (mean) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`random_normal()` second argument (mean) must be numeric",
+        )
     })?;
     let sd = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`random_normal()` third argument (sd) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`random_normal()` third argument (sd) must be numeric",
+        )
     })?;
-    let dist = Normal::new(mean, sd).map_err(|e| Diagnostic::compute_error("C0201", format!("`random_normal()`: {e}")))?;
+    let dist = Normal::new(mean, sd)
+        .map_err(|e| Diagnostic::compute_error("C0201", format!("`random_normal()`: {e}")))?;
     let seed = args.get(3).and_then(|v| v.as_i64());
     let data = sample_distribution(n as usize, &dist, seed);
     Ok(Value::Vector(VectorData::from_f64(data)))
@@ -374,18 +435,31 @@ pub(crate) fn native_random_normal(args: Vec<Value>) -> Result<Value, Diagnostic
 /// error.
 pub(crate) fn native_random_gamma(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let n = args.first().and_then(|v| v.as_i64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`random_gamma()` requires an integer length as its first argument")
+        Diagnostic::compute_error(
+            "C0201",
+            "`random_gamma()` requires an integer length as its first argument",
+        )
     })?;
     if n < 0 {
-        return Err(Diagnostic::compute_error("C0201", format!("`random_gamma()` length must be non-negative, found {n}")));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`random_gamma()` length must be non-negative, found {n}"),
+        ));
     }
     let shape = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`random_gamma()` second argument (shape) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`random_gamma()` second argument (shape) must be numeric",
+        )
     })?;
     let rate = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`random_gamma()` third argument (rate) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`random_gamma()` third argument (rate) must be numeric",
+        )
     })?;
-    let dist = Gamma::new(shape, rate).map_err(|e| Diagnostic::compute_error("C0201", format!("`random_gamma()`: {e}")))?;
+    let dist = Gamma::new(shape, rate)
+        .map_err(|e| Diagnostic::compute_error("C0201", format!("`random_gamma()`: {e}")))?;
     let seed = args.get(3).and_then(|v| v.as_i64());
     let data = sample_distribution(n as usize, &dist, seed);
     Ok(Value::Vector(VectorData::from_f64(data)))
@@ -398,29 +472,49 @@ pub(crate) fn native_random_gamma(args: Vec<Value>) -> Result<Value, Diagnostic>
 /// this pass.
 pub(crate) fn native_normal_pdf(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let x = args.first().and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`normal_pdf()` requires a numeric first argument (x)")
+        Diagnostic::compute_error(
+            "C0201",
+            "`normal_pdf()` requires a numeric first argument (x)",
+        )
     })?;
     let mean = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`normal_pdf()` second argument (mean) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`normal_pdf()` second argument (mean) must be numeric",
+        )
     })?;
     let sd = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`normal_pdf()` third argument (sd) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`normal_pdf()` third argument (sd) must be numeric",
+        )
     })?;
-    let dist = Normal::new(mean, sd).map_err(|e| Diagnostic::compute_error("C0201", format!("`normal_pdf()`: {e}")))?;
+    let dist = Normal::new(mean, sd)
+        .map_err(|e| Diagnostic::compute_error("C0201", format!("`normal_pdf()`: {e}")))?;
     Ok(Value::F64(dist.pdf(x)))
 }
 
 pub(crate) fn native_normal_cdf(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let x = args.first().and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`normal_cdf()` requires a numeric first argument (x)")
+        Diagnostic::compute_error(
+            "C0201",
+            "`normal_cdf()` requires a numeric first argument (x)",
+        )
     })?;
     let mean = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`normal_cdf()` second argument (mean) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`normal_cdf()` second argument (mean) must be numeric",
+        )
     })?;
     let sd = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`normal_cdf()` third argument (sd) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`normal_cdf()` third argument (sd) must be numeric",
+        )
     })?;
-    let dist = Normal::new(mean, sd).map_err(|e| Diagnostic::compute_error("C0201", format!("`normal_cdf()`: {e}")))?;
+    let dist = Normal::new(mean, sd)
+        .map_err(|e| Diagnostic::compute_error("C0201", format!("`normal_cdf()`: {e}")))?;
     Ok(Value::F64(dist.cdf(x)))
 }
 
@@ -428,29 +522,49 @@ pub(crate) fn native_normal_cdf(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// parameterization as `random_gamma()`, see its doc comment.
 pub(crate) fn native_gamma_pdf(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let x = args.first().and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`gamma_pdf()` requires a numeric first argument (x)")
+        Diagnostic::compute_error(
+            "C0201",
+            "`gamma_pdf()` requires a numeric first argument (x)",
+        )
     })?;
     let shape = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`gamma_pdf()` second argument (shape) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`gamma_pdf()` second argument (shape) must be numeric",
+        )
     })?;
     let rate = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`gamma_pdf()` third argument (rate) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`gamma_pdf()` third argument (rate) must be numeric",
+        )
     })?;
-    let dist = Gamma::new(shape, rate).map_err(|e| Diagnostic::compute_error("C0201", format!("`gamma_pdf()`: {e}")))?;
+    let dist = Gamma::new(shape, rate)
+        .map_err(|e| Diagnostic::compute_error("C0201", format!("`gamma_pdf()`: {e}")))?;
     Ok(Value::F64(dist.pdf(x)))
 }
 
 pub(crate) fn native_gamma_cdf(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let x = args.first().and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`gamma_cdf()` requires a numeric first argument (x)")
+        Diagnostic::compute_error(
+            "C0201",
+            "`gamma_cdf()` requires a numeric first argument (x)",
+        )
     })?;
     let shape = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`gamma_cdf()` second argument (shape) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`gamma_cdf()` second argument (shape) must be numeric",
+        )
     })?;
     let rate = args.get(2).and_then(|v| v.as_f64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`gamma_cdf()` third argument (rate) must be numeric")
+        Diagnostic::compute_error(
+            "C0201",
+            "`gamma_cdf()` third argument (rate) must be numeric",
+        )
     })?;
-    let dist = Gamma::new(shape, rate).map_err(|e| Diagnostic::compute_error("C0201", format!("`gamma_cdf()`: {e}")))?;
+    let dist = Gamma::new(shape, rate)
+        .map_err(|e| Diagnostic::compute_error("C0201", format!("`gamma_cdf()`: {e}")))?;
     Ok(Value::F64(dist.cdf(x)))
 }
 
@@ -488,13 +602,24 @@ pub(crate) fn native_bootstrap_mean(args: Vec<Value>) -> Result<Value, Diagnosti
         Some(other) => {
             return Err(Diagnostic::compute_error(
                 "C0202",
-                format!("`bootstrap_mean()` expects a Vector as its first argument, found `{}`", other.type_name()),
+                format!(
+                    "`bootstrap_mean()` expects a Vector as its first argument, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
-        None => return Err(Diagnostic::compute_error("C0201", "`bootstrap_mean()` requires 2 arguments")),
+        None => {
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                "`bootstrap_mean()` requires 2 arguments",
+            ));
+        }
     };
     let n_replicas = args.get(1).and_then(|v| v.as_i64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`bootstrap_mean()` requires an integer replica count as its second argument")
+        Diagnostic::compute_error(
+            "C0201",
+            "`bootstrap_mean()` requires an integer replica count as its second argument",
+        )
     })?;
     if n_replicas < 0 {
         return Err(Diagnostic::compute_error(
@@ -512,7 +637,10 @@ pub(crate) fn native_bootstrap_mean(args: Vec<Value>) -> Result<Value, Diagnosti
     let base = view.as_slice();
     let n = base.len();
     if n == 0 {
-        return Err(Diagnostic::statistical_error("S0412", "`bootstrap_mean()` requires a non-empty Vector"));
+        return Err(Diagnostic::statistical_error(
+            "S0412",
+            "`bootstrap_mean()` requires a non-empty Vector",
+        ));
     }
 
     let n_replicas = n_replicas as usize;
@@ -558,15 +686,23 @@ pub(crate) fn native_bootstrap_mean(args: Vec<Value>) -> Result<Value, Diagnosti
 }
 
 pub(crate) fn native_dot(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let a = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`dot()` requires 2 arguments"))?;
-    let b = args.get(1).ok_or_else(|| Diagnostic::compute_error("C0201", "`dot()` requires 2 arguments"))?;
+    let a = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`dot()` requires 2 arguments"))?;
+    let b = args
+        .get(1)
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`dot()` requires 2 arguments"))?;
 
     match (a, b) {
         (Value::Vector(va), Value::Vector(vb)) => {
             if va.len() != vb.len() {
                 return Err(Diagnostic::statistical_error(
                     "S0412",
-                    format!("`dot()`: vectors have different lengths ({} vs {})", va.len(), vb.len()),
+                    format!(
+                        "`dot()`: vectors have different lengths ({} vs {})",
+                        va.len(),
+                        vb.len()
+                    ),
                 ));
             }
             if let Some(na) = va.first_na().or_else(|| vb.first_na()) {
@@ -579,7 +715,11 @@ pub(crate) fn native_dot(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         (l, r) => Err(Diagnostic::compute_error(
             "C0202",
-            format!("`dot()` expects two Vectors, found `{}` and `{}`", l.type_name(), r.type_name()),
+            format!(
+                "`dot()` expects two Vectors, found `{}` and `{}`",
+                l.type_name(),
+                r.type_name()
+            ),
         )),
     }
 }
@@ -612,14 +752,23 @@ pub(crate) fn native_map(interp: &mut Interpreter, args: Vec<Value>) -> Result<V
         Some(other) => {
             return Err(Diagnostic::compute_error(
                 "C0202",
-                format!("`map()` expects a Vector as its first argument, found `{}`", other.type_name()),
+                format!(
+                    "`map()` expects a Vector as its first argument, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
-        None => return Err(Diagnostic::compute_error("C0201", "`map()` requires 2 arguments")),
+        None => {
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                "`map()` requires 2 arguments",
+            ));
+        }
     };
-    let callable = args.get(1).cloned().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`map()` requires 2 arguments")
-    })?;
+    let callable = args
+        .get(1)
+        .cloned()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`map()` requires 2 arguments"))?;
 
     match callable {
         Value::NativeFn(func) => {
@@ -629,9 +778,16 @@ pub(crate) fn native_map(interp: &mut Interpreter, args: Vec<Value>) -> Result<V
             }
             Ok(Value::Vector(VectorData::from_values(out)))
         }
-        Value::Closure { params, body, env: closure_env } => {
+        Value::Closure {
+            params,
+            body,
+            env: closure_env,
+        } => {
             let param_name = params.first().cloned().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`map()`'s function must take exactly 1 parameter")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`map()`'s function must take exactly 1 parameter",
+                )
             })?;
 
             // One-time setup -- see the doc comment above for why this isn't `call_value`
@@ -658,7 +814,10 @@ pub(crate) fn native_map(interp: &mut Interpreter, args: Vec<Value>) -> Result<V
         }
         other => Err(Diagnostic::compute_error(
             "C0203",
-            format!("`map()`'s second argument must be callable, found `{}`", other.type_name()),
+            format!(
+                "`map()`'s second argument must be callable, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }

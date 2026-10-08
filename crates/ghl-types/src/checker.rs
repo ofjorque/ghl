@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use crate::env::TypeEnv;
+use crate::types::{Dim, Type};
+use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::*;
 use ghl_syntax::source::SourceIndex;
-use ghl_diagnostics::Diagnostic;
-use crate::types::{Type, Dim};
-use crate::env::TypeEnv;
+use std::collections::HashMap;
 
 fn callee_name(expr: &Expr) -> Option<&str> {
     match &expr.kind {
@@ -106,11 +106,10 @@ impl TypeChecker {
 
                 let mut param_types = Vec::new();
                 for p in params {
-                    let p_ty = p
-                        .ty
-                        .as_ref()
-                        .map(Type::from_annotation)
-                        .unwrap_or(Type::Any);
+                    let p_ty =
+                        p.ty.as_ref()
+                            .map(Type::from_annotation)
+                            .unwrap_or(Type::Any);
                     param_types.push(p_ty);
                 }
 
@@ -185,11 +184,10 @@ impl TypeChecker {
 
                 let mut param_types = Vec::new();
                 for p in params {
-                    let p_ty = p
-                        .ty
-                        .as_ref()
-                        .map(Type::from_annotation)
-                        .unwrap_or(Type::Any);
+                    let p_ty =
+                        p.ty.as_ref()
+                            .map(Type::from_annotation)
+                            .unwrap_or(Type::Any);
                     param_types.push(p_ty);
                 }
 
@@ -211,7 +209,10 @@ impl TypeChecker {
                 let body_ty = self.check_expr(body);
                 self.env.pop_scope();
 
-                if body_ty.unify(&expected_ret).is_none() && expected_ret != Type::Unit && expected_ret != Type::Any {
+                if body_ty.unify(&expected_ret).is_none()
+                    && expected_ret != Type::Unit
+                    && expected_ret != Type::Any
+                {
                     self.diagnostics.push(
                         Diagnostic::compute_error(
                             "C0102",
@@ -265,22 +266,33 @@ impl TypeChecker {
                     self.diagnostics.push(
                         Diagnostic::compute_error(
                             "C0101",
-                            format!("Cannot implement for undefined struct `{}`", decl.target_type),
+                            format!(
+                                "Cannot implement for undefined struct `{}`",
+                                decl.target_type
+                            ),
                         )
-                        .locate(&self.source_index, &self.source_file, &stmt.span),
+                        .locate(
+                            &self.source_index,
+                            &self.source_file,
+                            &stmt.span,
+                        ),
                     );
                 }
 
-                if let Some(trait_name) = &decl.trait_name {
-                    if self.env.lookup_trait(trait_name).is_none() {
-                        self.diagnostics.push(
-                            Diagnostic::compute_error(
-                                "C0101",
-                                format!("Undefined trait `{}`", trait_name),
-                            )
-                            .locate(&self.source_index, &self.source_file, &stmt.span),
-                        );
-                    }
+                if let Some(trait_name) = &decl.trait_name
+                    && self.env.lookup_trait(trait_name).is_none()
+                {
+                    self.diagnostics.push(
+                        Diagnostic::compute_error(
+                            "C0101",
+                            format!("Undefined trait `{}`", trait_name),
+                        )
+                        .locate(
+                            &self.source_index,
+                            &self.source_file,
+                            &stmt.span,
+                        ),
+                    );
                 }
 
                 let mut assoc_types: HashMap<String, Type> = HashMap::new();
@@ -309,7 +321,14 @@ impl TypeChecker {
                 };
 
                 for item in &decl.items {
-                    if let ImplItem::Method { name, params, ret_ty, body, span } = item {
+                    if let ImplItem::Method {
+                        name,
+                        params,
+                        ret_ty,
+                        body,
+                        span,
+                    } = item
+                    {
                         let expected_ret = ret_ty
                             .as_ref()
                             .map(|ann| resolve_self(Type::from_annotation(ann)))
@@ -317,13 +336,14 @@ impl TypeChecker {
 
                         let mut param_types = Vec::new();
                         for p in params {
-                            let p_ty = if p.name == "&self" || p.name == "&mut self" || p.name == "self" {
-                                target_struct_ty.clone()
-                            } else {
-                                p.ty.as_ref()
-                                    .map(|ann| resolve_self(Type::from_annotation(ann)))
-                                    .unwrap_or(Type::Any)
-                            };
+                            let p_ty =
+                                if p.name == "&self" || p.name == "&mut self" || p.name == "self" {
+                                    target_struct_ty.clone()
+                                } else {
+                                    p.ty.as_ref()
+                                        .map(|ann| resolve_self(Type::from_annotation(ann)))
+                                        .unwrap_or(Type::Any)
+                                };
                             param_types.push(p_ty);
                         }
 
@@ -347,7 +367,10 @@ impl TypeChecker {
                         let body_ty = self.check_expr(body);
                         self.env.pop_scope();
 
-                        if body_ty.unify(&expected_ret).is_none() && expected_ret != Type::Unit && expected_ret != Type::Any {
+                        if body_ty.unify(&expected_ret).is_none()
+                            && expected_ret != Type::Unit
+                            && expected_ret != Type::Any
+                        {
                             self.diagnostics.push(
                                 Diagnostic::compute_error(
                                     "C0102",
@@ -356,7 +379,7 @@ impl TypeChecker {
                                         name, decl.target_type, expected_ret, body_ty
                                     ),
                                 )
-                                .locate(&self.source_index, &self.source_file, &span),
+                                .locate(&self.source_index, &self.source_file, span),
                             );
                         }
                     }
@@ -395,7 +418,10 @@ impl TypeChecker {
                                 format!("Cannot assign to `{}`: not declared as `mut`", name),
                             )
                             .locate(&self.source_index, &self.source_file, &stmt.span)
-                            .with_help(format!("Declare it as `let mut {} = ...;` to allow reassignment.", name)),
+                            .with_help(format!(
+                                "Declare it as `let mut {} = ...;` to allow reassignment.",
+                                name
+                            )),
                         );
                     }
                     Some(info) => {
@@ -415,7 +441,12 @@ impl TypeChecker {
                     }
                 }
             }
-            StmtKind::FieldAssign { target, fields: _, op: _, value } => {
+            StmtKind::FieldAssign {
+                target,
+                fields: _,
+                op: _,
+                value,
+            } => {
                 let _value_ty = self.check_expr(value);
                 match self.env.lookup(target) {
                     None => {
@@ -435,7 +466,10 @@ impl TypeChecker {
                                 format!("Cannot assign to `{}`: not declared as `mut`", target),
                             )
                             .locate(&self.source_index, &self.source_file, &stmt.span)
-                            .with_help(format!("Declare it as `let mut {} = ...;` to allow field mutation.", target)),
+                            .with_help(format!(
+                                "Declare it as `let mut {} = ...;` to allow field mutation.",
+                                target
+                            )),
                         );
                     }
                     Some(_info) => {
@@ -443,7 +477,12 @@ impl TypeChecker {
                     }
                 }
             }
-            StmtKind::IndexAssign { target, indices, op: _, value } => {
+            StmtKind::IndexAssign {
+                target,
+                indices,
+                op: _,
+                value,
+            } => {
                 let value_ty = self.check_expr(value);
                 for idx in indices {
                     match idx {
@@ -480,14 +519,21 @@ impl TypeChecker {
                                 format!("Cannot assign to `{}`: not declared as `mut`", target),
                             )
                             .locate(&self.source_index, &self.source_file, &stmt.span)
-                            .with_help(format!("Declare it as `let mut {} = ...;` to allow in-place mutation.", target)),
+                            .with_help(format!(
+                                "Declare it as `let mut {} = ...;` to allow in-place mutation.",
+                                target
+                            )),
                         );
                     }
                     Some(info) => {
                         let declared_ty = info.ty.clone();
                         match declared_ty {
                             Type::Vector(elem) => {
-                                if value_ty != Type::Any && *elem != Type::Any && value_ty != *elem && value_ty != Type::Vector(elem.clone()) {
+                                if value_ty != Type::Any
+                                    && *elem != Type::Any
+                                    && value_ty != *elem
+                                    && value_ty != Type::Vector(elem.clone())
+                                {
                                     self.diagnostics.push(
                                         Diagnostic::compute_error(
                                             "C0102",
@@ -554,9 +600,16 @@ impl TypeChecker {
                             self.diagnostics.push(
                                 Diagnostic::compute_error(
                                     "C0105",
-                                    format!("Module `{}` cannot be glob imported", use_stmt.path.join("::")),
+                                    format!(
+                                        "Module `{}` cannot be glob imported",
+                                        use_stmt.path.join("::")
+                                    ),
                                 )
-                                .locate(&self.source_index, &self.source_file, &stmt.span),
+                                .locate(
+                                    &self.source_index,
+                                    &self.source_file,
+                                    &stmt.span,
+                                ),
                             );
                         }
                     }
@@ -653,7 +706,11 @@ impl TypeChecker {
                 Type::Vector(Box::new(unified_elem))
             }
 
-            ExprKind::Comprehension { expr, clauses, condition } => {
+            ExprKind::Comprehension {
+                expr,
+                clauses,
+                condition,
+            } => {
                 // Lexical scope protection: variables bound in comprehension do NOT leak into outer scope!
                 self.env.push_scope();
 
@@ -697,7 +754,10 @@ impl TypeChecker {
                 self.env.pop_scope();
 
                 // 2D comprehension without `if` and with numeric body produces Matrix (row-major [fila, columna])
-                if clauses.len() == 2 && condition.is_none() && (body_ty == Type::F64 || body_ty == Type::I64) {
+                if clauses.len() == 2
+                    && condition.is_none()
+                    && (body_ty == Type::F64 || body_ty == Type::I64)
+                {
                     Type::Matrix {
                         elem: Box::new(Type::F64),
                         rows: Dim::Dynamic,
@@ -744,9 +804,15 @@ impl TypeChecker {
 
                 match op {
                     // Arithmetic operators
-                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::Pow => {
+                    BinaryOp::Add
+                    | BinaryOp::Sub
+                    | BinaryOp::Mul
+                    | BinaryOp::Div
+                    | BinaryOp::Mod
+                    | BinaryOp::Pow => {
                         // Anti-R string coercion check
-                        if (t_lhs == Type::String || t_rhs == Type::String) && *op != BinaryOp::Add {
+                        if (t_lhs == Type::String || t_rhs == Type::String) && *op != BinaryOp::Add
+                        {
                             self.diagnostics.push(
                                 Diagnostic::compute_error(
                                     "C0102",
@@ -762,12 +828,16 @@ impl TypeChecker {
                             if t_lhs == Type::String && t_rhs == Type::String {
                                 return Type::String;
                             }
-                            if (t_lhs == Type::String && t_rhs == Type::Any) || (t_rhs == Type::String && t_lhs == Type::Any) {
+                            if (t_lhs == Type::String && t_rhs == Type::Any)
+                                || (t_rhs == Type::String && t_lhs == Type::Any)
+                            {
                                 return Type::String;
                             }
                         }
 
-                        if (t_lhs == Type::String && t_rhs.is_numeric()) || (t_rhs == Type::String && t_lhs.is_numeric()) {
+                        if (t_lhs == Type::String && t_rhs.is_numeric())
+                            || (t_rhs == Type::String && t_lhs.is_numeric())
+                        {
                             self.diagnostics.push(
                                 Diagnostic::compute_error(
                                     "C0102",
@@ -786,10 +856,23 @@ impl TypeChecker {
 
                         // Matrix multiplication: A * B
                         if *op == BinaryOp::Mul {
-                            if let (Type::Matrix { elem: e1, rows: r1, cols: c1 }, Type::Matrix { elem: e2, rows: r2, cols: c2 }) = (&t_lhs, &t_rhs) {
-                                if let (Dim::Known(k1), Dim::Known(k2)) = (c1, r2) {
-                                    if k1 != k2 {
-                                        self.diagnostics.push(
+                            if let (
+                                Type::Matrix {
+                                    elem: e1,
+                                    rows: r1,
+                                    cols: c1,
+                                },
+                                Type::Matrix {
+                                    elem: e2,
+                                    rows: r2,
+                                    cols: c2,
+                                },
+                            ) = (&t_lhs, &t_rhs)
+                            {
+                                if let (Dim::Known(k1), Dim::Known(k2)) = (c1, r2)
+                                    && k1 != k2
+                                {
+                                    self.diagnostics.push(
                                             Diagnostic::compute_error(
                                                 "C0102",
                                                 format!(
@@ -800,8 +883,7 @@ impl TypeChecker {
                                             .locate(&self.source_index, &self.source_file, &expr.span)
                                             .with_help("To multiply matrices A * B, the number of columns in A must equal the number of rows in B."),
                                         );
-                                        return Type::Any;
-                                    }
+                                    return Type::Any;
                                 }
                                 let elem = e1.unify(e2).unwrap_or(Type::F64);
                                 return Type::Matrix {
@@ -812,25 +894,37 @@ impl TypeChecker {
                             }
 
                             // Matrix * Vector or Vector * Matrix
-                            if let (Type::Matrix { elem: e1, .. }, Type::Vector(e2)) = (&t_lhs, &t_rhs) {
+                            if let (Type::Matrix { elem: e1, .. }, Type::Vector(e2)) =
+                                (&t_lhs, &t_rhs)
+                            {
                                 let elem = e1.unify(e2).unwrap_or(Type::F64);
                                 return Type::Vector(Box::new(elem));
                             }
-                            if let (Type::Vector(e1), Type::Matrix { elem: e2, .. }) = (&t_lhs, &t_rhs) {
+                            if let (Type::Vector(e1), Type::Matrix { elem: e2, .. }) =
+                                (&t_lhs, &t_rhs)
+                            {
                                 let elem = e1.unify(e2).unwrap_or(Type::F64);
                                 return Type::Vector(Box::new(elem));
                             }
 
                             // Matrix * Scalar or Scalar * Matrix
-                            if let Type::Matrix { elem, rows, cols } = &t_lhs {
-                                if t_rhs.is_numeric() {
-                                    return Type::Matrix { elem: elem.clone(), rows: *rows, cols: *cols };
-                                }
+                            if let Type::Matrix { elem, rows, cols } = &t_lhs
+                                && t_rhs.is_numeric()
+                            {
+                                return Type::Matrix {
+                                    elem: elem.clone(),
+                                    rows: *rows,
+                                    cols: *cols,
+                                };
                             }
-                            if let Type::Matrix { elem, rows, cols } = &t_rhs {
-                                if t_lhs.is_numeric() {
-                                    return Type::Matrix { elem: elem.clone(), rows: *rows, cols: *cols };
-                                }
+                            if let Type::Matrix { elem, rows, cols } = &t_rhs
+                                && t_lhs.is_numeric()
+                            {
+                                return Type::Matrix {
+                                    elem: elem.clone(),
+                                    rows: *rows,
+                                    cols: *cols,
+                                };
                             }
                         }
 
@@ -842,7 +936,9 @@ impl TypeChecker {
                         } else if t_lhs == Type::I64 && t_rhs == Type::I64 {
                             Type::I64
                         } else if t_lhs.is_vector() || t_rhs.is_vector() {
-                            t_lhs.unify(&t_rhs).unwrap_or(Type::Vector(Box::new(Type::F64)))
+                            t_lhs
+                                .unify(&t_rhs)
+                                .unwrap_or(Type::Vector(Box::new(Type::F64)))
                         } else {
                             Type::F64
                         }
@@ -862,20 +958,34 @@ impl TypeChecker {
                         }
                         if t_rhs.is_vector() {
                             Type::Vector(Box::new(Type::F64))
-                        } else if let (Type::Matrix { rows: r1, cols: c1, .. }, Type::Matrix { elem: e2, rows: r2, cols: c2 }) = (&t_lhs, &t_rhs) {
-                            if let (Dim::Known(k1), Dim::Known(k2)) = (r1, r2) {
-                                if k1 != k2 {
-                                    self.diagnostics.push(
+                        } else if let (
+                            Type::Matrix {
+                                rows: r1, cols: c1, ..
+                            },
+                            Type::Matrix {
+                                elem: e2,
+                                rows: r2,
+                                cols: c2,
+                            },
+                        ) = (&t_lhs, &t_rhs)
+                        {
+                            if let (Dim::Known(k1), Dim::Known(k2)) = (r1, r2)
+                                && k1 != k2
+                            {
+                                self.diagnostics.push(
                                         Diagnostic::compute_error(
                                             "C0102",
                                             format!("Matrix dimension mismatch in solve `\\`: A is ({}x{}), B is ({}x{}) — row dimensions {} and {} must match", r1, c1, r2, c2, k1, k2),
                                         )
                                         .locate(&self.source_index, &self.source_file, &expr.span),
                                     );
-                                    return Type::Any;
-                                }
+                                return Type::Any;
                             }
-                            Type::Matrix { elem: e2.clone(), rows: *c1, cols: *c2 }
+                            Type::Matrix {
+                                elem: e2.clone(),
+                                rows: *c1,
+                                cols: *c2,
+                            }
                         } else {
                             Type::matrix_dynamic(Type::F64)
                         }
@@ -883,7 +993,19 @@ impl TypeChecker {
 
                     // Element-wise matrix operations
                     BinaryOp::DotMul | BinaryOp::DotAdd | BinaryOp::DotSub | BinaryOp::DotDiv => {
-                        if let (Type::Matrix { elem: e1, rows: r1, cols: c1 }, Type::Matrix { elem: e2, rows: r2, cols: c2 }) = (&t_lhs, &t_rhs) {
+                        if let (
+                            Type::Matrix {
+                                elem: e1,
+                                rows: r1,
+                                cols: c1,
+                            },
+                            Type::Matrix {
+                                elem: e2,
+                                rows: r2,
+                                cols: c2,
+                            },
+                        ) = (&t_lhs, &t_rhs)
+                        {
                             if !r1.is_compatible_with(r2) || !c1.is_compatible_with(c2) {
                                 self.diagnostics.push(
                                     Diagnostic::compute_error(
@@ -896,11 +1018,11 @@ impl TypeChecker {
                                 return Type::Any;
                             }
                             let elem = e1.unify(e2).unwrap_or(Type::F64);
-                            return Type::Matrix {
+                            Type::Matrix {
                                 elem: Box::new(elem),
                                 rows: if let Dim::Known(_) = r1 { *r1 } else { *r2 },
                                 cols: if let Dim::Known(_) = c1 { *c1 } else { *c2 },
-                            };
+                            }
                         } else if t_lhs.is_matrix() {
                             t_lhs.clone()
                         } else if t_rhs.is_matrix() {
@@ -953,7 +1075,8 @@ impl TypeChecker {
                 let src_ty = self.check_expr(expr);
                 match &target.kind {
                     ExprKind::Call { callee, args } => {
-                        let arg_ctx = col_ctx || callee_name(callee).is_some_and(is_column_context_verb);
+                        let arg_ctx =
+                            col_ctx || callee_name(callee).is_some_and(is_column_context_verb);
                         let mut call_args = vec![src_ty];
                         for arg in args {
                             call_args.push(self.check_expr_ctx(arg, arg_ctx));
@@ -972,11 +1095,17 @@ impl TypeChecker {
 
             ExprKind::Call { callee, args } => {
                 let arg_ctx = col_ctx || callee_name(callee).is_some_and(is_column_context_verb);
-                let arg_types: Vec<Type> = args.iter().map(|a| self.check_expr_ctx(a, arg_ctx)).collect();
+                let arg_types: Vec<Type> = args
+                    .iter()
+                    .map(|a| self.check_expr_ctx(a, arg_ctx))
+                    .collect();
                 self.check_call_type(callee, &arg_types, expr.span.clone())
             }
 
-            ExprKind::Block { stmts, expr: opt_expr } => {
+            ExprKind::Block {
+                stmts,
+                expr: opt_expr,
+            } => {
                 self.env.push_scope();
                 for s in stmts {
                     self.check_stmt(s);
@@ -1000,9 +1129,16 @@ impl TypeChecker {
                     self.diagnostics.push(
                         Diagnostic::compute_error(
                             "C0102",
-                            format!("`if` condition must evaluate to `bool`, found `{}`", cond_ty),
+                            format!(
+                                "`if` condition must evaluate to `bool`, found `{}`",
+                                cond_ty
+                            ),
                         )
-                        .locate(&self.source_index, &self.source_file, &cond.span),
+                        .locate(
+                            &self.source_index,
+                            &self.source_file,
+                            &cond.span,
+                        ),
                     );
                 }
 
@@ -1036,16 +1172,28 @@ impl TypeChecker {
                     self.diagnostics.push(
                         Diagnostic::compute_error(
                             "C0102",
-                            format!("`while` condition must evaluate to `bool`, found `{}`", cond_ty),
+                            format!(
+                                "`while` condition must evaluate to `bool`, found `{}`",
+                                cond_ty
+                            ),
                         )
-                        .locate(&self.source_index, &self.source_file, &cond.span),
+                        .locate(
+                            &self.source_index,
+                            &self.source_file,
+                            &cond.span,
+                        ),
                     );
                 }
                 self.check_expr(body);
                 Type::Unit
             }
 
-            ExprKind::For { var, start, end, body } => {
+            ExprKind::For {
+                var,
+                start,
+                end,
+                body,
+            } => {
                 let _start_ty = self.check_expr(start);
                 let end_ty = self.check_expr(end);
                 let elem_ty = match &end_ty {
@@ -1053,13 +1201,21 @@ impl TypeChecker {
                     Type::I64 => Type::I64,
                     _ => Type::Any,
                 };
-                if end_ty != Type::I64 && !matches!(end_ty, Type::Vector(_)) && end_ty != Type::Any {
+                if end_ty != Type::I64 && !matches!(end_ty, Type::Vector(_)) && end_ty != Type::Any
+                {
                     self.diagnostics.push(
                         Diagnostic::compute_error(
                             "C0103",
-                            format!("`for` loop iterable must be `i64` range or `Vector`, found `{}`", end_ty),
+                            format!(
+                                "`for` loop iterable must be `i64` range or `Vector`, found `{}`",
+                                end_ty
+                            ),
                         )
-                        .locate(&self.source_index, &self.source_file, &end.span),
+                        .locate(
+                            &self.source_index,
+                            &self.source_file,
+                            &end.span,
+                        ),
                     );
                 }
                 self.env.push_scope();
@@ -1069,7 +1225,10 @@ impl TypeChecker {
                 Type::Unit
             }
 
-            ExprKind::Match { expr: matched, arms } => {
+            ExprKind::Match {
+                expr: matched,
+                arms,
+            } => {
                 let _matched_ty = self.check_expr(matched);
                 let mut unified_result = Type::NA;
 
@@ -1087,7 +1246,9 @@ impl TypeChecker {
                                 ),
                             )
                             .locate(&self.source_index, &self.source_file, &arm.span)
-                            .with_help("All arms in a `match` expression must yield compatible types."),
+                            .with_help(
+                                "All arms in a `match` expression must yield compatible types.",
+                            ),
                         );
                     }
                 }
@@ -1101,7 +1262,9 @@ impl TypeChecker {
                 for eq in equations {
                     match &eq.kind {
                         ExprKind::Formula { .. } => {}
-                        ExprKind::Binary { op: BinaryOp::Eq, .. } => {}
+                        ExprKind::Binary {
+                            op: BinaryOp::Eq, ..
+                        } => {}
                         _ => {
                             let eq_ty = self.check_expr(eq);
                             self.diagnostics.push(
@@ -1157,7 +1320,11 @@ impl TypeChecker {
                                 "C0101",
                                 format!("Struct `{}` is not defined", name),
                             )
-                            .locate(&self.source_index, &self.source_file, &expr.span),
+                            .locate(
+                                &self.source_index,
+                                &self.source_file,
+                                &expr.span,
+                            ),
                         );
                         return Type::Any;
                     }
@@ -1167,7 +1334,8 @@ impl TypeChecker {
                 for (f_name, f_expr) in fields {
                     let f_ty = self.check_expr_ctx(f_expr, col_ctx);
                     let mut unified_f_ty = f_ty.clone();
-                    if let Some((_, expected_ty)) = defined_fields.iter().find(|(n, _)| n == f_name) {
+                    if let Some((_, expected_ty)) = defined_fields.iter().find(|(n, _)| n == f_name)
+                    {
                         if let Some(u) = f_ty.unify(expected_ty) {
                             if *expected_ty == Type::Any {
                                 unified_f_ty = Type::Any;
@@ -1183,7 +1351,11 @@ impl TypeChecker {
                                         f_name, name, expected_ty, f_ty
                                     ),
                                 )
-                                .locate(&self.source_index, &self.source_file, &f_expr.span),
+                                .locate(
+                                    &self.source_index,
+                                    &self.source_file,
+                                    &f_expr.span,
+                                ),
                             );
                         }
                     } else {
@@ -1192,7 +1364,11 @@ impl TypeChecker {
                                 "C0102",
                                 format!("Unknown field `{}` for struct `{}`", f_name, name),
                             )
-                            .locate(&self.source_index, &self.source_file, &f_expr.span),
+                            .locate(
+                                &self.source_index,
+                                &self.source_file,
+                                &f_expr.span,
+                            ),
                         );
                     }
                     actual_fields.push((f_name.clone(), unified_f_ty));
@@ -1218,17 +1394,28 @@ impl TypeChecker {
                                     "C0101",
                                     format!("Field `{}` not found in record", field),
                                 )
-                                .locate(&self.source_index, &self.source_file, &expr.span),
+                                .locate(
+                                    &self.source_index,
+                                    &self.source_file,
+                                    &expr.span,
+                                ),
                             );
                             Type::Any
                         }
                     }
-                    Type::Struct { ref name, ref fields } => {
+                    Type::Struct {
+                        ref name,
+                        ref fields,
+                    } => {
                         if let Some((_, ty)) = fields.iter().find(|(n, _)| n == field) {
                             ty.clone()
                         } else if let Some((params, ret)) = self.env.lookup_method(name, field) {
                             Type::Function {
-                                params: if params.is_empty() { Vec::new() } else { params[1..].to_vec() },
+                                params: if params.is_empty() {
+                                    Vec::new()
+                                } else {
+                                    params[1..].to_vec()
+                                },
                                 ret: Box::new(ret.clone()),
                             }
                         } else {
@@ -1236,14 +1423,18 @@ impl TypeChecker {
                         }
                     }
                     Type::Custom(ref name) => {
-                        if let Some(fields) = self.env.lookup_struct(name) {
-                            if let Some((_, ty)) = fields.iter().find(|(n, _)| n == field) {
-                                return ty.clone();
-                            }
+                        if let Some(fields) = self.env.lookup_struct(name)
+                            && let Some((_, ty)) = fields.iter().find(|(n, _)| n == field)
+                        {
+                            return ty.clone();
                         }
                         if let Some((params, ret)) = self.env.lookup_method(name, field) {
                             Type::Function {
-                                params: if params.is_empty() { Vec::new() } else { params[1..].to_vec() },
+                                params: if params.is_empty() {
+                                    Vec::new()
+                                } else {
+                                    params[1..].to_vec()
+                                },
                                 ret: Box::new(ret.clone()),
                             }
                         } else {
@@ -1291,7 +1482,11 @@ impl TypeChecker {
                             Type::Any
                         }
                     }
-                    Type::Matrix { elem, rows: _, cols: _ } => {
+                    Type::Matrix {
+                        elem,
+                        rows: _,
+                        cols: _,
+                    } => {
                         if indices.len() == 2 {
                             let is_r_scalar = match &indices[0] {
                                 IndexSpec::Expr(e) => self.check_expr_ctx(e, col_ctx) == Type::I64,
@@ -1326,7 +1521,11 @@ impl TypeChecker {
                             "C0103",
                             format!("Range start must be `i64`, found `{}`", start_ty),
                         )
-                        .locate(&self.source_index, &self.source_file, &start.span),
+                        .locate(
+                            &self.source_index,
+                            &self.source_file,
+                            &start.span,
+                        ),
                     );
                 }
                 if end_ty != Type::I64 && end_ty != Type::Any {
@@ -1335,14 +1534,19 @@ impl TypeChecker {
                             "C0103",
                             format!("Range end must be `i64`, found `{}`", end_ty),
                         )
-                        .locate(&self.source_index, &self.source_file, &end.span),
+                        .locate(
+                            &self.source_index,
+                            &self.source_file,
+                            &end.span,
+                        ),
                     );
                 }
                 Type::Custom("Range".into())
             }
 
             ExprKind::Path(segments) => {
-                if segments.len() == 2 && (segments[0] == "NAReason" || segments[0] == "NAReasons") {
+                if segments.len() == 2 && (segments[0] == "NAReason" || segments[0] == "NAReasons")
+                {
                     Type::NA
                 } else if let Some(ty) = crate::modules::lookup_module_item(segments) {
                     ty
@@ -1359,7 +1563,9 @@ impl TypeChecker {
                                 format!("Undefined path `{}`", full_name),
                             )
                             .locate(&self.source_index, &self.source_file, &expr.span)
-                            .with_help("Verify the module and function name, or import it with `use`."),
+                            .with_help(
+                                "Verify the module and function name, or import it with `use`.",
+                            ),
                         );
                         Type::Any
                     }
@@ -1372,7 +1578,7 @@ impl TypeChecker {
         let callee_ty = self.check_expr(callee);
         match callee_ty {
             Type::Function { params, ret } => {
-                if params.len() != arg_types.len() && !params.iter().any(|p| *p == Type::Any) {
+                if params.len() != arg_types.len() && !params.contains(&Type::Any) {
                     self.diagnostics.push(
                         Diagnostic::compute_error(
                             "C0102",
@@ -1382,7 +1588,11 @@ impl TypeChecker {
                                 arg_types.len()
                             ),
                         )
-                        .locate(&self.source_index, &self.source_file, &span),
+                        .locate(
+                            &self.source_index,
+                            &self.source_file,
+                            &span,
+                        ),
                     );
                 }
                 *ret

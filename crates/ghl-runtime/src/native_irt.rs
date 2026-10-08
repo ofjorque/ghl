@@ -3,12 +3,12 @@
 //! Provides Rayon-multithreaded and SIMD-vectorized expectation-maximization (EM)
 //! quadrature integration for multidimensional and unidimensional item response theory.
 
+use crate::value::Value;
+use crate::vector_data::{NumericView, VectorData};
+use ghl_diagnostics::Diagnostic;
+use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use rayon::prelude::*;
-use ghl_diagnostics::Diagnostic;
-use crate::value::Value;
-use crate::vector_data::{VectorData, NumericView};
 
 enum F64Slice<'a> {
     Borrowed(&'a [f64]),
@@ -44,7 +44,10 @@ fn extract_f64_data<'a>(
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("Parameter `{param_name}` must be a Matrix or Vector, found `{}`", other.type_name()),
+            format!(
+                "Parameter `{param_name}` must be a Matrix or Vector, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -57,13 +60,13 @@ pub(crate) fn native_irt_quadrature_grid(args: Vec<Value>) -> Result<Value, Diag
     let k = args.get(1).and_then(|v| v.as_i64()).unwrap_or(15) as usize;
     let b = args.get(2).and_then(|v| v.as_f64()).unwrap_or(3.5);
 
-    if d < 1 || d > 10 {
+    if !(1..=10).contains(&d) {
         return Err(Diagnostic::statistical_error(
             "S0410",
             format!("dimensions D must be between 1 and 10, found {d}"),
         ));
     }
-    if k < 1 || k > 100 {
+    if !(1..=100).contains(&k) {
         return Err(Diagnostic::statistical_error(
             "S0410",
             format!("points_per_dim must be between 1 and 100, found {k}"),
@@ -74,12 +77,18 @@ pub(crate) fn native_irt_quadrature_grid(args: Vec<Value>) -> Result<Value, Diag
     if q_total > 1_000_000 {
         return Err(Diagnostic::statistical_error(
             "S0411",
-            format!("Total quadrature points ({k}^{d} = {q_total}) exceeds safety limit of 1,000,000"),
+            format!(
+                "Total quadrature points ({k}^{d} = {q_total}) exceeds safety limit of 1,000,000"
+            ),
         ));
     }
 
     // 1D grid points and standard normal densities
-    let delta = if k > 1 { (2.0 * b) / ((k - 1) as f64) } else { 0.0 };
+    let delta = if k > 1 {
+        (2.0 * b) / ((k - 1) as f64)
+    } else {
+        0.0
+    };
     let mut x_1d = Vec::with_capacity(k);
     let mut w_1d = Vec::with_capacity(k);
     let inv_sqrt_2pi = 1.0 / (2.0 * std::f64::consts::PI).sqrt();
@@ -117,7 +126,10 @@ pub(crate) fn native_irt_quadrature_grid(args: Vec<Value>) -> Result<Value, Diag
 
     let mut fields = BTreeMap::new();
     fields.insert("nodes".into(), Value::matrix(q_total, d, nodes));
-    fields.insert("weights".into(), Value::Vector(VectorData::from_f64(weights)));
+    fields.insert(
+        "weights".into(),
+        Value::Vector(VectorData::from_f64(weights)),
+    );
     fields.insert("n_points".into(), Value::I64(q_total as i64));
     fields.insert("n_dimensions".into(), Value::I64(d as i64));
 
@@ -151,13 +163,19 @@ pub(crate) fn native_irt_em_quadrature_kernel(args: Vec<Value>) -> Result<Value,
     let (d_rows, _, d_slice) = extract_f64_data(&args[4], "d_intercepts")?;
     let j_items = d_rows;
     if j_items == 0 {
-        return Err(Diagnostic::statistical_error("S0200", "d_intercepts cannot be empty"));
+        return Err(Diagnostic::statistical_error(
+            "S0200",
+            "d_intercepts cannot be empty",
+        ));
     }
 
     let (w_rows, _, w_slice) = extract_f64_data(&args[2], "weights")?;
     let q_nodes = w_rows;
     if q_nodes == 0 {
-        return Err(Diagnostic::statistical_error("S0200", "weights cannot be empty"));
+        return Err(Diagnostic::statistical_error(
+            "S0200",
+            "weights cannot be empty",
+        ));
     }
 
     let (n_rows, n_cols, nodes_slice) = extract_f64_data(&args[1], "nodes")?;
@@ -173,13 +191,20 @@ pub(crate) fn native_irt_em_quadrature_kernel(args: Vec<Value>) -> Result<Value,
         if nodes_slice.as_slice().len() % q_nodes != 0 {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("nodes length ({}) must be a multiple of weights length ({})", nodes_slice.as_slice().len(), q_nodes),
+                format!(
+                    "nodes length ({}) must be a multiple of weights length ({})",
+                    nodes_slice.as_slice().len(),
+                    q_nodes
+                ),
             ));
         }
         nodes_slice.as_slice().len() / q_nodes
     };
     if d_dim == 0 {
-        return Err(Diagnostic::statistical_error("S0200", "latent dimension D must be >= 1"));
+        return Err(Diagnostic::statistical_error(
+            "S0200",
+            "latent dimension D must be >= 1",
+        ));
     }
 
     let (_a_rows, _a_cols, a_slice) = extract_f64_data(&args[3], "a_matrix")?;
@@ -187,7 +212,13 @@ pub(crate) fn native_irt_em_quadrature_kernel(args: Vec<Value>) -> Result<Value,
     if a_slice.as_slice().len() != expected_a_len {
         return Err(Diagnostic::statistical_error(
             "S0200",
-            format!("a_matrix length ({}) must equal J*D ({}*{} = {})", a_slice.as_slice().len(), j_items, d_dim, expected_a_len),
+            format!(
+                "a_matrix length ({}) must equal J*D ({}*{} = {})",
+                a_slice.as_slice().len(),
+                j_items,
+                d_dim,
+                expected_a_len
+            ),
         ));
     }
 
@@ -204,13 +235,20 @@ pub(crate) fn native_irt_em_quadrature_kernel(args: Vec<Value>) -> Result<Value,
         if resp_slice.as_slice().len() % j_items != 0 {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("responses length ({}) must be a multiple of items J ({})", resp_slice.as_slice().len(), j_items),
+                format!(
+                    "responses length ({}) must be a multiple of items J ({})",
+                    resp_slice.as_slice().len(),
+                    j_items
+                ),
             ));
         }
         resp_slice.as_slice().len() / j_items
     };
     if n_persons == 0 {
-        return Err(Diagnostic::statistical_error("S0200", "responses cannot have 0 respondents"));
+        return Err(Diagnostic::statistical_error(
+            "S0200",
+            "responses cannot have 0 respondents",
+        ));
     }
 
     let d_vec = d_slice.as_slice();
@@ -265,7 +303,13 @@ pub(crate) fn native_irt_em_quadrature_kernel(args: Vec<Value>) -> Result<Value,
         .zip(se_mat.par_chunks_mut(d_dim))
         .enumerate()
         .fold(
-            || (0.0f64, vec![0.0f64; q_nodes], vec![0.0f64; j_items * q_nodes]),
+            || {
+                (
+                    0.0f64,
+                    vec![0.0f64; q_nodes],
+                    vec![0.0f64; j_items * q_nodes],
+                )
+            },
             |(mut acc_ll, mut acc_nq, mut acc_rjq), (i, ((post_row, theta_row), se_row))| {
                 let resp_row = &resp_mat[i * j_items..(i + 1) * j_items];
 
@@ -335,7 +379,13 @@ pub(crate) fn native_irt_em_quadrature_kernel(args: Vec<Value>) -> Result<Value,
             },
         )
         .reduce(
-            || (0.0f64, vec![0.0f64; q_nodes], vec![0.0f64; j_items * q_nodes]),
+            || {
+                (
+                    0.0f64,
+                    vec![0.0f64; q_nodes],
+                    vec![0.0f64; j_items * q_nodes],
+                )
+            },
             |(ll_a, mut nq_a, mut rjq_a), (ll_b, nq_b, rjq_b)| {
                 for q in 0..q_nodes {
                     nq_a[q] += nq_b[q];
@@ -348,10 +398,19 @@ pub(crate) fn native_irt_em_quadrature_kernel(args: Vec<Value>) -> Result<Value,
         );
 
     let mut fields = BTreeMap::new();
-    fields.insert("expected_counts".into(), Value::matrix(j_items, q_nodes, expected_counts));
-    fields.insert("node_counts".into(), Value::Vector(VectorData::from_f64(node_counts)));
+    fields.insert(
+        "expected_counts".into(),
+        Value::matrix(j_items, q_nodes, expected_counts),
+    );
+    fields.insert(
+        "node_counts".into(),
+        Value::Vector(VectorData::from_f64(node_counts)),
+    );
     fields.insert("log_likelihood".into(), Value::F64(total_loglik));
-    fields.insert("posterior".into(), Value::matrix(n_persons, q_nodes, post_mat));
+    fields.insert(
+        "posterior".into(),
+        Value::matrix(n_persons, q_nodes, post_mat),
+    );
     fields.insert("thetas".into(), Value::matrix(n_persons, d_dim, thetas_mat));
     fields.insert("se".into(), Value::matrix(n_persons, d_dim, se_mat));
 

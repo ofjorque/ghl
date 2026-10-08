@@ -7,10 +7,10 @@
 //!
 //! Usage: `cargo run --release --example spike_summarize_high_cardinality -p ghl-runtime -- <rows> <n_groups>`
 
-use std::time::Instant;
+use ghl_runtime::Value;
 use ghl_runtime::io::{df_group_by, df_summarize};
 use ghl_runtime::polars_bridge::build_dataframe;
-use ghl_runtime::Value;
+use std::time::Instant;
 
 fn xorshift_next(state: &mut u64) -> u64 {
     let mut x = *state;
@@ -30,7 +30,10 @@ fn height_of(df: &Value) -> usize {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let rows: u64 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(2_000_000);
+    let rows: u64 = args
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2_000_000);
     let n_groups: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(100_000);
 
     let mut state: u64 = 0x9E37_79B9_7F4A_7C15 ^ rows;
@@ -48,16 +51,29 @@ fn main() {
         ("group_key".to_string(), group_col),
         ("value_b".to_string(), value_b),
         ("value_c".to_string(), value_c),
-    ]).expect("build_dataframe should succeed");
+    ])
+    .expect("build_dataframe should succeed");
     let df = Value::DataFrame { frame, na_reasons };
 
     println!("In-memory dataset: {rows} rows, {n_groups} groups");
 
     let specs = vec![
         ("n".to_string(), "count".to_string(), None),
-        ("mean_value_b".to_string(), "mean".to_string(), Some("value_b".to_string())),
-        ("max_value_b".to_string(), "max".to_string(), Some("value_b".to_string())),
-        ("sum_value_c".to_string(), "sum".to_string(), Some("value_c".to_string())),
+        (
+            "mean_value_b".to_string(),
+            "mean".to_string(),
+            Some("value_b".to_string()),
+        ),
+        (
+            "max_value_b".to_string(),
+            "max".to_string(),
+            Some("value_b".to_string()),
+        ),
+        (
+            "sum_value_c".to_string(),
+            "sum".to_string(),
+            Some("value_c".to_string()),
+        ),
     ];
 
     let start = Instant::now();

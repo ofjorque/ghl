@@ -1,20 +1,22 @@
-use std::fmt;
-use ghl_diagnostics::{
-    CockpitPanel, CockpitTable, RenderCaps, TableAlignment, TableColumn, Diagnostic,
-};
-use ghl_plot::{AestheticMap, FacetSpec, GeomLayer, PlotSpec};
-use ghl_syntax::ast::{Expr, BinaryOp, FormulaOp};
-use ghl_types::ContrastScheme;
 use crate::env::RuntimeEnv;
-use crate::neko::FittedModel;
 use crate::glm::FittedGlm;
 use crate::gmm::FittedGmm;
+use crate::neko::FittedModel;
+use ghl_diagnostics::{
+    CockpitPanel, CockpitTable, Diagnostic, RenderCaps, TableAlignment, TableColumn,
+};
+use ghl_plot::{AestheticMap, FacetSpec, GeomLayer, PlotSpec};
+use ghl_syntax::ast::{BinaryOp, Expr, FormulaOp};
+use ghl_types::ContrastScheme;
+use std::fmt;
 
 pub type NativeFunction = fn(Vec<Value>) -> Result<Value, Diagnostic>;
 
 /// First-class callable wrapper around Cranelift JIT-compiled native machine code (RFC 13).
 #[derive(Clone)]
-pub struct JitFunction(pub std::sync::Arc<dyn Fn(Vec<Value>) -> Result<Value, Diagnostic> + Send + Sync>);
+pub struct JitFunction(
+    pub std::sync::Arc<dyn Fn(Vec<Value>) -> Result<Value, Diagnostic> + Send + Sync>,
+);
 
 impl JitFunction {
     pub fn new<F>(f: F) -> Self
@@ -266,9 +268,9 @@ impl Value {
     /// absorbed fixed effects, instruments, and raw parts).
     pub fn formula_parts(&self) -> Option<FormulaParts> {
         match self {
-            Value::Formula { response, parts, .. } => {
-                Some(FormulaParts::new(response.clone(), parts.clone()))
-            }
+            Value::Formula {
+                response, parts, ..
+            } => Some(FormulaParts::new(response.clone(), parts.clone())),
             _ => None,
         }
     }
@@ -295,7 +297,11 @@ impl Value {
     pub fn as_i64(&self) -> Option<i64> {
         match self {
             Value::I64(n) => Some(*n),
-            Value::F64(x) if x.fract() == 0.0 && *x >= (i64::MIN as f64) && *x <= (i64::MAX as f64) => Some(*x as i64),
+            Value::F64(x)
+                if x.fract() == 0.0 && *x >= (i64::MIN as f64) && *x <= (i64::MAX as f64) =>
+            {
+                Some(*x as i64)
+            }
             _ => None,
         }
     }
@@ -377,45 +383,100 @@ impl PartialEq for Value {
             (Value::NA(a), Value::NA(b)) => a == b,
             (Value::Vector(a), Value::Vector(b)) => a == b,
             (
-                Value::Matrix { rows: r1, cols: c1, data: d1 },
-                Value::Matrix { rows: r2, cols: c2, data: d2 },
+                Value::Matrix {
+                    rows: r1,
+                    cols: c1,
+                    data: d1,
+                },
+                Value::Matrix {
+                    rows: r2,
+                    cols: c2,
+                    data: d2,
+                },
             ) => r1 == r2 && c1 == c2 && d1 == d2,
             (
-                Value::DataFrame { frame: f1, na_reasons: n1 },
-                Value::DataFrame { frame: f2, na_reasons: n2 },
+                Value::DataFrame {
+                    frame: f1,
+                    na_reasons: n1,
+                },
+                Value::DataFrame {
+                    frame: f2,
+                    na_reasons: n2,
+                },
             ) => f1.columns() == f2.columns() && n1 == n2,
             (Value::ColRef(c1), Value::ColRef(c2)) => c1 == c2,
             (
-                Value::ColPredicate { col: c1, op: o1, rhs: r1 },
-                Value::ColPredicate { col: c2, op: o2, rhs: r2 },
+                Value::ColPredicate {
+                    col: c1,
+                    op: o1,
+                    rhs: r1,
+                },
+                Value::ColPredicate {
+                    col: c2,
+                    op: o2,
+                    rhs: r2,
+                },
             ) => c1 == c2 && o1 == o2 && r1 == r2,
             (Value::IsNaPredicate(c1), Value::IsNaPredicate(c2)) => c1 == c2,
             (Value::NotPredicate(a), Value::NotPredicate(b)) => a == b,
             (Value::AndPredicate(a1, b1), Value::AndPredicate(a2, b2)) => a1 == a2 && b1 == b2,
             (Value::OrPredicate(a1, b1), Value::OrPredicate(a2, b2)) => a1 == a2 && b1 == b2,
             (
-                Value::Factor { levels: l1, indices: i1, ordered: o1, contrast: k1 },
-                Value::Factor { levels: l2, indices: i2, ordered: o2, contrast: k2 },
+                Value::Factor {
+                    levels: l1,
+                    indices: i1,
+                    ordered: o1,
+                    contrast: k1,
+                },
+                Value::Factor {
+                    levels: l2,
+                    indices: i2,
+                    ordered: o2,
+                    contrast: k2,
+                },
             ) => l1 == l2 && i1 == i2 && o1 == o2 && k1 == k2,
             (
-                Value::Formula { op: op1, response: r1, terms: t1, parts: p1 },
-                Value::Formula { op: op2, response: r2, terms: t2, parts: p2 },
+                Value::Formula {
+                    op: op1,
+                    response: r1,
+                    terms: t1,
+                    parts: p1,
+                },
+                Value::Formula {
+                    op: op2,
+                    response: r2,
+                    terms: t2,
+                    parts: p2,
+                },
             ) => op1 == op2 && r1 == r2 && t1 == t2 && p1 == p2,
             (Value::SemSpec(a), Value::SemSpec(b)) => a == b,
             (Value::ModelFit(m1), Value::ModelFit(m2)) => m1 == m2,
             (Value::GlmFit(m1), Value::GlmFit(m2)) => m1 == m2,
             (Value::GmmFit(m1), Value::GmmFit(m2)) => m1 == m2,
+            (Value::QrDecomp { q: q1, r: r1 }, Value::QrDecomp { q: q2, r: r2 }) => {
+                q1 == q2 && r1 == r2
+            }
             (
-                Value::QrDecomp { q: q1, r: r1 },
-                Value::QrDecomp { q: q2, r: r2 },
-            ) => q1 == q2 && r1 == r2,
-            (
-                Value::SvdDecomp { u: u1, s: s1, v: v1 },
-                Value::SvdDecomp { u: u2, s: s2, v: v2 },
+                Value::SvdDecomp {
+                    u: u1,
+                    s: s1,
+                    v: v1,
+                },
+                Value::SvdDecomp {
+                    u: u2,
+                    s: s2,
+                    v: v2,
+                },
             ) => u1 == u2 && s1 == s2 && v1 == v2,
             (
-                Value::EigenDecomp { values: a1, vectors: b1 },
-                Value::EigenDecomp { values: a2, vectors: b2 },
+                Value::EigenDecomp {
+                    values: a1,
+                    vectors: b1,
+                },
+                Value::EigenDecomp {
+                    values: a2,
+                    vectors: b2,
+                },
             ) => a1 == a2 && b1 == b2,
             (Value::Plot(p1), Value::Plot(p2)) => p1 == p2,
             (Value::Aesthetic(a1), Value::Aesthetic(a2)) => a1 == a2,
@@ -425,36 +486,55 @@ impl PartialEq for Value {
             (Value::Scale(s1), Value::Scale(s2)) => s1 == s2,
             (Value::Labels(l1), Value::Labels(l2)) => l1 == l2,
             (
-                Value::GroupedDataFrame { frame: f1, na_reasons: n1, keys: k1 },
-                Value::GroupedDataFrame { frame: f2, na_reasons: n2, keys: k2 },
+                Value::GroupedDataFrame {
+                    frame: f1,
+                    na_reasons: n1,
+                    keys: k1,
+                },
+                Value::GroupedDataFrame {
+                    frame: f2,
+                    na_reasons: n2,
+                    keys: k2,
+                },
             ) => f1.columns() == f2.columns() && n1 == n2 && k1 == k2,
             (
                 Value::GroupedLazyFrame { keys: k1, .. },
                 Value::GroupedLazyFrame { keys: k2, .. },
             ) => k1 == k2,
-            (
-                Value::AggSpec { kind: k1, col: c1 },
-                Value::AggSpec { kind: k2, col: c2 },
-            ) => k1 == k2 && c1 == c2,
-            (
-                Value::SortSpec { col: c1, desc: d1 },
-                Value::SortSpec { col: c2, desc: d2 },
-            ) => c1 == c2 && d1 == d2,
+            (Value::AggSpec { kind: k1, col: c1 }, Value::AggSpec { kind: k2, col: c2 }) => {
+                k1 == k2 && c1 == c2
+            }
+            (Value::SortSpec { col: c1, desc: d1 }, Value::SortSpec { col: c2, desc: d2 }) => {
+                c1 == c2 && d1 == d2
+            }
             (Value::NamedArg(n1, v1), Value::NamedArg(n2, v2)) => n1 == n2 && v1 == v2,
             (Value::Arena(a1), Value::Arena(a2)) => std::sync::Arc::ptr_eq(a1, a2),
             (Value::Record(a1), Value::Record(a2)) => a1 == a2,
             (
-                Value::Struct { name: n1, fields: f1 },
-                Value::Struct { name: n2, fields: f2 },
+                Value::Struct {
+                    name: n1,
+                    fields: f1,
+                },
+                Value::Struct {
+                    name: n2,
+                    fields: f2,
+                },
             ) => n1 == n2 && f1 == f2,
             (
-                Value::Range { start: s1, end: e1, inclusive: i1 },
-                Value::Range { start: s2, end: e2, inclusive: i2 },
+                Value::Range {
+                    start: s1,
+                    end: e1,
+                    inclusive: i1,
+                },
+                Value::Range {
+                    start: s2,
+                    end: e2,
+                    inclusive: i2,
+                },
             ) => s1 == s2 && e1 == e2 && i1 == i2,
-            (
-                Value::JitFn { name: n1, func: f1 },
-                Value::JitFn { name: n2, func: f2 },
-            ) => n1 == n2 && std::sync::Arc::ptr_eq(&f1.0, &f2.0),
+            (Value::JitFn { name: n1, func: f1 }, Value::JitFn { name: n2, func: f2 }) => {
+                n1 == n2 && std::sync::Arc::ptr_eq(&f1.0, &f2.0)
+            }
             (Value::CockpitPanel(p1), Value::CockpitPanel(p2)) => p1 == p2,
             _ => false,
         }
@@ -576,7 +656,7 @@ impl Value {
                         ("[", "]")
                     };
 
-                    out.push_str(" ");
+                    out.push(' ');
                     out.push_str(&caps.dim(open_b));
                     for c in 0..*cols {
                         let s = &formatted_cells[r * cols + c];
@@ -808,7 +888,7 @@ pub struct FormulaParts {
 
 impl FormulaParts {
     pub fn new(response: String, parts: Vec<Vec<String>>) -> Self {
-        let terms = parts.get(0).cloned().unwrap_or_default();
+        let terms = parts.first().cloned().unwrap_or_default();
         let absorbed = parts.get(1).cloned().unwrap_or_default();
         let instruments = parts.get(2).cloned().unwrap_or_default();
         Self {
@@ -850,4 +930,3 @@ impl FormulaParts {
         }
     }
 }
-

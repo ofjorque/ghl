@@ -5,10 +5,10 @@
 //! [`HOST_FUNCTIONS`] here; both [`crate::jit::JitEngine`] and
 //! [`crate::aot::AotEngine`] derive their import declarations from this table.
 
-use std::collections::HashMap;
 use cranelift::prelude::*;
 use cranelift_module::{FuncId, Linkage, Module};
 use ghl_diagnostics::Diagnostic;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy)]
 pub enum HostArity {
@@ -72,18 +72,65 @@ extern "C" fn ghl_host_ceil(x: f64) -> f64 {
 
 pub const HOST_FUNCTIONS: &[HostFn] = &[
     HostFn {
-        name: "clock_now", arity: HostArity::Zero, ptr: ghl_host_clock_now as *const u8,
+        name: "clock_now",
+        arity: HostArity::Zero,
+        ptr: ghl_host_clock_now as *const u8,
         rust_body: "std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)",
     },
-    HostFn { name: "sqrt", arity: HostArity::Unary, ptr: ghl_host_sqrt as *const u8, rust_body: "x.sqrt()" },
-    HostFn { name: "sin", arity: HostArity::Unary, ptr: ghl_host_sin as *const u8, rust_body: "x.sin()" },
-    HostFn { name: "cos", arity: HostArity::Unary, ptr: ghl_host_cos as *const u8, rust_body: "x.cos()" },
-    HostFn { name: "exp", arity: HostArity::Unary, ptr: ghl_host_exp as *const u8, rust_body: "x.exp()" },
-    HostFn { name: "ln", arity: HostArity::Unary, ptr: ghl_host_ln as *const u8, rust_body: "x.ln()" },
-    HostFn { name: "abs", arity: HostArity::Unary, ptr: ghl_host_abs as *const u8, rust_body: "x.abs()" },
-    HostFn { name: "floor", arity: HostArity::Unary, ptr: ghl_host_floor as *const u8, rust_body: "x.floor()" },
-    HostFn { name: "ceil", arity: HostArity::Unary, ptr: ghl_host_ceil as *const u8, rust_body: "x.ceil()" },
-    HostFn { name: "pow", arity: HostArity::Binary, ptr: ghl_host_pow as *const u8, rust_body: "x.powf(y)" },
+    HostFn {
+        name: "sqrt",
+        arity: HostArity::Unary,
+        ptr: ghl_host_sqrt as *const u8,
+        rust_body: "x.sqrt()",
+    },
+    HostFn {
+        name: "sin",
+        arity: HostArity::Unary,
+        ptr: ghl_host_sin as *const u8,
+        rust_body: "x.sin()",
+    },
+    HostFn {
+        name: "cos",
+        arity: HostArity::Unary,
+        ptr: ghl_host_cos as *const u8,
+        rust_body: "x.cos()",
+    },
+    HostFn {
+        name: "exp",
+        arity: HostArity::Unary,
+        ptr: ghl_host_exp as *const u8,
+        rust_body: "x.exp()",
+    },
+    HostFn {
+        name: "ln",
+        arity: HostArity::Unary,
+        ptr: ghl_host_ln as *const u8,
+        rust_body: "x.ln()",
+    },
+    HostFn {
+        name: "abs",
+        arity: HostArity::Unary,
+        ptr: ghl_host_abs as *const u8,
+        rust_body: "x.abs()",
+    },
+    HostFn {
+        name: "floor",
+        arity: HostArity::Unary,
+        ptr: ghl_host_floor as *const u8,
+        rust_body: "x.floor()",
+    },
+    HostFn {
+        name: "ceil",
+        arity: HostArity::Unary,
+        ptr: ghl_host_ceil as *const u8,
+        rust_body: "x.ceil()",
+    },
+    HostFn {
+        name: "pow",
+        arity: HostArity::Binary,
+        ptr: ghl_host_pow as *const u8,
+        rust_body: "x.powf(y)",
+    },
 ];
 
 fn signature_for<M: Module>(module: &M, arity: HostArity) -> Signature {
@@ -109,12 +156,14 @@ pub fn declare_host_imports<M: Module>(
 ) -> Result<(), Diagnostic> {
     for host_fn in HOST_FUNCTIONS {
         let sig = signature_for(module, host_fn.arity);
-        let id = module.declare_function(host_fn.name, Linkage::Import, &sig).map_err(|e| {
-            Diagnostic::compute_error(
-                "C0417",
-                format!("Failed to declare host import `{}`: {e}", host_fn.name),
-            )
-        })?;
+        let id = module
+            .declare_function(host_fn.name, Linkage::Import, &sig)
+            .map_err(|e| {
+                Diagnostic::compute_error(
+                    "C0417",
+                    format!("Failed to declare host import `{}`: {e}", host_fn.name),
+                )
+            })?;
         func_ids.insert(host_fn.name.to_string(), id);
     }
     Ok(())

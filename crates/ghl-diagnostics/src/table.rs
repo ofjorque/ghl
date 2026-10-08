@@ -49,6 +49,12 @@ pub struct CockpitTable {
     pub max_display_rows: usize,
 }
 
+impl Default for CockpitTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CockpitTable {
     pub fn new() -> Self {
         Self {
@@ -95,27 +101,33 @@ impl CockpitTable {
         let num_cols = self.columns.len();
 
         // Check if truncation is needed
-        let (display_rows, _is_truncated) = if total_rows > self.max_display_rows && self.max_display_rows >= 6 {
-            let head_count = self.max_display_rows.saturating_sub(3);
-            let tail_count = 3;
-            let mut subset: Vec<(usize, &Vec<String>)> = Vec::new();
-            for i in 0..head_count {
-                if let Some(r) = self.rows.get(i) {
-                    subset.push((i + 1, r));
+        let (display_rows, _is_truncated) =
+            if total_rows > self.max_display_rows && self.max_display_rows >= 6 {
+                let head_count = self.max_display_rows.saturating_sub(3);
+                let tail_count = 3;
+                let mut subset: Vec<(usize, &Vec<String>)> = Vec::new();
+                for i in 0..head_count {
+                    if let Some(r) = self.rows.get(i) {
+                        subset.push((i + 1, r));
+                    }
                 }
-            }
-            // Ellipsis placeholder row represented by index 0
-            subset.push((0, &self.rows[0])); 
-            for i in (total_rows - tail_count)..total_rows {
-                if let Some(r) = self.rows.get(i) {
-                    subset.push((i + 1, r));
+                // Ellipsis placeholder row represented by index 0
+                subset.push((0, &self.rows[0]));
+                for i in (total_rows - tail_count)..total_rows {
+                    if let Some(r) = self.rows.get(i) {
+                        subset.push((i + 1, r));
+                    }
                 }
-            }
-            (subset, true)
-        } else {
-            let subset: Vec<(usize, &Vec<String>)> = self.rows.iter().enumerate().map(|(i, r)| (i + 1, r)).collect();
-            (subset, false)
-        };
+                (subset, true)
+            } else {
+                let subset: Vec<(usize, &Vec<String>)> = self
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| (i + 1, r))
+                    .collect();
+                (subset, false)
+            };
 
         // Determine widths
         let row_num_width = if self.show_row_numbers {
@@ -201,7 +213,12 @@ impl CockpitTable {
                 TableAlignment::Center => {
                     let left_pad = pad.len() / 2;
                     let right_pad = pad.len() - left_pad;
-                    format!(" {}{}{} ", " ".repeat(left_pad), styled_header, " ".repeat(right_pad))
+                    format!(
+                        " {}{}{} ",
+                        " ".repeat(left_pad),
+                        styled_header,
+                        " ".repeat(right_pad)
+                    )
                 }
             };
             out.push_str(&cell_str);
@@ -274,7 +291,12 @@ impl CockpitTable {
                     TableAlignment::Center => {
                         let left_pad = pad.len() / 2;
                         let right_pad = pad.len() - left_pad;
-                        format!(" {}{}{} ", " ".repeat(left_pad), styled_val, " ".repeat(right_pad))
+                        format!(
+                            " {}{}{} ",
+                            " ".repeat(left_pad),
+                            styled_val,
+                            " ".repeat(right_pad)
+                        )
                     }
                 };
                 out.push_str(&cell_str);
@@ -318,9 +340,21 @@ mod tests {
     fn test_table_unicode_render() {
         let caps = RenderCaps::rich_terminal(80);
         let mut table = CockpitTable::new();
-        table.add_column(TableColumn::new("id").with_type("i64").with_alignment(TableAlignment::Right));
-        table.add_column(TableColumn::new("city").with_type("str").with_alignment(TableAlignment::Left));
-        table.add_column(TableColumn::new("temp").with_type("f64").with_alignment(TableAlignment::Right));
+        table.add_column(
+            TableColumn::new("id")
+                .with_type("i64")
+                .with_alignment(TableAlignment::Right),
+        );
+        table.add_column(
+            TableColumn::new("city")
+                .with_type("str")
+                .with_alignment(TableAlignment::Left),
+        );
+        table.add_column(
+            TableColumn::new("temp")
+                .with_type("f64")
+                .with_alignment(TableAlignment::Right),
+        );
 
         table.add_row(vec!["1".into(), "Tokyo".into(), "18.5".into()]);
         table.add_row(vec!["2".into(), "Santiago".into(), "24.0".into()]);

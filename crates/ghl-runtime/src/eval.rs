@@ -1,11 +1,11 @@
+use crate::env::RuntimeEnv;
+use crate::matrix::MatrixOps;
+use crate::value::Value;
+use crate::vector_data::VectorData;
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::*;
 use polars_core::prelude::DataType;
 use rayon::prelude::*;
-use crate::value::Value;
-use crate::vector_data::VectorData;
-use crate::env::RuntimeEnv;
-use crate::matrix::MatrixOps;
 
 /// See `Interpreter::eval_expr_tail`.
 enum TailOutcome {
@@ -44,6 +44,12 @@ impl DimSelection {
             DimSelection::Indices(idx) => idx.clone(),
             DimSelection::All => (0..dim_len).collect(),
         }
+    }
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -94,7 +100,9 @@ impl Interpreter {
                 self.env.set(name.clone(), val.clone());
                 Ok(val)
             }
-            StmtKind::Fn { name, params, body, .. } => {
+            StmtKind::Fn {
+                name, params, body, ..
+            } => {
                 // If precompiled to native machine code via Cranelift JIT, preserve it
                 if let Some(existing @ Value::JitFn { .. }) = self.env.get(name) {
                     return Ok(existing);
@@ -117,7 +125,10 @@ impl Interpreter {
             StmtKind::Trait(_) => Ok(Value::Unit),
             StmtKind::Impl(impl_decl) => {
                 for item in &impl_decl.items {
-                    if let ImplItem::Method { name, params, body, .. } = item {
+                    if let ImplItem::Method {
+                        name, params, body, ..
+                    } = item
+                    {
                         let param_names: Vec<String> = params
                             .iter()
                             .map(|p| {
@@ -131,7 +142,11 @@ impl Interpreter {
                         let method_closure = Value::Closure {
                             params: param_names,
                             body: body.clone(),
-                            env: if self.env.scopes.len() > 1 { self.env.clone() } else { RuntimeEnv::new() },
+                            env: if self.env.scopes.len() > 1 {
+                                self.env.clone()
+                            } else {
+                                RuntimeEnv::new()
+                            },
                         };
                         let method_key = format!("{}::{}", impl_decl.target_type, name);
                         self.env.set(method_key, method_closure);
@@ -178,11 +193,21 @@ impl Interpreter {
                 }
                 Ok(final_val)
             }
-            StmtKind::FieldAssign { target, fields, op, value } => {
+            StmtKind::FieldAssign {
+                target,
+                fields,
+                op,
+                value,
+            } => {
                 let rhs_val = self.eval_expr(value)?;
                 self.eval_field_assign(target, fields, *op, rhs_val)
             }
-            StmtKind::IndexAssign { target, indices, op, value } => {
+            StmtKind::IndexAssign {
+                target,
+                indices,
+                op,
+                value,
+            } => {
                 let rhs_val = self.eval_expr(value)?;
                 self.eval_index_assign(target, indices, *op, rhs_val, false)
             }
@@ -200,12 +225,16 @@ impl Interpreter {
 
                 match &use_stmt.kind {
                     UseKind::Glob => {
-                        let items = crate::modules::get_module_items(&use_stmt.path).ok_or_else(|| {
-                            Diagnostic::compute_error(
-                                "C0105",
-                                format!("Module `{}` cannot be glob imported", use_stmt.path.join("::")),
-                            )
-                        })?;
+                        let items =
+                            crate::modules::get_module_items(&use_stmt.path).ok_or_else(|| {
+                                Diagnostic::compute_error(
+                                    "C0105",
+                                    format!(
+                                        "Module `{}` cannot be glob imported",
+                                        use_stmt.path.join("::")
+                                    ),
+                                )
+                            })?;
                         for (name, val) in items {
                             self.env.set(name, val);
                         }
@@ -214,16 +243,18 @@ impl Interpreter {
                         for item in items {
                             let mut full_path = use_stmt.path.clone();
                             full_path.push(item.name.clone());
-                            let val = crate::modules::lookup_module_item(&full_path).ok_or_else(|| {
-                                Diagnostic::compute_error(
-                                    "C0106",
-                                    format!(
-                                        "Cannot find item `{}` in module `{}`",
-                                        item.name,
-                                        use_stmt.path.join("::")
-                                    ),
-                                )
-                            })?;
+                            let val = crate::modules::lookup_module_item(&full_path).ok_or_else(
+                                || {
+                                    Diagnostic::compute_error(
+                                        "C0106",
+                                        format!(
+                                            "Cannot find item `{}` in module `{}`",
+                                            item.name,
+                                            use_stmt.path.join("::")
+                                        ),
+                                    )
+                                },
+                            )?;
                             let bound_name = item.alias.as_deref().unwrap_or(&item.name);
                             self.env.set(bound_name.to_string(), val);
                         }
@@ -252,13 +283,19 @@ impl Interpreter {
             ExprKind::Lit(Literal::Bool(b)) => Ok(Value::Bool(*b)),
             ExprKind::Lit(Literal::NA(reason)) => Ok(Value::NA(reason.clone())),
 
-            ExprKind::Ident(name) => {
-                self.env.get(name).or_else(|| {
-                    if col_ctx { Some(Value::ColRef(name.clone())) } else { None }
-                }).ok_or_else(|| {
-                    Diagnostic::compute_error("C0101", format!("Undefined identifier `{}`", name))
+            ExprKind::Ident(name) => self
+                .env
+                .get(name)
+                .or_else(|| {
+                    if col_ctx {
+                        Some(Value::ColRef(name.clone()))
+                    } else {
+                        None
+                    }
                 })
-            }
+                .ok_or_else(|| {
+                    Diagnostic::compute_error("C0101", format!("Undefined identifier `{}`", name))
+                }),
 
             ExprKind::VectorLit(items) => {
                 let mut evaluated = Vec::with_capacity(items.len());
@@ -268,7 +305,11 @@ impl Interpreter {
                 Ok(Value::Vector(VectorData::from_values(evaluated)))
             }
 
-            ExprKind::Comprehension { expr, clauses, condition } => {
+            ExprKind::Comprehension {
+                expr,
+                clauses,
+                condition,
+            } => {
                 self.env.push_scope();
 
                 // If 2D comprehension without `if`, track rows and columns for Matrix construction
@@ -282,21 +323,37 @@ impl Interpreter {
                     let r_iter = self.eval_expr_ctx(&first.iter, col_ctx)?;
                     let mut res_ok = Ok(());
 
-                    let run_inner = |this: &mut Self, var_val: Value, col_counts: &mut Vec<usize>, results: &mut Vec<Value>| -> Result<(), Diagnostic> {
+                    let run_inner = |this: &mut Self,
+                                     var_val: Value,
+                                     col_counts: &mut Vec<usize>,
+                                     results: &mut Vec<Value>|
+                     -> Result<(), Diagnostic> {
                         this.env.set(first.var.clone(), var_val);
                         let before = results.len();
-                        this.eval_comprehension_clause(expr, std::slice::from_ref(second), None, col_ctx, results)?;
+                        this.eval_comprehension_clause(
+                            expr,
+                            std::slice::from_ref(second),
+                            None,
+                            col_ctx,
+                            results,
+                        )?;
                         let row_len = results.len() - before;
                         col_counts.push(row_len);
                         Ok(())
                     };
 
                     match r_iter {
-                        Value::Range { start, end, inclusive } => {
+                        Value::Range {
+                            start,
+                            end,
+                            inclusive,
+                        } => {
                             let s = start;
                             let e = if inclusive { end + 1 } else { end };
                             for i in s..e {
-                                if let Err(e) = run_inner(self, Value::I64(i), &mut col_counts, &mut results) {
+                                if let Err(e) =
+                                    run_inner(self, Value::I64(i), &mut col_counts, &mut results)
+                                {
                                     res_ok = Err(e);
                                     break;
                                 }
@@ -307,7 +364,9 @@ impl Interpreter {
                         }
                         Value::Vector(vd) => {
                             for item in vd.iter() {
-                                if let Err(e) = run_inner(self, item.clone(), &mut col_counts, &mut results) {
+                                if let Err(e) =
+                                    run_inner(self, item.clone(), &mut col_counts, &mut results)
+                                {
                                     res_ok = Err(e);
                                     break;
                                 }
@@ -344,7 +403,8 @@ impl Interpreter {
                 // Check if 2D matrix candidate produced a rectangular numeric matrix
                 if is_2d_matrix_candidate && !col_counts.is_empty() {
                     let first_cols = col_counts[0];
-                    let is_rectangular = first_cols > 0 && col_counts.iter().all(|&c| c == first_cols);
+                    let is_rectangular =
+                        first_cols > 0 && col_counts.iter().all(|&c| c == first_cols);
                     if is_rectangular {
                         let mut all_numeric = true;
                         let mut mat_data = Vec::with_capacity(results.len());
@@ -381,9 +441,12 @@ impl Interpreter {
                     let col_val = self.eval_expr(col_expr)?;
                     let values = match col_val {
                         Value::Vector(vec_data) => vec_data.iter().cloned().collect(),
-                        Value::Factor { levels, indices, .. } => {
-                            indices.iter().map(|&i| Value::String(levels[i].clone())).collect()
-                        }
+                        Value::Factor {
+                            levels, indices, ..
+                        } => indices
+                            .iter()
+                            .map(|&i| Value::String(levels[i].clone()))
+                            .collect(),
                         single => vec![single],
                     };
                     columns.push((name.clone(), values));
@@ -436,16 +499,26 @@ impl Interpreter {
             ExprKind::FieldAccess { target, field } => {
                 let target_val = self.eval_expr_ctx(target, col_ctx)?;
                 match target_val {
-                    Value::DataFrame { ref frame, ref na_reasons } => {
-                        let values = crate::polars_bridge::pull_column_as_values(frame, na_reasons, field)?;
-                        Ok(Value::Vector(crate::vector_data::VectorData::from_values(values)))
+                    Value::DataFrame {
+                        ref frame,
+                        ref na_reasons,
+                    } => {
+                        let values =
+                            crate::polars_bridge::pull_column_as_values(frame, na_reasons, field)?;
+                        Ok(Value::Vector(crate::vector_data::VectorData::from_values(
+                            values,
+                        )))
                     }
-                    Value::Record(map) => {
-                        map.get(field).cloned().ok_or_else(|| {
-                            Diagnostic::compute_error("C0102", format!("Field `{field}` not found in record"))
-                        })
-                    }
-                    Value::Struct { ref name, ref fields } => {
+                    Value::Record(map) => map.get(field).cloned().ok_or_else(|| {
+                        Diagnostic::compute_error(
+                            "C0102",
+                            format!("Field `{field}` not found in record"),
+                        )
+                    }),
+                    Value::Struct {
+                        ref name,
+                        ref fields,
+                    } => {
                         if let Some(v) = fields.get(field) {
                             Ok(v.clone())
                         } else {
@@ -453,50 +526,65 @@ impl Interpreter {
                             if let Some(m) = self.env.get(&method_key) {
                                 Ok(m)
                             } else {
-                                Err(Diagnostic::compute_error("C0102", format!("Field or method `{field}` not found in struct `{name}`")))
+                                Err(Diagnostic::compute_error(
+                                    "C0102",
+                                    format!(
+                                        "Field or method `{field}` not found in struct `{name}`"
+                                    ),
+                                ))
                             }
                         }
                     }
-                    Value::Formula { ref response, ref terms, ref parts, .. } => {
-                        match field.as_str() {
-                            "response" => Ok(Value::String(response.clone())),
-                            "terms" => Ok(Value::Vector(crate::vector_data::VectorData::from_values(
-                                terms.iter().map(|s| Value::String(s.clone())).collect(),
-                            ))),
-                            "parts" => Ok(Value::Vector(crate::vector_data::VectorData::from_values(
-                                parts
-                                    .iter()
-                                    .map(|p| {
-                                        Value::Vector(crate::vector_data::VectorData::from_values(
-                                            p.iter().map(|s| Value::String(s.clone())).collect(),
-                                        ))
-                                    })
-                                    .collect(),
-                            ))),
-                            "absorbed" => Ok(Value::Vector(crate::vector_data::VectorData::from_values(
+                    Value::Formula {
+                        ref response,
+                        ref terms,
+                        ref parts,
+                        ..
+                    } => match field.as_str() {
+                        "response" => Ok(Value::String(response.clone())),
+                        "terms" => Ok(Value::Vector(crate::vector_data::VectorData::from_values(
+                            terms.iter().map(|s| Value::String(s.clone())).collect(),
+                        ))),
+                        "parts" => Ok(Value::Vector(crate::vector_data::VectorData::from_values(
+                            parts
+                                .iter()
+                                .map(|p| {
+                                    Value::Vector(crate::vector_data::VectorData::from_values(
+                                        p.iter().map(|s| Value::String(s.clone())).collect(),
+                                    ))
+                                })
+                                .collect(),
+                        ))),
+                        "absorbed" => {
+                            Ok(Value::Vector(crate::vector_data::VectorData::from_values(
                                 parts
                                     .get(1)
                                     .map(|p| p.iter().map(|s| Value::String(s.clone())).collect())
                                     .unwrap_or_default(),
-                            ))),
-                            "instruments" => Ok(Value::Vector(crate::vector_data::VectorData::from_values(
+                            )))
+                        }
+                        "instruments" => {
+                            Ok(Value::Vector(crate::vector_data::VectorData::from_values(
                                 parts
                                     .get(2)
                                     .map(|p| p.iter().map(|s| Value::String(s.clone())).collect())
                                     .unwrap_or_default(),
-                            ))),
-                            "parts_count" => Ok(Value::I64(parts.len() as i64)),
-                            "has_fixed_effects" => Ok(Value::Bool(parts.len() >= 2)),
-                            "has_instruments" => Ok(Value::Bool(parts.len() >= 3)),
-                            _ => Err(Diagnostic::compute_error(
-                                "C0102",
-                                format!(
-                                    "Field `{field}` not found on Formula (available: response, terms, parts, absorbed, instruments, parts_count, has_fixed_effects, has_instruments)"
-                                ),
-                            )),
+                            )))
                         }
-                    }
-                    _ => Err(Diagnostic::compute_error("C0202", format!("Cannot access field `{field}` on non-record/non-struct value"))),
+                        "parts_count" => Ok(Value::I64(parts.len() as i64)),
+                        "has_fixed_effects" => Ok(Value::Bool(parts.len() >= 2)),
+                        "has_instruments" => Ok(Value::Bool(parts.len() >= 3)),
+                        _ => Err(Diagnostic::compute_error(
+                            "C0102",
+                            format!(
+                                "Field `{field}` not found on Formula (available: response, terms, parts, absorbed, instruments, parts_count, has_fixed_effects, has_instruments)"
+                            ),
+                        )),
+                    },
+                    _ => Err(Diagnostic::compute_error(
+                        "C0202",
+                        format!("Cannot access field `{field}` on non-record/non-struct value"),
+                    )),
                 }
             }
 
@@ -523,7 +611,9 @@ impl Interpreter {
                     // that (an Int64 literal is a real vector in a Vector[i64], so this
                     // isn't just a hypothetical). Int64/mixed/NA-containing vectors fall
                     // through to the boxed loop below, unchanged.
-                    Value::Vector(v) if v.null_count() == 0 && v.column().dtype() == &DataType::Float64 => {
+                    Value::Vector(v)
+                        if v.null_count() == 0 && v.column().dtype() == &DataType::Float64 =>
+                    {
                         let view = v.as_f64_view()?;
                         let base = view.as_slice();
                         let data: Vec<f64> = if base.len() >= PARALLEL_THRESHOLD {
@@ -544,7 +634,10 @@ impl Interpreter {
                         }
                         Ok(Value::Vector(VectorData::from_values(res)))
                     }
-                    _ => Err(Diagnostic::compute_error("C0202", "Unary `-` expects numeric operand")),
+                    _ => Err(Diagnostic::compute_error(
+                        "C0202",
+                        "Unary `-` expects numeric operand",
+                    )),
                 }
             }
 
@@ -558,7 +651,10 @@ impl Interpreter {
                     // deferred too rather than erroring — `filter()` resolves the whole
                     // tree into one BooleanChunked mask.
                     v if is_predicate(&v) => Ok(Value::NotPredicate(Box::new(v))),
-                    _ => Err(Diagnostic::compute_error("C0202", "Unary `!` expects boolean operand")),
+                    _ => Err(Diagnostic::compute_error(
+                        "C0202",
+                        "Unary `!` expects boolean operand",
+                    )),
                 }
             }
 
@@ -566,7 +662,8 @@ impl Interpreter {
                 let val = self.eval_expr(src)?;
                 match &target.kind {
                     ExprKind::Call { callee, args } => {
-                        let arg_ctx = col_ctx || callee_name(callee).is_some_and(is_column_context_verb);
+                        let arg_ctx =
+                            col_ctx || callee_name(callee).is_some_and(is_column_context_verb);
                         let mut call_args = vec![val];
                         for arg in args {
                             call_args.push(self.eval_expr_ctx(arg, arg_ctx)?);
@@ -576,7 +673,10 @@ impl Interpreter {
                     }
                     ExprKind::Ident(name) => {
                         let callee_val = self.env.get(name).ok_or_else(|| {
-                            Diagnostic::compute_error("C0101", format!("Undefined function `{}`", name))
+                            Diagnostic::compute_error(
+                                "C0101",
+                                format!("Undefined function `{}`", name),
+                            )
                         })?;
                         self.call_value(callee_val, vec![val])
                     }
@@ -592,7 +692,18 @@ impl Interpreter {
                 if let ExprKind::FieldAccess { target, field } = &callee.kind {
                     let target_val = self.eval_expr(target)?;
                     let is_record_fn = match &target_val {
-                        Value::Record(map) => map.get(field).map(|v| matches!(v, Value::NativeFn(_) | Value::NativeFnCtx(_) | Value::JitFn { .. } | Value::Closure { .. })).unwrap_or(false),
+                        Value::Record(map) => map
+                            .get(field)
+                            .map(|v| {
+                                matches!(
+                                    v,
+                                    Value::NativeFn(_)
+                                        | Value::NativeFnCtx(_)
+                                        | Value::JitFn { .. }
+                                        | Value::Closure { .. }
+                                )
+                            })
+                            .unwrap_or(false),
                         _ => false,
                     };
 
@@ -607,9 +718,16 @@ impl Interpreter {
                         }
                     } else if let Value::Struct { ref name, .. } = target_val {
                         let method_key = format!("{}::{}", name, field);
-                        let fn_val = self.env.get(&method_key).or_else(|| self.env.get(field)).ok_or_else(|| {
-                            Diagnostic::compute_error("C0101", format!("Undefined method `{field}` on struct `{name}`"))
-                        })?;
+                        let fn_val = self
+                            .env
+                            .get(&method_key)
+                            .or_else(|| self.env.get(field))
+                            .ok_or_else(|| {
+                                Diagnostic::compute_error(
+                                    "C0101",
+                                    format!("Undefined method `{field}` on struct `{name}`"),
+                                )
+                            })?;
                         let mut evaluated_args = Vec::with_capacity(args.len() + 1);
                         evaluated_args.push(target_val);
                         for a in args {
@@ -618,7 +736,10 @@ impl Interpreter {
                         return self.call_value(fn_val, evaluated_args);
                     } else {
                         let fn_val = self.env.get(field).ok_or_else(|| {
-                            Diagnostic::compute_error("C0101", format!("Undefined function or method `{field}`"))
+                            Diagnostic::compute_error(
+                                "C0101",
+                                format!("Undefined function or method `{field}`"),
+                            )
                         })?;
                         let arg_ctx = is_column_context_verb(field);
                         let mut evaluated_args = Vec::with_capacity(args.len() + 1);
@@ -639,7 +760,10 @@ impl Interpreter {
                 self.call_value(callee_val, evaluated_args)
             }
 
-            ExprKind::Block { stmts, expr: opt_expr } => {
+            ExprKind::Block {
+                stmts,
+                expr: opt_expr,
+            } => {
                 self.env.push_scope();
                 for s in stmts {
                     self.eval_stmt(s)?;
@@ -708,7 +832,12 @@ impl Interpreter {
                 Ok(Value::Unit)
             }
 
-            ExprKind::For { var, start, end, body } => {
+            ExprKind::For {
+                var,
+                start,
+                end,
+                body,
+            } => {
                 let start_val = self.eval_expr(start)?;
                 let end_val = self.eval_expr(end)?;
                 if let (Some(s), Some(e)) = (start_val.as_i64(), end_val.as_i64()) {
@@ -791,7 +920,12 @@ impl Interpreter {
                 Ok(Value::Unit)
             }
 
-            ExprKind::Formula { op, response, terms, parts } => {
+            ExprKind::Formula {
+                op,
+                response,
+                terms,
+                parts,
+            } => {
                 let resp_str = match &response.kind {
                     ExprKind::Ident(s) => s.clone(),
                     _ => format!("{response}"),
@@ -824,7 +958,11 @@ impl Interpreter {
                         ExprKind::Formula { .. } => {
                             values.push(self.eval_expr(eq)?);
                         }
-                        ExprKind::Binary { op: BinaryOp::Eq, lhs, rhs } => {
+                        ExprKind::Binary {
+                            op: BinaryOp::Eq,
+                            lhs,
+                            rhs,
+                        } => {
                             let mut left_terms = Vec::new();
                             let mut right_terms = Vec::new();
                             extract_formula_term(lhs, &mut left_terms);
@@ -845,17 +983,19 @@ impl Interpreter {
                 Ok(Value::SemSpec(values))
             }
 
-            ExprKind::Lambda { params, body } => {
-                Ok(Value::Closure {
-                    params: params.clone(),
-                    body: (**body).clone(),
-                    env: self.env.clone(),
-                })
-            }
+            ExprKind::Lambda { params, body } => Ok(Value::Closure {
+                params: params.clone(),
+                body: (**body).clone(),
+                env: self.env.clone(),
+            }),
 
             ExprKind::Placeholder => Ok(Value::Unit),
 
-            ExprKind::Range { start, end, inclusive } => {
+            ExprKind::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 let start_val = self.eval_expr(start)?;
                 let end_val = self.eval_expr(end)?;
                 match (start_val, end_val) {
@@ -866,23 +1006,38 @@ impl Interpreter {
                     }),
                     (s, e) => Err(Diagnostic::compute_error(
                         "C0104",
-                        format!("Range requires integer bounds, got `{}` and `{}`", s.type_name(), e.type_name()),
+                        format!(
+                            "Range requires integer bounds, got `{}` and `{}`",
+                            s.type_name(),
+                            e.type_name()
+                        ),
                     )),
                 }
             }
 
             ExprKind::Path(segments) => {
-                if segments.len() == 2 && (segments[0] == "NAReason" || segments[0] == "NAReasons") {
+                if segments.len() == 2 && (segments[0] == "NAReason" || segments[0] == "NAReasons")
+                {
                     Ok(Value::NA(Some(segments[1].clone())))
                 } else if let Some(val) = crate::modules::lookup_module_item(segments) {
                     Ok(val)
                 } else {
                     let full_name = segments.join("::");
-                    self.env.get(&full_name).or_else(|| {
-                        if col_ctx { Some(Value::ColRef(full_name.clone())) } else { None }
-                    }).ok_or_else(|| {
-                        Diagnostic::compute_error("C0101", format!("Undefined path `{}`", full_name))
-                    })
+                    self.env
+                        .get(&full_name)
+                        .or_else(|| {
+                            if col_ctx {
+                                Some(Value::ColRef(full_name.clone()))
+                            } else {
+                                None
+                            }
+                        })
+                        .ok_or_else(|| {
+                            Diagnostic::compute_error(
+                                "C0101",
+                                format!("Undefined path `{}`", full_name),
+                            )
+                        })
                 }
             }
         }
@@ -913,7 +1068,11 @@ impl Interpreter {
         let iter_val = self.eval_expr_ctx(&first.iter, col_ctx)?;
 
         match iter_val {
-            Value::Range { start, end, inclusive } => {
+            Value::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 let s = start;
                 let e = if inclusive { end + 1 } else { end };
                 for i in s..e {
@@ -970,7 +1129,10 @@ impl Interpreter {
     /// fall through to plain `eval_expr` unchanged, non-tail, same stack cost as today.
     fn eval_expr_tail(&mut self, expr: &Expr) -> Result<TailOutcome, Diagnostic> {
         match &expr.kind {
-            ExprKind::Block { stmts, expr: opt_expr } => {
+            ExprKind::Block {
+                stmts,
+                expr: opt_expr,
+            } => {
                 self.env.push_scope();
                 for s in stmts {
                     self.eval_stmt(s)?;
@@ -988,7 +1150,11 @@ impl Interpreter {
                 Ok(outcome)
             }
 
-            ExprKind::If { cond, then_branch, else_branch } => {
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 let cond_val = self.eval_expr(cond)?;
                 if cond_val.as_bool() == Some(true) {
                     self.eval_expr_tail(then_branch)
@@ -1031,7 +1197,18 @@ impl Interpreter {
                 if let ExprKind::FieldAccess { target, field } = &callee.kind {
                     let target_val = self.eval_expr(target)?;
                     let is_record_fn = match &target_val {
-                        Value::Record(map) => map.get(field).map(|v| matches!(v, Value::NativeFn(_) | Value::NativeFnCtx(_) | Value::JitFn { .. } | Value::Closure { .. })).unwrap_or(false),
+                        Value::Record(map) => map
+                            .get(field)
+                            .map(|v| {
+                                matches!(
+                                    v,
+                                    Value::NativeFn(_)
+                                        | Value::NativeFnCtx(_)
+                                        | Value::JitFn { .. }
+                                        | Value::Closure { .. }
+                                )
+                            })
+                            .unwrap_or(false),
                         _ => false,
                     };
 
@@ -1042,22 +1219,38 @@ impl Interpreter {
                             for a in args {
                                 evaluated_args.push(self.eval_expr_ctx(a, false)?);
                             }
-                            return Ok(TailOutcome::TailCall { callee: fn_val, args: evaluated_args });
+                            return Ok(TailOutcome::TailCall {
+                                callee: fn_val,
+                                args: evaluated_args,
+                            });
                         }
                     } else if let Value::Struct { ref name, .. } = target_val {
                         let method_key = format!("{}::{}", name, field);
-                        let fn_val = self.env.get(&method_key).or_else(|| self.env.get(field)).ok_or_else(|| {
-                            Diagnostic::compute_error("C0101", format!("Undefined method `{field}` on struct `{name}`"))
-                        })?;
+                        let fn_val = self
+                            .env
+                            .get(&method_key)
+                            .or_else(|| self.env.get(field))
+                            .ok_or_else(|| {
+                                Diagnostic::compute_error(
+                                    "C0101",
+                                    format!("Undefined method `{field}` on struct `{name}`"),
+                                )
+                            })?;
                         let mut evaluated_args = Vec::with_capacity(args.len() + 1);
                         evaluated_args.push(target_val);
                         for a in args {
                             evaluated_args.push(self.eval_expr_ctx(a, false)?);
                         }
-                        return Ok(TailOutcome::TailCall { callee: fn_val, args: evaluated_args });
+                        return Ok(TailOutcome::TailCall {
+                            callee: fn_val,
+                            args: evaluated_args,
+                        });
                     } else {
                         let fn_val = self.env.get(field).ok_or_else(|| {
-                            Diagnostic::compute_error("C0101", format!("Undefined function or method `{field}`"))
+                            Diagnostic::compute_error(
+                                "C0101",
+                                format!("Undefined function or method `{field}`"),
+                            )
                         })?;
                         let arg_ctx = is_column_context_verb(field);
                         let mut evaluated_args = Vec::with_capacity(args.len() + 1);
@@ -1065,7 +1258,10 @@ impl Interpreter {
                         for a in args {
                             evaluated_args.push(self.eval_expr_ctx(a, arg_ctx)?);
                         }
-                        return Ok(TailOutcome::TailCall { callee: fn_val, args: evaluated_args });
+                        return Ok(TailOutcome::TailCall {
+                            callee: fn_val,
+                            args: evaluated_args,
+                        });
                     }
                 }
 
@@ -1075,7 +1271,10 @@ impl Interpreter {
                 for a in args {
                     evaluated_args.push(self.eval_expr_ctx(a, arg_ctx)?);
                 }
-                Ok(TailOutcome::TailCall { callee: callee_val, args: evaluated_args })
+                Ok(TailOutcome::TailCall {
+                    callee: callee_val,
+                    args: evaluated_args,
+                })
             }
 
             ExprKind::Pipe { expr: src, target } => {
@@ -1088,17 +1287,29 @@ impl Interpreter {
                             call_args.push(self.eval_expr_ctx(arg, arg_ctx)?);
                         }
                         let callee_val = self.eval_expr(callee)?;
-                        Ok(TailOutcome::TailCall { callee: callee_val, args: call_args })
+                        Ok(TailOutcome::TailCall {
+                            callee: callee_val,
+                            args: call_args,
+                        })
                     }
                     ExprKind::Ident(name) => {
                         let callee_val = self.env.get(name).ok_or_else(|| {
-                            Diagnostic::compute_error("C0101", format!("Undefined function `{}`", name))
+                            Diagnostic::compute_error(
+                                "C0101",
+                                format!("Undefined function `{}`", name),
+                            )
                         })?;
-                        Ok(TailOutcome::TailCall { callee: callee_val, args: vec![val] })
+                        Ok(TailOutcome::TailCall {
+                            callee: callee_val,
+                            args: vec![val],
+                        })
                     }
                     ExprKind::Path(_) => {
                         let callee_val = self.eval_expr(target)?;
-                        Ok(TailOutcome::TailCall { callee: callee_val, args: vec![val] })
+                        Ok(TailOutcome::TailCall {
+                            callee: callee_val,
+                            args: vec![val],
+                        })
                     }
                     _ => Ok(TailOutcome::Value(self.eval_expr(target)?)),
                 }
@@ -1135,7 +1346,7 @@ impl Interpreter {
 
                 let result = loop {
                     self.env.push_scope();
-                    for (p, a) in cur_params.iter().zip(cur_args.into_iter()) {
+                    for (p, a) in cur_params.iter().zip(cur_args) {
                         self.env.set(p.clone(), a);
                     }
 
@@ -1148,7 +1359,15 @@ impl Interpreter {
                             self.env.pop_scope();
                             break Ok(v);
                         }
-                        Ok(TailOutcome::TailCall { callee: Value::Closure { params: p2, body: b2, env: mut e2 }, args: next_args }) => {
+                        Ok(TailOutcome::TailCall {
+                            callee:
+                                Value::Closure {
+                                    params: p2,
+                                    body: b2,
+                                    env: mut e2,
+                                },
+                            args: next_args,
+                        }) => {
                             self.env.pop_scope();
                             if let Some(global_scope) = caller_env.scopes.first() {
                                 for (k, v) in global_scope {
@@ -1162,7 +1381,10 @@ impl Interpreter {
                             cur_body = b2;
                             cur_args = next_args;
                         }
-                        Ok(TailOutcome::TailCall { callee: other, args: next_args }) => {
+                        Ok(TailOutcome::TailCall {
+                            callee: other,
+                            args: next_args,
+                        }) => {
                             self.env.pop_scope();
                             self.env = caller_env.clone();
                             break self.call_value(other, next_args);
@@ -1178,7 +1400,10 @@ impl Interpreter {
             }
             other => Err(Diagnostic::compute_error(
                 "C0203",
-                format!("Value `{}` is not callable as a function", other.type_name()),
+                format!(
+                    "Value `{}` is not callable as a function",
+                    other.type_name()
+                ),
             )),
         }
     }
@@ -1194,7 +1419,10 @@ impl Interpreter {
                 if indices.len() != 1 {
                     return Err(Diagnostic::compute_error(
                         "C0201",
-                        format!("Vector indexing requires exactly 1 index, got {}", indices.len()),
+                        format!(
+                            "Vector indexing requires exactly 1 index, got {}",
+                            indices.len()
+                        ),
                     ));
                 }
                 match &indices[0] {
@@ -1206,7 +1434,10 @@ impl Interpreter {
                                 if i < 0 || (i as usize) >= vd.len() {
                                     return Err(Diagnostic::compute_error(
                                         "C0203",
-                                        format!("Index out of bounds: index {i} for vector of length {}", vd.len()),
+                                        format!(
+                                            "Index out of bounds: index {i} for vector of length {}",
+                                            vd.len()
+                                        ),
                                     ));
                                 }
                                 Ok(vd.value_at(i as usize).unwrap_or(Value::NA(None)))
@@ -1216,7 +1447,10 @@ impl Interpreter {
                                 if i < 0 || (i as usize) >= vd.len() {
                                     return Err(Diagnostic::compute_error(
                                         "C0203",
-                                        format!("Index out of bounds: index {i} for vector of length {}", vd.len()),
+                                        format!(
+                                            "Index out of bounds: index {i} for vector of length {}",
+                                            vd.len()
+                                        ),
                                     ));
                                 }
                                 Ok(vd.value_at(i as usize).unwrap_or(Value::NA(None)))
@@ -1235,28 +1469,39 @@ impl Interpreter {
                                     }
                                     if let Ok(ca) = idx_vec.column().bool() {
                                         if let Ok(filtered_col) = vd.column().filter(ca) {
-                                            let mut new_reasons = crate::na_reasons::NaReasonTable::new();
+                                            let mut new_reasons =
+                                                crate::na_reasons::NaReasonTable::new();
                                             if vd.null_count() > 0 {
                                                 let mut new_row = 0;
                                                 for old_row in 0..vd.len() {
                                                     if ca.get(old_row) == Some(true) {
-                                                        if let Some(r) = vd.na_reasons().get(crate::vector_data::VECTOR_COL, old_row) {
-                                                            new_reasons.set(crate::vector_data::VECTOR_COL, new_row, r);
+                                                        if let Some(r) = vd.na_reasons().get(
+                                                            crate::vector_data::VECTOR_COL,
+                                                            old_row,
+                                                        ) {
+                                                            new_reasons.set(
+                                                                crate::vector_data::VECTOR_COL,
+                                                                new_row,
+                                                                r,
+                                                            );
                                                         }
                                                         new_row += 1;
                                                     }
                                                 }
                                             }
-                                            return Ok(Value::Vector(VectorData::from_column_and_reasons(
-                                                filtered_col,
-                                                std::sync::Arc::new(new_reasons),
-                                            )));
+                                            return Ok(Value::Vector(
+                                                VectorData::from_column_and_reasons(
+                                                    filtered_col,
+                                                    std::sync::Arc::new(new_reasons),
+                                                ),
+                                            ));
                                         }
                                     }
                                     let mut gathered = Vec::new();
                                     for (i, m) in idx_vec.iter().enumerate() {
                                         if m.as_bool() == Some(true) {
-                                            gathered.push(vd.value_at(i).unwrap_or(Value::NA(None)));
+                                            gathered
+                                                .push(vd.value_at(i).unwrap_or(Value::NA(None)));
                                         }
                                     }
                                     Ok(Value::Vector(VectorData::from_values(gathered)))
@@ -1264,15 +1509,23 @@ impl Interpreter {
                                     let mut gathered = Vec::with_capacity(idx_vec.len());
                                     for item in idx_vec.iter() {
                                         let i = item.as_i64().ok_or_else(|| {
-                                            Diagnostic::compute_error("C0202", "Vector index must be integer or boolean mask")
+                                            Diagnostic::compute_error(
+                                                "C0202",
+                                                "Vector index must be integer or boolean mask",
+                                            )
                                         })?;
                                         if i < 0 || (i as usize) >= vd.len() {
                                             return Err(Diagnostic::compute_error(
                                                 "C0203",
-                                                format!("Index out of bounds: index {i} for vector of length {}", vd.len()),
+                                                format!(
+                                                    "Index out of bounds: index {i} for vector of length {}",
+                                                    vd.len()
+                                                ),
                                             ));
                                         }
-                                        gathered.push(vd.value_at(i as usize).unwrap_or(Value::NA(None)));
+                                        gathered.push(
+                                            vd.value_at(i as usize).unwrap_or(Value::NA(None)),
+                                        );
                                     }
                                     Ok(Value::Vector(VectorData::from_values(gathered)))
                                 }
@@ -1283,7 +1536,11 @@ impl Interpreter {
                             )),
                         }
                     }
-                    IndexSpec::Range { start, end, inclusive } => {
+                    IndexSpec::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
                         let s = if let Some(st) = start {
                             let val = self.eval_expr_ctx(st, col_ctx)?;
                             val.as_i64().ok_or_else(|| {
@@ -1301,10 +1558,18 @@ impl Interpreter {
                         } else {
                             vd.len() as i64
                         };
-                        if s < 0 || (s as usize) > vd.len() || e < 0 || (e as usize) > vd.len() || s > e {
+                        if s < 0
+                            || (s as usize) > vd.len()
+                            || e < 0
+                            || (e as usize) > vd.len()
+                            || s > e
+                        {
                             return Err(Diagnostic::compute_error(
                                 "C0203",
-                                format!("Range slice [{s}..{e}] out of bounds for vector of length {}", vd.len()),
+                                format!(
+                                    "Range slice [{s}..{e}] out of bounds for vector of length {}",
+                                    vd.len()
+                                ),
                             ));
                         }
                         let start_u = s as usize;
@@ -1314,28 +1579,58 @@ impl Interpreter {
                 }
             }
 
-            Value::DataFrame { ref frame, ref na_reasons } => {
+            Value::DataFrame {
+                ref frame,
+                ref na_reasons,
+            } => {
                 if indices.len() == 1 {
                     match &indices[0] {
                         IndexSpec::Expr(e) => {
                             let idx_val = self.eval_expr_ctx(e, col_ctx)?;
                             match idx_val {
                                 Value::String(col_name) | Value::ColRef(col_name) => {
-                                    let values = crate::polars_bridge::pull_column_as_values(frame, na_reasons, &col_name)?;
-                                    return Ok(Value::Vector(crate::vector_data::VectorData::from_values(values)));
+                                    let values = crate::polars_bridge::pull_column_as_values(
+                                        frame, na_reasons, &col_name,
+                                    )?;
+                                    return Ok(Value::Vector(
+                                        crate::vector_data::VectorData::from_values(values),
+                                    ));
                                 }
                                 Value::I64(i) => {
                                     if i < 0 || (i as usize) >= frame.width() {
-                                        return Err(Diagnostic::compute_error("C0203", format!("Column index {i} out of bounds for DataFrame with {} columns", frame.width())));
+                                        return Err(Diagnostic::compute_error(
+                                            "C0203",
+                                            format!(
+                                                "Column index {i} out of bounds for DataFrame with {} columns",
+                                                frame.width()
+                                            ),
+                                        ));
                                     }
                                     let col_name = frame.get_column_names()[i as usize].to_string();
-                                    let values = crate::polars_bridge::pull_column_as_values(frame, na_reasons, &col_name)?;
-                                    return Ok(Value::Vector(crate::vector_data::VectorData::from_values(values)));
+                                    let values = crate::polars_bridge::pull_column_as_values(
+                                        frame, na_reasons, &col_name,
+                                    )?;
+                                    return Ok(Value::Vector(
+                                        crate::vector_data::VectorData::from_values(values),
+                                    ));
                                 }
-                                other => return Err(Diagnostic::compute_error("C0201", format!("DataFrame column index must be string or integer, found `{}`", other.type_name()))),
+                                other => {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0201",
+                                        format!(
+                                            "DataFrame column index must be string or integer, found `{}`",
+                                            other.type_name()
+                                        ),
+                                    ));
+                                }
                             }
                         }
-                        _ => return Err(Diagnostic::compute_error("C0201", "Invalid DataFrame index")),
+                        _ => {
+                            return Err(Diagnostic::compute_error(
+                                "C0201",
+                                "Invalid DataFrame index",
+                            ));
+                        }
                     }
                 } else if indices.len() == 2 {
                     let col_name = match &indices[1] {
@@ -1345,27 +1640,54 @@ impl Interpreter {
                                 Value::String(s) | Value::ColRef(s) => s,
                                 Value::I64(i) => {
                                     if i < 0 || (i as usize) >= frame.width() {
-                                        return Err(Diagnostic::compute_error("C0203", format!("Column index {i} out of bounds for DataFrame with {} columns", frame.width())));
+                                        return Err(Diagnostic::compute_error(
+                                            "C0203",
+                                            format!(
+                                                "Column index {i} out of bounds for DataFrame with {} columns",
+                                                frame.width()
+                                            ),
+                                        ));
                                     }
                                     frame.get_column_names()[i as usize].to_string()
                                 }
-                                other => return Err(Diagnostic::compute_error("C0201", format!("DataFrame column index must be string or integer, found `{}`", other.type_name()))),
+                                other => {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0201",
+                                        format!(
+                                            "DataFrame column index must be string or integer, found `{}`",
+                                            other.type_name()
+                                        ),
+                                    ));
+                                }
                             }
                         }
-                        _ => return Err(Diagnostic::compute_error("C0201", "Invalid column specification in DataFrame index")),
+                        _ => {
+                            return Err(Diagnostic::compute_error(
+                                "C0201",
+                                "Invalid column specification in DataFrame index",
+                            ));
+                        }
                     };
-                    let col_values = crate::polars_bridge::pull_column_as_values(frame, na_reasons, &col_name)?;
-                    let col_vec = Value::Vector(crate::vector_data::VectorData::from_values(col_values));
+                    let col_values =
+                        crate::polars_bridge::pull_column_as_values(frame, na_reasons, &col_name)?;
+                    let col_vec =
+                        Value::Vector(crate::vector_data::VectorData::from_values(col_values));
                     return self.eval_indexing(col_vec, &[indices[0].clone()], col_ctx);
                 }
-                Err(Diagnostic::compute_error("C0201", "DataFrame indexing requires 1 or 2 indices"))
+                Err(Diagnostic::compute_error(
+                    "C0201",
+                    "DataFrame indexing requires 1 or 2 indices",
+                ))
             }
 
             Value::Matrix { rows, cols, data } => {
                 if indices.len() != 2 {
                     return Err(Diagnostic::compute_error(
                         "C0201",
-                        format!("Matrix indexing requires exactly 2 indices [row, col], got {}", indices.len()),
+                        format!(
+                            "Matrix indexing requires exactly 2 indices [row, col], got {}",
+                            indices.len()
+                        ),
                     ));
                 }
 
@@ -1419,7 +1741,10 @@ impl Interpreter {
                 if indices.len() != 1 {
                     return Err(Diagnostic::compute_error(
                         "C0201",
-                        format!("String indexing requires exactly 1 index, got {}", indices.len()),
+                        format!(
+                            "String indexing requires exactly 1 index, got {}",
+                            indices.len()
+                        ),
                     ));
                 }
                 let chars: Vec<char> = s.chars().collect();
@@ -1433,12 +1758,19 @@ impl Interpreter {
                         if i < 0 || (i as usize) >= chars.len() {
                             return Err(Diagnostic::compute_error(
                                 "C0203",
-                                format!("Index out of bounds: index {i} for string of length {}", chars.len()),
+                                format!(
+                                    "Index out of bounds: index {i} for string of length {}",
+                                    chars.len()
+                                ),
                             ));
                         }
                         Ok(Value::String(chars[i as usize].to_string()))
                     }
-                    IndexSpec::Range { start, end, inclusive } => {
+                    IndexSpec::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
                         let st = if let Some(s_expr) = start {
                             let val = self.eval_expr_ctx(s_expr, col_ctx)?;
                             val.as_i64().ok_or_else(|| {
@@ -1456,10 +1788,18 @@ impl Interpreter {
                         } else {
                             chars.len() as i64
                         };
-                        if st < 0 || (st as usize) > chars.len() || ed < 0 || (ed as usize) > chars.len() || st > ed {
+                        if st < 0
+                            || (st as usize) > chars.len()
+                            || ed < 0
+                            || (ed as usize) > chars.len()
+                            || st > ed
+                        {
                             return Err(Diagnostic::compute_error(
                                 "C0203",
-                                format!("Range slice [{st}..{ed}] out of bounds for string of length {}", chars.len()),
+                                format!(
+                                    "Range slice [{st}..{ed}] out of bounds for string of length {}",
+                                    chars.len()
+                                ),
                             ));
                         }
                         let substr: String = chars[(st as usize)..(ed as usize)].iter().collect();
@@ -1470,7 +1810,10 @@ impl Interpreter {
 
             other => Err(Diagnostic::compute_error(
                 "C0202",
-                format!("Cannot index value of type `{}` with `[...]`", other.type_name()),
+                format!(
+                    "Cannot index value of type `{}` with `[...]`",
+                    other.type_name()
+                ),
             )),
         }
     }
@@ -1491,7 +1834,9 @@ impl Interpreter {
                         if i < 0 || (i as usize) >= dim_len {
                             return Err(Diagnostic::compute_error(
                                 "C0203",
-                                format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
+                                format!(
+                                    "Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"
+                                ),
                             ));
                         }
                         Ok(DimSelection::Scalar(i as usize))
@@ -1501,7 +1846,9 @@ impl Interpreter {
                         if i < 0 || (i as usize) >= dim_len {
                             return Err(Diagnostic::compute_error(
                                 "C0203",
-                                format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
+                                format!(
+                                    "Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"
+                                ),
                             ));
                         }
                         Ok(DimSelection::Scalar(i as usize))
@@ -1545,7 +1892,9 @@ impl Interpreter {
                                 if i < 0 || (i as usize) >= dim_len {
                                     return Err(Diagnostic::compute_error(
                                         "C0203",
-                                        format!("Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"),
+                                        format!(
+                                            "Matrix {dim_name} index {i} out of bounds for dimension of size {dim_len}"
+                                        ),
                                     ));
                                 }
                                 indices.push(i as usize);
@@ -1562,11 +1911,18 @@ impl Interpreter {
                     )),
                 }
             }
-            IndexSpec::Range { start, end, inclusive } => {
+            IndexSpec::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 let s = if let Some(st) = start {
                     let val = self.eval_expr_ctx(st, col_ctx)?;
                     val.as_i64().ok_or_else(|| {
-                        Diagnostic::compute_error("C0201", format!("Matrix {dim_name} range start must be an integer"))
+                        Diagnostic::compute_error(
+                            "C0201",
+                            format!("Matrix {dim_name} range start must be an integer"),
+                        )
                     })?
                 } else {
                     0
@@ -1574,7 +1930,10 @@ impl Interpreter {
                 let e = if let Some(ed) = end {
                     let val = self.eval_expr_ctx(ed, col_ctx)?;
                     let ed_i = val.as_i64().ok_or_else(|| {
-                        Diagnostic::compute_error("C0201", format!("Matrix {dim_name} range end must be an integer"))
+                        Diagnostic::compute_error(
+                            "C0201",
+                            format!("Matrix {dim_name} range end must be an integer"),
+                        )
                     })?;
                     if *inclusive { ed_i + 1 } else { ed_i }
                 } else {
@@ -1583,7 +1942,9 @@ impl Interpreter {
                 if s < 0 || (s as usize) > dim_len || e < 0 || (e as usize) > dim_len || s > e {
                     return Err(Diagnostic::compute_error(
                         "C0203",
-                        format!("Matrix {dim_name} slice [{s}..{e}] out of bounds for dimension of size {dim_len}"),
+                        format!(
+                            "Matrix {dim_name} slice [{s}..{e}] out of bounds for dimension of size {dim_len}"
+                        ),
                     ));
                 }
                 Ok(DimSelection::Range(s as usize, e as usize))
@@ -1599,7 +1960,10 @@ impl Interpreter {
         rhs_val: Value,
     ) -> Result<Value, Diagnostic> {
         if fields.is_empty() {
-            return Err(Diagnostic::compute_error("C0201", "Field assignment requires at least one field"));
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                "Field assignment requires at least one field",
+            ));
         }
 
         let target_val = self.env.get(target).ok_or_else(|| {
@@ -1614,20 +1978,27 @@ impl Interpreter {
                 if fields.len() != 1 {
                     return Err(Diagnostic::compute_error(
                         "C0201",
-                        format!("DataFrame field assignment requires exactly 1 field name, got {}", fields.len()),
+                        format!(
+                            "DataFrame field assignment requires exactly 1 field name, got {}",
+                            fields.len()
+                        ),
                     ));
                 }
                 self.assign_dataframe_column(target, &frame, &na_reasons, &fields[0], op, rhs_val)
             }
             Value::Record(_) | Value::Struct { .. } => {
                 let mut root_val = target_val;
-                let final_assigned = self.update_record_or_struct_field(&mut root_val, fields, op, rhs_val)?;
+                let final_assigned =
+                    self.update_record_or_struct_field(&mut root_val, fields, op, rhs_val)?;
                 self.env.assign(target, root_val);
                 Ok(final_assigned)
             }
             other => Err(Diagnostic::compute_error(
                 "C0201",
-                format!("Type `{}` does not support field mutation", other.type_name()),
+                format!(
+                    "Type `{}` does not support field mutation",
+                    other.type_name()
+                ),
             )),
         }
     }
@@ -1640,7 +2011,10 @@ impl Interpreter {
         rhs: Value,
     ) -> Result<Value, Diagnostic> {
         if fields.is_empty() {
-            return Err(Diagnostic::compute_error("C0201", "Field path cannot be empty"));
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                "Field path cannot be empty",
+            ));
         }
         let field = &fields[0];
         if fields.len() == 1 {
@@ -1649,7 +2023,10 @@ impl Interpreter {
                     let current_val = map_arc.get(field).cloned();
                     let final_val = if let Some(bin_op) = op.to_binary_op() {
                         let cur = current_val.ok_or_else(|| {
-                            Diagnostic::compute_error("C0102", format!("Field `{field}` not found in record"))
+                            Diagnostic::compute_error(
+                                "C0102",
+                                format!("Field `{field}` not found in record"),
+                            )
                         })?;
                         self.eval_binary_op(bin_op, cur, rhs)?
                     } else {
@@ -1658,11 +2035,17 @@ impl Interpreter {
                     std::sync::Arc::make_mut(map_arc).insert(field.clone(), final_val.clone());
                     Ok(final_val)
                 }
-                Value::Struct { name, fields: fields_arc } => {
+                Value::Struct {
+                    name,
+                    fields: fields_arc,
+                } => {
                     let current_val = fields_arc.get(field).cloned();
                     let final_val = if let Some(bin_op) = op.to_binary_op() {
                         let cur = current_val.ok_or_else(|| {
-                            Diagnostic::compute_error("C0102", format!("Field `{field}` not found in struct `{name}`"))
+                            Diagnostic::compute_error(
+                                "C0102",
+                                format!("Field `{field}` not found in struct `{name}`"),
+                            )
                         })?;
                         self.eval_binary_op(bin_op, cur, rhs)?
                     } else {
@@ -1673,7 +2056,10 @@ impl Interpreter {
                 }
                 other => Err(Diagnostic::compute_error(
                     "C0201",
-                    format!("Type `{}` does not support field mutation", other.type_name()),
+                    format!(
+                        "Type `{}` does not support field mutation",
+                        other.type_name()
+                    ),
                 )),
             }
         } else {
@@ -1681,20 +2067,33 @@ impl Interpreter {
                 Value::Record(map_arc) => {
                     let map_mut = std::sync::Arc::make_mut(map_arc);
                     let sub_val = map_mut.get_mut(field).ok_or_else(|| {
-                        Diagnostic::compute_error("C0102", format!("Field `{field}` not found in record"))
+                        Diagnostic::compute_error(
+                            "C0102",
+                            format!("Field `{field}` not found in record"),
+                        )
                     })?;
                     self.update_record_or_struct_field(sub_val, &fields[1..], op, rhs)
                 }
-                Value::Struct { name, fields: fields_arc } => {
+                Value::Struct {
+                    name,
+                    fields: fields_arc,
+                } => {
                     let fields_mut = std::sync::Arc::make_mut(fields_arc);
                     let sub_val = fields_mut.get_mut(field).ok_or_else(|| {
-                        Diagnostic::compute_error("C0102", format!("Field `{field}` not found in struct `{name}`"))
+                        Diagnostic::compute_error(
+                            "C0102",
+                            format!("Field `{field}` not found in struct `{name}`"),
+                        )
                     })?;
                     self.update_record_or_struct_field(sub_val, &fields[1..], op, rhs)
                 }
                 other => Err(Diagnostic::compute_error(
                     "C0201",
-                    format!("Cannot traverse field `{}` on type `{}`", field, other.type_name()),
+                    format!(
+                        "Cannot traverse field `{}` on type `{}`",
+                        field,
+                        other.type_name()
+                    ),
                 )),
             }
         }
@@ -1711,8 +2110,10 @@ impl Interpreter {
     ) -> Result<Value, Diagnostic> {
         let height = frame.height();
         let final_rhs = if let Some(bin_op) = op.to_binary_op() {
-            let current_vals = crate::polars_bridge::pull_column_as_values(frame, na_reasons, col_name)?;
-            let current_vec = Value::Vector(crate::vector_data::VectorData::from_values(current_vals));
+            let current_vals =
+                crate::polars_bridge::pull_column_as_values(frame, na_reasons, col_name)?;
+            let current_vec =
+                Value::Vector(crate::vector_data::VectorData::from_values(current_vals));
             self.eval_binary_op(bin_op, current_vec, rhs_val)?
         } else {
             rhs_val
@@ -1755,7 +2156,9 @@ impl Interpreter {
             na_reasons: std::sync::Arc::new(new_reasons),
         };
         self.env.assign(target, df_val);
-        Ok(Value::Vector(crate::vector_data::VectorData::from_values(new_values)))
+        Ok(Value::Vector(crate::vector_data::VectorData::from_values(
+            new_values,
+        )))
     }
 
     pub(crate) fn eval_index_assign(
@@ -1778,7 +2181,10 @@ impl Interpreter {
                 if indices.len() != 1 {
                     return Err(Diagnostic::compute_error(
                         "C0201",
-                        format!("Vector indexing requires exactly 1 index, got {}", indices.len()),
+                        format!(
+                            "Vector indexing requires exactly 1 index, got {}",
+                            indices.len()
+                        ),
                     ));
                 }
 
@@ -1791,12 +2197,19 @@ impl Interpreter {
                                 if i < 0 || (i as usize) >= items.len() {
                                     return Err(Diagnostic::compute_error(
                                         "C0203",
-                                        format!("Index out of bounds: index {i} for vector of length {}", items.len()),
+                                        format!(
+                                            "Index out of bounds: index {i} for vector of length {}",
+                                            items.len()
+                                        ),
                                     ));
                                 }
                                 let idx = i as usize;
                                 let new_cell = if let Some(bin_op) = op.to_binary_op() {
-                                    self.eval_binary_op(bin_op, items[idx].clone(), rhs_val.clone())?
+                                    self.eval_binary_op(
+                                        bin_op,
+                                        items[idx].clone(),
+                                        rhs_val.clone(),
+                                    )?
                                 } else {
                                     rhs_val.clone()
                                 };
@@ -1807,12 +2220,19 @@ impl Interpreter {
                                 if i < 0 || (i as usize) >= items.len() {
                                     return Err(Diagnostic::compute_error(
                                         "C0203",
-                                        format!("Index out of bounds: index {i} for vector of length {}", items.len()),
+                                        format!(
+                                            "Index out of bounds: index {i} for vector of length {}",
+                                            items.len()
+                                        ),
                                     ));
                                 }
                                 let idx = i as usize;
                                 let new_cell = if let Some(bin_op) = op.to_binary_op() {
-                                    self.eval_binary_op(bin_op, items[idx].clone(), rhs_val.clone())?
+                                    self.eval_binary_op(
+                                        bin_op,
+                                        items[idx].clone(),
+                                        rhs_val.clone(),
+                                    )?
                                 } else {
                                     rhs_val.clone()
                                 };
@@ -1856,9 +2276,14 @@ impl Interpreter {
                                             ));
                                         }
                                         for (k, &idx) in selected.iter().enumerate() {
-                                            let rhs_item = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                            let rhs_item =
+                                                rhs_v.value_at(k).unwrap_or(Value::NA(None));
                                             let new_cell = if let Some(bin_op) = op.to_binary_op() {
-                                                self.eval_binary_op(bin_op, items[idx].clone(), rhs_item)?
+                                                self.eval_binary_op(
+                                                    bin_op,
+                                                    items[idx].clone(),
+                                                    rhs_item,
+                                                )?
                                             } else {
                                                 rhs_item
                                             };
@@ -1867,7 +2292,11 @@ impl Interpreter {
                                     } else {
                                         for &idx in &selected {
                                             let new_cell = if let Some(bin_op) = op.to_binary_op() {
-                                                self.eval_binary_op(bin_op, items[idx].clone(), rhs_val.clone())?
+                                                self.eval_binary_op(
+                                                    bin_op,
+                                                    items[idx].clone(),
+                                                    rhs_val.clone(),
+                                                )?
                                             } else {
                                                 rhs_val.clone()
                                             };
@@ -1878,12 +2307,18 @@ impl Interpreter {
                                     let mut selected = Vec::with_capacity(idx_vd.len());
                                     for it in idx_vd.iter() {
                                         let i = it.as_i64().ok_or_else(|| {
-                                            Diagnostic::compute_error("C0201", "Vector index must be an integer or boolean mask")
+                                            Diagnostic::compute_error(
+                                                "C0201",
+                                                "Vector index must be an integer or boolean mask",
+                                            )
                                         })?;
                                         if i < 0 || (i as usize) >= items.len() {
                                             return Err(Diagnostic::compute_error(
                                                 "C0203",
-                                                format!("Index out of bounds: index {i} for vector of length {}", items.len()),
+                                                format!(
+                                                    "Index out of bounds: index {i} for vector of length {}",
+                                                    items.len()
+                                                ),
                                             ));
                                         }
                                         selected.push(i as usize);
@@ -1900,9 +2335,14 @@ impl Interpreter {
                                             ));
                                         }
                                         for (k, &idx) in selected.iter().enumerate() {
-                                            let rhs_item = rhs_v.value_at(k).unwrap_or(Value::NA(None));
+                                            let rhs_item =
+                                                rhs_v.value_at(k).unwrap_or(Value::NA(None));
                                             let new_cell = if let Some(bin_op) = op.to_binary_op() {
-                                                self.eval_binary_op(bin_op, items[idx].clone(), rhs_item)?
+                                                self.eval_binary_op(
+                                                    bin_op,
+                                                    items[idx].clone(),
+                                                    rhs_item,
+                                                )?
                                             } else {
                                                 rhs_item
                                             };
@@ -1911,7 +2351,11 @@ impl Interpreter {
                                     } else {
                                         for &idx in &selected {
                                             let new_cell = if let Some(bin_op) = op.to_binary_op() {
-                                                self.eval_binary_op(bin_op, items[idx].clone(), rhs_val.clone())?
+                                                self.eval_binary_op(
+                                                    bin_op,
+                                                    items[idx].clone(),
+                                                    rhs_val.clone(),
+                                                )?
                                             } else {
                                                 rhs_val.clone()
                                             };
@@ -1928,7 +2372,11 @@ impl Interpreter {
                             }
                         }
                     }
-                    IndexSpec::Range { start, end, inclusive } => {
+                    IndexSpec::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
                         let s = if let Some(st) = start {
                             let val = self.eval_expr_ctx(st, col_ctx)?;
                             val.as_i64().ok_or_else(|| {
@@ -1946,10 +2394,18 @@ impl Interpreter {
                         } else {
                             items.len() as i64
                         };
-                        if s < 0 || (s as usize) > items.len() || e < 0 || (e as usize) > items.len() || s > e {
+                        if s < 0
+                            || (s as usize) > items.len()
+                            || e < 0
+                            || (e as usize) > items.len()
+                            || s > e
+                        {
                             return Err(Diagnostic::compute_error(
                                 "C0203",
-                                format!("Range slice [{s}..{e}] out of bounds for vector of length {}", items.len()),
+                                format!(
+                                    "Range slice [{s}..{e}] out of bounds for vector of length {}",
+                                    items.len()
+                                ),
                             ));
                         }
                         let start_u = s as usize;
@@ -1968,7 +2424,11 @@ impl Interpreter {
                             for k in 0..len_u {
                                 let rhs_item = rhs_v.value_at(k).unwrap_or(Value::NA(None));
                                 let new_cell = if let Some(bin_op) = op.to_binary_op() {
-                                    self.eval_binary_op(bin_op, items[start_u + k].clone(), rhs_item)?
+                                    self.eval_binary_op(
+                                        bin_op,
+                                        items[start_u + k].clone(),
+                                        rhs_item,
+                                    )?
                                 } else {
                                     rhs_item
                                 };
@@ -1977,7 +2437,11 @@ impl Interpreter {
                         } else {
                             for k in 0..len_u {
                                 let new_cell = if let Some(bin_op) = op.to_binary_op() {
-                                    self.eval_binary_op(bin_op, items[start_u + k].clone(), rhs_val.clone())?
+                                    self.eval_binary_op(
+                                        bin_op,
+                                        items[start_u + k].clone(),
+                                        rhs_val.clone(),
+                                    )?
                                 } else {
                                     rhs_val.clone()
                                 };
@@ -2019,7 +2483,8 @@ impl Interpreter {
                     }
                 }
 
-                self.env.assign(target, Value::Vector(VectorData::from_values(items)));
+                self.env
+                    .assign(target, Value::Vector(VectorData::from_values(items)));
                 Ok(rhs_val)
             }
 
@@ -2034,20 +2499,40 @@ impl Interpreter {
                                     if i < 0 || (i as usize) >= frame.width() {
                                         return Err(Diagnostic::compute_error(
                                             "C0203",
-                                            format!("Column index {i} out of bounds for DataFrame with {} columns", frame.width()),
+                                            format!(
+                                                "Column index {i} out of bounds for DataFrame with {} columns",
+                                                frame.width()
+                                            ),
                                         ));
                                     }
                                     frame.get_column_names()[i as usize].to_string()
                                 }
-                                other => return Err(Diagnostic::compute_error(
-                                    "C0201",
-                                    format!("DataFrame column index must be string or integer, found `{}`", other.type_name()),
-                                )),
+                                other => {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0201",
+                                        format!(
+                                            "DataFrame column index must be string or integer, found `{}`",
+                                            other.type_name()
+                                        ),
+                                    ));
+                                }
                             }
                         }
-                        _ => return Err(Diagnostic::compute_error("C0201", "Invalid DataFrame column specification")),
+                        _ => {
+                            return Err(Diagnostic::compute_error(
+                                "C0201",
+                                "Invalid DataFrame column specification",
+                            ));
+                        }
                     };
-                    self.assign_dataframe_column(target, &frame, &na_reasons, &col_name, op, rhs_val)
+                    self.assign_dataframe_column(
+                        target,
+                        &frame,
+                        &na_reasons,
+                        &col_name,
+                        op,
+                        rhs_val,
+                    )
                 } else if indices.len() == 2 {
                     let col_name = match &indices[1] {
                         IndexSpec::Expr(e) => {
@@ -2058,21 +2543,38 @@ impl Interpreter {
                                     if i < 0 || (i as usize) >= frame.width() {
                                         return Err(Diagnostic::compute_error(
                                             "C0203",
-                                            format!("Column index {i} out of bounds for DataFrame with {} columns", frame.width()),
+                                            format!(
+                                                "Column index {i} out of bounds for DataFrame with {} columns",
+                                                frame.width()
+                                            ),
                                         ));
                                     }
                                     frame.get_column_names()[i as usize].to_string()
                                 }
-                                other => return Err(Diagnostic::compute_error(
-                                    "C0201",
-                                    format!("DataFrame column index must be string or integer, found `{}`", other.type_name()),
-                                )),
+                                other => {
+                                    return Err(Diagnostic::compute_error(
+                                        "C0201",
+                                        format!(
+                                            "DataFrame column index must be string or integer, found `{}`",
+                                            other.type_name()
+                                        ),
+                                    ));
+                                }
                             }
                         }
-                        _ => return Err(Diagnostic::compute_error("C0201", "Invalid DataFrame column specification")),
+                        _ => {
+                            return Err(Diagnostic::compute_error(
+                                "C0201",
+                                "Invalid DataFrame column specification",
+                            ));
+                        }
                     };
 
-                    if !frame.get_column_names().iter().any(|c| c.as_str() == col_name.as_str()) {
+                    if !frame
+                        .get_column_names()
+                        .iter()
+                        .any(|c| c.as_str() == col_name.as_str())
+                    {
                         return Err(Diagnostic::compute_error(
                             "C0102",
                             format!("Column `{col_name}` not found in DataFrame"),
@@ -2088,7 +2590,9 @@ impl Interpreter {
                                     if i < 0 || (i as usize) >= height {
                                         return Err(Diagnostic::compute_error(
                                             "C0203",
-                                            format!("Row index {i} out of bounds for DataFrame with {height} rows"),
+                                            format!(
+                                                "Row index {i} out of bounds for DataFrame with {height} rows"
+                                            ),
                                         ));
                                     }
                                     vec![i as usize]
@@ -2098,7 +2602,9 @@ impl Interpreter {
                                     if i < 0 || (i as usize) >= height {
                                         return Err(Diagnostic::compute_error(
                                             "C0203",
-                                            format!("Row index {i} out of bounds for DataFrame with {height} rows"),
+                                            format!(
+                                                "Row index {i} out of bounds for DataFrame with {height} rows"
+                                            ),
                                         ));
                                     }
                                     vec![i as usize]
@@ -2134,12 +2640,17 @@ impl Interpreter {
                                         let mut sel = Vec::with_capacity(idx_vd.len());
                                         for it in idx_vd.iter() {
                                             let i = it.as_i64().ok_or_else(|| {
-                                                Diagnostic::compute_error("C0201", "Row index must be an integer or boolean mask")
+                                                Diagnostic::compute_error(
+                                                    "C0201",
+                                                    "Row index must be an integer or boolean mask",
+                                                )
                                             })?;
                                             if i < 0 || (i as usize) >= height {
                                                 return Err(Diagnostic::compute_error(
                                                     "C0203",
-                                                    format!("Row index {i} out of bounds for DataFrame with {height} rows"),
+                                                    format!(
+                                                        "Row index {i} out of bounds for DataFrame with {height} rows"
+                                                    ),
                                                 ));
                                             }
                                             sel.push(i as usize);
@@ -2150,16 +2661,26 @@ impl Interpreter {
                                 other => {
                                     return Err(Diagnostic::compute_error(
                                         "C0202",
-                                        format!("Cannot index DataFrame rows with `{}`", other.type_name()),
+                                        format!(
+                                            "Cannot index DataFrame rows with `{}`",
+                                            other.type_name()
+                                        ),
                                     ));
                                 }
                             }
                         }
-                        IndexSpec::Range { start, end, inclusive } => {
+                        IndexSpec::Range {
+                            start,
+                            end,
+                            inclusive,
+                        } => {
                             let s = if let Some(st) = start {
                                 let val = self.eval_expr_ctx(st, col_ctx)?;
                                 val.as_i64().ok_or_else(|| {
-                                    Diagnostic::compute_error("C0201", "Range start must be an integer")
+                                    Diagnostic::compute_error(
+                                        "C0201",
+                                        "Range start must be an integer",
+                                    )
                                 })?
                             } else {
                                 0
@@ -2167,16 +2688,26 @@ impl Interpreter {
                             let e = if let Some(ed) = end {
                                 let val = self.eval_expr_ctx(ed, col_ctx)?;
                                 let ed_i = val.as_i64().ok_or_else(|| {
-                                    Diagnostic::compute_error("C0201", "Range end must be an integer")
+                                    Diagnostic::compute_error(
+                                        "C0201",
+                                        "Range end must be an integer",
+                                    )
                                 })?;
                                 if *inclusive { ed_i + 1 } else { ed_i }
                             } else {
                                 height as i64
                             };
-                            if s < 0 || (s as usize) > height || e < 0 || (e as usize) > height || s > e {
+                            if s < 0
+                                || (s as usize) > height
+                                || e < 0
+                                || (e as usize) > height
+                                || s > e
+                            {
                                 return Err(Diagnostic::compute_error(
                                     "C0203",
-                                    format!("Range slice [{s}..{e}] out of bounds for DataFrame with {height} rows"),
+                                    format!(
+                                        "Range slice [{s}..{e}] out of bounds for DataFrame with {height} rows"
+                                    ),
                                 ));
                             }
                             (s as usize..e as usize).collect()
@@ -2184,7 +2715,11 @@ impl Interpreter {
                         IndexSpec::All => (0..height).collect(),
                     };
 
-                    let mut col_values = crate::polars_bridge::pull_column_as_values(&frame, &na_reasons, &col_name)?;
+                    let mut col_values = crate::polars_bridge::pull_column_as_values(
+                        &frame,
+                        &na_reasons,
+                        &col_name,
+                    )?;
                     if let Value::Vector(rhs_vd) = &rhs_val {
                         if rhs_vd.len() != selected.len() {
                             return Err(Diagnostic::compute_error(
@@ -2208,7 +2743,11 @@ impl Interpreter {
                     } else {
                         for &row_idx in &selected {
                             let final_cell = if let Some(bin_op) = op.to_binary_op() {
-                                self.eval_binary_op(bin_op, col_values[row_idx].clone(), rhs_val.clone())?
+                                self.eval_binary_op(
+                                    bin_op,
+                                    col_values[row_idx].clone(),
+                                    rhs_val.clone(),
+                                )?
                             } else {
                                 rhs_val.clone()
                             };
@@ -2222,15 +2761,28 @@ impl Interpreter {
                             new_reasons.set(&col_name, r, reason.clone());
                         }
                     }
-                    let new_column = crate::polars_bridge::value_column_to_polars(&col_name, &col_values);
+                    let new_column =
+                        crate::polars_bridge::value_column_to_polars(&col_name, &col_values);
                     let mut new_frame = frame.clone();
                     new_frame.with_column(new_column).map_err(|e| {
-                        Diagnostic::compute_error("C0210", format!("DataFrame cell assignment failed: {e}"))
+                        Diagnostic::compute_error(
+                            "C0210",
+                            format!("DataFrame cell assignment failed: {e}"),
+                        )
                     })?;
-                    self.env.assign(target, Value::DataFrame { frame: new_frame, na_reasons: std::sync::Arc::new(new_reasons) });
+                    self.env.assign(
+                        target,
+                        Value::DataFrame {
+                            frame: new_frame,
+                            na_reasons: std::sync::Arc::new(new_reasons),
+                        },
+                    );
                     Ok(rhs_val)
                 } else {
-                    Err(Diagnostic::compute_error("C0201", "DataFrame indexing requires 1 or 2 indices"))
+                    Err(Diagnostic::compute_error(
+                        "C0201",
+                        "DataFrame indexing requires 1 or 2 indices",
+                    ))
                 }
             }
 
@@ -2238,7 +2790,10 @@ impl Interpreter {
                 if indices.len() != 2 {
                     return Err(Diagnostic::compute_error(
                         "C0201",
-                        format!("Matrix indexing requires exactly 2 indices [row, col], got {}", indices.len()),
+                        format!(
+                            "Matrix indexing requires exactly 2 indices [row, col], got {}",
+                            indices.len()
+                        ),
                     ));
                 }
 
@@ -2246,14 +2801,22 @@ impl Interpreter {
                 let c_sel = self.resolve_dim_selection(&indices[1], cols, "col", col_ctx)?;
 
                 let target_ref = self.env.get_mut(target).unwrap();
-                if let Value::Matrix { rows: m_rows, cols: m_cols, data } = target_ref {
+                if let Value::Matrix {
+                    rows: m_rows,
+                    cols: m_cols,
+                    data,
+                } = target_ref
+                {
                     let cols_len = *m_cols;
                     let rows_len = *m_rows;
                     let data_mut = std::sync::Arc::make_mut(data);
                     match (&r_sel, &c_sel) {
                         (DimSelection::Scalar(r), DimSelection::Scalar(c)) => {
                             let val_f64 = rhs_val.as_f64().ok_or_else(|| {
-                                Diagnostic::compute_error("C0202", "Matrix element must be a numeric value")
+                                Diagnostic::compute_error(
+                                    "C0202",
+                                    "Matrix element must be a numeric value",
+                                )
                             })?;
                             let idx = *r * cols_len + *c;
                             let res = if let Some(bin_op) = op.to_binary_op() {
@@ -2277,9 +2840,15 @@ impl Interpreter {
                                     ));
                                 }
                                 for (k, &c) in c_indices.iter().enumerate() {
-                                    let cell_val = vd.value_at(k).and_then(|v| v.as_f64()).ok_or_else(|| {
-                                        Diagnostic::compute_error("C0202", "Matrix element must be a numeric value")
-                                    })?;
+                                    let cell_val = vd
+                                        .value_at(k)
+                                        .and_then(|v| v.as_f64())
+                                        .ok_or_else(|| {
+                                            Diagnostic::compute_error(
+                                                "C0202",
+                                                "Matrix element must be a numeric value",
+                                            )
+                                        })?;
                                     let idx = *r * cols_len + c;
                                     let res = if let Some(bin_op) = op.to_binary_op() {
                                         apply_matrix_bin_op(bin_op, data_mut[idx], cell_val)?
@@ -2319,9 +2888,15 @@ impl Interpreter {
                                     ));
                                 }
                                 for (k, &r) in r_indices.iter().enumerate() {
-                                    let cell_val = vd.value_at(k).and_then(|v| v.as_f64()).ok_or_else(|| {
-                                        Diagnostic::compute_error("C0202", "Matrix element must be a numeric value")
-                                    })?;
+                                    let cell_val = vd
+                                        .value_at(k)
+                                        .and_then(|v| v.as_f64())
+                                        .ok_or_else(|| {
+                                            Diagnostic::compute_error(
+                                                "C0202",
+                                                "Matrix element must be a numeric value",
+                                            )
+                                        })?;
                                     let idx = r * cols_len + *c;
                                     let res = if let Some(bin_op) = op.to_binary_op() {
                                         apply_matrix_bin_op(bin_op, data_mut[idx], cell_val)?
@@ -2350,13 +2925,21 @@ impl Interpreter {
                         (r_spec, c_spec) => {
                             let r_indices = r_spec.to_indices(rows_len);
                             let c_indices = c_spec.to_indices(cols_len);
-                            if let Value::Matrix { rows: sub_r, cols: sub_c, data: sub_data } = &rhs_val {
+                            if let Value::Matrix {
+                                rows: sub_r,
+                                cols: sub_c,
+                                data: sub_data,
+                            } = &rhs_val
+                            {
                                 if *sub_r != r_indices.len() || *sub_c != c_indices.len() {
                                     return Err(Diagnostic::compute_error(
                                         "C0202",
                                         format!(
                                             "Replacement matrix dimensions ([{}, {}]) do not match target submatrix ([{}, {}])",
-                                            sub_r, sub_c, r_indices.len(), c_indices.len()
+                                            sub_r,
+                                            sub_c,
+                                            r_indices.len(),
+                                            c_indices.len()
                                         ),
                                     ));
                                 }
@@ -2398,12 +2981,20 @@ impl Interpreter {
 
             other => Err(Diagnostic::compute_error(
                 "C0201",
-                format!("Type `{}` does not support indexed assignment", other.type_name()),
+                format!(
+                    "Type `{}` does not support indexed assignment",
+                    other.type_name()
+                ),
             )),
         }
     }
 
-    fn eval_binary_op(&mut self, op: BinaryOp, left: Value, right: Value) -> Result<Value, Diagnostic> {
+    fn eval_binary_op(
+        &mut self,
+        op: BinaryOp,
+        left: Value,
+        right: Value,
+    ) -> Result<Value, Diagnostic> {
         // DataFrame column expressions: col("id") > 1
         if let Value::ColRef(col) = left {
             return Ok(Value::ColPredicate {
@@ -2434,7 +3025,9 @@ impl Interpreter {
         // Kleene Bool `&&`/`||` below, which would just error on a non-Bool operand.
         // Two real Bools/NAs never hit this branch (`is_predicate` is false for both),
         // so ordinary `&&`/`||` semantics are unaffected.
-        if matches!(op, BinaryOp::And | BinaryOp::Or) && (is_predicate(&left) || is_predicate(&right)) {
+        if matches!(op, BinaryOp::And | BinaryOp::Or)
+            && (is_predicate(&left) || is_predicate(&right))
+        {
             return Ok(match op {
                 BinaryOp::And => Value::AndPredicate(Box::new(left), Box::new(right)),
                 BinaryOp::Or => Value::OrPredicate(Box::new(left), Box::new(right)),
@@ -2444,22 +3037,31 @@ impl Interpreter {
 
         match op {
             // Matrix solve: A \ b
-            BinaryOp::MatSolve => {
-                match (left, right) {
-                    (Value::Matrix { rows, cols: _, data }, Value::Vector(v)) => {
-                        let mut b_floats = Vec::with_capacity(v.len());
-                        for item in v.iter() {
-                            b_floats.push(item.as_f64().unwrap_or(0.0));
-                        }
-                        let x = MatrixOps::solve(rows, &data, &b_floats)?;
-                        Ok(Value::Vector(VectorData::from_f64(x)))
+            BinaryOp::MatSolve => match (left, right) {
+                (
+                    Value::Matrix {
+                        rows,
+                        cols: _,
+                        data,
+                    },
+                    Value::Vector(v),
+                ) => {
+                    let mut b_floats = Vec::with_capacity(v.len());
+                    for item in v.iter() {
+                        b_floats.push(item.as_f64().unwrap_or(0.0));
                     }
-                    (l, r) => Err(Diagnostic::statistical_error(
-                        "S0412",
-                        format!("Operator `\\` expects Matrix LHS and Vector RHS, found `{}` and `{}`", l.type_name(), r.type_name()),
-                    )),
+                    let x = MatrixOps::solve(rows, &data, &b_floats)?;
+                    Ok(Value::Vector(VectorData::from_f64(x)))
                 }
-            }
+                (l, r) => Err(Diagnostic::statistical_error(
+                    "S0412",
+                    format!(
+                        "Operator `\\` expects Matrix LHS and Vector RHS, found `{}` and `{}`",
+                        l.type_name(),
+                        r.type_name()
+                    ),
+                )),
+            },
 
             // Element-wise Dot operations
             BinaryOp::DotMul | BinaryOp::DotAdd | BinaryOp::DotSub | BinaryOp::DotDiv => {
@@ -2473,22 +3075,47 @@ impl Interpreter {
 
                 match (left, right) {
                     (
-                        Value::Matrix { rows: r1, cols: c1, data: d1 },
-                        Value::Matrix { rows: r2, cols: c2, data: d2 },
+                        Value::Matrix {
+                            rows: r1,
+                            cols: c1,
+                            data: d1,
+                        },
+                        Value::Matrix {
+                            rows: r2,
+                            cols: c2,
+                            data: d2,
+                        },
                     ) => {
-                        let (r, c, d) = MatrixOps::elementwise(r1, c1, &d1, r2, c2, &d2, op_fn, "matrix op")?;
-                        Ok(Value::Matrix { rows: r, cols: c, data: std::sync::Arc::new(d) })
+                        let (r, c, d) =
+                            MatrixOps::elementwise(r1, c1, &d1, r2, c2, &d2, op_fn, "matrix op")?;
+                        Ok(Value::Matrix {
+                            rows: r,
+                            cols: c,
+                            data: std::sync::Arc::new(d),
+                        })
                     }
-                    (Value::Vector(v1), Value::Vector(v2)) => vector_elementwise_op(&v1, &v2, op_fn),
+                    (Value::Vector(v1), Value::Vector(v2)) => {
+                        vector_elementwise_op(&v1, &v2, op_fn)
+                    }
                     (l, r) => Err(Diagnostic::compute_error(
                         "C0202",
-                        format!("Element-wise op requires Vectors or Matrices, found `{}` and `{}`", l.type_name(), r.type_name()),
+                        format!(
+                            "Element-wise op requires Vectors or Matrices, found `{}` and `{}`",
+                            l.type_name(),
+                            r.type_name()
+                        ),
                     )),
                 }
             }
 
             // Standard Arithmetic (+, -, *, /, %, ^, |)
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::Pow | BinaryOp::BitOr => {
+            BinaryOp::Add
+            | BinaryOp::Sub
+            | BinaryOp::Mul
+            | BinaryOp::Div
+            | BinaryOp::Mod
+            | BinaryOp::Pow
+            | BinaryOp::BitOr => {
                 // Kleene NA propagation: any operation with NA yields NA (preserving reason)
                 if let Value::NA(r) = left {
                     return Ok(Value::NA(r));
@@ -2528,30 +3155,47 @@ impl Interpreter {
                                         let (xs, ys) = layer.effective_xy(&p);
                                         match crate::plot_stats::simple_linear_fit(xs, ys) {
                                             Some(fit) => ghl_plot::GeomLayer {
-                                                kind: ghl_plot::GeomKind::Smooth { fit: Some(fit), se: *se },
+                                                kind: ghl_plot::GeomKind::Smooth {
+                                                    fit: Some(fit),
+                                                    se: *se,
+                                                },
                                                 mapping: layer.mapping.clone(),
                                                 data: layer.data.clone(),
                                             },
                                             None => layer,
                                         }
                                     }
-                                    ghl_plot::GeomKind::Boxplot { stats: None, multi_stats } if multi_stats.is_empty() => {
+                                    ghl_plot::GeomKind::Boxplot {
+                                        stats: None,
+                                        multi_stats,
+                                    } if multi_stats.is_empty() => {
                                         let (xs, ys) = layer.effective_xy(&p);
                                         if !p.categories.is_empty() && !ys.is_empty() {
                                             let n = p.categories.len().min(ys.len());
-                                            let mut grouped: std::collections::BTreeMap<String, Vec<f64>> = std::collections::BTreeMap::new();
+                                            let mut grouped: std::collections::BTreeMap<
+                                                String,
+                                                Vec<f64>,
+                                            > = std::collections::BTreeMap::new();
                                             for i in 0..n {
-                                                grouped.entry(p.categories[i].clone()).or_default().push(ys[i]);
+                                                grouped
+                                                    .entry(p.categories[i].clone())
+                                                    .or_default()
+                                                    .push(ys[i]);
                                             }
                                             let mut group_stats = Vec::new();
                                             for (cat, vals) in grouped {
-                                                if let Some(st) = crate::plot_stats::five_number_summary(&vals) {
+                                                if let Some(st) =
+                                                    crate::plot_stats::five_number_summary(&vals)
+                                                {
                                                     group_stats.push((cat, st));
                                                 }
                                             }
                                             if !group_stats.is_empty() {
                                                 ghl_plot::GeomLayer {
-                                                    kind: ghl_plot::GeomKind::Boxplot { stats: None, multi_stats: group_stats },
+                                                    kind: ghl_plot::GeomKind::Boxplot {
+                                                        stats: None,
+                                                        multi_stats: group_stats,
+                                                    },
                                                     mapping: layer.mapping.clone(),
                                                     data: layer.data.clone(),
                                                 }
@@ -2561,7 +3205,10 @@ impl Interpreter {
                                         } else {
                                             match crate::plot_stats::five_number_summary(xs) {
                                                 Some(stats) => ghl_plot::GeomLayer {
-                                                    kind: ghl_plot::GeomKind::Boxplot { stats: Some(stats), multi_stats: Vec::new() },
+                                                    kind: ghl_plot::GeomKind::Boxplot {
+                                                        stats: Some(stats),
+                                                        multi_stats: Vec::new(),
+                                                    },
                                                     mapping: layer.mapping.clone(),
                                                     data: layer.data.clone(),
                                                 },
@@ -2578,32 +3225,57 @@ impl Interpreter {
                                 for l in other_p.layers {
                                     let configured = match &l.kind {
                                         ghl_plot::GeomKind::Smooth { fit: None, .. } => {
-                                            match crate::plot_stats::simple_linear_fit(&p.x_data, &p.y_data) {
-                                                Some(fit) => ghl_plot::GeomLayer::smooth_with_fit(fit),
+                                            match crate::plot_stats::simple_linear_fit(
+                                                &p.x_data, &p.y_data,
+                                            ) {
+                                                Some(fit) => {
+                                                    ghl_plot::GeomLayer::smooth_with_fit(fit)
+                                                }
                                                 None => l,
                                             }
                                         }
-                                        ghl_plot::GeomKind::Boxplot { stats: None, multi_stats } if multi_stats.is_empty() => {
+                                        ghl_plot::GeomKind::Boxplot {
+                                            stats: None,
+                                            multi_stats,
+                                        } if multi_stats.is_empty() => {
                                             if !p.categories.is_empty() && !p.y_data.is_empty() {
                                                 let n = p.categories.len().min(p.y_data.len());
-                                                let mut grouped: std::collections::BTreeMap<String, Vec<f64>> = std::collections::BTreeMap::new();
+                                                let mut grouped: std::collections::BTreeMap<
+                                                    String,
+                                                    Vec<f64>,
+                                                > = std::collections::BTreeMap::new();
                                                 for i in 0..n {
-                                                    grouped.entry(p.categories[i].clone()).or_default().push(p.y_data[i]);
+                                                    grouped
+                                                        .entry(p.categories[i].clone())
+                                                        .or_default()
+                                                        .push(p.y_data[i]);
                                                 }
                                                 let mut group_stats = Vec::new();
                                                 for (cat, vals) in grouped {
-                                                    if let Some(st) = crate::plot_stats::five_number_summary(&vals) {
+                                                    if let Some(st) =
+                                                        crate::plot_stats::five_number_summary(
+                                                            &vals,
+                                                        )
+                                                    {
                                                         group_stats.push((cat, st));
                                                     }
                                                 }
                                                 if !group_stats.is_empty() {
-                                                    ghl_plot::GeomLayer::boxplot_with_multi_stats(group_stats)
+                                                    ghl_plot::GeomLayer::boxplot_with_multi_stats(
+                                                        group_stats,
+                                                    )
                                                 } else {
                                                     l
                                                 }
                                             } else {
-                                                match crate::plot_stats::five_number_summary(&p.x_data) {
-                                                    Some(stats) => ghl_plot::GeomLayer::boxplot_with_stats(stats),
+                                                match crate::plot_stats::five_number_summary(
+                                                    &p.x_data,
+                                                ) {
+                                                    Some(stats) => {
+                                                        ghl_plot::GeomLayer::boxplot_with_stats(
+                                                            stats,
+                                                        )
+                                                    }
                                                     None => l,
                                                 }
                                             }
@@ -2612,10 +3284,18 @@ impl Interpreter {
                                     };
                                     p.layers.push(configured);
                                 }
-                                if other_p.labels.title.is_some() { p.labels.title = other_p.labels.title; }
-                                if other_p.labels.x_label.is_some() { p.labels.x_label = other_p.labels.x_label; }
-                                if other_p.labels.y_label.is_some() { p.labels.y_label = other_p.labels.y_label; }
-                                if other_p.theme != ghl_plot::PlotTheme::Default { p.theme = other_p.theme; }
+                                if other_p.labels.title.is_some() {
+                                    p.labels.title = other_p.labels.title;
+                                }
+                                if other_p.labels.x_label.is_some() {
+                                    p.labels.x_label = other_p.labels.x_label;
+                                }
+                                if other_p.labels.y_label.is_some() {
+                                    p.labels.y_label = other_p.labels.y_label;
+                                }
+                                if other_p.theme != ghl_plot::PlotTheme::Default {
+                                    p.theme = other_p.theme;
+                                }
                                 return Ok(Value::Plot(p));
                             }
                             Value::Facet(f) => {
@@ -2625,7 +3305,9 @@ impl Interpreter {
                                             p.facet_data = col.clone();
                                         }
                                     }
-                                    ghl_plot::FacetLayout::Grid { row_var, col_var, .. } => {
+                                    ghl_plot::FacetLayout::Grid {
+                                        row_var, col_var, ..
+                                    } => {
                                         if let Some(r_name) = row_var {
                                             if let Some(col) = p.columns_cache.get(r_name) {
                                                 p.facet_row_data = col.clone();
@@ -2650,20 +3332,39 @@ impl Interpreter {
                                 return Ok(Value::Plot(p));
                             }
                             Value::Labels(l) => {
-                                if let Some(t) = l.title { p.labels.title = Some(t); }
-                                if let Some(s) = l.subtitle { p.labels.subtitle = Some(s); }
-                                if let Some(x) = l.x_label { p.labels.x_label = Some(x); }
-                                if let Some(y) = l.y_label { p.labels.y_label = Some(y); }
-                                if let Some(c) = l.color_label { p.labels.color_label = Some(c); }
-                                if let Some(sz) = l.size_label { p.labels.size_label = Some(sz); }
-                                if let Some(sh) = l.shape_label { p.labels.shape_label = Some(sh); }
-                                if let Some(cap) = l.caption { p.labels.caption = Some(cap); }
+                                if let Some(t) = l.title {
+                                    p.labels.title = Some(t);
+                                }
+                                if let Some(s) = l.subtitle {
+                                    p.labels.subtitle = Some(s);
+                                }
+                                if let Some(x) = l.x_label {
+                                    p.labels.x_label = Some(x);
+                                }
+                                if let Some(y) = l.y_label {
+                                    p.labels.y_label = Some(y);
+                                }
+                                if let Some(c) = l.color_label {
+                                    p.labels.color_label = Some(c);
+                                }
+                                if let Some(sz) = l.size_label {
+                                    p.labels.size_label = Some(sz);
+                                }
+                                if let Some(sh) = l.shape_label {
+                                    p.labels.shape_label = Some(sh);
+                                }
+                                if let Some(cap) = l.caption {
+                                    p.labels.caption = Some(cap);
+                                }
                                 return Ok(Value::Plot(p));
                             }
                             other => {
                                 return Err(Diagnostic::compute_error(
                                     "C0308",
-                                    format!("Cannot add `{}` to a Plot. Expected a Geom layer, Facet, Theme, Scale, or Labels (e.g. `geom_point()`, `facet_wrap()`, `theme()`, `scale_size()`, `labs()`).", other.type_name()),
+                                    format!(
+                                        "Cannot add `{}` to a Plot. Expected a Geom layer, Facet, Theme, Scale, or Labels (e.g. `geom_point()`, `facet_wrap()`, `theme()`, `scale_size()`, `labs()`).",
+                                        other.type_name()
+                                    ),
                                 ));
                             }
                         }
@@ -2688,22 +3389,60 @@ impl Interpreter {
 
                 // True matrix product `A * B` (Caso 1.2, Suite 01) and element-wise `+`/`-`
                 if let (
-                    Value::Matrix { rows: r1, cols: c1, data: d1 },
-                    Value::Matrix { rows: r2, cols: c2, data: d2 },
+                    Value::Matrix {
+                        rows: r1,
+                        cols: c1,
+                        data: d1,
+                    },
+                    Value::Matrix {
+                        rows: r2,
+                        cols: c2,
+                        data: d2,
+                    },
                 ) = (&left, &right)
                 {
                     match op {
                         BinaryOp::Mul => {
                             let (r, c, d) = MatrixOps::mul(*r1, *c1, d1, *r2, *c2, d2)?;
-                            return Ok(Value::Matrix { rows: r, cols: c, data: std::sync::Arc::new(d) });
+                            return Ok(Value::Matrix {
+                                rows: r,
+                                cols: c,
+                                data: std::sync::Arc::new(d),
+                            });
                         }
                         BinaryOp::Add => {
-                            let (r, c, d) = MatrixOps::elementwise(*r1, *c1, d1, *r2, *c2, d2, |a, b| a + b, "matrix add")?;
-                            return Ok(Value::Matrix { rows: r, cols: c, data: std::sync::Arc::new(d) });
+                            let (r, c, d) = MatrixOps::elementwise(
+                                *r1,
+                                *c1,
+                                d1,
+                                *r2,
+                                *c2,
+                                d2,
+                                |a, b| a + b,
+                                "matrix add",
+                            )?;
+                            return Ok(Value::Matrix {
+                                rows: r,
+                                cols: c,
+                                data: std::sync::Arc::new(d),
+                            });
                         }
                         BinaryOp::Sub => {
-                            let (r, c, d) = MatrixOps::elementwise(*r1, *c1, d1, *r2, *c2, d2, |a, b| a - b, "matrix sub")?;
-                            return Ok(Value::Matrix { rows: r, cols: c, data: std::sync::Arc::new(d) });
+                            let (r, c, d) = MatrixOps::elementwise(
+                                *r1,
+                                *c1,
+                                d1,
+                                *r2,
+                                *c2,
+                                d2,
+                                |a, b| a - b,
+                                "matrix sub",
+                            )?;
+                            return Ok(Value::Matrix {
+                                rows: r,
+                                cols: c,
+                                data: std::sync::Arc::new(d),
+                            });
                         }
                         _ => {}
                     }
@@ -2912,7 +3651,12 @@ impl Interpreter {
 
                 Err(Diagnostic::compute_error(
                     "C0202",
-                    format!("Cannot apply `{:?}` to `{}` and `{}`", op, left.type_name(), right.type_name()),
+                    format!(
+                        "Cannot apply `{:?}` to `{}` and `{}`",
+                        op,
+                        left.type_name(),
+                        right.type_name()
+                    ),
                 ))
             }
 
@@ -2922,12 +3666,17 @@ impl Interpreter {
                     // false && anything is false!
                     (Value::Bool(false), _) | (_, Value::Bool(false)) => Ok(Value::Bool(false)),
                     // true && NA is NA!
-                    (Value::Bool(true), Value::NA(r)) | (Value::NA(r), Value::Bool(true)) => Ok(Value::NA(r.clone())),
+                    (Value::Bool(true), Value::NA(r)) | (Value::NA(r), Value::Bool(true)) => {
+                        Ok(Value::NA(r.clone()))
+                    }
                     // NA && NA is NA!
                     (Value::NA(r), Value::NA(_)) => Ok(Value::NA(r.clone())),
                     // true && true is true!
                     (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(*a && *b)),
-                    _ => Err(Diagnostic::compute_error("C0202", "`&&` requires boolean operands")),
+                    _ => Err(Diagnostic::compute_error(
+                        "C0202",
+                        "`&&` requires boolean operands",
+                    )),
                 }
             }
 
@@ -2936,17 +3685,27 @@ impl Interpreter {
                     // true || anything is true!
                     (Value::Bool(true), _) | (_, Value::Bool(true)) => Ok(Value::Bool(true)),
                     // false || NA is NA!
-                    (Value::Bool(false), Value::NA(r)) | (Value::NA(r), Value::Bool(false)) => Ok(Value::NA(r.clone())),
+                    (Value::Bool(false), Value::NA(r)) | (Value::NA(r), Value::Bool(false)) => {
+                        Ok(Value::NA(r.clone()))
+                    }
                     // NA || NA is NA!
                     (Value::NA(r), Value::NA(_)) => Ok(Value::NA(r.clone())),
                     // false || false is false!
                     (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(*a || *b)),
-                    _ => Err(Diagnostic::compute_error("C0202", "`||` requires boolean operands")),
+                    _ => Err(Diagnostic::compute_error(
+                        "C0202",
+                        "`||` requires boolean operands",
+                    )),
                 }
             }
 
             // Comparisons (<, <=, >, >=, ==, !=)
-            BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
+            BinaryOp::Eq
+            | BinaryOp::NotEq
+            | BinaryOp::Lt
+            | BinaryOp::LtEq
+            | BinaryOp::Gt
+            | BinaryOp::GtEq => {
                 if matches!(&left, Value::Vector(_)) || matches!(&right, Value::Vector(_)) {
                     return eval_vector_comparison(op, left, right);
                 }
@@ -2995,7 +3754,10 @@ impl Interpreter {
                             };
                             Ok(Value::Bool(cmp))
                         } else {
-                            Err(Diagnostic::compute_error("C0202", "Inequality comparison requires numeric operands"))
+                            Err(Diagnostic::compute_error(
+                                "C0202",
+                                "Inequality comparison requires numeric operands",
+                            ))
                         }
                     }
                     _ => unreachable!(),
@@ -3073,11 +3835,19 @@ fn apply_matrix_bin_op(op: BinaryOp, a: f64, b: f64) -> Result<f64, Diagnostic> 
     }
 }
 
-fn vector_elementwise_op(v1: &VectorData, v2: &VectorData, op_fn: fn(f64, f64) -> f64) -> Result<Value, Diagnostic> {
+fn vector_elementwise_op(
+    v1: &VectorData,
+    v2: &VectorData,
+    op_fn: fn(f64, f64) -> f64,
+) -> Result<Value, Diagnostic> {
     if v1.len() != v2.len() {
         return Err(Diagnostic::statistical_error(
             "S0412",
-            format!("Vector length mismatch in element-wise op: {} vs {}", v1.len(), v2.len()),
+            format!(
+                "Vector length mismatch in element-wise op: {} vs {}",
+                v1.len(),
+                v2.len()
+            ),
         ));
     }
 
@@ -3086,7 +3856,10 @@ fn vector_elementwise_op(v1: &VectorData, v2: &VectorData, op_fn: fn(f64, f64) -
         let view2 = v2.as_f64_view()?;
         let (a, b) = (view1.as_slice(), view2.as_slice());
         let data: Vec<f64> = if a.len() >= PARALLEL_THRESHOLD {
-            a.par_iter().zip(b.par_iter()).map(|(&x, &y)| op_fn(x, y)).collect()
+            a.par_iter()
+                .zip(b.par_iter())
+                .map(|(&x, &y)| op_fn(x, y))
+                .collect()
         } else {
             a.iter().zip(b.iter()).map(|(&x, &y)| op_fn(x, y)).collect()
         };
@@ -3114,7 +3887,11 @@ fn eval_vector_comparison(op: BinaryOp, left: Value, right: Value) -> Result<Val
             if v1.len() != v2.len() {
                 return Err(Diagnostic::statistical_error(
                     "S0412",
-                    format!("Vector length mismatch in element-wise comparison: {} vs {}", v1.len(), v2.len()),
+                    format!(
+                        "Vector length mismatch in element-wise comparison: {} vs {}",
+                        v1.len(),
+                        v2.len()
+                    ),
                 ));
             }
             if v1.null_count() == 0 && v2.null_count() == 0 {
@@ -3130,9 +3907,15 @@ fn eval_vector_comparison(op: BinaryOp, left: Value, right: Value) -> Result<Val
                         _ => unreachable!(),
                     };
                     let bools: Vec<bool> = if a.len() >= PARALLEL_THRESHOLD {
-                        a.par_iter().zip(b.par_iter()).map(|(&x, &y)| cmp_fn(x, y)).collect()
+                        a.par_iter()
+                            .zip(b.par_iter())
+                            .map(|(&x, &y)| cmp_fn(x, y))
+                            .collect()
                     } else {
-                        a.iter().zip(b.iter()).map(|(&x, &y)| cmp_fn(x, y)).collect()
+                        a.iter()
+                            .zip(b.iter())
+                            .map(|(&x, &y)| cmp_fn(x, y))
+                            .collect()
                     };
                     return Ok(Value::Vector(VectorData::from_bool(bools)));
                 }
@@ -3157,7 +3940,10 @@ fn eval_vector_comparison(op: BinaryOp, left: Value, right: Value) -> Result<Val
                                     _ => unreachable!(),
                                 }
                             } else {
-                                return Err(Diagnostic::compute_error("C0202", "Inequality comparison requires numeric operands"));
+                                return Err(Diagnostic::compute_error(
+                                    "C0202",
+                                    "Inequality comparison requires numeric operands",
+                                ));
                             }
                         }
                         _ => unreachable!(),
@@ -3210,7 +3996,10 @@ fn eval_vector_comparison(op: BinaryOp, left: Value, right: Value) -> Result<Val
                                     _ => unreachable!(),
                                 }
                             } else {
-                                return Err(Diagnostic::compute_error("C0202", "Inequality comparison requires numeric operands"));
+                                return Err(Diagnostic::compute_error(
+                                    "C0202",
+                                    "Inequality comparison requires numeric operands",
+                                ));
                             }
                         }
                         _ => unreachable!(),
@@ -3263,7 +4052,10 @@ fn eval_vector_comparison(op: BinaryOp, left: Value, right: Value) -> Result<Val
                                     _ => unreachable!(),
                                 }
                             } else {
-                                return Err(Diagnostic::compute_error("C0202", "Inequality comparison requires numeric operands"));
+                                return Err(Diagnostic::compute_error(
+                                    "C0202",
+                                    "Inequality comparison requires numeric operands",
+                                ));
                             }
                         }
                         _ => unreachable!(),
@@ -3276,7 +4068,6 @@ fn eval_vector_comparison(op: BinaryOp, left: Value, right: Value) -> Result<Val
         _ => unreachable!(),
     }
 }
-
 
 /// True for any `Value` that represents a deferred `filter()` predicate rather than a
 /// real computed value — the leaf `ColPredicate`/`IsNaPredicate` and the combinators
@@ -3316,11 +4107,19 @@ fn extract_formula_term(expr: &Expr, acc: &mut Vec<String>) {
         ExprKind::FieldAccess { target, field } => acc.push(format!("{target}.{field}")),
         ExprKind::Lit(ghl_syntax::ast::Literal::Int(n)) => acc.push(n.to_string()),
         ExprKind::Lit(ghl_syntax::ast::Literal::Float(s)) => acc.push(s.to_string()),
-        ExprKind::Binary { op: BinaryOp::Add, lhs, rhs } => {
+        ExprKind::Binary {
+            op: BinaryOp::Add,
+            lhs,
+            rhs,
+        } => {
             extract_formula_term(lhs, acc);
             extract_formula_term(rhs, acc);
         }
-        ExprKind::Binary { op: BinaryOp::Mul, lhs, rhs } => {
+        ExprKind::Binary {
+            op: BinaryOp::Mul,
+            lhs,
+            rhs,
+        } => {
             let mut left = Vec::new();
             let mut right = Vec::new();
             extract_formula_term(lhs, &mut left);
@@ -3330,4 +4129,3 @@ fn extract_formula_term(expr: &Expr, acc: &mut Vec<String>) {
         _ => acc.push(format!("{expr}")),
     }
 }
-

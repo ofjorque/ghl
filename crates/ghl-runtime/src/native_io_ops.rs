@@ -3,10 +3,9 @@
 //! Split out of `env.rs` for maintainability; native fn names are still
 //! referenced unqualified from `RuntimeEnv::with_prelude()` via glob imports.
 
-use ghl_diagnostics::Diagnostic;
 use crate::value::Value;
 use crate::vector_data::VectorData;
-
+use ghl_diagnostics::Diagnostic;
 
 // =========================================================================
 // Primitive and Tabular I/O Native Functions
@@ -58,15 +57,19 @@ pub(crate) fn native_write_file(args: Vec<Value>) -> Result<Value, Diagnostic> {
         ));
     }
 
-    let (path, content): (String, String) = if let (Some(s1), Some(s2)) = (args[0].as_str(), args[1].as_str()) {
-        resolve_path_and_content(s1, s2)
-    } else if let Some(p) = args[1].as_str() {
-        (p.to_string(), args[0].to_string())
-    } else if let Some(p) = args[0].as_str() {
-        (p.to_string(), args[1].to_string())
-    } else {
-        return Err(Diagnostic::compute_error("C0402", "`write_file()` requires string arguments"));
-    };
+    let (path, content): (String, String) =
+        if let (Some(s1), Some(s2)) = (args[0].as_str(), args[1].as_str()) {
+            resolve_path_and_content(s1, s2)
+        } else if let Some(p) = args[1].as_str() {
+            (p.to_string(), args[0].to_string())
+        } else if let Some(p) = args[0].as_str() {
+            (p.to_string(), args[1].to_string())
+        } else {
+            return Err(Diagnostic::compute_error(
+                "C0402",
+                "`write_file()` requires string arguments",
+            ));
+        };
 
     crate::io::write_file(&path, &content)?;
     Ok(Value::Unit)
@@ -80,15 +83,19 @@ pub(crate) fn native_append_file(args: Vec<Value>) -> Result<Value, Diagnostic> 
         ));
     }
 
-    let (path, content): (String, String) = if let (Some(s1), Some(s2)) = (args[0].as_str(), args[1].as_str()) {
-        resolve_path_and_content(s1, s2)
-    } else if let Some(p) = args[1].as_str() {
-        (p.to_string(), args[0].to_string())
-    } else if let Some(p) = args[0].as_str() {
-        (p.to_string(), args[1].to_string())
-    } else {
-        return Err(Diagnostic::compute_error("C0402", "`append_file()` requires string arguments"));
-    };
+    let (path, content): (String, String) =
+        if let (Some(s1), Some(s2)) = (args[0].as_str(), args[1].as_str()) {
+            resolve_path_and_content(s1, s2)
+        } else if let Some(p) = args[1].as_str() {
+            (p.to_string(), args[0].to_string())
+        } else if let Some(p) = args[0].as_str() {
+            (p.to_string(), args[1].to_string())
+        } else {
+            return Err(Diagnostic::compute_error(
+                "C0402",
+                "`append_file()` requires string arguments",
+            ));
+        };
 
     crate::io::append_file(&path, &content)?;
     Ok(Value::Unit)
@@ -105,7 +112,10 @@ pub(crate) fn native_read_csv(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let path = args.first().and_then(|v| v.as_str()).ok_or_else(|| {
         Diagnostic::compute_error("C0403", "`read_csv()` requires a file path string")
     })?;
-    let delim = args.get(1).and_then(|v| v.as_str()).and_then(|s| s.chars().next());
+    let delim = args
+        .get(1)
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.chars().next());
     crate::io::read_csv_file(path, delim)
 }
 
@@ -113,7 +123,10 @@ pub(crate) fn native_parse_csv(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let content = args.first().and_then(|v| v.as_str()).ok_or_else(|| {
         Diagnostic::compute_error("C0403", "`parse_csv()` requires a CSV text string")
     })?;
-    let delim = args.get(1).and_then(|v| v.as_str()).and_then(|s| s.chars().next());
+    let delim = args
+        .get(1)
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.chars().next());
     crate::io::parse_csv_string(content, delim)
 }
 
@@ -140,7 +153,10 @@ pub(crate) fn native_write_csv(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Diagnostic::compute_error("C0404", "`write_csv()` requires a string destination path")
     })?;
 
-    let delim = args.get(delim_idx).and_then(|v| v.as_str()).and_then(|s| s.chars().next());
+    let delim = args
+        .get(delim_idx)
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.chars().next());
     crate::io::write_csv_file(df, p, delim)?;
     Ok(Value::Unit)
 }
@@ -164,11 +180,17 @@ pub(crate) fn native_write_parquet(args: Vec<Value>) -> Result<Value, Diagnostic
         (Value::DataFrame { .. }, _) => (&args[0], args[1].as_str()),
         (_, Value::DataFrame { .. }) => (&args[1], args[0].as_str()),
         _ => {
-            return Err(Diagnostic::compute_error("C0405", "`write_parquet()` requires a DataFrame argument"));
+            return Err(Diagnostic::compute_error(
+                "C0405",
+                "`write_parquet()` requires a DataFrame argument",
+            ));
         }
     };
     let p = path.ok_or_else(|| {
-        Diagnostic::compute_error("C0405", "`write_parquet()` requires a string destination path")
+        Diagnostic::compute_error(
+            "C0405",
+            "`write_parquet()` requires a string destination path",
+        )
     })?;
 
     crate::io::write_parquet_file(df, p)?;
@@ -176,23 +198,23 @@ pub(crate) fn native_write_parquet(args: Vec<Value>) -> Result<Value, Diagnostic
 }
 
 pub(crate) fn native_lazy(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`lazy()` requires a DataFrame")
-    })?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`lazy()` requires a DataFrame"))?;
     crate::io::df_lazy(df)
 }
 
 pub(crate) fn native_collect(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let lf = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`collect()` requires a LazyFrame")
-    })?;
+    let lf = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`collect()` requires a LazyFrame"))?;
     crate::io::df_collect(lf)
 }
 
 pub(crate) fn native_explain(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let lf = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`explain()` requires a LazyFrame")
-    })?;
+    let lf = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`explain()` requires a LazyFrame"))?;
     let opt = args.get(1).and_then(|v| v.as_bool()).unwrap_or(true);
     crate::io::df_explain(lf, opt)
 }
@@ -213,7 +235,10 @@ pub(crate) fn native_scan_parquet(args: Vec<Value>) -> Result<Value, Diagnostic>
 
 pub(crate) fn native_select(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Err(Diagnostic::compute_error("C0201", "`select()` requires a DataFrame"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`select()` requires a DataFrame",
+        ));
     }
 
     let df = &args[0];
@@ -238,17 +263,17 @@ pub(crate) fn native_select(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_head(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`head()` requires a DataFrame")
-    })?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`head()` requires a DataFrame"))?;
     let n = args.get(1).and_then(|v| v.as_i64()).unwrap_or(5) as usize;
     crate::io::df_head(df, n)
 }
 
 pub(crate) fn native_tail(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`tail()` requires a DataFrame")
-    })?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`tail()` requires a DataFrame"))?;
     let n = args.get(1).and_then(|v| v.as_i64()).unwrap_or(5) as usize;
     crate::io::df_tail(df, n)
 }

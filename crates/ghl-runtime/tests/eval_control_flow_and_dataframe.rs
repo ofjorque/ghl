@@ -3,8 +3,8 @@
 mod common;
 use common::*;
 
-use ghl_runtime::value::Value;
 use ghl_runtime::eval::Interpreter;
+use ghl_runtime::value::Value;
 use ghl_syntax::parser::parse;
 
 #[test]
@@ -127,7 +127,10 @@ fn test_return_short_circuits_nested_block() {
     interp.eval_program(&program).expect("evaluation ok");
     assert_eq!(interp.env.get("a"), Some(Value::String("huge".to_string())));
     assert_eq!(interp.env.get("b"), Some(Value::String("big".to_string())));
-    assert_eq!(interp.env.get("c"), Some(Value::String("small".to_string())));
+    assert_eq!(
+        interp.env.get("c"),
+        Some(Value::String("small".to_string()))
+    );
 }
 
 #[test]
@@ -141,7 +144,11 @@ fn test_return_at_top_level_stops_program() {
     let mut interp = Interpreter::new();
     interp.eval_program(&program).expect("evaluation ok");
     assert_eq!(interp.env.get("a"), Some(Value::I64(1)));
-    assert_eq!(interp.env.get("b"), None, "statement after a top-level return must not run");
+    assert_eq!(
+        interp.env.get("b"),
+        None,
+        "statement after a top-level return must not run"
+    );
 }
 
 #[test]
@@ -279,7 +286,9 @@ fn test_assign_rejects_undeclared_variable() {
     let code = r#"x = 1;"#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("undeclared assignment must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("undeclared assignment must fail");
     assert_eq!(err.code, "C0101");
 }
 
@@ -338,10 +347,16 @@ fn test_filter_is_na_predicate_and_negation() {
     interp.eval_program(&program).expect("evaluation ok");
 
     let only_na = interp.env.get("only_na").expect("only_na exists");
-    assert_eq!(df_column(&only_na, "id"), vec![Value::I64(2), Value::I64(4)]);
+    assert_eq!(
+        df_column(&only_na, "id"),
+        vec![Value::I64(2), Value::I64(4)]
+    );
 
     let without_na = interp.env.get("without_na").expect("without_na exists");
-    assert_eq!(df_column(&without_na, "id"), vec![Value::I64(1), Value::I64(3)]);
+    assert_eq!(
+        df_column(&without_na, "id"),
+        vec![Value::I64(1), Value::I64(3)]
+    );
 }
 
 #[test]
@@ -381,7 +396,10 @@ fn test_filter_rejects_unrecognized_predicate_instead_of_silently_passing_throug
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
     let result = interp.eval_program(&program);
-    assert!(result.is_err(), "filter() with a nonsensical predicate must error, not no-op");
+    assert!(
+        result.is_err(),
+        "filter() with a nonsensical predicate must error, not no-op"
+    );
 }
 
 #[test]
@@ -458,5 +476,3 @@ fn test_type_conversion_helpers() {
     assert_eq!(interp.env.get("str_int"), Some(Value::I64(123)));
     assert_eq!(interp.env.get("str_float"), Some(Value::F64(3.1415)));
 }
-
-

@@ -1,8 +1,8 @@
 //! `ghl run` — parse, typecheck, JIT-compile with Cranelift, and execute a GHL script.
 
-use std::time::Instant;
 use ghl_diagnostics::{Diagnostic, RenderCaps, SemanticCode};
 use ghl_syntax::SourceIndex;
+use std::time::Instant;
 
 pub fn cmd_run(args: &[String], caps: &RenderCaps) {
     if args.len() < 3 {
@@ -27,7 +27,8 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
                     eval_code = Some(args[idx + 1].clone());
                     idx += 1;
                 } else {
-                    let err = Diagnostic::compute_error("C0001", "Missing code string for -e / -c flag");
+                    let err =
+                        Diagnostic::compute_error("C0001", "Missing code string for -e / -c flag");
                     eprintln!("{}", err.render_with_caps(caps));
                     std::process::exit(1);
                 }
@@ -84,8 +85,11 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
             let index = SourceIndex::new(&content);
             for syntax_err in errors {
                 let (line, col) = index.offset_to_position(syntax_err.span.start);
-                let err = Diagnostic::compute_error("C0100", syntax_err.message)
-                    .with_location(&filename, line as usize + 1, col as usize + 1);
+                let err = Diagnostic::compute_error("C0100", syntax_err.message).with_location(
+                    &filename,
+                    line as usize + 1,
+                    col as usize + 1,
+                );
                 eprintln!("{}", err.render_with_caps(caps));
             }
             std::process::exit(1);
@@ -93,7 +97,9 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
     };
 
     // 1b. Module & Package Resolution Phase (RFC 06)
-    if let Err(diag) = crate::package::resolve_package_imports(&mut program, std::path::Path::new(&filename)) {
+    if let Err(diag) =
+        crate::package::resolve_package_imports(&mut program, std::path::Path::new(&filename))
+    {
         eprintln!("{}", diag.render_with_caps(caps));
         std::process::exit(1);
     }
@@ -129,7 +135,11 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
 
     let jit_info = opt_jit.as_ref().map(|(_jit, hir)| {
         let elapsed = jit_start.elapsed().as_secs_f64() * 1000.0;
-        format!("({} functions compiled in {:.2}ms)", hir.functions.len(), elapsed)
+        format!(
+            "({} functions compiled in {:.2}ms)",
+            hir.functions.len(),
+            elapsed
+        )
     });
 
     // Telemetry indicator for verbose users (-v / --verbose)
@@ -137,7 +147,7 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
         let jit_label = if let Some(info) = &jit_info {
             format!("{} {}", caps.cyan("CRANELIFT JIT ▶"), caps.dim(info))
         } else {
-            format!("{}", caps.cyan("EXECUTE ▶"))
+            caps.cyan("EXECUTE ▶").to_string()
         };
 
         let header = format!(
@@ -158,11 +168,16 @@ pub fn cmd_run(args: &[String], caps: &RenderCaps) {
     if let Some((jit_arc, hir_module)) = &opt_jit {
         for (name, hir_fn) in &hir_module.functions {
             if let Some(ptr) = jit_arc.get_fn_ptr(name) {
-                if let Some(trampoline) = crate::jit_bridge::create_jit_trampoline(hir_fn, ptr, jit_arc.clone()) {
-                    interpreter.env.set(name.clone(), ghl_runtime::Value::JitFn {
-                        name: name.clone(),
-                        func: trampoline,
-                    });
+                if let Some(trampoline) =
+                    crate::jit_bridge::create_jit_trampoline(hir_fn, ptr, jit_arc.clone())
+                {
+                    interpreter.env.set(
+                        name.clone(),
+                        ghl_runtime::Value::JitFn {
+                            name: name.clone(),
+                            func: trampoline,
+                        },
+                    );
                 }
             }
         }

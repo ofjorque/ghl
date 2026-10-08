@@ -19,8 +19,22 @@ pub struct PaletteColor {
 }
 
 impl PaletteColor {
-    pub const fn new(name: &'static str, r: u8, g: u8, b: u8, hex: &'static str, ansi_code: &'static str) -> Self {
-        Self { name, r, g, b, hex, ansi_code }
+    pub const fn new(
+        name: &'static str,
+        r: u8,
+        g: u8,
+        b: u8,
+        hex: &'static str,
+        ansi_code: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            r,
+            g,
+            b,
+            hex,
+            ansi_code,
+        }
     }
 
     pub fn to_rgb_tuple(&self) -> (u8, u8, u8) {
@@ -36,9 +50,23 @@ impl PaletteColor {
 pub static OKABE_ITO: [PaletteColor; 8] = [
     PaletteColor::new("Sky Blue", 86, 180, 233, "#56B4E9", "\x1b[38;2;86;180;233m"),
     PaletteColor::new("Orange", 230, 159, 0, "#E69F00", "\x1b[38;2;230;159;0m"),
-    PaletteColor::new("Bluish Green", 0, 158, 115, "#009E73", "\x1b[38;2;0;158;115m"),
+    PaletteColor::new(
+        "Bluish Green",
+        0,
+        158,
+        115,
+        "#009E73",
+        "\x1b[38;2;0;158;115m",
+    ),
     PaletteColor::new("Vermilion", 213, 94, 0, "#D55E00", "\x1b[38;2;213;94;0m"),
-    PaletteColor::new("Reddish Purple", 204, 121, 167, "#CC79A7", "\x1b[38;2;204;121;167m"),
+    PaletteColor::new(
+        "Reddish Purple",
+        204,
+        121,
+        167,
+        "#CC79A7",
+        "\x1b[38;2;204;121;167m",
+    ),
     PaletteColor::new("Yellow", 240, 228, 66, "#F0E442", "\x1b[38;2;240;228;66m"),
     PaletteColor::new("Blue", 0, 114, 178, "#0072B2", "\x1b[38;2;0;114;178m"),
     PaletteColor::new("Black", 0, 0, 0, "#000000", "\x1b[38;2;0;0;0m"),
@@ -60,10 +88,38 @@ pub static DARK2: [PaletteColor; 8] = [
 pub static VIRIDIS: [PaletteColor; 6] = [
     PaletteColor::new("Viridis-1", 68, 1, 84, "#440154", "\x1b[38;2;68;1;84m"),
     PaletteColor::new("Viridis-2", 65, 68, 135, "#414487", "\x1b[38;2;65;68;135m"),
-    PaletteColor::new("Viridis-3", 42, 120, 142, "#2A788E", "\x1b[38;2;42;120;142m"),
-    PaletteColor::new("Viridis-4", 34, 168, 132, "#22A884", "\x1b[38;2;34;168;132m"),
-    PaletteColor::new("Viridis-5", 122, 209, 81, "#7AD151", "\x1b[38;2;122;209;81m"),
-    PaletteColor::new("Viridis-6", 253, 231, 37, "#FDE725", "\x1b[38;2;253;231;37m"),
+    PaletteColor::new(
+        "Viridis-3",
+        42,
+        120,
+        142,
+        "#2A788E",
+        "\x1b[38;2;42;120;142m",
+    ),
+    PaletteColor::new(
+        "Viridis-4",
+        34,
+        168,
+        132,
+        "#22A884",
+        "\x1b[38;2;34;168;132m",
+    ),
+    PaletteColor::new(
+        "Viridis-5",
+        122,
+        209,
+        81,
+        "#7AD151",
+        "\x1b[38;2;122;209;81m",
+    ),
+    PaletteColor::new(
+        "Viridis-6",
+        253,
+        231,
+        37,
+        "#FDE725",
+        "\x1b[38;2;253;231;37m",
+    ),
 ];
 
 /// Retrieve the i-th color from the default Okabe-Ito palette, cycling if necessary.

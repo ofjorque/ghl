@@ -19,10 +19,10 @@
 //! Usage:
 //!   cargo run --release --example spike_gibbs_mcmc_latency -p ghl-runtime -- [iterations] [n_per_group]
 
-use std::time::Instant;
 use rand::SeedableRng;
 use rand_distr::{Distribution, Normal as RNormal};
 use rand_xoshiro::Xoshiro256PlusPlus;
+use std::time::Instant;
 
 use ghl_runtime::eval::Interpreter;
 use ghl_runtime::value::Value;
@@ -39,7 +39,10 @@ fn main() {
     println!("================================================================================");
     println!("Configuration:");
     println!("  - MCMC Iterations: {num_iterations}");
-    println!("  - N per group:     {n_per_group} (3 groups, N_total = {})", n_per_group * 3);
+    println!(
+        "  - N per group:     {n_per_group} (3 groups, N_total = {})",
+        n_per_group * 3
+    );
     println!("  - True parameters: mu = [3.0, 8.0, -4.0], sigma = 0.8 (tau ~ 1.5625)");
 
     // 1. Generate synthetic data in Rust
@@ -103,33 +106,71 @@ fn main() {
     let program = parse(ghl_code).expect("GHL code parsed successfully");
 
     let mut interp = Interpreter::new();
-    interp.env.set("y".to_string(), Value::Vector(VectorData::from_f64(y)));
+    interp
+        .env
+        .set("y".to_string(), Value::Vector(VectorData::from_f64(y)));
     interp.env.set(
         "groups".to_string(),
-        Value::Vector(VectorData::from_values(groups.into_iter().map(Value::I64).collect())),
+        Value::Vector(VectorData::from_values(
+            groups.into_iter().map(Value::I64).collect(),
+        )),
     );
-    interp.env.set("iterations".to_string(), Value::I64(num_iterations));
+    interp
+        .env
+        .set("iterations".to_string(), Value::I64(num_iterations));
 
     println!("\nStarting Gibbs sampling in GHL...");
     let start = Instant::now();
-    interp.eval_program(&program).expect("GHL evaluation successful");
+    interp
+        .eval_program(&program)
+        .expect("GHL evaluation successful");
     let elapsed = start.elapsed();
 
-    let m0 = interp.env.get("mean0").and_then(|v| v.as_f64()).unwrap_or(f64::NAN);
-    let m1 = interp.env.get("mean1").and_then(|v| v.as_f64()).unwrap_or(f64::NAN);
-    let m2 = interp.env.get("mean2").and_then(|v| v.as_f64()).unwrap_or(f64::NAN);
+    let m0 = interp
+        .env
+        .get("mean0")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::NAN);
+    let m1 = interp
+        .env
+        .get("mean1")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::NAN);
+    let m2 = interp
+        .env
+        .get("mean2")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::NAN);
 
     let per_iter = elapsed.as_secs_f64() / (num_iterations as f64);
     let iter_per_sec = (num_iterations as f64) / elapsed.as_secs_f64();
 
     println!("\nSampler Results:");
-    println!("  - Posterior mean mu[0]: {:>8.4} (expected: ~3.0000, error: {:>+.4})", m0, m0 - 3.0);
-    println!("  - Posterior mean mu[1]: {:>8.4} (expected: ~8.0000, error: {:>+.4})", m1, m1 - 8.0);
-    println!("  - Posterior mean mu[2]: {:>8.4} (expected: ~-4.0000, error: {:>+.4})", m2, m2 - (-4.0));
+    println!(
+        "  - Posterior mean mu[0]: {:>8.4} (expected: ~3.0000, error: {:>+.4})",
+        m0,
+        m0 - 3.0
+    );
+    println!(
+        "  - Posterior mean mu[1]: {:>8.4} (expected: ~8.0000, error: {:>+.4})",
+        m1,
+        m1 - 8.0
+    );
+    println!(
+        "  - Posterior mean mu[2]: {:>8.4} (expected: ~-4.0000, error: {:>+.4})",
+        m2,
+        m2 - (-4.0)
+    );
 
     println!("\nPerformance:");
     println!("  - Total time:          {elapsed:?}");
-    println!("  - Time per iteration:  {:>8.3} µs", per_iter * 1_000_000.0);
-    println!("  - Throughput:          {:>8.1} iterations/second", iter_per_sec);
+    println!(
+        "  - Time per iteration:  {:>8.3} µs",
+        per_iter * 1_000_000.0
+    );
+    println!(
+        "  - Throughput:          {:>8.1} iterations/second",
+        iter_per_sec
+    );
     println!("================================================================================");
 }

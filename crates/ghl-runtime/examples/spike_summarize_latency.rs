@@ -6,9 +6,9 @@
 //!
 //! Usage: `cargo run --release --example spike_summarize_latency -p ghl-runtime -- <parquet_path>`
 
-use std::time::Instant;
-use ghl_runtime::io::{read_parquet_file, df_group_by, df_summarize};
 use ghl_runtime::Value;
+use ghl_runtime::io::{df_group_by, df_summarize, read_parquet_file};
+use std::time::Instant;
 
 fn height_of(df: &Value) -> usize {
     match df {
@@ -19,7 +19,10 @@ fn height_of(df: &Value) -> usize {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let path = args.get(1).cloned().unwrap_or_else(|| "target/synthetic.parquet".to_string());
+    let path = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| "target/synthetic.parquet".to_string());
 
     let df = read_parquet_file(&path).unwrap_or_else(|e| {
         eprintln!("Could not read {path}: {e:?}");
@@ -30,9 +33,21 @@ fn main() {
 
     let specs = vec![
         ("n".to_string(), "count".to_string(), None),
-        ("mean_value_b".to_string(), "mean".to_string(), Some("value_b".to_string())),
-        ("max_value_b".to_string(), "max".to_string(), Some("value_b".to_string())),
-        ("sum_value_c".to_string(), "sum".to_string(), Some("value_c".to_string())),
+        (
+            "mean_value_b".to_string(),
+            "mean".to_string(),
+            Some("value_b".to_string()),
+        ),
+        (
+            "max_value_b".to_string(),
+            "max".to_string(),
+            Some("value_b".to_string()),
+        ),
+        (
+            "sum_value_c".to_string(),
+            "sum".to_string(),
+            Some("value_c".to_string()),
+        ),
     ];
 
     let start = Instant::now();
@@ -53,5 +68,8 @@ fn main() {
     // (`spike_polars_latency.rs`) -- reference for evaluating scaling,
     // not an exact comparison (that was 1 aggregation, this evaluates 4 distinct aggregations).
     let projected_100k = elapsed.as_secs_f64() * (100_000.0 / total_rows as f64);
-    println!("For context, scaled to 100k rows: ~{:.0}us (Spike #1 with single native aggregation: ~601us)", projected_100k * 1_000_000.0);
+    println!(
+        "For context, scaled to 100k rows: ~{:.0}us (Spike #1 with single native aggregation: ~601us)",
+        projected_100k * 1_000_000.0
+    );
 }

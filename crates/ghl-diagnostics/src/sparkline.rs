@@ -24,7 +24,11 @@ impl Sparkline {
         // Filter out non-finite numbers for min/max computation
         let finite_vals: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
         if finite_vals.is_empty() {
-            return if caps.unicode_enabled { "┄".to_string() } else { "-".to_string() };
+            return if caps.unicode_enabled {
+                "┄".to_string()
+            } else {
+                "-".to_string()
+            };
         }
 
         let sampled = match max_len {
@@ -33,7 +37,10 @@ impl Sparkline {
         };
 
         let min = finite_vals.iter().copied().fold(f64::INFINITY, f64::min);
-        let max = finite_vals.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let max = finite_vals
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
 
         let ticks = if caps.unicode_enabled {
             UNICODE_TICKS
@@ -121,4 +128,3 @@ mod tests {
         assert_eq!(spark.chars().count(), 10);
     }
 }
-

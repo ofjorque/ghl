@@ -33,3 +33,19 @@ readme = "README.md"
 [profile.dev]
 debug = "line-tables-only"
 
+[workspace.lints.clippy]
+collapsible_if = "allow"
+type_complexity = "allow"
+result_large_err = "allow"
+manual_strip = "allow"
+manual_is_multiple_of = "allow"
+arc_with_non_send_sync = "allow"
+extend_with_drain = "allow"
+needless_option_as_deref = "allow"
+too_many_arguments = "allow"
+needless_range_loop = "allow"
+if_same_then_else = "allow"
+match_like_matches_macro = "allow"
+new_without_default = "allow"
+
+

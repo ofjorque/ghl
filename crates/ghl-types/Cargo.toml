@@ -10,3 +10,7 @@ description = "Type system, dimensional verification, and factor representation 
 ghl-diagnostics = { path = "../ghl-diagnostics" }
 ghl-syntax = { path = "../ghl-syntax" }
 
+[lints]
+workspace = true
+
+

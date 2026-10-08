@@ -1,5 +1,6 @@
-use std::io::{self, Write};
-use ghl_diagnostics::{CockpitPanel, CockpitTable, Diagnostic, RenderCaps, TableAlignment, TableColumn};
+use ghl_diagnostics::{
+    CockpitPanel, CockpitTable, Diagnostic, RenderCaps, TableAlignment, TableColumn,
+};
 use ghl_runtime::{Interpreter, Value};
 use ghl_types::TypeEnv;
 use rustyline::completion::Completer;
@@ -9,12 +10,26 @@ use rustyline::hint::Hinter;
 use rustyline::history::DefaultHistory;
 use rustyline::validate::Validator;
 use rustyline::{Editor, Helper};
+use std::io::{self, Write};
 
 /// Canonical spellings of every REPL command, used to suggest a close match
 /// when the user mistypes one (see `levenshtein_distance`).
 const KNOWN_COMMANDS: &[&str] = &[
-    ":quit", ":q", ":exit", ":help", ":h", ":vars", ":var", ":v", ":rm", ":clear-vars", ":doc",
-    ":clear", ":c", ":reset", ":r",
+    ":quit",
+    ":q",
+    ":exit",
+    ":help",
+    ":h",
+    ":vars",
+    ":var",
+    ":v",
+    ":rm",
+    ":clear-vars",
+    ":doc",
+    ":clear",
+    ":c",
+    ":reset",
+    ":r",
 ];
 
 /// Classic Wagner-Fischer edit distance between two strings, by Unicode scalar value.
@@ -67,7 +82,6 @@ impl Highlighter for GhlPromptHelper {
         } else {
             std::borrow::Cow::Borrowed(prompt)
         }
-
     }
 }
 
@@ -103,7 +117,9 @@ impl ReplSession {
 
         let mut rl = match Editor::<GhlPromptHelper, DefaultHistory>::new() {
             Ok(mut editor) => {
-                editor.set_helper(Some(GhlPromptHelper { caps: self.caps.clone() }));
+                editor.set_helper(Some(GhlPromptHelper {
+                    caps: self.caps.clone(),
+                }));
                 if let Some(ref p) = history_path {
                     let _ = editor.load_history(p);
                 }
@@ -116,7 +132,11 @@ impl ReplSession {
 
         loop {
             let prompt = if multi_line_accum.is_empty() {
-                if self.caps.unicode_enabled { "ghl ฅ(•⩊ •マ> " } else { "ghl> " }
+                if self.caps.unicode_enabled {
+                    "ghl ฅ(•⩊ •マ> "
+                } else {
+                    "ghl> "
+                }
             } else {
                 "   ... "
             };
@@ -216,7 +236,11 @@ impl ReplSession {
 
     fn print_welcome(&self) {
         let mut panel = CockpitPanel::new("GHL Interactive Shell (REPL)");
-        panel.with_badge(if self.caps.unicode_enabled { "ฅ(•⩊ •マ READY" } else { "READY" });
+        panel.with_badge(if self.caps.unicode_enabled {
+            "ฅ(•⩊ •マ READY"
+        } else {
+            "READY"
+        });
         panel.add_line("Gojo & Haru High-Performance Statistical System");
         panel.add_line(format!(
             "Type {} for session commands, {} for docs, or {} to exit.",
@@ -228,7 +252,11 @@ impl ReplSession {
     }
 
     fn print_goodbye(&self) {
-        let cat = if self.caps.unicode_enabled { "ฅ(•⩊ •マ" } else { "[GHL]" };
+        let cat = if self.caps.unicode_enabled {
+            "ฅ(•⩊ •マ"
+        } else {
+            "[GHL]"
+        };
         println!(
             "\n{} {}\n",
             self.caps.haru(cat),
@@ -236,17 +264,25 @@ impl ReplSession {
         );
     }
 
-
     fn handle_command(&mut self, cmd: &str) -> bool {
         match cmd {
             ":quit" | ":q" | ":exit" => true,
             ":help" | ":h" => {
                 let mut panel = CockpitPanel::new("REPL Commands");
                 panel.add_kv(":help, :h", "Show this help table");
-                panel.add_kv(":vars, :var, :v", "List active user-defined variables and types");
-                panel.add_kv(":rm <vars>", "Remove one or more variables from session (or :rm *)");
+                panel.add_kv(
+                    ":vars, :var, :v",
+                    "List active user-defined variables and types",
+                );
+                panel.add_kv(
+                    ":rm <vars>",
+                    "Remove one or more variables from session (or :rm *)",
+                );
                 panel.add_kv(":clear-vars", "Clear all user-defined variables");
-                panel.add_kv(":doc <fn>, ?<fn>", "View documentation & formula for a function");
+                panel.add_kv(
+                    ":doc <fn>, ?<fn>",
+                    "View documentation & formula for a function",
+                );
                 panel.add_kv(":clear, :c", "Clear the terminal screen");
                 panel.add_kv(":reset, :r", "Reset the environment to initial clean state");
                 panel.add_kv(":quit, :q", "Exit the interactive shell");
@@ -256,7 +292,10 @@ impl ReplSession {
             ":vars" | ":var" | ":v" => {
                 if self.user_vars.is_empty() {
                     let mut panel = CockpitPanel::new("Active Variables");
-                    panel.add_line(self.caps.dim("(No user variables defined yet. Use `let x = ...`)"));
+                    panel.add_line(
+                        self.caps
+                            .dim("(No user variables defined yet. Use `let x = ...`)"),
+                    );
                     println!("{}\n", panel.render(&self.caps));
                     return false;
                 }
@@ -276,7 +315,11 @@ impl ReplSession {
                             .unwrap_or_else(|| val.type_name().to_string());
                         let val_preview = match &val {
                             Value::DataFrame { frame, .. } => {
-                                format!("DataFrame ({} rows x {} cols)", frame.height(), frame.width())
+                                format!(
+                                    "DataFrame ({} rows x {} cols)",
+                                    frame.height(),
+                                    frame.width()
+                                )
                             }
                             Value::Matrix { rows, cols, .. } => {
                                 format!("Matrix ({} x {})", rows, cols)
@@ -309,8 +352,15 @@ impl ReplSession {
                 self.user_docs.clear();
                 self.last_assigned_var = None;
                 self.last_expr_ident = None;
-                let glyph = if self.caps.unicode_enabled { "ฅ(•⩊ •マ" } else { "[OK]" };
-                println!("{} Session environment successfully reset.\n", self.caps.haru(glyph));
+                let glyph = if self.caps.unicode_enabled {
+                    "ฅ(•⩊ •マ"
+                } else {
+                    "[OK]"
+                };
+                println!(
+                    "{} Session environment successfully reset.\n",
+                    self.caps.haru(glyph)
+                );
                 false
             }
             ":clear-vars" => {
@@ -320,7 +370,10 @@ impl ReplSession {
             cmd if cmd.starts_with(":rm") => {
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
                 if parts.len() < 2 {
-                    let err = Diagnostic::compute_error("C0006", "Usage: `:rm <var1> [var2...]` or `:clear-vars`");
+                    let err = Diagnostic::compute_error(
+                        "C0006",
+                        "Usage: `:rm <var1> [var2...]` or `:clear-vars`",
+                    );
                     eprintln!("{}\n", err.render_with_caps(&self.caps));
                     return false;
                 }
@@ -335,10 +388,17 @@ impl ReplSession {
                     self.user_vars.retain(|v| v != var);
                     removed.push(*var);
                 }
-                let glyph = if self.caps.unicode_enabled { "ฅ(•⩊ •マ" } else { "[OK]" };
-                println!("{} Removed variable(s): {}\n", self.caps.haru(glyph), removed.join(", "));
+                let glyph = if self.caps.unicode_enabled {
+                    "ฅ(•⩊ •マ"
+                } else {
+                    "[OK]"
+                };
+                println!(
+                    "{} Removed variable(s): {}\n",
+                    self.caps.haru(glyph),
+                    removed.join(", ")
+                );
                 false
-
             }
             cmd if cmd.starts_with(":doc") => {
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
@@ -359,14 +419,14 @@ impl ReplSession {
                     .map(|(cmd, _)| cmd);
 
                 let help = match suggestion {
-                    Some(cmd) => format!("Did you mean `{cmd}`? Type `:help` to see available commands."),
+                    Some(cmd) => {
+                        format!("Did you mean `{cmd}`? Type `:help` to see available commands.")
+                    }
                     None => "Type `:help` to see available commands.".to_string(),
                 };
-                let diag = Diagnostic::compute_error(
-                    "C0005",
-                    format!("Unknown REPL command `{other}`"),
-                )
-                .with_help(help);
+                let diag =
+                    Diagnostic::compute_error("C0005", format!("Unknown REPL command `{other}`"))
+                        .with_help(help);
                 eprintln!("{}\n", diag.render_with_caps(&self.caps));
                 false
             }
@@ -382,10 +442,16 @@ impl ReplSession {
         self.user_vars.clear();
         self.last_assigned_var = None;
         self.last_expr_ident = None;
-        let glyph = if self.caps.unicode_enabled { "ฅ(•⩊ •マ" } else { "[OK]" };
-        println!("{} Cleared {count} user variable(s).\n", self.caps.haru(glyph));
+        let glyph = if self.caps.unicode_enabled {
+            "ฅ(•⩊ •マ"
+        } else {
+            "[OK]"
+        };
+        println!(
+            "{} Cleared {count} user variable(s).\n",
+            self.caps.haru(glyph)
+        );
     }
-
 
     fn show_doc(&self, name: &str) {
         if let Some(doc) = ghl_runtime::lookup_doc(name) {
@@ -402,7 +468,12 @@ impl ReplSession {
                     panel.add_kv("Signature", format!("fn({})", params.join(", ")));
                     panel.add_divider();
                     panel.add_line(self.caps.dim("Definition:"));
-                    panel.add_line(format!("  fn {}({}) {{\n      {}\n  }}", name, params.join(", "), body));
+                    panel.add_line(format!(
+                        "  fn {}({}) {{\n      {}\n  }}",
+                        name,
+                        params.join(", "),
+                        body
+                    ));
                     println!("{}\n", panel.render(&self.caps));
                 }
                 other => {
@@ -430,8 +501,14 @@ impl ReplSession {
 
     fn list_docs(&self) {
         let mut panel = CockpitPanel::new("Standard Library Functions");
-        panel.with_badge(if self.caps.unicode_enabled { "/ᐠ • ˕ •マ ? DOCS" } else { "DOCS" });
-        panel.add_line("Use `?<name>` or `:doc <name>` to view signatures and mathematical formulas.");
+        panel.with_badge(if self.caps.unicode_enabled {
+            "/ᐠ • ˕ •マ ? DOCS"
+        } else {
+            "DOCS"
+        });
+        panel.add_line(
+            "Use `?<name>` or `:doc <name>` to view signatures and mathematical formulas.",
+        );
 
         panel.add_divider();
         for doc in ghl_runtime::doc::all_docs() {
@@ -443,7 +520,9 @@ impl ReplSession {
     fn is_continuation_input(&self, s: &str) -> bool {
         let trimmed = s.trim();
         trimmed.starts_with('+')
-            || (trimmed.starts_with('|') && !trimmed.starts_with("||") && !trimmed.starts_with("|>"))
+            || (trimmed.starts_with('|')
+                && !trimmed.starts_with("||")
+                && !trimmed.starts_with("|>"))
             || trimmed.starts_with("|>")
     }
 
@@ -491,7 +570,9 @@ impl ReplSession {
         };
 
         // 1b. Module & Package Resolution Phase (RFC 06)
-        if let Err(diag) = crate::package::resolve_package_imports(&mut program, std::path::Path::new(".")) {
+        if let Err(diag) =
+            crate::package::resolve_package_imports(&mut program, std::path::Path::new("."))
+        {
             eprintln!("{}", diag.render_with_caps(&self.caps));
             return;
         }
@@ -549,7 +630,8 @@ impl ReplSession {
             Ok(final_val) => {
                 // Synchronize variables if `rm` was called in code
                 let before_vars = self.user_vars.clone();
-                self.user_vars.retain(|v| self.interpreter.env.get(v).is_some());
+                self.user_vars
+                    .retain(|v| self.interpreter.env.get(v).is_some());
                 for v in before_vars {
                     if !self.user_vars.contains(&v) {
                         self.type_env.remove(&v);
@@ -604,9 +686,16 @@ impl ReplSession {
                                         .duration_since(std::time::UNIX_EPOCH)
                                         .map(|d| d.as_millis())
                                         .unwrap_or(0);
-                                    let plot_path = std::path::Path::new(&plots_dir).join(format!("ghl_plot_{}_{}.svg", std::process::id(), timestamp));
+                                    let plot_path = std::path::Path::new(&plots_dir).join(format!(
+                                        "ghl_plot_{}_{}.svg",
+                                        std::process::id(),
+                                        timestamp
+                                    ));
                                     if let Err(e) = p.save_file(&plot_path.to_string_lossy()) {
-                                        eprintln!("{} [Plots Pane] Warning: failed to save SVG plot: {e}", self.caps.gojo("/ᐠ ¬`‸´¬ マ"));
+                                        eprintln!(
+                                            "{} [Plots Pane] Warning: failed to save SVG plot: {e}",
+                                            self.caps.gojo("/ᐠ ¬`‸´¬ マ")
+                                        );
                                     }
                                 }
                             }
@@ -721,7 +810,9 @@ mod tests {
     #[test]
     fn test_unbalanced_brackets_detection() {
         assert!(ReplSession::has_unbalanced_brackets("fn add(a, b) {"));
-        assert!(!ReplSession::has_unbalanced_brackets("fn add(a, b) { a + b }"));
+        assert!(!ReplSession::has_unbalanced_brackets(
+            "fn add(a, b) { a + b }"
+        ));
         assert!(ReplSession::has_unbalanced_brackets("let v = [1, 2,"));
         assert!(!ReplSession::has_unbalanced_brackets("let v = [1, 2, 3];"));
     }
@@ -795,12 +886,16 @@ mod tests {
     #[test]
     fn test_incomplete_input_detection() {
         assert!(ReplSession::is_incomplete_input("let x = 10 +"));
-        assert!(ReplSession::is_incomplete_input("let p = ggplot(df, aes(x = \"a\")) +"));
+        assert!(ReplSession::is_incomplete_input(
+            "let p = ggplot(df, aes(x = \"a\")) +"
+        ));
         assert!(ReplSession::is_incomplete_input("df |>"));
         assert!(ReplSession::is_incomplete_input("p1 |"));
         assert!(ReplSession::is_incomplete_input("let x = 10 + // comment"));
         assert!(!ReplSession::is_incomplete_input("let x = 10 + 5;"));
-        assert!(!ReplSession::is_incomplete_input("let p = ggplot(df, aes(x = \"a\")) + geom_point();"));
+        assert!(!ReplSession::is_incomplete_input(
+            "let p = ggplot(df, aes(x = \"a\")) + geom_point();"
+        ));
     }
 
     #[test]

@@ -3,11 +3,13 @@
 //! Provides `ghl new`, `ghl fetch`, `ghl test`, and cryptographic SHA-256
 //! lockfile generation (`ghl.lock`) for reproducible statistical pipelines.
 
+use ghl_diagnostics::{
+    CockpitPanel, CockpitTable, Diagnostic, RenderCaps, TableAlignment, TableColumn,
+};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use sha2::{Digest, Sha256};
-use ghl_diagnostics::{CockpitPanel, CockpitTable, Diagnostic, RenderCaps, TableAlignment, TableColumn};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -38,7 +40,10 @@ pub struct LockedPackage {
 /// Creates a new GHL project with standardized directory structure and manifest.
 pub fn cmd_new(project_name: &str, caps: &RenderCaps) -> Result<(), Diagnostic> {
     if project_name.trim().is_empty() {
-        return Err(Diagnostic::compute_error("C0601", "Project name cannot be empty"));
+        return Err(Diagnostic::compute_error(
+            "C0601",
+            "Project name cannot be empty",
+        ));
     }
 
     let project_dir = PathBuf::from(project_name);
@@ -99,17 +104,27 @@ let res = a + b;
 "#;
     let test_path = tests_dir.join("basic_test.gh");
     fs::write(&test_path, test_content).map_err(|e| {
-        Diagnostic::compute_error("C0605", format!("Failed to write `tests/basic_test.gh`: {e}"))
+        Diagnostic::compute_error(
+            "C0605",
+            format!("Failed to write `tests/basic_test.gh`: {e}"),
+        )
     })?;
 
     let mut panel = CockpitPanel::new("GHL Package Generator (RFC 06 §4)");
-    panel.with_badge(caps.green(if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ CREATED" } else { "[CREATED]" }));
+    panel.with_badge(caps.green(if caps.unicode_enabled {
+        "/ᐠ˵- ⩊ -˵マ ✧ CREATED"
+    } else {
+        "[CREATED]"
+    }));
     panel.add_kv("Package Name", project_name);
 
     panel.add_kv("Manifest", manifest_path.display().to_string());
     panel.add_kv("Entry Point", main_path.display().to_string());
     panel.add_kv("Test Suite", test_path.display().to_string());
-    panel.add_line(format!("Run {} to enter the project", caps.cyan(&format!("cd {project_name} && ghl run src/main.gh"))));
+    panel.add_line(format!(
+        "Run {} to enter the project",
+        caps.cyan(&format!("cd {project_name} && ghl run src/main.gh"))
+    ));
 
     println!("{}", panel.render(caps));
     Ok(())
@@ -147,7 +162,10 @@ pub fn parse_manifest(content: &str) -> Result<PackageManifest, Diagnostic> {
                     "edition" => edition = v.trim_matches('"').to_string(),
                     "authors" => {
                         let inner = v.trim_matches(|c| c == '[' || c == ']');
-                        authors = inner.split(',').map(|s| s.trim().trim_matches('"').to_string()).collect();
+                        authors = inner
+                            .split(',')
+                            .map(|s| s.trim().trim_matches('"').to_string())
+                            .collect();
                     }
                     _ => {}
                 },
@@ -162,8 +180,12 @@ pub fn parse_manifest(content: &str) -> Result<PackageManifest, Diagnostic> {
                         for item in inner.split(',') {
                             if let Some((sub_k, sub_v)) = item.split_once('=') {
                                 match sub_k.trim() {
-                                    "path" => path = Some(sub_v.trim().trim_matches('"').to_string()),
-                                    "version" => ver = Some(sub_v.trim().trim_matches('"').to_string()),
+                                    "path" => {
+                                        path = Some(sub_v.trim().trim_matches('"').to_string())
+                                    }
+                                    "version" => {
+                                        ver = Some(sub_v.trim().trim_matches('"').to_string())
+                                    }
                                     "git" => git = Some(sub_v.trim().trim_matches('"').to_string()),
                                     _ => {}
                                 }
@@ -173,7 +195,14 @@ pub fn parse_manifest(content: &str) -> Result<PackageManifest, Diagnostic> {
                         ver = Some(v.trim_matches('"').to_string());
                     }
 
-                    dependencies.insert(dep_name, DependencySpec { version: ver, path, git });
+                    dependencies.insert(
+                        dep_name,
+                        DependencySpec {
+                            version: ver,
+                            path,
+                            git,
+                        },
+                    );
                 }
                 _ => {}
             }
@@ -181,7 +210,10 @@ pub fn parse_manifest(content: &str) -> Result<PackageManifest, Diagnostic> {
     }
 
     if name.is_empty() {
-        return Err(Diagnostic::compute_error("C0606", "Manifest `ghl.toml` missing package name"));
+        return Err(Diagnostic::compute_error(
+            "C0606",
+            "Manifest `ghl.toml` missing package name",
+        ));
     }
 
     Ok(PackageManifest {
@@ -221,9 +253,15 @@ pub fn compute_sha256_tree(target: &Path) -> Result<String, std::io::Error> {
 }
 
 /// Resolves dependencies, computes SHA-256 hashes, and writes `ghl.lock`.
-pub fn cmd_fetch(manifest_path: &Path, caps: &RenderCaps) -> Result<Vec<LockedPackage>, Diagnostic> {
+pub fn cmd_fetch(
+    manifest_path: &Path,
+    caps: &RenderCaps,
+) -> Result<Vec<LockedPackage>, Diagnostic> {
     let content = fs::read_to_string(manifest_path).map_err(|e| {
-        Diagnostic::compute_error("C0607", format!("Failed to read manifest `{}`: {e}", manifest_path.display()))
+        Diagnostic::compute_error(
+            "C0607",
+            format!("Failed to read manifest `{}`: {e}", manifest_path.display()),
+        )
     })?;
 
     let manifest = parse_manifest(&content)?;
@@ -235,7 +273,8 @@ pub fn cmd_fetch(manifest_path: &Path, caps: &RenderCaps) -> Result<Vec<LockedPa
         let (source, checksum) = if let Some(ref path_str) = spec.path {
             let full_path = base_dir.join(path_str);
             let cs = if full_path.exists() {
-                compute_sha256_tree(&full_path).unwrap_or_else(|_| "sha256:00000000000000000000000000000000".into())
+                compute_sha256_tree(&full_path)
+                    .unwrap_or_else(|_| "sha256:00000000000000000000000000000000".into())
             } else {
                 let mut hasher = Sha256::new();
                 hasher.update(dep_name.as_bytes());
@@ -246,13 +285,19 @@ pub fn cmd_fetch(manifest_path: &Path, caps: &RenderCaps) -> Result<Vec<LockedPa
         } else if let Some(ref git_url) = spec.git {
             let mut hasher = Sha256::new();
             hasher.update(git_url.as_bytes());
-            (format!("git+{git_url}"), format!("sha256:{:x}", hasher.finalize()))
+            (
+                format!("git+{git_url}"),
+                format!("sha256:{:x}", hasher.finalize()),
+            )
         } else {
             let ver = spec.version.clone().unwrap_or_else(|| "0.1.0".to_string());
             let mut hasher = Sha256::new();
             hasher.update(dep_name.as_bytes());
             hasher.update(ver.as_bytes());
-            (format!("registry+ghl-crates"), format!("sha256:{:x}", hasher.finalize()))
+            (
+                "registry+ghl-crates".to_string(),
+                format!("sha256:{:x}", hasher.finalize()),
+            )
         };
 
         locked_packages.push(LockedPackage {
@@ -270,7 +315,8 @@ pub fn cmd_fetch(manifest_path: &Path, caps: &RenderCaps) -> Result<Vec<LockedPa
     let manifest_hash = format!("sha256:{:x}", hasher.finalize());
 
     let mut lock_content = String::new();
-    lock_content.push_str("# This file is automatically generated by GHL package manager (RFC 06 §4).\n");
+    lock_content
+        .push_str("# This file is automatically generated by GHL package manager (RFC 06 §4).\n");
     lock_content.push_str("# It is not recommended to edit this file manually.\n");
     lock_content.push_str("version = 1\n\n");
     lock_content.push_str("[metadata]\n");
@@ -311,7 +357,11 @@ pub fn cmd_fetch(manifest_path: &Path, caps: &RenderCaps) -> Result<Vec<LockedPa
     }
 
     let mut panel = CockpitPanel::new("GHL Lockfile Resolution (RFC 06 §4)");
-    panel.with_badge(caps.green(if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ LOCKED" } else { "[LOCKED]" }));
+    panel.with_badge(caps.green(if caps.unicode_enabled {
+        "/ᐠ˵- ⩊ -˵マ ✧ LOCKED"
+    } else {
+        "[LOCKED]"
+    }));
     panel.add_kv("Manifest", manifest_path.display().to_string());
 
     panel.add_kv("Lockfile", lock_path.display().to_string());
@@ -360,7 +410,10 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
     }
 
     if test_files.is_empty() {
-        println!("{}", caps.dim("No GHL test files found in `tests/` or `src/*_test.{gh,ghl}`."));
+        println!(
+            "{}",
+            caps.dim("No GHL test files found in `tests/` or `src/*_test.{gh,ghl}`.")
+        );
         return Ok(());
     }
 
@@ -371,10 +424,16 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
             for entry in entries.flatten() {
                 let p = entry.path();
                 if p.is_file()
-                    && p.extension().map(|e| e == "gh" || e == "ghl").unwrap_or(false)
+                    && p.extension()
+                        .map(|e| e == "gh" || e == "ghl")
+                        .unwrap_or(false)
                 {
                     if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                        if name != "main.gh" && name != "main.ghl" && !name.ends_with("_test.gh") && !name.ends_with("_test.ghl") {
+                        if name != "main.gh"
+                            && name != "main.ghl"
+                            && !name.ends_with("_test.gh")
+                            && !name.ends_with("_test.ghl")
+                        {
                             lib_files.push(p);
                         }
                     }
@@ -422,7 +481,12 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
         let test_program = match ghl_syntax::parse(&content) {
             Ok(p) => p,
             Err(errs) => {
-                println!("  test {} ... {} (syntax errors: {})", display_name, caps.red("FAILED"), errs.len());
+                println!(
+                    "  test {} ... {} (syntax errors: {})",
+                    display_name,
+                    caps.red("FAILED"),
+                    errs.len()
+                );
                 for err in &errs {
                     eprintln!("    {err}");
                 }
@@ -440,7 +504,12 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
         let combined_content = format!("{}\n{}", lib_source_header, content);
 
         if let Err(diags) = ghl_types::check(&program, &display_name, &combined_content) {
-            println!("  test {} ... {} (type errors: {})", display_name, caps.red("FAILED"), diags.len());
+            println!(
+                "  test {} ... {} (type errors: {})",
+                display_name,
+                caps.red("FAILED"),
+                diags.len()
+            );
             for diag in &diags {
                 eprintln!("{}", diag.render_with_caps(caps));
             }
@@ -455,7 +524,12 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
                 passed += 1;
             }
             Err(e) => {
-                println!("  test {} ... {} ({})", display_name, caps.red("FAILED"), e.message);
+                println!(
+                    "  test {} ... {} ({})",
+                    display_name,
+                    caps.red("FAILED"),
+                    e.message
+                );
                 failed += 1;
             }
         }
@@ -463,17 +537,27 @@ pub fn cmd_test(root_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
 
     println!();
     if failed == 0 {
-        let glyph = if caps.unicode_enabled { "ദ്ദി(ᓀ‸ᓂマ ੭ " } else { "" };
+        let glyph = if caps.unicode_enabled {
+            "ദ്ദി(ᓀ‸ᓂマ ੭ "
+        } else {
+            ""
+        };
         let summary = format!("{glyph}test result: ok. {passed} passed; 0 failed; finished");
         println!("{}", caps.green(&summary));
         Ok(())
     } else {
-        let glyph = if caps.unicode_enabled { "/ᐠ ¬`‸´¬ マ " } else { "" };
+        let glyph = if caps.unicode_enabled {
+            "/ᐠ ¬`‸´¬ マ "
+        } else {
+            ""
+        };
         let summary = format!("{glyph}test result: FAILED. {passed} passed; {failed} failed");
         println!("{}", caps.red(&summary));
-        Err(Diagnostic::compute_error("C0609", "One or more tests failed"))
+        Err(Diagnostic::compute_error(
+            "C0609",
+            "One or more tests failed",
+        ))
     }
-
 }
 
 /// Discovers source files, extracts documentation comments, and generates HTML/Markdown documentation.
@@ -492,7 +576,10 @@ pub fn cmd_doc(
         let manifest_path = if target_path.is_dir() {
             target_path.join("ghl.toml")
         } else {
-            target_path.parent().unwrap_or_else(|| Path::new(".")).join("ghl.toml")
+            target_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("ghl.toml")
         };
         if manifest_path.exists() {
             fs::read_to_string(&manifest_path)
@@ -529,7 +616,10 @@ pub fn cmd_doc(
     if files.is_empty() {
         return Err(Diagnostic::compute_error(
             "C0611",
-            format!("No .gh or .ghl source files found in `{}`", target_path.display()),
+            format!(
+                "No .gh or .ghl source files found in `{}`",
+                target_path.display()
+            ),
         ));
     }
 
@@ -546,7 +636,10 @@ pub fn cmd_doc(
         let program = match ghl_syntax::parse(&content) {
             Ok(p) => p,
             Err(errs) => {
-                let msg = errs.first().cloned().unwrap_or_else(|| "Syntax error".to_string());
+                let msg = errs
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "Syntax error".to_string());
                 return Err(Diagnostic::compute_error(
                     "C0100",
                     format!("Failed to parse `{}`: {msg}", file.display()),
@@ -562,7 +655,10 @@ pub fn cmd_doc(
     fs::create_dir_all(out_dir).map_err(|e| {
         Diagnostic::compute_error(
             "C0613",
-            format!("Failed to create output directory `{}`: {e}", out_dir.display()),
+            format!(
+                "Failed to create output directory `{}`: {e}",
+                out_dir.display()
+            ),
         )
     })?;
 
@@ -572,7 +668,10 @@ pub fn cmd_doc(
         fs::write(&md_path, md).map_err(|e| {
             Diagnostic::compute_error(
                 "C0614",
-                format!("Failed to write Markdown documentation to `{}`: {e}", md_path.display()),
+                format!(
+                    "Failed to write Markdown documentation to `{}`: {e}",
+                    md_path.display()
+                ),
             )
         })?;
     }
@@ -583,7 +682,10 @@ pub fn cmd_doc(
         fs::write(&html_path, html).map_err(|e| {
             Diagnostic::compute_error(
                 "C0614",
-                format!("Failed to write HTML documentation to `{}`: {e}", html_path.display()),
+                format!(
+                    "Failed to write HTML documentation to `{}`: {e}",
+                    html_path.display()
+                ),
             )
         })?;
     }
@@ -604,20 +706,28 @@ pub fn cmd_doc(
     } else {
         100.0
     };
-    panel.add_kv("Documented", format!("{}/{} ({:.1}%)", doc_count, all_items.len(), pct));
+    panel.add_kv(
+        "Documented",
+        format!("{}/{} ({:.1}%)", doc_count, all_items.len(), pct),
+    );
     panel.add_kv("Output Directory", out_dir.display().to_string());
     if generate_html {
-        panel.add_kv("HTML Output", out_dir.join("index.html").display().to_string());
+        panel.add_kv(
+            "HTML Output",
+            out_dir.join("index.html").display().to_string(),
+        );
     }
     if generate_md {
-        panel.add_kv("Markdown Output", out_dir.join("index.md").display().to_string());
+        panel.add_kv(
+            "Markdown Output",
+            out_dir.join("index.md").display().to_string(),
+        );
     }
     panel.add_divider();
     panel.add_line(format!(
         "{} Documentation deck generated! /ᐠ˵- ⩊ -˵マ ✧",
         caps.green("✔")
     ));
-
 
     println!("{}\n", panel.render(caps));
     Ok(())
@@ -628,7 +738,10 @@ fn discover_gh_files(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default();
                 if name != "target" && name != ".git" && name != ".cargo" && name != "api" {
                     discover_gh_files(&path, out);
                 }
@@ -750,7 +863,9 @@ pub fn resolve_package_imports(
                                 for entry in entries.flatten() {
                                     let p = entry.path();
                                     if p.is_file()
-                                        && p.extension().map(|e| e == "gh" || e == "ghl").unwrap_or(false)
+                                        && p.extension()
+                                            .map(|e| e == "gh" || e == "ghl")
+                                            .unwrap_or(false)
                                     {
                                         if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
                                             if name != "main.gh"
@@ -771,14 +886,24 @@ pub fn resolve_package_imports(
                             let content = fs::read_to_string(lib_file).map_err(|e| {
                                 Diagnostic::compute_error(
                                     "C0004",
-                                    format!("Failed to read package file `{}`: {e}", lib_file.display()),
+                                    format!(
+                                        "Failed to read package file `{}`: {e}",
+                                        lib_file.display()
+                                    ),
                                 )
                             })?;
                             let parsed = ghl_syntax::parse_spanned(&content).map_err(|errs| {
-                                let msg = errs.into_iter().map(|e| e.message).collect::<Vec<_>>().join("; ");
+                                let msg = errs
+                                    .into_iter()
+                                    .map(|e| e.message)
+                                    .collect::<Vec<_>>()
+                                    .join("; ");
                                 Diagnostic::compute_error(
                                     "C0100",
-                                    format!("Syntax error in package file `{}`: {msg}", lib_file.display()),
+                                    format!(
+                                        "Syntax error in package file `{}`: {msg}",
+                                        lib_file.display()
+                                    ),
                                 )
                             })?;
                             new_statements.extend(parsed.statements);
@@ -819,44 +944,75 @@ mod tests {
         let res = cmd_new(proj_path.to_str().unwrap(), &caps);
         assert!(res.is_ok(), "cmd_new should succeed: {:?}", res.err());
         assert!(proj_path.join("ghl.toml").exists(), "ghl.toml must exist");
-        assert!(proj_path.join("src/main.gh").exists(), "src/main.gh must exist");
-        assert!(proj_path.join("tests/basic_test.gh").exists(), "tests/basic_test.gh must exist");
+        assert!(
+            proj_path.join("src/main.gh").exists(),
+            "src/main.gh must exist"
+        );
+        assert!(
+            proj_path.join("tests/basic_test.gh").exists(),
+            "tests/basic_test.gh must exist"
+        );
 
         // 2. Test cmd_fetch on fresh project
         let manifest_path = proj_path.join("ghl.toml");
         let fetch_res = cmd_fetch(&manifest_path, &caps);
-        assert!(fetch_res.is_ok(), "cmd_fetch should succeed: {:?}", fetch_res.err());
+        assert!(
+            fetch_res.is_ok(),
+            "cmd_fetch should succeed: {:?}",
+            fetch_res.err()
+        );
 
         let lock_path = proj_path.join("ghl.lock");
         assert!(lock_path.exists(), "ghl.lock must be created");
         let lock_content = std::fs::read_to_string(&lock_path).expect("read ghl.lock");
-        assert!(lock_content.contains("[metadata]"), "ghl.lock must contain metadata");
-        assert!(lock_content.contains("manifest_checksum = \"sha256:"), "ghl.lock must contain manifest SHA-256");
+        assert!(
+            lock_content.contains("[metadata]"),
+            "ghl.lock must contain metadata"
+        );
+        assert!(
+            lock_content.contains("manifest_checksum = \"sha256:"),
+            "ghl.lock must contain manifest SHA-256"
+        );
 
         // 3. Add a path dependency and re-fetch to verify [[package]] locked entry with SHA-256
         let dep_dir = temp_dir.join(format!("test_ghl_dep_{pid}"));
         let _ = std::fs::create_dir_all(&dep_dir);
-        std::fs::write(dep_dir.join("lib.gh"), "pub fn compute() -> int { 99 }\n").expect("write dep lib");
+        std::fs::write(dep_dir.join("lib.gh"), "pub fn compute() -> int { 99 }\n")
+            .expect("write dep lib");
 
         let mut manifest_with_dep = std::fs::read_to_string(&manifest_path).expect("read manifest");
-        manifest_with_dep.push_str(&format!("helper = {{ path = \"{}\" }}\n", dep_dir.display()));
+        manifest_with_dep.push_str(&format!(
+            "helper = {{ path = \"{}\" }}\n",
+            dep_dir.display()
+        ));
         std::fs::write(&manifest_path, manifest_with_dep).expect("write manifest with dep");
 
         let fetch_res2 = cmd_fetch(&manifest_path, &caps);
         assert!(fetch_res2.is_ok(), "second cmd_fetch should succeed");
         let lock_content2 = std::fs::read_to_string(&lock_path).expect("read second ghl.lock");
-        assert!(lock_content2.contains("[[package]]"), "ghl.lock must contain [[package]]");
-        assert!(lock_content2.contains("name = \"helper\""), "ghl.lock must lock helper package");
-        assert!(lock_content2.contains("checksum = \"sha256:"), "ghl.lock must record SHA-256 for package");
+        assert!(
+            lock_content2.contains("[[package]]"),
+            "ghl.lock must contain [[package]]"
+        );
+        assert!(
+            lock_content2.contains("name = \"helper\""),
+            "ghl.lock must lock helper package"
+        );
+        assert!(
+            lock_content2.contains("checksum = \"sha256:"),
+            "ghl.lock must record SHA-256 for package"
+        );
 
         // 4. Test cmd_test (supporting both .gh and .ghl)
-        std::fs::write(
-            proj_path.join("tests/extended_test.ghl"),
-            "let x = 42;\n",
-        ).expect("write extended_test.ghl");
+        std::fs::write(proj_path.join("tests/extended_test.ghl"), "let x = 42;\n")
+            .expect("write extended_test.ghl");
 
         let test_res = cmd_test(&proj_path, &caps);
-        assert!(test_res.is_ok(), "cmd_test should discover and pass tests: {:?}", test_res.err());
+        assert!(
+            test_res.is_ok(),
+            "cmd_test should discover and pass tests: {:?}",
+            test_res.err()
+        );
 
         // Clean up
         let _ = std::fs::remove_dir_all(&proj_path);
@@ -894,7 +1050,14 @@ struct WeightedModel {
         std::fs::write(src_dir.join("stats.gh"), code).expect("write stats.gh");
 
         let caps = RenderCaps::detect();
-        let res = cmd_doc(&proj_dir, &out_dir, true, true, Some("TestDocProject"), &caps);
+        let res = cmd_doc(
+            &proj_dir,
+            &out_dir,
+            true,
+            true,
+            Some("TestDocProject"),
+            &caps,
+        );
         assert!(res.is_ok(), "cmd_doc must succeed: {:?}", res.err());
 
         let md_file = out_dir.join("index.md");
@@ -932,7 +1095,11 @@ fn package_helper(x: f64) -> f64 {
 }
 "#;
         std::fs::write(src_dir.join("math.gh"), pkg_code).expect("write math.gh");
-        std::fs::write(pkg_dir.join("ghl.toml"), "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n").expect("write ghl.toml");
+        std::fs::write(
+            pkg_dir.join("ghl.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write ghl.toml");
 
         // Script that imports this package
         let script_dir = temp_dir.join(format!("test_resolve_script_{pid}_{nanos}"));
@@ -964,7 +1131,11 @@ my_pkg = {{ path = "{}" }}
         assert_eq!(program.statements.len(), 2);
 
         let res = resolve_package_imports(&mut program, &script_file);
-        assert!(res.is_ok(), "resolve_package_imports should succeed: {:?}", res.err());
+        assert!(
+            res.is_ok(),
+            "resolve_package_imports should succeed: {:?}",
+            res.err()
+        );
 
         // Now program statements should include the function definition from package
         let has_fn = program.statements.iter().any(|s| {

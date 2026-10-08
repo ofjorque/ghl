@@ -15,22 +15,36 @@ pub fn cmd_check(args: &[String], caps: &RenderCaps) {
         Ok(content) => {
             match ghl_syntax::parse_spanned(&content) {
                 Ok(mut program) => {
-                    if let Err(diag) = crate::package::resolve_package_imports(&mut program, std::path::Path::new(file)) {
+                    if let Err(diag) = crate::package::resolve_package_imports(
+                        &mut program,
+                        std::path::Path::new(file),
+                    ) {
                         eprintln!("{}", diag.render_with_caps(caps));
                         std::process::exit(1);
                     }
-                    let parse_stat = format!("Parsed {} top-level statements", program.statements.len());
+                    let parse_stat =
+                        format!("Parsed {} top-level statements", program.statements.len());
                     match ghl_types::check(&program, file, &content) {
                         Ok(_) => {
                             let mut panel = CockpitPanel::new("GHL Verification Deck");
-                            panel.with_badge(caps.green(if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ PASS" } else { "[PASS]" }));
+                            panel.with_badge(caps.green(if caps.unicode_enabled {
+                                "/ᐠ˵- ⩊ -˵マ ✧ PASS"
+                            } else {
+                                "[PASS]"
+                            }));
                             panel.add_kv("Target File", file);
                             panel.add_kv("Syntax", format!("✔ Syntax verified ({parse_stat})"));
                             panel.add_kv("Type Safety", "✔ Zero semantic and type errors");
 
                             if let Ok(hir_module) = ghl_ir::lower_ast(&program) {
                                 if !hir_module.functions.is_empty() {
-                                    panel.add_kv("Cranelift JIT", format!("Verified {} functions ready for native machine code", hir_module.functions.len()));
+                                    panel.add_kv(
+                                        "Cranelift JIT",
+                                        format!(
+                                            "Verified {} functions ready for native machine code",
+                                            hir_module.functions.len()
+                                        ),
+                                    );
                                 }
                             }
 

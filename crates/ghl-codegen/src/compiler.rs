@@ -1,10 +1,10 @@
 //! Cranelift IR compiler for GHL HIR functions.
 
-use std::collections::HashMap;
 use cranelift::prelude::*;
 use cranelift_module::{FuncId, Module};
 use ghl_diagnostics::Diagnostic;
 use ghl_ir::{HirBinaryOp, HirExpr, HirFunction, HirLiteral, HirStatement, HirType, HirUnaryOp};
+use std::collections::HashMap;
 
 #[derive(Clone, Copy)]
 pub struct LoopBlocks {
@@ -58,7 +58,8 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
 
     pub fn compile_function(mut self, func: &HirFunction) -> Result<(), Diagnostic> {
         let entry_block = self.builder.create_block();
-        self.builder.append_block_params_for_function_params(entry_block);
+        self.builder
+            .append_block_params_for_function_params(entry_block);
         self.builder.switch_to_block(entry_block);
         self.builder.seal_block(entry_block);
 
@@ -104,17 +105,25 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
         func_name: &str,
     ) -> Result<Option<Value>, Diagnostic> {
         match expr {
-            HirExpr::IfElse { cond, then_branch, else_branch, .. } => {
+            HirExpr::IfElse {
+                cond,
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 let cond_val = self.compile_expr(cond)?;
 
                 let then_block = self.builder.create_block();
                 let else_block = self.builder.create_block();
 
-                self.builder.ins().brif(cond_val, then_block, &[], else_block, &[]);
+                self.builder
+                    .ins()
+                    .brif(cond_val, then_block, &[], else_block, &[]);
 
                 self.builder.switch_to_block(then_block);
                 self.builder.seal_block(then_block);
-                let then_res = self.compile_expr_tail(then_branch, loop_header, param_vars, func_name)?;
+                let then_res =
+                    self.compile_expr_tail(then_branch, loop_header, param_vars, func_name)?;
                 if let Some(val) = then_res {
                     if !self.is_current_block_terminated() {
                         self.builder.ins().return_(&[val]);
@@ -123,7 +132,8 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
 
                 self.builder.switch_to_block(else_block);
                 self.builder.seal_block(else_block);
-                let else_res = self.compile_expr_tail(else_branch, loop_header, param_vars, func_name)?;
+                let else_res =
+                    self.compile_expr_tail(else_branch, loop_header, param_vars, func_name)?;
                 if let Some(val) = else_res {
                     if !self.is_current_block_terminated() {
                         self.builder.ins().return_(&[val]);
@@ -132,7 +142,9 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
 
                 Ok(None)
             }
-            HirExpr::Block { statements, result, .. } => {
+            HirExpr::Block {
+                statements, result, ..
+            } => {
                 for stmt in statements {
                     self.compile_stmt(stmt)?;
                 }
@@ -143,7 +155,9 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                     Ok(Some(zero))
                 }
             }
-            HirExpr::Call { func, args, .. } if func == func_name && args.len() == param_vars.len() => {
+            HirExpr::Call { func, args, .. }
+                if func == func_name && args.len() == param_vars.len() =>
+            {
                 // TCO: Evaluate all arguments first into temporary Cranelift values
                 let mut evaluated_args = Vec::with_capacity(args.len());
                 for arg in args {
@@ -218,7 +232,9 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                     )
                 })?;
 
-                let func_ref = self.module.declare_func_in_func(*func_id, self.builder.func);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(*func_id, self.builder.func);
                 let mut arg_vals = Vec::with_capacity(args.len());
                 for arg in args {
                     arg_vals.push(self.compile_expr(arg)?);
@@ -232,7 +248,12 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                     Ok(results[0])
                 }
             }
-            HirExpr::IfElse { cond, then_branch, else_branch, ty } => {
+            HirExpr::IfElse {
+                cond,
+                then_branch,
+                else_branch,
+                ty,
+            } => {
                 let cond_val = self.compile_expr(cond)?;
 
                 let then_block = self.builder.create_block();
@@ -243,7 +264,9 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                 let res_var = self.builder.declare_var(clif_ty);
 
                 // Branch condition: if cond != 0 goto then_block else goto else_block
-                self.builder.ins().brif(cond_val, then_block, &[], else_block, &[]);
+                self.builder
+                    .ins()
+                    .brif(cond_val, then_block, &[], else_block, &[]);
 
                 // 1. Then branch
                 self.builder.switch_to_block(then_block);
@@ -281,7 +304,9 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                     Ok(self.builder.use_var(res_var))
                 }
             }
-            HirExpr::Block { statements, result, .. } => {
+            HirExpr::Block {
+                statements, result, ..
+            } => {
                 for stmt in statements {
                     self.compile_stmt(stmt)?;
                 }
@@ -302,7 +327,9 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
 
                 self.builder.switch_to_block(header_block);
                 let cond_val = self.compile_expr(cond)?;
-                self.builder.ins().brif(cond_val, body_block, &[], exit_block, &[]);
+                self.builder
+                    .ins()
+                    .brif(cond_val, body_block, &[], exit_block, &[]);
 
                 self.builder.switch_to_block(body_block);
                 self.builder.seal_block(body_block);
@@ -328,7 +355,13 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
 
                 Ok(self.builder.ins().iconst(types::I64, 0))
             }
-            HirExpr::For { var, start, end, body, .. } => {
+            HirExpr::For {
+                var,
+                start,
+                end,
+                body,
+                ..
+            } => {
                 let mut start_val = self.compile_expr(start)?;
                 let mut end_val = self.compile_expr(end)?;
 
@@ -360,8 +393,13 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                 self.builder.switch_to_block(header_block);
                 let cur_i = self.builder.use_var(loop_var);
                 let cur_end = self.builder.use_var(end_var);
-                let cond_val = self.builder.ins().icmp(IntCC::SignedLessThan, cur_i, cur_end);
-                self.builder.ins().brif(cond_val, body_block, &[], exit_block, &[]);
+                let cond_val = self
+                    .builder
+                    .ins()
+                    .icmp(IntCC::SignedLessThan, cur_i, cur_end);
+                self.builder
+                    .ins()
+                    .brif(cond_val, body_block, &[], exit_block, &[]);
 
                 self.builder.switch_to_block(body_block);
                 self.builder.seal_block(body_block);
@@ -441,7 +479,8 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                     if let Some(&var_ty) = self.var_types.get(name) {
                         let val_ty = self.builder.func.dfg.value_type(val);
                         if val_ty != var_ty {
-                            if var_ty == types::F64 && (val_ty == types::I64 || val_ty == types::I8) {
+                            if var_ty == types::F64 && (val_ty == types::I64 || val_ty == types::I8)
+                            {
                                 val = self.builder.ins().fcvt_from_sint(types::F64, val);
                             } else if var_ty == types::I64 && val_ty == types::F64 {
                                 val = self.builder.ins().fcvt_to_sint(types::I64, val);
@@ -474,7 +513,10 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                     self.builder.seal_block(dead_block);
                     Ok(())
                 } else {
-                    Err(Diagnostic::compute_error("C0404", "`break` outside of loop in JIT"))
+                    Err(Diagnostic::compute_error(
+                        "C0404",
+                        "`break` outside of loop in JIT",
+                    ))
                 }
             }
             HirStatement::Continue => {
@@ -488,7 +530,10 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
                     self.builder.seal_block(dead_block);
                     Ok(())
                 } else {
-                    Err(Diagnostic::compute_error("C0405", "`continue` outside of loop in JIT"))
+                    Err(Diagnostic::compute_error(
+                        "C0405",
+                        "`continue` outside of loop in JIT",
+                    ))
                 }
             }
             HirStatement::Return(expr_opt) => {
@@ -513,7 +558,12 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
         }
     }
 
-    fn compile_int_binary(&mut self, op: HirBinaryOp, lhs: Value, rhs: Value) -> Result<Value, Diagnostic> {
+    fn compile_int_binary(
+        &mut self,
+        op: HirBinaryOp,
+        lhs: Value,
+        rhs: Value,
+    ) -> Result<Value, Diagnostic> {
         match op {
             HirBinaryOp::Add => Ok(self.builder.ins().iadd(lhs, rhs)),
             HirBinaryOp::Sub => Ok(self.builder.ins().isub(lhs, rhs)),
@@ -524,31 +574,53 @@ impl<'a, M: Module> FunctionCompiler<'a, M> {
             HirBinaryOp::Eq => Ok(self.builder.ins().icmp(IntCC::Equal, lhs, rhs)),
             HirBinaryOp::Ne => Ok(self.builder.ins().icmp(IntCC::NotEqual, lhs, rhs)),
             HirBinaryOp::Lt => Ok(self.builder.ins().icmp(IntCC::SignedLessThan, lhs, rhs)),
-            HirBinaryOp::Le => Ok(self.builder.ins().icmp(IntCC::SignedLessThanOrEqual, lhs, rhs)),
+            HirBinaryOp::Le => Ok(self
+                .builder
+                .ins()
+                .icmp(IntCC::SignedLessThanOrEqual, lhs, rhs)),
             HirBinaryOp::Gt => Ok(self.builder.ins().icmp(IntCC::SignedGreaterThan, lhs, rhs)),
-            HirBinaryOp::Ge => Ok(self.builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs)),
+            HirBinaryOp::Ge => {
+                Ok(self
+                    .builder
+                    .ins()
+                    .icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs))
+            }
 
             HirBinaryOp::And => Ok(self.builder.ins().band(lhs, rhs)),
             HirBinaryOp::Or => Ok(self.builder.ins().bor(lhs, rhs)),
         }
     }
 
-    fn compile_float_binary(&mut self, op: HirBinaryOp, lhs: Value, rhs: Value) -> Result<Value, Diagnostic> {
+    fn compile_float_binary(
+        &mut self,
+        op: HirBinaryOp,
+        lhs: Value,
+        rhs: Value,
+    ) -> Result<Value, Diagnostic> {
         match op {
             HirBinaryOp::Add => Ok(self.builder.ins().fadd(lhs, rhs)),
             HirBinaryOp::Sub => Ok(self.builder.ins().fsub(lhs, rhs)),
             HirBinaryOp::Mul => Ok(self.builder.ins().fmul(lhs, rhs)),
             HirBinaryOp::Div => Ok(self.builder.ins().fdiv(lhs, rhs)),
-            HirBinaryOp::Mod => Err(Diagnostic::compute_error("C0404", "Modulo not supported on float values in JIT")),
+            HirBinaryOp::Mod => Err(Diagnostic::compute_error(
+                "C0404",
+                "Modulo not supported on float values in JIT",
+            )),
 
             HirBinaryOp::Eq => Ok(self.builder.ins().fcmp(FloatCC::Equal, lhs, rhs)),
             HirBinaryOp::Ne => Ok(self.builder.ins().fcmp(FloatCC::NotEqual, lhs, rhs)),
             HirBinaryOp::Lt => Ok(self.builder.ins().fcmp(FloatCC::LessThan, lhs, rhs)),
             HirBinaryOp::Le => Ok(self.builder.ins().fcmp(FloatCC::LessThanOrEqual, lhs, rhs)),
             HirBinaryOp::Gt => Ok(self.builder.ins().fcmp(FloatCC::GreaterThan, lhs, rhs)),
-            HirBinaryOp::Ge => Ok(self.builder.ins().fcmp(FloatCC::GreaterThanOrEqual, lhs, rhs)),
+            HirBinaryOp::Ge => Ok(self
+                .builder
+                .ins()
+                .fcmp(FloatCC::GreaterThanOrEqual, lhs, rhs)),
 
-            _ => Err(Diagnostic::compute_error("C0405", "Unsupported operator for floats in JIT")),
+            _ => Err(Diagnostic::compute_error(
+                "C0405",
+                "Unsupported operator for floats in JIT",
+            )),
         }
     }
 }

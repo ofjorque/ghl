@@ -22,9 +22,9 @@ pub mod table;
 pub use caps::RenderCaps;
 pub use panel::{CockpitPanel, PanelItem};
 pub use progress::{
-    circle_disc_glyph, finish_progress, get_progress_delay_ms, render_progress_line,
-    render_spinner_line, set_progress_delay_ms, update_progress_bar, update_progress_spinner,
-    ProgressTheme, SpinnerStyle,
+    ProgressTheme, SpinnerStyle, circle_disc_glyph, finish_progress, get_progress_delay_ms,
+    render_progress_line, render_spinner_line, set_progress_delay_ms, update_progress_bar,
+    update_progress_spinner,
 };
 pub use registry::{SemanticCode, SymbolEntry, SymbolRegistry};
 pub use sparkline::Sparkline;
@@ -49,7 +49,6 @@ impl DiagnosticSeverity {
             Self::Success => "/ᐠ˵- ⩊ -˵マ ✧",
         }
     }
-
 
     pub fn ascii_fallback(&self) -> &'static str {
         match self {
@@ -220,7 +219,6 @@ mod tests {
         assert!(rendered.contains("/ᐠ ¬`‸´¬ マ"));
         assert!(rendered.contains("[Compute Error C0102]"));
     }
-
 
     #[test]
     fn test_ascii_degradation_render() {

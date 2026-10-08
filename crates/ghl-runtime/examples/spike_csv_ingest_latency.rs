@@ -6,8 +6,8 @@
 //!
 //! Usage: `cargo run --release --example spike_csv_ingest_latency -p ghl-runtime -- <csv_path>`
 
+use ghl_runtime::io::{parse_csv_string, read_csv_file, read_file};
 use std::time::Instant;
-use ghl_runtime::io::{read_file, parse_csv_string, read_csv_file};
 
 fn height_of(df: &ghl_runtime::Value) -> usize {
     match df {
@@ -23,13 +23,19 @@ fn report(label: &str, size_mb: f64, height: usize, elapsed: std::time::Duration
     println!("[{label}] Throughput: {throughput_mb_s:.1} MB/s, {rows_per_sec:.0} rows/s");
     if height > 0 {
         let projected_25m = elapsed.as_secs_f64() * (25_000_000.0 / height as f64);
-        println!("[{label}] Linear projection to 25M rows: ~{:.1} min", projected_25m / 60.0);
+        println!(
+            "[{label}] Linear projection to 25M rows: ~{:.1} min",
+            projected_25m / 60.0
+        );
     }
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let path = args.get(1).cloned().unwrap_or_else(|| "target/synthetic.csv".to_string());
+    let path = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| "target/synthetic.csv".to_string());
 
     let content = read_file(&path).unwrap_or_else(|e| {
         eprintln!("Could not read {path}: {e:?}");

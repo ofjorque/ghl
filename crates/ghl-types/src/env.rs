@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use crate::ContrastScheme;
 use crate::types::Type;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SymbolInfo {
@@ -14,6 +14,12 @@ pub struct TypeEnv {
     pub structs: HashMap<String, Vec<(String, Type)>>,
     pub traits: HashMap<String, HashMap<String, (Vec<Type>, Type)>>,
     pub impl_methods: HashMap<(String, String), (Vec<Type>, Type)>,
+}
+
+impl Default for TypeEnv {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TypeEnv {
@@ -994,52 +1000,147 @@ impl TypeEnv {
 
         // Grouping / summarizing / sorting / row-selection helpers / joins
         for name in [
-            "ungroup", "first", "last", "n_distinct", "count", "coalesce", "desc",
-            "pull", "fill_na", "fill_na_all", "glimpse", "slice_min", "slice_max",
-            "sample_n", "sample_frac", "inner_join", "left_join",
-            "na_reason", "na_reasons", "is_na", "is_vector",
+            "ungroup",
+            "first",
+            "last",
+            "n_distinct",
+            "count",
+            "coalesce",
+            "desc",
+            "pull",
+            "fill_na",
+            "fill_na_all",
+            "glimpse",
+            "slice_min",
+            "slice_max",
+            "sample_n",
+            "sample_frac",
+            "inner_join",
+            "left_join",
+            "na_reason",
+            "na_reasons",
+            "is_na",
+            "is_vector",
         ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
 
         // Statistical distributions & testing (RFC 15 Capa 0 Kernel + Capa 1 Stdlib)
         for name in [
-            "t_pdf", "t_cdf", "t_quantile", "random_t",
-            "f_pdf", "f_cdf", "f_quantile", "random_f",
-            "chisq_pdf", "chisq_cdf", "chisq_quantile", "random_chisq",
-            "beta_pdf", "beta_cdf", "beta_quantile", "random_beta",
-            "uniform_pdf", "uniform_cdf", "uniform_quantile",
-            "exponential_pdf", "exponential_cdf", "exponential_quantile", "random_exponential",
-            "binomial_pmf", "binomial_cdf", "binomial_quantile", "random_binomial",
-            "poisson_pmf", "poisson_cdf", "poisson_quantile", "random_poisson",
-            "normal_quantile", "gamma_quantile",
-            "feols", "iv_regress", "ridge", "lasso", "elastic_net",
-            "irt_em_quadrature_kernel", "irt_quadrature_grid",
-            "sigmoid_matmul", "sigmoid", "log_sum_exp", "softmax", "fused_mul_add",
-            "row_sums", "col_sums", "row_means", "col_means", "row_maxs", "col_maxs", "row_mins", "col_mins",
-            "matrix", "as_matrix",
-            "sem", "decompose_spec", "optim", "nls", "sample_cov", "anova", "t_test", "t_test_one_sample", "chisq_test",
-            "normal", "student_t", "fisher_f", "chisq", "gamma_dist", "beta_dist",
-            "uniform", "exponential", "binomial", "poisson_dist",
-            "conf_int", "p_value", "z_test_one_sample", "cor_test",
-            "db_connect", "db_disconnect", "db_execute", "db_query", "db_register", "db_tables", "query_sql",
+            "t_pdf",
+            "t_cdf",
+            "t_quantile",
+            "random_t",
+            "f_pdf",
+            "f_cdf",
+            "f_quantile",
+            "random_f",
+            "chisq_pdf",
+            "chisq_cdf",
+            "chisq_quantile",
+            "random_chisq",
+            "beta_pdf",
+            "beta_cdf",
+            "beta_quantile",
+            "random_beta",
+            "uniform_pdf",
+            "uniform_cdf",
+            "uniform_quantile",
+            "exponential_pdf",
+            "exponential_cdf",
+            "exponential_quantile",
+            "random_exponential",
+            "binomial_pmf",
+            "binomial_cdf",
+            "binomial_quantile",
+            "random_binomial",
+            "poisson_pmf",
+            "poisson_cdf",
+            "poisson_quantile",
+            "random_poisson",
+            "normal_quantile",
+            "gamma_quantile",
+            "feols",
+            "iv_regress",
+            "ridge",
+            "lasso",
+            "elastic_net",
+            "irt_em_quadrature_kernel",
+            "irt_quadrature_grid",
+            "sigmoid_matmul",
+            "sigmoid",
+            "log_sum_exp",
+            "softmax",
+            "fused_mul_add",
+            "row_sums",
+            "col_sums",
+            "row_means",
+            "col_means",
+            "row_maxs",
+            "col_maxs",
+            "row_mins",
+            "col_mins",
+            "matrix",
+            "as_matrix",
+            "sem",
+            "decompose_spec",
+            "optim",
+            "nls",
+            "sample_cov",
+            "anova",
+            "t_test",
+            "t_test_one_sample",
+            "chisq_test",
+            "normal",
+            "student_t",
+            "fisher_f",
+            "chisq",
+            "gamma_dist",
+            "beta_dist",
+            "uniform",
+            "exponential",
+            "binomial",
+            "poisson_dist",
+            "conf_int",
+            "p_value",
+            "z_test_one_sample",
+            "cor_test",
+            "db_connect",
+            "db_disconnect",
+            "db_execute",
+            "db_query",
+            "db_register",
+            "db_tables",
+            "query_sql",
         ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
 
         // Math helpers — scalar + Vector[f64]
-        for name in ["ln", "log", "log2", "log10", "exp", "sqrt", "abs", "floor", "ceil", "round", "pow", "clamp", "sin", "cos"] {
+        for name in [
+            "ln", "log", "log2", "log10", "exp", "sqrt", "abs", "floor", "ceil", "round", "pow",
+            "clamp", "sin", "cos",
+        ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
@@ -1048,161 +1149,294 @@ impl TypeEnv {
 
         // Dense linear algebra (TODO.md Fase 3, faer-backed)
         for name in [
-            "dot", "map", "random_uniform", "bootstrap_mean",
-            "random_normal", "random_gamma", "normal_pdf", "normal_cdf", "gamma_pdf", "gamma_cdf",
-            "qr", "qr_q", "qr_r", "cholesky",
-            "svd", "svd_u", "svd_s", "svd_v",
-            "eigen", "eigen_values", "eigen_vectors",
-            "zeros", "len", "get", "set", "get_row", "set_row", "get_col",
-            "transpose", "t", "identity", "eye", "diag", "log_sum_exp",
+            "dot",
+            "map",
+            "random_uniform",
+            "bootstrap_mean",
+            "random_normal",
+            "random_gamma",
+            "normal_pdf",
+            "normal_cdf",
+            "gamma_pdf",
+            "gamma_cdf",
+            "qr",
+            "qr_q",
+            "qr_r",
+            "cholesky",
+            "svd",
+            "svd_u",
+            "svd_s",
+            "svd_v",
+            "eigen",
+            "eigen_values",
+            "eigen_vectors",
+            "zeros",
+            "len",
+            "get",
+            "set",
+            "get_row",
+            "set_row",
+            "get_col",
+            "transpose",
+            "t",
+            "identity",
+            "eye",
+            "diag",
+            "log_sum_exp",
         ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
 
         // Vector / window helpers
         for name in [
-            "cumsum", "cumprod", "cummax", "cummin", "lag", "lead",
-            "if_else", "between", "sort_asc", "sort_desc", "rank",
+            "cumsum",
+            "cumprod",
+            "cummax",
+            "cummin",
+            "lag",
+            "lead",
+            "if_else",
+            "between",
+            "sort_asc",
+            "sort_desc",
+            "rank",
         ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
 
         // String helpers — scalar String + Vector[String]
         for name in [
-            "str_upper", "str_lower", "str_trim", "str_replace", "str_pad",
+            "str_upper",
+            "str_lower",
+            "str_trim",
+            "str_replace",
+            "str_pad",
         ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::String) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::String),
+                },
                 false,
             );
         }
         env.insert(
             "str_split".into(),
-            Type::Function { params: vec![Type::Any, Type::Any], ret: Box::new(Type::Vector(Box::new(Type::String))) },
+            Type::Function {
+                params: vec![Type::Any, Type::Any],
+                ret: Box::new(Type::Vector(Box::new(Type::String))),
+            },
             false,
         );
         env.insert(
             "str_len".into(),
-            Type::Function { params: vec![Type::Any], ret: Box::new(Type::I64) },
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::I64),
+            },
             false,
         );
         for name in ["str_contains", "str_starts", "str_ends"] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any, Type::Any], ret: Box::new(Type::Bool) },
+                Type::Function {
+                    params: vec![Type::Any, Type::Any],
+                    ret: Box::new(Type::Bool),
+                },
                 false,
             );
         }
 
         // Regional Memory Arenas (RFC 03 §2.2)
         for name in [
-            "scope", "arena::scope", "alloc_vector", "arena::alloc_vector",
-            "alloc_matrix", "arena::alloc_matrix", "reset", "arena::reset",
-            "allocated_bytes", "arena::allocated_bytes",
+            "scope",
+            "arena::scope",
+            "alloc_vector",
+            "arena::alloc_vector",
+            "alloc_matrix",
+            "arena::alloc_matrix",
+            "reset",
+            "arena::reset",
+            "allocated_bytes",
+            "arena::allocated_bytes",
         ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
 
         // Automatic Differentiation (RFC 04 §5)
         for name in [
-            "grad", "autodiff::grad", "diff", "autodiff::diff",
-            "value_and_grad", "autodiff::value_and_grad",
-            "jacobian", "autodiff::jacobian",
+            "grad",
+            "autodiff::grad",
+            "diff",
+            "autodiff::diff",
+            "value_and_grad",
+            "autodiff::value_and_grad",
+            "jacobian",
+            "autodiff::jacobian",
         ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
 
         // Network & HTTP Microservices (RFC 04 §6)
         for name in [
-            "http::serve", "http_serve", "http::response", "http_response",
-            "http::get", "http_get", "http::post", "http_post",
-            "net::tcp_connect", "tcp_connect",
+            "http::serve",
+            "http_serve",
+            "http::response",
+            "http_response",
+            "http::get",
+            "http_get",
+            "http::post",
+            "http_post",
+            "net::tcp_connect",
+            "tcp_connect",
         ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
 
         // Parallel Iterators (RFC 05 §2)
-        for name in [
-            "par_iter", "concurrency::par_iter",
-        ] {
+        for name in ["par_iter", "concurrency::par_iter"] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
 
         // GPU Acceleration & Shaders (RFC 05 §4)
         for name in [
-            "Device", "gpu::Device",
-            "GpuMatrix", "gpu::GpuMatrix",
-            "GpuVector", "gpu::GpuVector",
-            "PhiloxRng", "gpu::PhiloxRng",
-            "gemm", "gpu::gemm",
-            "reduce_sum", "gpu::reduce_sum",
+            "Device",
+            "gpu::Device",
+            "GpuMatrix",
+            "gpu::GpuMatrix",
+            "GpuVector",
+            "gpu::GpuVector",
+            "PhiloxRng",
+            "gpu::PhiloxRng",
+            "gemm",
+            "gpu::gemm",
+            "reduce_sum",
+            "gpu::reduce_sum",
         ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
 
         // Probability Distributions Subsystem (`std::prob` per RFC 15)
-        env.insert_struct("Normal".into(), vec![("mean".into(), Type::F64), ("sd".into(), Type::F64)]);
+        env.insert_struct(
+            "Normal".into(),
+            vec![("mean".into(), Type::F64), ("sd".into(), Type::F64)],
+        );
         env.insert_struct("StudentT".into(), vec![("df".into(), Type::F64)]);
-        env.insert_struct("FisherF".into(), vec![("df1".into(), Type::F64), ("df2".into(), Type::F64)]);
+        env.insert_struct(
+            "FisherF".into(),
+            vec![("df1".into(), Type::F64), ("df2".into(), Type::F64)],
+        );
         env.insert_struct("ChiSq".into(), vec![("df".into(), Type::F64)]);
-        env.insert_struct("Gamma".into(), vec![("shape".into(), Type::F64), ("rate".into(), Type::F64)]);
-        env.insert_struct("Beta".into(), vec![("alpha".into(), Type::F64), ("beta".into(), Type::F64)]);
-        env.insert_struct("Binomial".into(), vec![("n".into(), Type::F64), ("p".into(), Type::F64)]);
+        env.insert_struct(
+            "Gamma".into(),
+            vec![("shape".into(), Type::F64), ("rate".into(), Type::F64)],
+        );
+        env.insert_struct(
+            "Beta".into(),
+            vec![("alpha".into(), Type::F64), ("beta".into(), Type::F64)],
+        );
+        env.insert_struct(
+            "Binomial".into(),
+            vec![("n".into(), Type::F64), ("p".into(), Type::F64)],
+        );
         env.insert_struct("Poisson".into(), vec![("lambda".into(), Type::F64)]);
-        env.insert_struct("Uniform".into(), vec![("min".into(), Type::F64), ("max".into(), Type::F64)]);
+        env.insert_struct(
+            "Uniform".into(),
+            vec![("min".into(), Type::F64), ("max".into(), Type::F64)],
+        );
         env.insert_struct("Exponential".into(), vec![("rate".into(), Type::F64)]);
 
-        for name in [
-            "p_value", "conf_int", "z_test_one_sample", "cor_test",
-        ] {
+        for name in ["p_value", "conf_int", "z_test_one_sample", "cor_test"] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
 
         // Cockpit Deck Subsystem (RFC 14)
         for name in [
-            "cockpit", "cockpit_with_badge", "cockpit_add_kv", "cockpit_add_line",
-            "cockpit_add_divider", "render_cockpit", "show_cockpit", "cockpit_render",
-            "format_cockpit", "cockpit_format", "sparkline", "cockpit_sparkline",
-            "cockpit_add_progress", "cockpit_add_circle",
-            "progress_bar", "progress_spinner", "progress_done",
-            "sleep", "sleep_ms", "set_progress_delay", "progress_set_delay",
+            "cockpit",
+            "cockpit_with_badge",
+            "cockpit_add_kv",
+            "cockpit_add_line",
+            "cockpit_add_divider",
+            "render_cockpit",
+            "show_cockpit",
+            "cockpit_render",
+            "format_cockpit",
+            "cockpit_format",
+            "sparkline",
+            "cockpit_sparkline",
+            "cockpit_add_progress",
+            "cockpit_add_circle",
+            "progress_bar",
+            "progress_spinner",
+            "progress_done",
+            "sleep",
+            "sleep_ms",
+            "set_progress_delay",
+            "progress_set_delay",
         ] {
             env.insert(
                 name.into(),
-                Type::Function { params: vec![Type::Any], ret: Box::new(Type::Any) },
+                Type::Function {
+                    params: vec![Type::Any],
+                    ret: Box::new(Type::Any),
+                },
                 false,
             );
         }
@@ -1260,11 +1494,23 @@ impl TypeEnv {
         self.traits.get(name)
     }
 
-    pub fn insert_impl_method(&mut self, struct_name: String, method_name: String, params: Vec<Type>, ret: Type) {
-        self.impl_methods.insert((struct_name, method_name), (params, ret));
+    pub fn insert_impl_method(
+        &mut self,
+        struct_name: String,
+        method_name: String,
+        params: Vec<Type>,
+        ret: Type,
+    ) {
+        self.impl_methods
+            .insert((struct_name, method_name), (params, ret));
     }
 
-    pub fn lookup_method(&self, struct_name: &str, method_name: &str) -> Option<&(Vec<Type>, Type)> {
-        self.impl_methods.get(&(struct_name.to_string(), method_name.to_string()))
+    pub fn lookup_method(
+        &self,
+        struct_name: &str,
+        method_name: &str,
+    ) -> Option<&(Vec<Type>, Type)> {
+        self.impl_methods
+            .get(&(struct_name.to_string(), method_name.to_string()))
     }
 }

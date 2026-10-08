@@ -6,11 +6,11 @@
 //! - Information criteria: log-likelihood, AIC, BIC
 //! - Semantic projections: `summary()`, `tidy()`, `glance()`, `augment()`, `predict()`, `coef()`
 
-use std::fmt;
-use std::sync::Arc;
-use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps};
 use crate::value::Value;
 use crate::vector_data::VectorData;
+use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps};
+use std::fmt;
+use std::sync::Arc;
 
 const DEFAULT_MAX_ITER: usize = 100;
 const DEFAULT_TOL: f64 = 1e-6;
@@ -59,7 +59,10 @@ impl FittedGmm {
                 let names: Vec<String> = (0..*cols).map(|d| format!("V{d}")).collect();
                 (data.clone(), *rows, *cols, names)
             }
-            Value::DataFrame { frame, na_reasons: _ } => {
+            Value::DataFrame {
+                frame,
+                na_reasons: _,
+            } => {
                 let n = frame.height();
                 let cols = frame.columns();
                 let mut valid_col_names = Vec::new();
@@ -92,7 +95,10 @@ impl FittedGmm {
             other => {
                 return Err(Diagnostic::statistical_error(
                     "S0200",
-                    format!("First argument of `fit_gmm()` must be a DataFrame or Matrix, found `{}`", other.type_name()),
+                    format!(
+                        "First argument of `fit_gmm()` must be a DataFrame or Matrix, found `{}`",
+                        other.type_name()
+                    ),
                 ));
             }
         };
@@ -100,7 +106,9 @@ impl FittedGmm {
         if n_obs < k {
             return Err(Diagnostic::statistical_error(
                 "S0201",
-                format!("`fit_gmm()`: number of observations ({n_obs}) must be >= number of clusters ({k})"),
+                format!(
+                    "`fit_gmm()`: number of observations ({n_obs}) must be >= number of clusters ({k})"
+                ),
             ));
         }
 
@@ -262,9 +270,11 @@ impl FittedGmm {
         let mut panel = CockpitPanel::new("NEKO GMM: Gaussian Mixture Model");
         let badge = if self.converged {
             if caps.unicode_enabled {
-                format!("/ᐠ˵- ⩊ -˵マ ✧ EM CONVERGED in {} iterations", self.iterations)
+                format!(
+                    "/ᐠ˵- ⩊ -˵マ ✧ EM CONVERGED in {} iterations",
+                    self.iterations
+                )
             } else {
-
                 format!("[CONVERGED in {} iterations]", self.iterations)
             }
         } else {
@@ -277,14 +287,23 @@ impl FittedGmm {
         panel.add_kv("Observations", format!("{} observations", self.n_obs));
         panel.add_kv(
             "Fit Metrics",
-            format!("Log-Likelihood = {:.4} | AIC = {:.2} | BIC = {:.2}", self.log_likelihood, self.aic, self.bic),
+            format!(
+                "Log-Likelihood = {:.4} | AIC = {:.2} | BIC = {:.2}",
+                self.log_likelihood, self.aic, self.bic
+            ),
         );
 
         panel.add_divider();
 
         // Components table
-        panel.add_line(format!("{:<8} {:>10} {:>10}  {:<35}", "Cluster", "Weight", "Est.Size", "Means (first dimensions)"));
-        panel.add_line(format!("{:<8} {:>10} {:>10}  {:<35}", "-------", "------", "--------", "-------------------------"));
+        panel.add_line(format!(
+            "{:<8} {:>10} {:>10}  {:<35}",
+            "Cluster", "Weight", "Est.Size", "Means (first dimensions)"
+        ));
+        panel.add_line(format!(
+            "{:<8} {:>10} {:>10}  {:<35}",
+            "-------", "------", "--------", "-------------------------"
+        ));
 
         for ki in 0..self.k {
             let w = self.weights[ki];
@@ -300,7 +319,10 @@ impl FittedGmm {
             }
             let mean_repr = format!("[{}]", mean_strs.join(", "));
 
-            panel.add_line(format!("#{:<7} {:>10.4} {:>10}  {:<35}", ki, w, est_size, mean_repr));
+            panel.add_line(format!(
+                "#{:<7} {:>10.4} {:>10}  {:<35}",
+                ki, w, est_size, mean_repr
+            ));
         }
 
         panel.add_divider();
@@ -322,7 +344,9 @@ impl FittedGmm {
         for ki in 0..self.k {
             components.push(Value::I64(ki as i64));
             weights_val.push(Value::F64(self.weights[ki]));
-            est_sizes.push(Value::I64((self.weights[ki] * (self.n_obs as f64)).round() as i64));
+            est_sizes.push(Value::I64(
+                (self.weights[ki] * (self.n_obs as f64)).round() as i64
+            ));
         }
 
         let mut cols = vec![
@@ -353,13 +377,19 @@ impl FittedGmm {
     /// `glance(m)` — 1-row DataFrame of global fit statistics.
     pub fn glance(&self) -> Value {
         let cols = vec![
-            ("log_likelihood".to_string(), vec![Value::F64(self.log_likelihood)]),
+            (
+                "log_likelihood".to_string(),
+                vec![Value::F64(self.log_likelihood)],
+            ),
             ("aic".to_string(), vec![Value::F64(self.aic)]),
             ("bic".to_string(), vec![Value::F64(self.bic)]),
             ("k".to_string(), vec![Value::I64(self.k as i64)]),
             ("dim".to_string(), vec![Value::I64(self.dim as i64)]),
             ("n_obs".to_string(), vec![Value::I64(self.n_obs as i64)]),
-            ("iterations".to_string(), vec![Value::I64(self.iterations as i64)]),
+            (
+                "iterations".to_string(),
+                vec![Value::I64(self.iterations as i64)],
+            ),
             ("converged".to_string(), vec![Value::Bool(self.converged)]),
         ];
 
@@ -375,7 +405,10 @@ impl FittedGmm {
                 if *cols != self.dim {
                     return Err(Diagnostic::statistical_error(
                         "S0412",
-                        format!("`predict()`: dimension mismatch, model expects {} dims, found {}", self.dim, cols),
+                        format!(
+                            "`predict()`: dimension mismatch, model expects {} dims, found {}",
+                            self.dim, cols
+                        ),
                     ));
                 }
                 (data.clone(), *rows, *cols)
@@ -386,9 +419,14 @@ impl FittedGmm {
                 for i in 0..n {
                     for name in &self.column_names {
                         let c = frame.column(name).map_err(|_| {
-                            Diagnostic::statistical_error("S0200", format!("Column `{name}` not found in predict dataframe"))
+                            Diagnostic::statistical_error(
+                                "S0200",
+                                format!("Column `{name}` not found in predict dataframe"),
+                            )
                         })?;
-                        let v = c.get(i).map_err(|e| Diagnostic::compute_error("C0210", format!("{e}")))?;
+                        let v = c
+                            .get(i)
+                            .map_err(|e| Diagnostic::compute_error("C0210", format!("{e}")))?;
                         let val: f64 = match v {
                             polars_core::datatypes::AnyValue::Float64(f) => f,
                             polars_core::datatypes::AnyValue::Int64(n) => n as f64,
@@ -402,7 +440,10 @@ impl FittedGmm {
             other => {
                 return Err(Diagnostic::compute_error(
                     "C0201",
-                    format!("`predict()` requires a DataFrame or Matrix, found `{}`", other.type_name()),
+                    format!(
+                        "`predict()` requires a DataFrame or Matrix, found `{}`",
+                        other.type_name()
+                    ),
                 ));
             }
         };
@@ -449,27 +490,41 @@ impl FittedGmm {
                 if frame.height() != self.n_obs {
                     return Err(Diagnostic::statistical_error(
                         "S0200",
-                        format!("`augment()`: DataFrame height ({}) does not match model fit observations ({})", frame.height(), self.n_obs),
+                        format!(
+                            "`augment()`: DataFrame height ({}) does not match model fit observations ({})",
+                            frame.height(),
+                            self.n_obs
+                        ),
                     ));
                 }
 
                 let mut new_frame = frame.clone();
                 let cluster_col: Vec<i64> = self.cluster_assignments.clone();
-                let prob_col: Vec<Option<f64>> = self.max_posterior_probs.iter().map(|&p| Some(p)).collect();
+                let prob_col: Vec<Option<f64>> =
+                    self.max_posterior_probs.iter().map(|&p| Some(p)).collect();
 
-                new_frame.with_column(
-                    crate::polars_bridge::i64_column(".cluster", cluster_col)
-                ).map_err(|e| Diagnostic::compute_error("C0210", format!("{e}")))?;
+                new_frame
+                    .with_column(crate::polars_bridge::i64_column(".cluster", cluster_col))
+                    .map_err(|e| Diagnostic::compute_error("C0210", format!("{e}")))?;
 
-                new_frame.with_column(
-                    crate::polars_bridge::f64_opt_column(".probability", prob_col)
-                ).map_err(|e| Diagnostic::compute_error("C0210", format!("{e}")))?;
+                new_frame
+                    .with_column(crate::polars_bridge::f64_opt_column(
+                        ".probability",
+                        prob_col,
+                    ))
+                    .map_err(|e| Diagnostic::compute_error("C0210", format!("{e}")))?;
 
-                Ok(Value::DataFrame { frame: new_frame, na_reasons: Arc::clone(na_reasons) })
+                Ok(Value::DataFrame {
+                    frame: new_frame,
+                    na_reasons: Arc::clone(na_reasons),
+                })
             }
             other => Err(Diagnostic::compute_error(
                 "C0201",
-                format!("`augment()` requires a DataFrame as second argument, found `{}`", other.type_name()),
+                format!(
+                    "`augment()` requires a DataFrame as second argument, found `{}`",
+                    other.type_name()
+                ),
             )),
         }
     }

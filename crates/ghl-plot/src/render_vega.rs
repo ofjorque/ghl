@@ -3,9 +3,9 @@
 //! Produces publication-grade, interactive visualizations compatible with
 //! Positron, Jupyter notebooks, VSCode data viewers, and web browsers.
 
-use serde_json::{json, Value};
 use crate::palette::OKABE_ITO;
 use crate::spec::{GeomKind, PlotSpec, PlotTheme, ScaleTransform};
+use serde_json::{Value, json};
 
 pub struct VegaRenderer;
 
@@ -13,7 +13,8 @@ impl VegaRenderer {
     /// Generate a valid Vega-Lite v5 JSON string from a `PlotSpec`.
     pub fn to_vega_json(spec: &PlotSpec) -> Result<String, String> {
         let val = Self::to_vega_value(spec)?;
-        serde_json::to_string_pretty(&val).map_err(|e| format!("Vega JSON serialization error: {e}"))
+        serde_json::to_string_pretty(&val)
+            .map_err(|e| format!("Vega JSON serialization error: {e}"))
     }
 
     /// Generate a `serde_json::Value` tree representing the Vega-Lite v5 spec.
@@ -23,8 +24,12 @@ impl VegaRenderer {
                 crate::spec::CompositePlot::Horizontal(left, right) => {
                     let mut l = (**left).clone();
                     let mut r = (**right).clone();
-                    if l.font_family.is_none() { l.font_family = spec.font_family.clone(); }
-                    if r.font_family.is_none() { r.font_family = spec.font_family.clone(); }
+                    if l.font_family.is_none() {
+                        l.font_family = spec.font_family.clone();
+                    }
+                    if r.font_family.is_none() {
+                        r.font_family = spec.font_family.clone();
+                    }
                     let mut l_val = Self::to_vega_value(&l)?;
                     let mut r_val = Self::to_vega_value(&r)?;
                     if let Some(obj) = l_val.as_object_mut() {
@@ -45,8 +50,12 @@ impl VegaRenderer {
                 crate::spec::CompositePlot::Vertical(top, bottom) => {
                     let mut t = (**top).clone();
                     let mut b = (**bottom).clone();
-                    if t.font_family.is_none() { t.font_family = spec.font_family.clone(); }
-                    if b.font_family.is_none() { b.font_family = spec.font_family.clone(); }
+                    if t.font_family.is_none() {
+                        t.font_family = spec.font_family.clone();
+                    }
+                    if b.font_family.is_none() {
+                        b.font_family = spec.font_family.clone();
+                    }
                     let mut t_val = Self::to_vega_value(&t)?;
                     let mut b_val = Self::to_vega_value(&b)?;
                     if let Some(obj) = t_val.as_object_mut() {
@@ -67,8 +76,14 @@ impl VegaRenderer {
             }
         }
 
-        let is_hist = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Histogram { .. }));
-        let is_box = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Boxplot { .. }));
+        let is_hist = spec
+            .layers
+            .iter()
+            .any(|l| matches!(l.kind, GeomKind::Histogram { .. }));
+        let is_box = spec
+            .layers
+            .iter()
+            .any(|l| matches!(l.kind, GeomKind::Boxplot { .. }));
         let is_bar = spec.layers.iter().any(|l| matches!(l.kind, GeomKind::Bar));
 
         let title = spec.labels.title.as_deref().unwrap_or("Plot");
@@ -131,9 +146,10 @@ impl VegaRenderer {
 
         if is_bar {
             let counts_map = spec.bar_counts().unwrap_or_default();
-            let data_values: Vec<Value> = counts_map.into_iter().map(|(cat, count)| {
-                json!({ "category": cat, "count": count })
-            }).collect();
+            let data_values: Vec<Value> = counts_map
+                .into_iter()
+                .map(|(cat, count)| json!({ "category": cat, "count": count }))
+                .collect();
 
             return Ok(json!({
                 "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
@@ -160,7 +176,9 @@ impl VegaRenderer {
             let has_categories = !spec.categories.is_empty() && !spec.y_data.is_empty();
             let data_values: Vec<Value> = if has_categories {
                 let n = spec.categories.len().min(spec.y_data.len());
-                (0..n).map(|i| json!({ "category": spec.categories[i], "value": spec.y_data[i] })).collect()
+                (0..n)
+                    .map(|i| json!({ "category": spec.categories[i], "value": spec.y_data[i] }))
+                    .collect()
             } else {
                 spec.y_data.iter().map(|&y| json!({ "value": y })).collect()
             };
@@ -194,8 +212,10 @@ impl VegaRenderer {
         let series_list = spec.all_series();
         let mut data_values = Vec::new();
         let has_groups = series_list.iter().any(|s| s.group_name.is_some());
-        let has_size = series_list.iter().any(|s| !s.size_values.is_empty()) || !spec.size_data.is_empty();
-        let has_shape = series_list.iter().any(|s| !s.shape_values.is_empty()) || !spec.shape_data.is_empty();
+        let has_size =
+            series_list.iter().any(|s| !s.size_values.is_empty()) || !spec.size_data.is_empty();
+        let has_shape =
+            series_list.iter().any(|s| !s.shape_values.is_empty()) || !spec.shape_data.is_empty();
 
         for s in &series_list {
             let n = s.x_values.len().min(s.y_values.len());
@@ -230,7 +250,9 @@ impl VegaRenderer {
                             crate::spec::FacetLayout::Wrap { variable, .. } => {
                                 row[variable] = json!(f_val);
                             }
-                            crate::spec::FacetLayout::Grid { col_var: Some(c), .. } => {
+                            crate::spec::FacetLayout::Grid {
+                                col_var: Some(c), ..
+                            } => {
                                 row[c] = json!(f_val);
                             }
                             _ => {}
@@ -239,7 +261,10 @@ impl VegaRenderer {
                 }
                 if let Some(r_val) = spec.facet_row_data.get(i) {
                     if let Some(ref facet_spec) = spec.facet {
-                        if let crate::spec::FacetLayout::Grid { row_var: Some(r), .. } = &facet_spec.layout {
+                        if let crate::spec::FacetLayout::Grid {
+                            row_var: Some(r), ..
+                        } = &facet_spec.layout
+                        {
                             row[r] = json!(r_val);
                         }
                     }
@@ -287,8 +312,10 @@ impl VegaRenderer {
         }
 
         if has_size {
-            let min_area = (spec.size_range.0 * spec.size_range.0 * std::f64::consts::PI).round() as u64;
-            let max_area = (spec.size_range.1 * spec.size_range.1 * std::f64::consts::PI).round() as u64;
+            let min_area =
+                (spec.size_range.0 * spec.size_range.0 * std::f64::consts::PI).round() as u64;
+            let max_area =
+                (spec.size_range.1 * spec.size_range.1 * std::f64::consts::PI).round() as u64;
             base_encoding["size"] = json!({
                 "field": "size",
                 "type": "quantitative",
@@ -308,9 +335,18 @@ impl VegaRenderer {
         let mut layers = Vec::new();
 
         let global_has_points = spec.layers.is_empty()
-            || spec.layers.iter().any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Point { .. }));
-        let global_has_lines = spec.layers.iter().any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Line { .. }));
-        let global_has_smooth = spec.layers.iter().any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Smooth { .. }));
+            || spec
+                .layers
+                .iter()
+                .any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Point { .. }));
+        let global_has_lines = spec
+            .layers
+            .iter()
+            .any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Line { .. }));
+        let global_has_smooth = spec
+            .layers
+            .iter()
+            .any(|l| l.data.is_none() && matches!(l.kind, GeomKind::Smooth { .. }));
 
         if global_has_points && !data_values.is_empty() {
             let mut point_mark = json!({
@@ -439,7 +475,12 @@ impl VegaRenderer {
             });
 
             match &facet_spec.layout {
-                crate::spec::FacetLayout::Wrap { variable, ncol, scales, .. } => {
+                crate::spec::FacetLayout::Wrap {
+                    variable,
+                    ncol,
+                    scales,
+                    ..
+                } => {
                     let mut facet_enc = json!({
                         "field": variable,
                         "type": "nominal"
@@ -451,7 +492,8 @@ impl VegaRenderer {
 
                     match scales {
                         crate::spec::FacetScales::Free => {
-                            facet_json["resolve"] = json!({ "scale": { "x": "independent", "y": "independent" } });
+                            facet_json["resolve"] =
+                                json!({ "scale": { "x": "independent", "y": "independent" } });
                         }
                         crate::spec::FacetScales::FreeX => {
                             facet_json["resolve"] = json!({ "scale": { "x": "independent" } });
@@ -462,7 +504,11 @@ impl VegaRenderer {
                         crate::spec::FacetScales::Fixed => {}
                     }
                 }
-                crate::spec::FacetLayout::Grid { row_var, col_var, scales } => {
+                crate::spec::FacetLayout::Grid {
+                    row_var,
+                    col_var,
+                    scales,
+                } => {
                     let mut facet_enc = json!({});
                     if let Some(r) = row_var {
                         facet_enc["row"] = json!({ "field": r, "type": "nominal" });
@@ -474,7 +520,8 @@ impl VegaRenderer {
 
                     match scales {
                         crate::spec::FacetScales::Free => {
-                            facet_json["resolve"] = json!({ "scale": { "x": "independent", "y": "independent" } });
+                            facet_json["resolve"] =
+                                json!({ "scale": { "x": "independent", "y": "independent" } });
                         }
                         crate::spec::FacetScales::FreeX => {
                             facet_json["resolve"] = json!({ "scale": { "x": "independent" } });

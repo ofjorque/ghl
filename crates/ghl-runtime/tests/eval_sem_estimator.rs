@@ -88,11 +88,23 @@ fn test_sample_covariance() {
         assert_eq!(rows, 2);
         assert_eq!(cols, 2);
         // Var(x1) = 2.5
-        assert!((data[0] - 2.5).abs() < 1e-6, "Expected Var(x1) = 2.5, got {}", data[0]);
+        assert!(
+            (data[0] - 2.5).abs() < 1e-6,
+            "Expected Var(x1) = 2.5, got {}",
+            data[0]
+        );
         // Cov(x1, x2) = 5.5
-        assert!((data[1] - 5.5).abs() < 1e-6, "Expected Cov(x1, x2) = 5.5, got {}", data[1]);
+        assert!(
+            (data[1] - 5.5).abs() < 1e-6,
+            "Expected Cov(x1, x2) = 5.5, got {}",
+            data[1]
+        );
         // Var(x2) = 12.8
-        assert!((data[3] - 12.8).abs() < 1e-6, "Expected Var(x2) = 12.8, got {}", data[3]);
+        assert!(
+            (data[3] - 12.8).abs() < 1e-6,
+            "Expected Var(x2) = 12.8, got {}",
+            data[3]
+        );
     } else {
         panic!("Expected Matrix from sample_cov()");
     }
@@ -126,7 +138,8 @@ fn test_sem_one_factor_cfa_end_to_end() {
     let x2_str = format!("{:?}", x2_vals);
     let x3_str = format!("{:?}", x3_vals);
 
-    let src = format!(r#"
+    let src = format!(
+        r#"
         let df = dataframe {{
             x1: {},
             x2: {},
@@ -143,7 +156,9 @@ fn test_sem_one_factor_cfa_end_to_end() {
         let t = tidy(fit);
         let g = glance(fit);
         let v = vcov(fit);
-    "#, x1_str, x2_str, x3_str);
+    "#,
+        x1_str, x2_str, x3_str
+    );
 
     let (interp, _) = run_ghl(&src);
 
@@ -153,7 +168,10 @@ fn test_sem_one_factor_cfa_end_to_end() {
 
     // 1. Check tidy() DataFrame
     if let Value::DataFrame { frame, .. } = t {
-        assert!(frame.height() >= 5, "Expected at least 5 estimated parameters");
+        assert!(
+            frame.height() >= 5,
+            "Expected at least 5 estimated parameters"
+        );
         assert!(frame.column("term").is_ok());
         assert!(frame.column("estimate").is_ok());
         assert!(frame.column("std_error").is_ok());
@@ -182,7 +200,13 @@ fn test_sem_one_factor_cfa_end_to_end() {
         assert_eq!(frame.height(), 1);
         let cfi = frame.column("cfi").unwrap().f64().unwrap().get(0).unwrap();
         let srmr = frame.column("srmr").unwrap().f64().unwrap().get(0).unwrap();
-        let rmsea = frame.column("rmsea").unwrap().f64().unwrap().get(0).unwrap();
+        let rmsea = frame
+            .column("rmsea")
+            .unwrap()
+            .f64()
+            .unwrap()
+            .get(0)
+            .unwrap();
 
         assert!(cfi >= 0.85, "Expected high CFI (>= 0.85), got {}", cfi);
         assert!(srmr <= 0.15, "Expected low SRMR (<= 0.15), got {}", srmr);
@@ -233,11 +257,23 @@ fn test_optim_bounded_lbfgs_b() {
         if let Value::Vector(vd) = par {
             let p0 = vd[0].as_f64().unwrap();
             let p1 = vd[1].as_f64().unwrap();
-            assert!((p0 - 2.0).abs() < 1e-3, "Expected bounded x ≈ 2.0, got {}", p0);
-            assert!((p1 - (-3.0)).abs() < 1e-3, "Expected bounded y ≈ -3.0, got {}", p1);
+            assert!(
+                (p0 - 2.0).abs() < 1e-3,
+                "Expected bounded x ≈ 2.0, got {}",
+                p0
+            );
+            assert!(
+                (p1 - (-3.0)).abs() < 1e-3,
+                "Expected bounded y ≈ -3.0, got {}",
+                p1
+            );
         }
         if let Value::F64(v) = val {
-            assert!((v - 13.0).abs() < 1e-2, "Expected f(2, -3) ≈ 13.0, got {}", v);
+            assert!(
+                (v - 13.0).abs() < 1e-2,
+                "Expected f(2, -3) ≈ 13.0, got {}",
+                v
+            );
         }
     } else {
         panic!("Expected Record from optim()");
@@ -279,7 +315,11 @@ fn test_nls_levenberg_marquardt() {
         if let Value::Vector(vd) = par {
             let vmax = vd[0].as_f64().unwrap();
             let km = vd[1].as_f64().unwrap();
-            assert!((vmax - 10.0).abs() < 0.1, "Expected Vmax ≈ 10.0, got {}", vmax);
+            assert!(
+                (vmax - 10.0).abs() < 0.1,
+                "Expected Vmax ≈ 10.0, got {}",
+                vmax
+            );
             assert!((km - 2.0).abs() < 0.1, "Expected Km ≈ 2.0, got {}", km);
         }
     } else {

@@ -32,10 +32,18 @@ fn test_lasso_variable_selection() {
     let val = res.expect("lasso should succeed");
     if let Value::Struct { name, fields } = val {
         assert_eq!(name, "RegularizedResult");
-        let m_type = fields.get("model_type").expect("model_type").as_str().unwrap();
+        let m_type = fields
+            .get("model_type")
+            .expect("model_type")
+            .as_str()
+            .unwrap();
         assert_eq!(m_type, "Lasso");
 
-        let n_sel = fields.get("n_selected").expect("n_selected").as_i64().unwrap();
+        let n_sel = fields
+            .get("n_selected")
+            .expect("n_selected")
+            .as_i64()
+            .unwrap();
         let coefs = fields.get("coefficients").expect("coefficients");
         let active = fields.get("active_terms").expect("active_terms");
 
@@ -52,15 +60,26 @@ fn test_lasso_variable_selection() {
             assert!(b_x2 > 1.0, "Expected x2 to be selected (>1), got {}", b_x2);
 
             // x3 and x4 should be shrunk towards zero or exactly zero
-            assert!(b_x3.abs() < 1e-4, "Expected x3 to be shrunk to 0, got {}", b_x3);
-            assert!(b_x4.abs() < 1e-4, "Expected x4 to be shrunk to 0, got {}", b_x4);
+            assert!(
+                b_x3.abs() < 1e-4,
+                "Expected x3 to be shrunk to 0, got {}",
+                b_x3
+            );
+            assert!(
+                b_x4.abs() < 1e-4,
+                "Expected x4 to be shrunk to 0, got {}",
+                b_x4
+            );
         } else {
             panic!("Expected Vector for coefficients");
         }
 
         if let Value::Vector(a_vec) = active {
             assert_eq!(a_vec.len(), n_sel as usize);
-            let active_names: Vec<String> = a_vec.iter().map(|v| v.as_str().unwrap().to_string()).collect();
+            let active_names: Vec<String> = a_vec
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect();
             assert!(active_names.contains(&"x1".to_string()));
             assert!(active_names.contains(&"x2".to_string()));
             assert!(!active_names.contains(&"x3".to_string()));
@@ -89,13 +108,21 @@ fn test_ridge_shrinkage() {
     let val = res.expect("ridge should succeed");
     if let Value::Struct { name, fields } = val {
         assert_eq!(name, "RegularizedResult");
-        let m_type = fields.get("model_type").expect("model_type").as_str().unwrap();
+        let m_type = fields
+            .get("model_type")
+            .expect("model_type")
+            .as_str()
+            .unwrap();
         assert_eq!(m_type, "Ridge");
 
         let alpha = fields.get("alpha").expect("alpha").as_f64().unwrap();
         assert_eq!(alpha, 0.0);
 
-        let n_sel = fields.get("n_selected").expect("n_selected").as_i64().unwrap();
+        let n_sel = fields
+            .get("n_selected")
+            .expect("n_selected")
+            .as_i64()
+            .unwrap();
         // In Ridge, coefficients shrink but generally all features remain non-zero
         assert_eq!(n_sel, 2);
 
@@ -124,7 +151,11 @@ fn test_elastic_net_mixture() {
     let val = res.expect("elastic_net should succeed");
     if let Value::Struct { name, fields } = val {
         assert_eq!(name, "RegularizedResult");
-        let m_type = fields.get("model_type").expect("model_type").as_str().unwrap();
+        let m_type = fields
+            .get("model_type")
+            .expect("model_type")
+            .as_str()
+            .unwrap();
         assert_eq!(m_type, "ElasticNet");
 
         let alpha = fields.get("alpha").expect("alpha").as_f64().unwrap();
@@ -166,7 +197,12 @@ fn test_cv_glmnet_auto_tuning() {
         let l_min = lam_min.as_f64().unwrap();
         let l_1se = lam_1se.as_f64().unwrap();
         assert!(l_min > 0.0);
-        assert!(l_1se >= l_min, "lambda_1se ({}) should be >= lambda_min ({})", l_1se, l_min);
+        assert!(
+            l_1se >= l_min,
+            "lambda_1se ({}) should be >= lambda_min ({})",
+            l_1se,
+            l_min
+        );
 
         if let Value::DataFrame { frame, .. } = cv_metrics {
             assert!(frame.height() > 0, "cv_metrics should have rows");

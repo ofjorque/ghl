@@ -5,10 +5,10 @@
 //! TrueType (`.ttf`) and OpenType (`.otf`) fonts with Plotters for pixel-perfect
 //! raster (PNG) and vector rendering without external R dependencies like `showtext`.
 
+use plotters::style::FontStyle;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use plotters::style::FontStyle;
 
 static REGISTERED_FONTS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
@@ -24,7 +24,9 @@ pub fn os_font_directories() -> Vec<PathBuf> {
             dirs.push(PathBuf::from("C:\\Windows\\Fonts"));
         }
         if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            dirs.push(PathBuf::from(format!("{local_app_data}\\Microsoft\\Windows\\Fonts")));
+            dirs.push(PathBuf::from(format!(
+                "{local_app_data}\\Microsoft\\Windows\\Fonts"
+            )));
         }
     }
 
@@ -80,7 +82,12 @@ fn common_font_file_stem(norm: &str) -> Option<&'static str> {
 }
 
 /// Recursively search for a matching font file up to `max_depth`.
-fn find_font_file(dir: &Path, target_norm: &str, known_stem: Option<&str>, depth: usize) -> Option<PathBuf> {
+fn find_font_file(
+    dir: &Path,
+    target_norm: &str,
+    known_stem: Option<&str>,
+    depth: usize,
+) -> Option<PathBuf> {
     if depth > 3 || !dir.exists() || !dir.is_dir() {
         return None;
     }
@@ -157,7 +164,10 @@ mod tests {
     #[test]
     fn test_os_font_directories_exist() {
         let dirs = os_font_directories();
-        assert!(!dirs.is_empty(), "Host OS must provide at least one font directory");
+        assert!(
+            !dirs.is_empty(),
+            "Host OS must provide at least one font directory"
+        );
     }
 
     #[test]
@@ -165,8 +175,12 @@ mod tests {
         // On Windows, Segoe UI or Arial or Consolas always exist
         #[cfg(target_os = "windows")]
         {
-            let found = discover_and_register_font("Segoe UI") || discover_and_register_font("Arial");
-            assert!(found, "Should discover Windows standard font Segoe UI or Arial");
+            let found =
+                discover_and_register_font("Segoe UI") || discover_and_register_font("Arial");
+            assert!(
+                found,
+                "Should discover Windows standard font Segoe UI or Arial"
+            );
         }
     }
 }

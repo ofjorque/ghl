@@ -6,10 +6,10 @@
 //!
 //! Usage: `cargo run --release --example spike_vector_dot_latency -p ghl-runtime -- <n>`
 
-use std::time::Instant;
 use ghl_runtime::matrix::MatrixOps;
 use ghl_runtime::value::Value;
 use ghl_runtime::vector_data::VectorData;
+use std::time::Instant;
 
 const REPEATS: u32 = 10;
 
@@ -26,7 +26,10 @@ fn boxed_dot(a: &[Value], b: &[Value]) -> f64 {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let n: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(10_000_000);
+    let n: usize = args
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10_000_000);
 
     println!("N = {n} elements");
 
@@ -42,7 +45,9 @@ fn main() {
         boxed_result = boxed_dot(&boxed_a, &boxed_b);
         best_boxed = best_boxed.min(start.elapsed());
     }
-    println!("  dot() hand-rolled on boxed Vec<Value>: min over {REPEATS} runs: {best_boxed:>10.3?}");
+    println!(
+        "  dot() hand-rolled on boxed Vec<Value>: min over {REPEATS} runs: {best_boxed:>10.3?}"
+    );
 
     // New path: VectorData::from_f64 (unboxed) + MatrixOps::dot (faer, RowRef *
     // ColRef, the same blocked GEMM kernel used by matrix multiplication).
@@ -54,13 +59,19 @@ fn main() {
     let mut best_fast = std::time::Duration::MAX;
     let mut fast_result = 0.0;
     for _ in 0..REPEATS {
-        let view_a = vd_a.as_f64_view().expect("no nulls, should hit the fast path");
-        let view_b = vd_b.as_f64_view().expect("no nulls, should hit the fast path");
+        let view_a = vd_a
+            .as_f64_view()
+            .expect("no nulls, should hit the fast path");
+        let view_b = vd_b
+            .as_f64_view()
+            .expect("no nulls, should hit the fast path");
         let start = Instant::now();
         fast_result = MatrixOps::dot(view_a.as_slice(), view_b.as_slice()).expect("equal lengths");
         best_fast = best_fast.min(start.elapsed());
     }
-    println!("  dot() real (faer, VectorData::as_f64_view): min over {REPEATS} runs: {best_fast:>10.3?}");
+    println!(
+        "  dot() real (faer, VectorData::as_f64_view): min over {REPEATS} runs: {best_fast:>10.3?}"
+    );
 
     assert!(
         (boxed_result - fast_result).abs() < 1e-3 * boxed_result.abs().max(1.0),

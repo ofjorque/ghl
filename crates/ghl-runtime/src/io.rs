@@ -5,11 +5,10 @@
 //! - Tabular CSV operations: `read_csv`, `write_csv`, `parse_csv` with automatic type inference and NA reasoning
 //! - Core DataFrame wrangling verbs: `select`, `head`, `tail`
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use crate::na_reasons::NaReasonTable;
+use crate::polars_bridge;
+use crate::value::{LazyPlan, Value};
+use crate::vector_data::VectorData;
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::BinaryOp;
 use polars_core::prelude::*;
@@ -17,10 +16,11 @@ use polars_io::prelude::*;
 use polars_lazy::prelude::*;
 use polars_ops::prelude::*;
 use rayon::prelude::*;
-use crate::na_reasons::NaReasonTable;
-use crate::polars_bridge;
-use crate::value::{Value, LazyPlan};
-use crate::vector_data::VectorData;
+use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
+use std::sync::Arc;
 
 static TELEMETRY_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -32,7 +32,9 @@ pub fn set_telemetry_enabled(enabled: bool) {
 /// Returns true if Cockpit Deck telemetry should report performance for the given row volume.
 pub fn is_telemetry_active(rows: usize) -> bool {
     TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
-        || std::env::var("GHL_TELEMETRY").map(|v| v != "0").unwrap_or(false)
+        || std::env::var("GHL_TELEMETRY")
+            .map(|v| v != "0")
+            .unwrap_or(false)
         || rows >= 100_000
 }
 
@@ -41,12 +43,18 @@ pub fn is_telemetry_active(rows: usize) -> bool {
 /// first argument is not a DataFrame. Returns the `Arc` itself (rather than an unwrapped
 /// `&NaReasonTable`) so verbs that reuse reasons unchanged (`ungroup()`, variable reads)
 /// can clone the `Arc` cheaply without copying the underlying table.
-fn as_dataframe<'a>(df: &'a Value, verb: &str) -> Result<(&'a DataFrame, &'a Arc<NaReasonTable>), Diagnostic> {
+fn as_dataframe<'a>(
+    df: &'a Value,
+    verb: &str,
+) -> Result<(&'a DataFrame, &'a Arc<NaReasonTable>), Diagnostic> {
     match df {
         Value::DataFrame { frame, na_reasons } => Ok((frame, na_reasons)),
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`{verb}()` requires a DataFrame, found `{}`", other.type_name()),
+            format!(
+                "`{verb}()` requires a DataFrame, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -55,12 +63,16 @@ fn as_dataframe<'a>(df: &'a Value, verb: &str) -> Result<(&'a DataFrame, &'a Arc
 /// to the `DataFrame` and its `NaReasonTable`, keeping both aligned — shared across
 /// `arrange`/`slice`/`head`/`tail`/`sample_n`/`distinct`. Wraps the result in an `Arc`
 /// directly here to enforce consistent wrapping across all callers.
-pub(crate) fn take_rows(frame: &DataFrame, na_reasons: &NaReasonTable, indices: &[usize]) -> Result<(DataFrame, Arc<NaReasonTable>), Diagnostic> {
+pub(crate) fn take_rows(
+    frame: &DataFrame,
+    na_reasons: &NaReasonTable,
+    indices: &[usize],
+) -> Result<(DataFrame, Arc<NaReasonTable>), Diagnostic> {
     let idx: Vec<IdxSize> = indices.iter().map(|&i| i as IdxSize).collect();
     let idx_ca = IdxCa::from_vec(PlSmallStr::EMPTY, idx);
-    let new_frame = frame.take(&idx_ca).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("Failed to take rows: {e}"))
-    })?;
+    let new_frame = frame
+        .take(&idx_ca)
+        .map_err(|e| Diagnostic::compute_error("C0210", format!("Failed to take rows: {e}")))?;
     Ok((new_frame, Arc::new(na_reasons.reindex(indices))))
 }
 
@@ -86,7 +98,10 @@ pub(crate) fn colref_predicate_mask(
     rhs: &Value,
 ) -> Result<BooleanChunked, Diagnostic> {
     let left = frame.column(col).map_err(|_| {
-        Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `filter()`", col))
+        Diagnostic::statistical_error(
+            "S0201",
+            format!("Column `{}` not found in DataFrame for `filter()`", col),
+        )
     })?;
 
     let av = value_to_any_value(rhs);
@@ -103,11 +118,16 @@ pub(crate) fn colref_predicate_mask(
         other => {
             return Err(Diagnostic::compute_error(
                 "C0202",
-                format!("`filter()` does not support operator `{:?}` on a column comparison", other),
+                format!(
+                    "`filter()` does not support operator `{:?}` on a column comparison",
+                    other
+                ),
             ));
         }
     };
-    result.map_err(|e| Diagnostic::compute_error("C0210", format!("`filter()` comparison failed: {e}")))
+    result.map_err(|e| {
+        Diagnostic::compute_error("C0210", format!("`filter()` comparison failed: {e}"))
+    })
 }
 
 /// Row positions (in order) where `mask` is `true` — nulls in the mask count as `false`,
@@ -115,7 +135,10 @@ pub(crate) fn colref_predicate_mask(
 /// `filter()`'s vectorized path and anything else that needs indices back from a
 /// `BooleanChunked` for `take_rows`/`NaReasonTable::reindex`.
 pub(crate) fn mask_to_indices(mask: &BooleanChunked) -> Vec<usize> {
-    mask.iter().enumerate().filter_map(|(i, v)| v.unwrap_or(false).then_some(i)).collect()
+    mask.iter()
+        .enumerate()
+        .filter_map(|(i, v)| v.unwrap_or(false).then_some(i))
+        .collect()
 }
 
 /// Converts a scalar `Value` into a literal `Expr` for lazy query expressions.
@@ -127,7 +150,10 @@ pub(crate) fn value_to_lazy_lit(v: &Value) -> Result<Expr, Diagnostic> {
         Value::String(s) => Ok(lit(s.as_str())),
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("Value `{}` cannot be used as a literal in a lazy query expression", other.type_name()),
+            format!(
+                "Value `{}` cannot be used as a literal in a lazy query expression",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -135,7 +161,11 @@ pub(crate) fn value_to_lazy_lit(v: &Value) -> Result<Expr, Diagnostic> {
 /// Recursively translates GHL's deferred predicate tree into a native `polars_lazy::dsl::Expr`.
 pub(crate) fn predicate_to_lazy_expr(pred: &Value) -> Result<Expr, Diagnostic> {
     match pred {
-        Value::ColPredicate { col: col_name, op, rhs } => {
+        Value::ColPredicate {
+            col: col_name,
+            op,
+            rhs,
+        } => {
             let left = col(col_name.as_str());
             let right = value_to_lazy_lit(rhs)?;
             match op {
@@ -147,7 +177,10 @@ pub(crate) fn predicate_to_lazy_expr(pred: &Value) -> Result<Expr, Diagnostic> {
                 BinaryOp::NotEq => Ok(left.neq(right)),
                 other => Err(Diagnostic::compute_error(
                     "C0202",
-                    format!("`filter()` does not support operator `{:?}` in a lazy query", other),
+                    format!(
+                        "`filter()` does not support operator `{:?}` in a lazy query",
+                        other
+                    ),
                 )),
             }
         }
@@ -196,12 +229,18 @@ pub fn df_filter_by_col_predicate(
 /// of those built with `!`/`&&`/`||`) into a single `BooleanChunked` mask. Each
 /// combinator maps straight onto polars' own boolean bitwise ops, which already
 /// implement Kleene 3-valued logic over nulls — the same semantics GHL wants.
-pub(crate) fn predicate_mask(frame: &DataFrame, pred: &Value) -> Result<BooleanChunked, Diagnostic> {
+pub(crate) fn predicate_mask(
+    frame: &DataFrame,
+    pred: &Value,
+) -> Result<BooleanChunked, Diagnostic> {
     match pred {
         Value::ColPredicate { col, op, rhs } => colref_predicate_mask(frame, col, *op, rhs),
         Value::IsNaPredicate(col) => {
             let column = frame.column(col).map_err(|_| {
-                Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `filter()`", col))
+                Diagnostic::statistical_error(
+                    "S0201",
+                    format!("Column `{}` not found in DataFrame for `filter()`", col),
+                )
             })?;
             Ok(column.is_null())
         }
@@ -228,7 +267,10 @@ pub fn df_filter_by_predicate(df: &Value, pred: &Value) -> Result<Value, Diagnos
             let mask = predicate_mask(frame, pred)?;
             let indices = mask_to_indices(&mask);
             let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
-            Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+            Ok(Value::DataFrame {
+                frame: new_frame,
+                na_reasons: new_reasons,
+            })
         }
         Value::LazyFrame { plan, na_reasons } => {
             let expr = predicate_to_lazy_expr(pred)?;
@@ -240,7 +282,10 @@ pub fn df_filter_by_predicate(df: &Value, pred: &Value) -> Result<Value, Diagnos
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`filter()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!(
+                "`filter()` requires a DataFrame or LazyFrame, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -251,19 +296,13 @@ pub fn df_filter_by_predicate(df: &Value, pred: &Value) -> Result<Value, Diagnos
 
 pub fn read_file(path: &str) -> Result<String, Diagnostic> {
     fs::read_to_string(path).map_err(|e| {
-        Diagnostic::compute_error(
-            "C0401",
-            format!("Failed to read file `{}`: {}", path, e),
-        )
+        Diagnostic::compute_error("C0401", format!("Failed to read file `{}`: {}", path, e))
     })
 }
 
 pub fn read_lines(path: &str) -> Result<Vec<String>, Diagnostic> {
     let file = fs::File::open(path).map_err(|e| {
-        Diagnostic::compute_error(
-            "C0401",
-            format!("Failed to open file `{}`: {}", path, e),
-        )
+        Diagnostic::compute_error("C0401", format!("Failed to open file `{}`: {}", path, e))
     })?;
 
     let reader = BufReader::new(file);
@@ -294,10 +333,7 @@ pub fn write_file(path: &str, content: &str) -> Result<(), Diagnostic> {
     }
 
     fs::write(path, content).map_err(|e| {
-        Diagnostic::compute_error(
-            "C0402",
-            format!("Failed to write file `{}`: {}", path, e),
-        )
+        Diagnostic::compute_error("C0402", format!("Failed to write file `{}`: {}", path, e))
     })
 }
 
@@ -364,10 +400,16 @@ pub fn read_csv_file(path: &str, delim: Option<char>) -> Result<Value, Diagnosti
                 Some(Ok(l)) if l.trim().is_empty() => continue,
                 Some(Ok(l)) => break l,
                 Some(Err(e)) => {
-                    return Err(Diagnostic::compute_error("C0401", format!("Failed to read `{}`: {}", path, e)));
+                    return Err(Diagnostic::compute_error(
+                        "C0401",
+                        format!("Failed to read `{}`: {}", path, e),
+                    ));
                 }
                 None => {
-                    return Err(Diagnostic::compute_error("C0403", "Cannot parse empty CSV content (no header found)"));
+                    return Err(Diagnostic::compute_error(
+                        "C0403",
+                        "Cannot parse empty CSV content (no header found)",
+                    ));
                 }
             }
         }
@@ -376,7 +418,10 @@ pub fn read_csv_file(path: &str, delim: Option<char>) -> Result<Value, Diagnosti
     let sep = delim.unwrap_or_else(|| detect_delimiter(header_line));
     let num_cols = parse_csv_row(header_line, sep).len();
     if num_cols == 0 {
-        return Err(Diagnostic::compute_error("C0403", "CSV header row contains zero columns"));
+        return Err(Diagnostic::compute_error(
+            "C0403",
+            "CSV header row contains zero columns",
+        ));
     }
 
     let parse_options = CsvParseOptions::default().with_separator(sep as u8);
@@ -387,7 +432,9 @@ pub fn read_csv_file(path: &str, delim: Option<char>) -> Result<Value, Diagnosti
         .with_dtype_overwrite(Some(dtype_overwrite))
         .try_into_reader_with_file_path(Some(std::path::PathBuf::from(path)))
         .and_then(|reader| reader.finish())
-        .map_err(|e| Diagnostic::compute_error("C0403", format!("Failed to read CSV `{}`: {}", path, e)))?;
+        .map_err(|e| {
+            Diagnostic::compute_error("C0403", format!("Failed to read CSV `{}`: {}", path, e))
+        })?;
 
     // Columns are independent of each other, so the per-column type-inference/NA-reason
     // pass runs across `rayon`'s thread pool rather than one column at a time -- this is
@@ -403,15 +450,23 @@ pub fn read_csv_file(path: &str, delim: Option<char>) -> Result<Value, Diagnosti
     let cols: Vec<(Column, Vec<(usize, String)>)> = raw_frame
         .get_column_names()
         .into_par_iter()
-        .map(|name| -> Result<(Column, Vec<(usize, String)>), Diagnostic> {
-            let raw_col = raw_frame.column(name).map_err(|e| {
-                Diagnostic::compute_error("C0403", format!("Internal error reading column `{name}`: {e}"))
-            })?;
-            let raw_strs = raw_col.str().map_err(|e| {
-                Diagnostic::compute_error("C0403", format!("Internal error reading column `{name}`: {e}"))
-            })?;
-            Ok(infer_and_convert_column_native(name, raw_strs))
-        })
+        .map(
+            |name| -> Result<(Column, Vec<(usize, String)>), Diagnostic> {
+                let raw_col = raw_frame.column(name).map_err(|e| {
+                    Diagnostic::compute_error(
+                        "C0403",
+                        format!("Internal error reading column `{name}`: {e}"),
+                    )
+                })?;
+                let raw_strs = raw_col.str().map_err(|e| {
+                    Diagnostic::compute_error(
+                        "C0403",
+                        format!("Internal error reading column `{name}`: {e}"),
+                    )
+                })?;
+                Ok(infer_and_convert_column_native(name, raw_strs))
+            },
+        )
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut na_reasons = NaReasonTable::new();
@@ -430,7 +485,10 @@ pub fn read_csv_file(path: &str, delim: Option<char>) -> Result<Value, Diagnosti
             Diagnostic::compute_error("C0210", format!("No se pudo construir el DataFrame: {e}"))
         })?
     };
-    Ok(Value::DataFrame { frame, na_reasons: Arc::new(na_reasons) })
+    Ok(Value::DataFrame {
+        frame,
+        na_reasons: Arc::new(na_reasons),
+    })
 }
 
 pub fn parse_csv_string(content: &str, delim: Option<char>) -> Result<Value, Diagnostic> {
@@ -495,7 +553,11 @@ pub fn write_csv_file(df: &Value, path: &str, delim: Option<char>) -> Result<(),
     let sep = delim.unwrap_or(',');
     let (frame, na_reasons) = as_dataframe(df, "write_csv")?;
 
-    let columns: Vec<String> = frame.get_column_names().iter().map(|s| s.to_string()).collect();
+    let columns: Vec<String> = frame
+        .get_column_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let num_rows = frame.height();
 
     let mut out = String::new();
@@ -541,7 +603,10 @@ pub fn read_parquet_file(path: &str) -> Result<Value, Diagnostic> {
     let frame = ParquetReader::new(file).finish().map_err(|e| {
         Diagnostic::compute_error("C0405", format!("Failed to read Parquet `{}`: {}", path, e))
     })?;
-    Ok(Value::DataFrame { frame, na_reasons: Arc::new(NaReasonTable::new()) })
+    Ok(Value::DataFrame {
+        frame,
+        na_reasons: Arc::new(NaReasonTable::new()),
+    })
 }
 
 /// Writes a `DataFrame` to Parquet. NA-with-reason is intentionally not persisted:
@@ -564,7 +629,10 @@ pub fn write_parquet_file(df: &Value, path: &str) -> Result<(), Diagnostic> {
     })?;
     let mut frame = frame.clone();
     ParquetWriter::new(file).finish(&mut frame).map_err(|e| {
-        Diagnostic::compute_error("C0405", format!("Failed to write Parquet `{}`: {}", path, e))
+        Diagnostic::compute_error(
+            "C0405",
+            format!("Failed to write Parquet `{}`: {}", path, e),
+        )
     })?;
     Ok(())
 }
@@ -576,16 +644,17 @@ pub fn write_parquet_file(df: &Value, path: &str) -> Result<(), Diagnostic> {
 /// `lazy(df)` — converts an eager `DataFrame` into a `LazyFrame` for deferred query optimization.
 pub fn df_lazy(val: &Value) -> Result<Value, Diagnostic> {
     match val {
-        Value::DataFrame { frame, na_reasons } => {
-            Ok(Value::LazyFrame {
-                plan: LazyPlan(frame.clone().lazy()),
-                na_reasons: na_reasons.clone(),
-            })
-        }
+        Value::DataFrame { frame, na_reasons } => Ok(Value::LazyFrame {
+            plan: LazyPlan(frame.clone().lazy()),
+            na_reasons: na_reasons.clone(),
+        }),
         Value::LazyFrame { .. } => Ok(val.clone()),
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`lazy()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!(
+                "`lazy()` requires a DataFrame or LazyFrame, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -605,7 +674,10 @@ pub fn df_collect(val: &Value) -> Result<Value, Diagnostic> {
         Value::DataFrame { .. } => Ok(val.clone()),
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`collect()` requires a LazyFrame or DataFrame, found `{}`", other.type_name()),
+            format!(
+                "`collect()` requires a LazyFrame or DataFrame, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -627,18 +699,19 @@ pub fn df_explain(val: &Value, optimized: bool) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`explain()` requires a LazyFrame or DataFrame, found `{}`", other.type_name()),
+            format!(
+                "`explain()` requires a LazyFrame or DataFrame, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
 
 /// `scan_csv(path)` — lazy scan of a CSV file without materializing it in memory.
 pub fn scan_csv_file(path: &str) -> Result<Value, Diagnostic> {
-    let plan = LazyCsvReader::new(path.into())
-        .finish()
-        .map_err(|e| {
-            Diagnostic::compute_error("C0403", format!("Failed to scan CSV file `{path}`: {e}"))
-        })?;
+    let plan = LazyCsvReader::new(path.into()).finish().map_err(|e| {
+        Diagnostic::compute_error("C0403", format!("Failed to scan CSV file `{path}`: {e}"))
+    })?;
     Ok(Value::LazyFrame {
         plan: LazyPlan(plan),
         na_reasons: Arc::new(NaReasonTable::new()),
@@ -647,10 +720,12 @@ pub fn scan_csv_file(path: &str) -> Result<Value, Diagnostic> {
 
 /// `scan_parquet(path)` — lazy scan of a Parquet file.
 pub fn scan_parquet_file(path: &str) -> Result<Value, Diagnostic> {
-    let plan = LazyFrame::scan_parquet(path.into(), ScanArgsParquet::default())
-        .map_err(|e| {
-            Diagnostic::compute_error("C0405", format!("Failed to scan Parquet file `{path}`: {e}"))
-        })?;
+    let plan = LazyFrame::scan_parquet(path.into(), ScanArgsParquet::default()).map_err(|e| {
+        Diagnostic::compute_error(
+            "C0405",
+            format!("Failed to scan Parquet file `{path}`: {e}"),
+        )
+    })?;
     Ok(Value::LazyFrame {
         plan: LazyPlan(plan),
         na_reasons: Arc::new(NaReasonTable::new()),
@@ -674,11 +749,16 @@ pub fn df_select(df: &Value, cols_to_keep: &[String]) -> Result<Value, Diagnosti
                 }
             }
 
-            let new_frame = frame.select(cols_to_keep.iter().map(|s| s.as_str())).map_err(|e| {
-                Diagnostic::compute_error("C0210", format!("`select()` failed: {e}"))
-            })?;
+            let new_frame = frame
+                .select(cols_to_keep.iter().map(|s| s.as_str()))
+                .map_err(|e| {
+                    Diagnostic::compute_error("C0210", format!("`select()` failed: {e}"))
+                })?;
             let new_reasons = Arc::new(na_reasons.retain_columns(cols_to_keep));
-            Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+            Ok(Value::DataFrame {
+                frame: new_frame,
+                na_reasons: new_reasons,
+            })
         }
         Value::LazyFrame { plan, na_reasons } => {
             let exprs: Vec<Expr> = cols_to_keep.iter().map(|c| col(c.as_str())).collect();
@@ -691,7 +771,10 @@ pub fn df_select(df: &Value, cols_to_keep: &[String]) -> Result<Value, Diagnosti
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`select()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!(
+                "`select()` requires a DataFrame or LazyFrame, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -701,7 +784,10 @@ pub fn df_head(df: &Value, n: usize) -> Result<Value, Diagnostic> {
         Value::DataFrame { frame, na_reasons } => {
             let indices: Vec<usize> = (0..n.min(frame.height())).collect();
             let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
-            Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+            Ok(Value::DataFrame {
+                frame: new_frame,
+                na_reasons: new_reasons,
+            })
         }
         Value::LazyFrame { plan, na_reasons } => {
             let new_plan = plan.0.clone().limit(n as IdxSize);
@@ -712,7 +798,10 @@ pub fn df_head(df: &Value, n: usize) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`head()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!(
+                "`head()` requires a DataFrame or LazyFrame, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -723,7 +812,10 @@ pub fn df_tail(df: &Value, n: usize) -> Result<Value, Diagnostic> {
             let start = frame.height().saturating_sub(n);
             let indices: Vec<usize> = (start..frame.height()).collect();
             let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
-            Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+            Ok(Value::DataFrame {
+                frame: new_frame,
+                na_reasons: new_reasons,
+            })
         }
         Value::LazyFrame { plan, na_reasons } => {
             let new_plan = plan.0.clone().tail(n as IdxSize);
@@ -734,7 +826,10 @@ pub fn df_tail(df: &Value, n: usize) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`tail()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!(
+                "`tail()` requires a DataFrame or LazyFrame, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -752,7 +847,9 @@ pub fn df_mutate(df: &Value, col_name: &str, new_values: Vec<Value>) -> Result<V
                     "C0205",
                     format!(
                         "`mutate()`: column `{}` has {} values, but DataFrame has {} rows",
-                        col_name, new_values.len(), num_rows
+                        col_name,
+                        new_values.len(),
+                        num_rows
                     ),
                 ));
             }
@@ -777,11 +874,15 @@ pub fn df_mutate(df: &Value, col_name: &str, new_values: Vec<Value>) -> Result<V
                 Diagnostic::compute_error("C0210", format!("`mutate()` failed: {e}"))
             })?;
 
-            Ok(Value::DataFrame { frame: new_frame, na_reasons: Arc::new(new_reasons) })
+            Ok(Value::DataFrame {
+                frame: new_frame,
+                na_reasons: Arc::new(new_reasons),
+            })
         }
         Value::LazyFrame { plan, na_reasons } => {
             if new_values.len() == 1 {
-                let lit_expr = value_to_lazy_lit(&new_values[0])?.alias(PlSmallStr::from_string(col_name.to_string()));
+                let lit_expr = value_to_lazy_lit(&new_values[0])?
+                    .alias(PlSmallStr::from_string(col_name.to_string()));
                 let new_plan = plan.0.clone().with_column(lit_expr);
                 return Ok(Value::LazyFrame {
                     plan: LazyPlan(new_plan),
@@ -789,7 +890,8 @@ pub fn df_mutate(df: &Value, col_name: &str, new_values: Vec<Value>) -> Result<V
                 });
             }
             let col_series = polars_bridge::value_column_to_polars(col_name, &new_values);
-            let lit_expr = lit(col_series.as_materialized_series().clone()).alias(PlSmallStr::from_string(col_name.to_string()));
+            let lit_expr = lit(col_series.as_materialized_series().clone())
+                .alias(PlSmallStr::from_string(col_name.to_string()));
             let new_plan = plan.0.clone().with_column(lit_expr);
             Ok(Value::LazyFrame {
                 plan: LazyPlan(new_plan),
@@ -798,7 +900,10 @@ pub fn df_mutate(df: &Value, col_name: &str, new_values: Vec<Value>) -> Result<V
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`mutate()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!(
+                "`mutate()` requires a DataFrame or LazyFrame, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -811,12 +916,12 @@ pub(crate) fn compare_values(a: Option<&Value>, b: Option<&Value>) -> std::cmp::
         (Some(Value::F64(x)), Some(Value::F64(y))) => {
             x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
         }
-        (Some(Value::I64(x)), Some(Value::F64(y))) => {
-            (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
-        }
-        (Some(Value::F64(x)), Some(Value::I64(y))) => {
-            x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal)
-        }
+        (Some(Value::I64(x)), Some(Value::F64(y))) => (*x as f64)
+            .partial_cmp(y)
+            .unwrap_or(std::cmp::Ordering::Equal),
+        (Some(Value::F64(x)), Some(Value::I64(y))) => x
+            .partial_cmp(&(*y as f64))
+            .unwrap_or(std::cmp::Ordering::Equal),
         (Some(Value::String(x)), Some(Value::String(y))) => x.cmp(y),
         (Some(Value::Bool(x)), Some(Value::Bool(y))) => x.cmp(y),
         _ => std::cmp::Ordering::Equal,
@@ -830,12 +935,16 @@ pub fn df_arrange(df: &Value, specs: &[(String, bool)]) -> Result<Value, Diagnos
         Value::DataFrame { frame, na_reasons } => {
             let mut sort_cols: Vec<(Vec<Value>, bool)> = Vec::with_capacity(specs.len());
             for (col_name, desc) in specs {
-                let col_vals = polars_bridge::pull_column_as_values(frame, na_reasons, col_name).map_err(|_| {
-                    Diagnostic::statistical_error(
-                        "S0201",
-                        format!("Column `{}` not found in DataFrame for `arrange()`", col_name),
-                    )
-                })?;
+                let col_vals = polars_bridge::pull_column_as_values(frame, na_reasons, col_name)
+                    .map_err(|_| {
+                        Diagnostic::statistical_error(
+                            "S0201",
+                            format!(
+                                "Column `{}` not found in DataFrame for `arrange()`",
+                                col_name
+                            ),
+                        )
+                    })?;
                 sort_cols.push((col_vals, *desc));
             }
 
@@ -857,16 +966,27 @@ pub fn df_arrange(df: &Value, specs: &[(String, bool)]) -> Result<Value, Diagnos
                 let elapsed = start.elapsed().as_secs_f64();
                 let caps = ghl_diagnostics::RenderCaps::detect();
                 let note = format!("specs: {:?}", specs);
-                let panel = ghl_diagnostics::CockpitPanel::operation_telemetry("df_arrange", num_rows, elapsed, Some(&note));
+                let panel = ghl_diagnostics::CockpitPanel::operation_telemetry(
+                    "df_arrange",
+                    num_rows,
+                    elapsed,
+                    Some(&note),
+                );
                 eprintln!("{}", panel.render(&caps));
             }
-            Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+            Ok(Value::DataFrame {
+                frame: new_frame,
+                na_reasons: new_reasons,
+            })
         }
         Value::LazyFrame { plan, na_reasons } => {
-            let by_cols: Vec<PlSmallStr> = specs.iter().map(|(c, _)| PlSmallStr::from_string(c.clone())).collect();
+            let by_cols: Vec<PlSmallStr> = specs
+                .iter()
+                .map(|(c, _)| PlSmallStr::from_string(c.clone()))
+                .collect();
             let descending: Vec<bool> = specs.iter().map(|(_, desc)| *desc).collect();
-            let sort_options = SortMultipleOptions::default()
-                .with_order_descending_multi(descending);
+            let sort_options =
+                SortMultipleOptions::default().with_order_descending_multi(descending);
             let new_plan = plan.0.clone().sort(by_cols, sort_options);
             Ok(Value::LazyFrame {
                 plan: LazyPlan(new_plan),
@@ -875,7 +995,10 @@ pub fn df_arrange(df: &Value, specs: &[(String, bool)]) -> Result<Value, Diagnos
         }
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`arrange()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!(
+                "`arrange()` requires a DataFrame or LazyFrame, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -923,7 +1046,10 @@ pub fn df_sample_n(df: &Value, n: usize) -> Result<Value, Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "sample_n")?;
     let indices = sample_indices(frame.height(), n);
     let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    Ok(Value::DataFrame {
+        frame: new_frame,
+        na_reasons: new_reasons,
+    })
 }
 
 /// `sample_frac(df, frac)` — a random `frac` fraction of rows, without replacement.
@@ -940,7 +1066,10 @@ pub fn df_rename(df: &Value, old_name: &str, new_name: &str) -> Result<Value, Di
     if frame.column(old_name).is_err() {
         return Err(Diagnostic::statistical_error(
             "S0201",
-            format!("Column `{}` not found in DataFrame for `rename()`", old_name),
+            format!(
+                "Column `{}` not found in DataFrame for `rename()`",
+                old_name
+            ),
         ));
     }
     if frame.column(new_name).is_ok() {
@@ -951,25 +1080,34 @@ pub fn df_rename(df: &Value, old_name: &str, new_name: &str) -> Result<Value, Di
     }
 
     let mut new_frame = frame.clone();
-    new_frame.rename(old_name, new_name.into()).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`rename()` failed: {e}"))
-    })?;
+    new_frame
+        .rename(old_name, new_name.into())
+        .map_err(|e| Diagnostic::compute_error("C0210", format!("`rename()` failed: {e}")))?;
     let new_reasons = Arc::new(na_reasons.rename_column(old_name, new_name));
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    Ok(Value::DataFrame {
+        frame: new_frame,
+        na_reasons: new_reasons,
+    })
 }
 
 /// `drop(df, ["col_a", "col_b"])` — remove columns from the DataFrame.
 pub fn df_drop(df: &Value, cols_to_drop: &[String]) -> Result<Value, Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "drop")?;
-    let drop_set: std::collections::HashSet<&str> = cols_to_drop.iter().map(|s| s.as_str()).collect();
+    let drop_set: std::collections::HashSet<&str> =
+        cols_to_drop.iter().map(|s| s.as_str()).collect();
 
     let new_frame = frame.drop_many(cols_to_drop.iter().map(|s| s.as_str()));
-    let keep_cols: Vec<String> = frame.get_column_names().iter()
+    let keep_cols: Vec<String> = frame
+        .get_column_names()
+        .iter()
         .map(|s| s.to_string())
         .filter(|c| !drop_set.contains(c.as_str()))
         .collect();
     let new_reasons = Arc::new(na_reasons.retain_columns(&keep_cols));
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    Ok(Value::DataFrame {
+        frame: new_frame,
+        na_reasons: new_reasons,
+    })
 }
 
 /// `distinct(df)` — remove duplicate rows (all columns checked).
@@ -978,17 +1116,23 @@ pub fn df_distinct(df: &Value, key_cols: Option<&[String]>) -> Result<Value, Dia
     let (frame, na_reasons) = as_dataframe(df, "distinct")?;
     let num_rows = frame.height();
 
-    let all_cols: Vec<String> = frame.get_column_names().iter().map(|s| s.to_string()).collect();
+    let all_cols: Vec<String> = frame
+        .get_column_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let check_cols: &[String] = key_cols.unwrap_or(&all_cols);
 
-    let check_values: Vec<Vec<Value>> = check_cols.iter()
+    let check_values: Vec<Vec<Value>> = check_cols
+        .iter()
         .map(|c| polars_bridge::pull_column_as_values(frame, na_reasons, c))
         .collect::<Result<_, _>>()?;
 
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut keep_indices: Vec<usize> = Vec::new();
     for row_idx in 0..num_rows {
-        let row_key: String = check_values.iter()
+        let row_key: String = check_values
+            .iter()
             .map(|col_vals| format!("{:?}", col_vals[row_idx]))
             .collect::<Vec<_>>()
             .join("|");
@@ -998,7 +1142,10 @@ pub fn df_distinct(df: &Value, key_cols: Option<&[String]>) -> Result<Value, Dia
     }
 
     let (new_frame, new_reasons) = take_rows(frame, na_reasons, &keep_indices)?;
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    Ok(Value::DataFrame {
+        frame: new_frame,
+        na_reasons: new_reasons,
+    })
 }
 
 /// `nrow(df)` — number of rows.
@@ -1016,7 +1163,11 @@ pub fn df_ncol(df: &Value) -> Result<Value, Diagnostic> {
 /// `colnames(df)` — returns a `Vector[String]` of column names.
 pub fn df_colnames(df: &Value) -> Result<Value, Diagnostic> {
     let (frame, _) = as_dataframe(df, "colnames")?;
-    let names = frame.get_column_names().iter().map(|s| Value::String(s.to_string())).collect();
+    let names = frame
+        .get_column_names()
+        .iter()
+        .map(|s| Value::String(s.to_string()))
+        .collect();
     Ok(Value::Vector(VectorData::from_values(names)))
 }
 
@@ -1024,9 +1175,16 @@ pub fn df_colnames(df: &Value) -> Result<Value, Diagnostic> {
 pub fn df_slice(df: &Value, from: usize, to: usize) -> Result<Value, Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "slice")?;
     let end = to.min(frame.height());
-    let indices: Vec<usize> = if from < end { (from..end).collect() } else { Vec::new() };
+    let indices: Vec<usize> = if from < end {
+        (from..end).collect()
+    } else {
+        Vec::new()
+    };
     let (new_frame, new_reasons) = take_rows(frame, na_reasons, &indices)?;
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    Ok(Value::DataFrame {
+        frame: new_frame,
+        na_reasons: new_reasons,
+    })
 }
 
 // =========================================================================
@@ -1050,18 +1208,23 @@ pub fn df_group_by(df: &Value, keys: &[String]) -> Result<Value, Diagnostic> {
                 }
             }
 
-            Ok(Value::GroupedDataFrame { frame: frame.clone(), na_reasons: na_reasons.clone(), keys: keys.to_vec() })
-        }
-        Value::LazyFrame { plan, na_reasons } => {
-            Ok(Value::GroupedLazyFrame {
-                plan: plan.clone(),
+            Ok(Value::GroupedDataFrame {
+                frame: frame.clone(),
                 na_reasons: na_reasons.clone(),
                 keys: keys.to_vec(),
             })
         }
+        Value::LazyFrame { plan, na_reasons } => Ok(Value::GroupedLazyFrame {
+            plan: plan.clone(),
+            na_reasons: na_reasons.clone(),
+            keys: keys.to_vec(),
+        }),
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`group_by()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+            format!(
+                "`group_by()` requires a DataFrame or LazyFrame, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -1087,7 +1250,10 @@ fn agg_expr_for(kind: &str, col_name: &str, alias: &str) -> Result<Expr, Diagnos
         "last" => base.last(),
         "n_distinct" => base.n_unique(),
         other => {
-            return Err(Diagnostic::compute_error("C0201", format!("Unknown aggregation `{}` in `summarize()`", other)));
+            return Err(Diagnostic::compute_error(
+                "C0201",
+                format!("Unknown aggregation `{}` in `summarize()`", other),
+            ));
         }
     };
     Ok(expr.alias(PlSmallStr::from_string(alias.to_string())))
@@ -1101,14 +1267,25 @@ fn get_idx_cell(column: &Column, i: usize, what: &str) -> Result<usize, Diagnost
     match column.get(i) {
         Ok(AnyValue::UInt32(v)) => Ok(v as usize),
         Ok(AnyValue::UInt64(v)) => Ok(v as usize),
-        other => Err(Diagnostic::compute_error("C0210", format!("`summarize()`: unexpected type reading {what}: {other:?}"))),
+        other => Err(Diagnostic::compute_error(
+            "C0210",
+            format!("`summarize()`: unexpected type reading {what}: {other:?}"),
+        )),
     }
 }
 
 /// `summarize(gdf, name = agg, ...)` — consumes the `GroupedDataFrame` or `GroupedLazyFrame`,
 /// returning a plain `DataFrame` or `LazyFrame`. `specs` is `(output_name, agg_kind, source_col)`.
-pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> Result<Value, Diagnostic> {
-    if let Value::GroupedLazyFrame { plan, na_reasons, keys } = gdf {
+pub fn df_summarize(
+    gdf: &Value,
+    specs: &[(String, String, Option<String>)],
+) -> Result<Value, Diagnostic> {
+    if let Value::GroupedLazyFrame {
+        plan,
+        na_reasons,
+        keys,
+    } = gdf
+    {
         let key_exprs: Vec<Expr> = keys.iter().map(|k| col(k.as_str())).collect();
         let mut agg_exprs: Vec<Expr> = Vec::with_capacity(specs.len());
         for (out_name, kind, source_col) in specs {
@@ -1118,7 +1295,9 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
                 (other, None) => {
                     return Err(Diagnostic::compute_error(
                         "C0201",
-                        format!("Aggregation `{other}` requires a column argument in `summarize()`"),
+                        format!(
+                            "Aggregation `{other}` requires a column argument in `summarize()`"
+                        ),
                     ));
                 }
             };
@@ -1132,7 +1311,11 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
     }
 
     let (frame, na_reasons, keys) = match gdf {
-        Value::GroupedDataFrame { frame, na_reasons, keys } => (frame, na_reasons, keys),
+        Value::GroupedDataFrame {
+            frame,
+            na_reasons,
+            keys,
+        } => (frame, na_reasons, keys),
         other => {
             return Err(Diagnostic::compute_error(
                 "C0201",
@@ -1153,12 +1336,19 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
     // the only way to recover which original row represents each group afterward -- needed
     // to fetch na_reason-aware key values (a key row that's itself an `NA:Reason` keeps that
     // reason), the same semantics as before this was fused into one lazy query.
-    let indexed = frame.with_row_index(PlSmallStr::from_static(ROW_IDX_COL), None).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`summarize()`: failed to build row index: {e}"))
-    })?;
+    let indexed = frame
+        .with_row_index(PlSmallStr::from_static(ROW_IDX_COL), None)
+        .map_err(|e| {
+            Diagnostic::compute_error(
+                "C0210",
+                format!("`summarize()`: failed to build row index: {e}"),
+            )
+        })?;
 
     let mut agg_exprs: Vec<Expr> = vec![
-        col(ROW_IDX_COL).first().alias(PlSmallStr::from_static(FIRST_IDX_ALIAS)),
+        col(ROW_IDX_COL)
+            .first()
+            .alias(PlSmallStr::from_static(FIRST_IDX_ALIAS)),
     ];
     let mut result_aliases: HashMap<(String, Option<String>), String> = HashMap::new();
     let mut null_count_aliases: HashMap<String, String> = HashMap::new();
@@ -1168,17 +1358,26 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
             continue;
         }
         let col_name = col_opt.as_deref().ok_or_else(|| {
-            Diagnostic::compute_error("C0201", format!("`{}()` requires a column argument in `summarize()`", kind))
+            Diagnostic::compute_error(
+                "C0201",
+                format!("`{}()` requires a column argument in `summarize()`", kind),
+            )
         })?;
         let source_column = frame.column(col_name).map_err(|_| {
-            Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `summarize()`", col_name))
+            Diagnostic::statistical_error(
+                "S0201",
+                format!(
+                    "Column `{}` not found in DataFrame for `summarize()`",
+                    col_name
+                ),
+            )
         })?;
 
         let cache_key = (kind.clone(), col_opt.clone());
-        if !result_aliases.contains_key(&cache_key) {
+        if let std::collections::hash_map::Entry::Vacant(e) = result_aliases.entry(cache_key) {
             let alias = format!("__ghl_agg__{kind}__{col_name}");
             agg_exprs.push(agg_expr_for(kind, col_name, &alias)?);
-            result_aliases.insert(cache_key, alias);
+            e.insert(alias);
         }
 
         // Kleene propagation (RFC 02 sect2.4: GHL never silently skips missing data the way
@@ -1191,7 +1390,11 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
             && source_column.null_count() > 0
         {
             let alias = format!("__ghl_nullcount__{col_name}");
-            agg_exprs.push(col(col_name).null_count().alias(PlSmallStr::from_string(alias.clone())));
+            agg_exprs.push(
+                col(col_name)
+                    .null_count()
+                    .alias(PlSmallStr::from_string(alias.clone())),
+            );
             null_count_aliases.insert(col_name.to_string(), alias);
         }
     }
@@ -1207,11 +1410,16 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
         .group_by_stable(key_exprs)
         .agg(agg_exprs)
         .collect()
-        .map_err(|e| Diagnostic::compute_error("C0210", format!("`summarize()`: group_by/agg failed: {e}")))?;
+        .map_err(|e| {
+            Diagnostic::compute_error("C0210", format!("`summarize()`: group_by/agg failed: {e}"))
+        })?;
 
     let n_groups = result_df.height();
     let first_idx_col = result_df.column(FIRST_IDX_ALIAS).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`summarize()`: missing internal row-index column: {e}"))
+        Diagnostic::compute_error(
+            "C0210",
+            format!("`summarize()`: missing internal row-index column: {e}"),
+        )
     })?;
 
     let mut out_columns: Vec<String> = keys.clone();
@@ -1222,7 +1430,12 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
     for i in 0..n_groups {
         let first_idx = get_idx_cell(first_idx_col, i, "row index")?;
         for k in keys {
-            out_data.get_mut(k).unwrap().push(polars_bridge::get_cell_as_value(frame, na_reasons, k, first_idx)?);
+            out_data
+                .get_mut(k)
+                .unwrap()
+                .push(polars_bridge::get_cell_as_value(
+                    frame, na_reasons, k, first_idx,
+                )?);
         }
     }
 
@@ -1231,18 +1444,28 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
         let mut values = Vec::with_capacity(n_groups);
         if kind == "count" {
             let count_col = result_df.column(COUNT_ALIAS).map_err(|e| {
-                Diagnostic::compute_error("C0210", format!("`summarize()`: missing count column: {e}"))
+                Diagnostic::compute_error(
+                    "C0210",
+                    format!("`summarize()`: missing count column: {e}"),
+                )
             })?;
             for i in 0..n_groups {
                 values.push(Value::I64(get_idx_cell(count_col, i, "group count")? as i64));
             }
         } else {
-            let col_name = col_opt.as_deref().expect("validated above: non-count specs always carry a column");
+            let col_name = col_opt
+                .as_deref()
+                .expect("validated above: non-count specs always carry a column");
             let alias = &result_aliases[&(kind.clone(), col_opt.clone())];
             let agg_col = result_df.column(alias).map_err(|e| {
-                Diagnostic::compute_error("C0210", format!("`{kind}()` missing from `summarize()` result: {e}"))
+                Diagnostic::compute_error(
+                    "C0210",
+                    format!("`{kind}()` missing from `summarize()` result: {e}"),
+                )
             })?;
-            let null_count_col = null_count_aliases.get(col_name).map(|a| result_df.column(a).unwrap());
+            let null_count_col = null_count_aliases
+                .get(col_name)
+                .map(|a| result_df.column(a).unwrap());
             let propagates_na = PROPAGATES_NA_KINDS.contains(&kind.as_str());
             for i in 0..n_groups {
                 let is_null_group = match (propagates_na, null_count_col) {
@@ -1256,7 +1479,10 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
                     values.push(Value::NA(None));
                 } else {
                     let av = agg_col.get(i).map_err(|e| {
-                        Diagnostic::compute_error("C0210", format!("`{kind}()` failed in `summarize()`: {e}"))
+                        Diagnostic::compute_error(
+                            "C0210",
+                            format!("`{kind}()` failed in `summarize()`: {e}"),
+                        )
                     })?;
                     values.push(polars_bridge::any_value_to_plain_value(&av));
                 }
@@ -1268,18 +1494,32 @@ pub fn df_summarize(gdf: &Value, specs: &[(String, String, Option<String>)]) -> 
     // Fresh DataFrame via the same construction boundary as everything else. Aggregated
     // columns carry no NA-with-reason: which reason "wins" across a collapsed group
     // isn't defined (and doesn't need to be, per TODO.md Fase 0).
-    let cols: Vec<(String, Vec<Value>)> = out_columns.iter()
+    let cols: Vec<(String, Vec<Value>)> = out_columns
+        .iter()
         .map(|c| (c.clone(), out_data.remove(c).unwrap_or_default()))
         .collect();
     let (result_frame, result_reasons) = polars_bridge::build_dataframe(&cols)?;
     if is_telemetry_active(frame.height()) {
         let elapsed = start.elapsed().as_secs_f64();
         let caps = ghl_diagnostics::RenderCaps::detect();
-        let note = format!("Keys: {} | Aggs: {} | Output: {} groups", keys.len(), specs.len(), result_frame.height());
-        let panel = ghl_diagnostics::CockpitPanel::operation_telemetry("df_summarize", frame.height(), elapsed, Some(&note));
+        let note = format!(
+            "Keys: {} | Aggs: {} | Output: {} groups",
+            keys.len(),
+            specs.len(),
+            result_frame.height()
+        );
+        let panel = ghl_diagnostics::CockpitPanel::operation_telemetry(
+            "df_summarize",
+            frame.height(),
+            elapsed,
+            Some(&note),
+        );
         eprintln!("{}", panel.render(&caps));
     }
-    Ok(Value::DataFrame { frame: result_frame, na_reasons: result_reasons })
+    Ok(Value::DataFrame {
+        frame: result_frame,
+        na_reasons: result_reasons,
+    })
 }
 
 /// `pull(df, col)` — extract a column as a plain `Vector`.
@@ -1315,17 +1555,32 @@ pub fn df_na_reasons(df: &Value, col: &str) -> Result<Value, Diagnostic> {
 pub fn df_fill_na(df: &Value, col: &str, default: &Value) -> Result<Value, Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "fill_na")?;
     let col_vals = polars_bridge::pull_column_as_values(frame, na_reasons, col).map_err(|_| {
-        Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `fill_na()`", col))
+        Diagnostic::statistical_error(
+            "S0201",
+            format!("Column `{}` not found in DataFrame for `fill_na()`", col),
+        )
     })?;
-    let filled: Vec<Value> = col_vals.iter().map(|v| if v.is_na() { default.clone() } else { v.clone() }).collect();
+    let filled: Vec<Value> = col_vals
+        .iter()
+        .map(|v| {
+            if v.is_na() {
+                default.clone()
+            } else {
+                v.clone()
+            }
+        })
+        .collect();
 
     let column = polars_bridge::value_column_to_polars(col, &filled);
     let mut new_frame = frame.clone();
-    new_frame.with_column(column).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`fill_na()` failed: {e}"))
-    })?;
+    new_frame
+        .with_column(column)
+        .map_err(|e| Diagnostic::compute_error("C0210", format!("`fill_na()` failed: {e}")))?;
     let new_reasons = Arc::new(na_reasons.without_column(col));
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    Ok(Value::DataFrame {
+        frame: new_frame,
+        na_reasons: new_reasons,
+    })
 }
 
 /// `fill_na_all(df, default)` — replace `NA` in every column with a constant.
@@ -1351,7 +1606,10 @@ pub fn df_impute(
 ) -> Result<Value, Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "impute")?;
     let col_vals = polars_bridge::pull_column_as_values(frame, na_reasons, col).map_err(|_| {
-        Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `impute()`", col))
+        Diagnostic::statistical_error(
+            "S0201",
+            format!("Column `{}` not found in DataFrame for `impute()`", col),
+        )
     })?;
 
     let strat_clean = strategy.trim().to_lowercase();
@@ -1361,28 +1619,47 @@ pub fn df_impute(
             let mut count = 0usize;
             for v in &col_vals {
                 match v {
-                    Value::F64(x) => { sum += x; count += 1; }
-                    Value::I64(n) => { sum += *n as f64; count += 1; }
+                    Value::F64(x) => {
+                        sum += x;
+                        count += 1;
+                    }
+                    Value::I64(n) => {
+                        sum += *n as f64;
+                        count += 1;
+                    }
                     _ => {}
                 }
             }
             if count == 0 {
-                return Err(Diagnostic::statistical_error("S0202", format!("Cannot compute mean for imputation of `{col}`: no valid numeric observations")));
+                return Err(Diagnostic::statistical_error(
+                    "S0202",
+                    format!(
+                        "Cannot compute mean for imputation of `{col}`: no valid numeric observations"
+                    ),
+                ));
             }
             Value::F64(sum / count as f64)
         }
         "median" => {
-            let mut nums: Vec<f64> = col_vals.iter().filter_map(|v| match v {
-                Value::F64(x) => Some(*x),
-                Value::I64(n) => Some(*n as f64),
-                _ => None,
-            }).collect();
+            let mut nums: Vec<f64> = col_vals
+                .iter()
+                .filter_map(|v| match v {
+                    Value::F64(x) => Some(*x),
+                    Value::I64(n) => Some(*n as f64),
+                    _ => None,
+                })
+                .collect();
             if nums.is_empty() {
-                return Err(Diagnostic::statistical_error("S0202", format!("Cannot compute median for imputation of `{col}`: no valid numeric observations")));
+                return Err(Diagnostic::statistical_error(
+                    "S0202",
+                    format!(
+                        "Cannot compute median for imputation of `{col}`: no valid numeric observations"
+                    ),
+                ));
             }
             nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let mid = nums.len() / 2;
-            let med = if nums.len() % 2 == 0 {
+            let med = if nums.len().is_multiple_of(2) {
                 (nums[mid - 1] + nums[mid]) / 2.0
             } else {
                 nums[mid]
@@ -1398,7 +1675,10 @@ pub fn df_impute(
                 }
             }
             if counts.is_empty() {
-                return Err(Diagnostic::statistical_error("S0202", format!("Cannot compute mode for imputation of `{col}`: no valid observations")));
+                return Err(Diagnostic::statistical_error(
+                    "S0202",
+                    format!("Cannot compute mode for imputation of `{col}`: no valid observations"),
+                ));
             }
             let mut best_val = Value::NA(None);
             let mut max_count = 0;
@@ -1415,7 +1695,9 @@ pub fn df_impute(
         other => {
             return Err(Diagnostic::compute_error(
                 "C0201",
-                format!("Unknown imputation strategy `{other}` for `impute()`. Supported: mean, median, mode, const, zero"),
+                format!(
+                    "Unknown imputation strategy `{other}` for `impute()`. Supported: mean, median, mode, const, zero"
+                ),
             ));
         }
     };
@@ -1429,7 +1711,7 @@ pub fn df_impute(
             let should_impute = match only_for {
                 Some(allowed) => match reason {
                     Some(r) => allowed.iter().any(|a| a == r),
-                    None => allowed.iter().any(|a| a == "" || a == "NA"),
+                    None => allowed.iter().any(|a| a.is_empty() || a == "NA"),
                 },
                 None => true,
             };
@@ -1447,9 +1729,9 @@ pub fn df_impute(
 
     let column = polars_bridge::value_column_to_polars(col, &new_vals);
     let mut new_frame = frame.clone();
-    new_frame.with_column(column).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`impute()` failed: {e}"))
-    })?;
+    new_frame
+        .with_column(column)
+        .map_err(|e| Diagnostic::compute_error("C0210", format!("`impute()` failed: {e}")))?;
 
     Ok(Value::DataFrame {
         frame: new_frame,
@@ -1467,7 +1749,13 @@ pub fn df_filter_na_reason(
 ) -> Result<Value, Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "filter_na_reason")?;
     let col_series = frame.column(col).map_err(|_| {
-        Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `filter_na_reason()`", col))
+        Diagnostic::statistical_error(
+            "S0201",
+            format!(
+                "Column `{}` not found in DataFrame for `filter_na_reason()`",
+                col
+            ),
+        )
     })?;
 
     let null_mask = col_series.is_null();
@@ -1481,7 +1769,7 @@ pub fn df_filter_na_reason(
             if let Some(drops) = drop_reasons {
                 let should_drop = match reason {
                     Some(r) => drops.iter().any(|d| d == r),
-                    None => drops.iter().any(|d| d == "" || d == "NA"),
+                    None => drops.iter().any(|d| d.is_empty() || d == "NA"),
                 };
                 if !should_drop {
                     kept_indices.push(row);
@@ -1489,7 +1777,7 @@ pub fn df_filter_na_reason(
             } else if let Some(keeps) = keep_reasons {
                 let should_keep = match reason {
                     Some(r) => keeps.iter().any(|k| k == r),
-                    None => keeps.iter().any(|k| k == "" || k == "NA"),
+                    None => keeps.iter().any(|k| k.is_empty() || k == "NA"),
                 };
                 if should_keep {
                     kept_indices.push(row);
@@ -1503,14 +1791,20 @@ pub fn df_filter_na_reason(
     }
 
     let (new_frame, new_reasons) = take_rows(frame, na_reasons, &kept_indices)?;
-    Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons })
+    Ok(Value::DataFrame {
+        frame: new_frame,
+        na_reasons: new_reasons,
+    })
 }
 
 /// `count(df, col)` — frequency table: `DataFrame[col, n]`, one row per distinct value.
 pub fn df_count(df: &Value, col: &str) -> Result<Value, Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "count")?;
     let col_vals = polars_bridge::pull_column_as_values(frame, na_reasons, col).map_err(|_| {
-        Diagnostic::statistical_error("S0201", format!("Column `{}` not found in DataFrame for `count()`", col))
+        Diagnostic::statistical_error(
+            "S0201",
+            format!("Column `{}` not found in DataFrame for `count()`", col),
+        )
     })?;
 
     let mut order: Vec<Value> = Vec::new();
@@ -1523,15 +1817,17 @@ pub fn df_count(df: &Value, col: &str) -> Result<Value, Diagnostic> {
         *counts.entry(key).or_insert(0) += 1;
     }
 
-    let n_out: Vec<Value> = order.iter()
+    let n_out: Vec<Value> = order
+        .iter()
         .map(|v| Value::I64(*counts.get(&format!("{:?}", v)).unwrap_or(&0)))
         .collect();
 
-    let (result_frame, result_reasons) = polars_bridge::build_dataframe(&[
-        (col.to_string(), order),
-        ("n".to_string(), n_out),
-    ])?;
-    Ok(Value::DataFrame { frame: result_frame, na_reasons: result_reasons })
+    let (result_frame, result_reasons) =
+        polars_bridge::build_dataframe(&[(col.to_string(), order), ("n".to_string(), n_out)])?;
+    Ok(Value::DataFrame {
+        frame: result_frame,
+        na_reasons: result_reasons,
+    })
 }
 
 /// `glimpse(df)` — compact per-column overview (name, type, first few values); prints, returns `Unit`.
@@ -1541,7 +1837,11 @@ pub fn df_glimpse(df: &Value) -> Result<Value, Diagnostic> {
     println!("Columns: {}", frame.width());
     for col in frame.get_column_names() {
         let col_vals = polars_bridge::pull_column_as_values(frame, na_reasons, col)?;
-        let ty = col_vals.iter().find(|v| !v.is_na()).map(|v| v.type_name()).unwrap_or("any");
+        let ty = col_vals
+            .iter()
+            .find(|v| !v.is_na())
+            .map(|v| v.type_name())
+            .unwrap_or("any");
         let preview: Vec<String> = col_vals.iter().take(10).map(|v| v.to_string()).collect();
         println!("$ {:<15} <{}> {}", col, ty, preview.join(", "));
     }
@@ -1559,7 +1859,12 @@ pub fn df_left_join(left: &Value, right: &Value, on: &[String]) -> Result<Value,
     df_join_dispatch(left, right, on, JoinType::Left)
 }
 
-fn df_join_dispatch(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<Value, Diagnostic> {
+fn df_join_dispatch(
+    left: &Value,
+    right: &Value,
+    on: &[String],
+    how: JoinType,
+) -> Result<Value, Diagnostic> {
     let verb = match how {
         JoinType::Inner => "inner_join",
         JoinType::Left => "left_join",
@@ -1572,7 +1877,10 @@ fn df_join_dispatch(left: &Value, right: &Value, on: &[String], how: JoinType) -
             other => {
                 return Err(Diagnostic::compute_error(
                     "C0201",
-                    format!("`{verb}()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+                    format!(
+                        "`{verb}()` requires a DataFrame or LazyFrame, found `{}`",
+                        other.type_name()
+                    ),
                 ));
             }
         };
@@ -1582,7 +1890,10 @@ fn df_join_dispatch(left: &Value, right: &Value, on: &[String], how: JoinType) -
             other => {
                 return Err(Diagnostic::compute_error(
                     "C0201",
-                    format!("`{verb}()` requires a DataFrame or LazyFrame, found `{}`", other.type_name()),
+                    format!(
+                        "`{verb}()` requires a DataFrame or LazyFrame, found `{}`",
+                        other.type_name()
+                    ),
                 ));
             }
         };
@@ -1605,7 +1916,10 @@ fn get_idx_cell_opt(column: &Column, i: usize, what: &str) -> Result<Option<usiz
         Ok(AnyValue::Null) => Ok(None),
         Ok(AnyValue::UInt32(v)) => Ok(Some(v as usize)),
         Ok(AnyValue::UInt64(v)) => Ok(Some(v as usize)),
-        other => Err(Diagnostic::compute_error("C0210", format!("`join()`: unexpected type reading {what}: {other:?}"))),
+        other => Err(Diagnostic::compute_error(
+            "C0210",
+            format!("`join()`: unexpected type reading {what}: {other:?}"),
+        )),
     }
 }
 
@@ -1623,13 +1937,19 @@ fn df_join(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<
         if left_frame.column(k).is_err() {
             return Err(Diagnostic::statistical_error(
                 "S0201",
-                format!("Column `{}` not found in the left DataFrame for `{verb}()`", k),
+                format!(
+                    "Column `{}` not found in the left DataFrame for `{verb}()`",
+                    k
+                ),
             ));
         }
         if right_frame.column(k).is_err() {
             return Err(Diagnostic::statistical_error(
                 "S0201",
-                format!("Column `{}` not found in the right DataFrame for `{verb}()`", k),
+                format!(
+                    "Column `{}` not found in the right DataFrame for `{verb}()`",
+                    k
+                ),
             ));
         }
     }
@@ -1644,12 +1964,22 @@ fn df_join(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<
     // duplicate a row on a one-to-many match, or drop it on no match), so the simple
     // positional reindex `filter`/`arrange`/`slice` use doesn't apply here directly --
     // this is the general version of the same idea.
-    let left_indexed = left_frame.with_row_index(PlSmallStr::from_static(LEFT_IDX_COL), None).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`{verb}()`: failed to build left row index: {e}"))
-    })?;
-    let mut right_indexed = right_frame.with_row_index(PlSmallStr::from_static(RIGHT_IDX_COL), None).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`{verb}()`: failed to build right row index: {e}"))
-    })?;
+    let left_indexed = left_frame
+        .with_row_index(PlSmallStr::from_static(LEFT_IDX_COL), None)
+        .map_err(|e| {
+            Diagnostic::compute_error(
+                "C0210",
+                format!("`{verb}()`: failed to build left row index: {e}"),
+            )
+        })?;
+    let mut right_indexed = right_frame
+        .with_row_index(PlSmallStr::from_static(RIGHT_IDX_COL), None)
+        .map_err(|e| {
+            Diagnostic::compute_error(
+                "C0210",
+                format!("`{verb}()`: failed to build right row index: {e}"),
+            )
+        })?;
 
     // Pre-rename colliding right-side non-key columns ourselves (using the same `_right`
     // suffix polars' own default join behavior would have used) instead of letting the
@@ -1667,9 +1997,14 @@ fn df_join(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<
             name_str.to_string()
         };
         if output_name != name_str {
-            right_indexed.rename(name_str, PlSmallStr::from_string(output_name.clone())).map_err(|e| {
-                Diagnostic::compute_error("C0210", format!("`{verb}()`: failed to rename `{name_str}`: {e}"))
-            })?;
+            right_indexed
+                .rename(name_str, PlSmallStr::from_string(output_name.clone()))
+                .map_err(|e| {
+                    Diagnostic::compute_error(
+                        "C0210",
+                        format!("`{verb}()`: failed to rename `{name_str}`: {e}"),
+                    )
+                })?;
         }
         right_source_names.insert(output_name, name_str.to_string());
     }
@@ -1680,10 +2015,16 @@ fn df_join(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<
 
     let n_out = joined.height();
     let left_idx_col = joined.column(LEFT_IDX_COL).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`{verb}()`: missing internal left row-index column: {e}"))
+        Diagnostic::compute_error(
+            "C0210",
+            format!("`{verb}()`: missing internal left row-index column: {e}"),
+        )
     })?;
     let right_idx_col = joined.column(RIGHT_IDX_COL).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`{verb}()`: missing internal right row-index column: {e}"))
+        Diagnostic::compute_error(
+            "C0210",
+            format!("`{verb}()`: missing internal right row-index column: {e}"),
+        )
     })?;
 
     let mut result_reasons = NaReasonTable::new();
@@ -1720,11 +2061,24 @@ fn df_join(left: &Value, right: &Value, on: &[String], how: JoinType) -> Result<
     if is_telemetry_active(joined.height()) {
         let elapsed = start.elapsed().as_secs_f64();
         let caps = ghl_diagnostics::RenderCaps::detect();
-        let note = format!("Join: {} | On: {:?} | Output: {} rows", verb, on, joined.height());
-        let panel = ghl_diagnostics::CockpitPanel::operation_telemetry(verb, joined.height(), elapsed, Some(&note));
+        let note = format!(
+            "Join: {} | On: {:?} | Output: {} rows",
+            verb,
+            on,
+            joined.height()
+        );
+        let panel = ghl_diagnostics::CockpitPanel::operation_telemetry(
+            verb,
+            joined.height(),
+            elapsed,
+            Some(&note),
+        );
         eprintln!("{}", panel.render(&caps));
     }
-    Ok(Value::DataFrame { frame: joined, na_reasons: Arc::new(result_reasons) })
+    Ok(Value::DataFrame {
+        frame: joined,
+        na_reasons: Arc::new(result_reasons),
+    })
 }
 
 /// `pivot_wider(df, names_from, values_from, id_cols)` — reshape from long to wide format.
@@ -1735,7 +2089,11 @@ pub fn df_pivot_wider(
     id_cols: Option<&[String]>,
 ) -> Result<Value, Diagnostic> {
     let (frame, _) = as_dataframe(df, "pivot_wider")?;
-    let all_cols: Vec<String> = frame.get_column_names().iter().map(|s| s.to_string()).collect();
+    let all_cols: Vec<String> = frame
+        .get_column_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
 
     if !all_cols.iter().any(|c| c == names_from) {
         return Err(Diagnostic::compute_error(
@@ -1787,12 +2145,7 @@ pub fn df_pivot_wider(
 
     // 3. For each distinct name, filter, select id_cols + values_from, rename to name_str, and left_join
     for (name_str, name_val) in &distinct_names {
-        let filtered = df_filter_by_col_predicate(
-            df,
-            names_from,
-            BinaryOp::Eq,
-            name_val,
-        )?;
+        let filtered = df_filter_by_col_predicate(df, names_from, BinaryOp::Eq, name_val)?;
 
         let mut slice_cols = id_columns.clone();
         slice_cols.push(values_from.to_string());
@@ -1815,7 +2168,11 @@ pub fn df_pivot_longer(
     id_cols: Option<&[String]>,
 ) -> Result<Value, Diagnostic> {
     let (frame, na_reasons) = as_dataframe(df, "pivot_longer")?;
-    let all_cols: Vec<String> = frame.get_column_names().iter().map(|s| s.to_string()).collect();
+    let all_cols: Vec<String> = frame
+        .get_column_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
 
     let (on_cols, index_cols): (Vec<PlSmallStr>, Vec<PlSmallStr>) = match (cols, id_cols) {
         (Some(c), Some(id)) => (
@@ -1858,9 +2215,9 @@ pub fn df_pivot_longer(
         value_name: PlSmallStr::from_str(values_to),
     };
 
-    let unpivoted = frame.unpivot2(args).map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("`pivot_longer()` failed: {e}"))
-    })?;
+    let unpivoted = frame
+        .unpivot2(args)
+        .map_err(|e| Diagnostic::compute_error("C0210", format!("`pivot_longer()` failed: {e}")))?;
 
     // Map NA reasons to new row positions
     let mut new_reasons = NaReasonTable::new();
@@ -1958,7 +2315,10 @@ fn escape_csv_field(field: &str, sep: char) -> String {
 /// Returns the `Column` plus a sparse `(row, reason)` list for cells that were a reasoned
 /// `NA:reason` token -- built in the same single pass, rather than re-scanning a `Vec<Value>`
 /// for `Value::NA(Some(_))` afterward the way `build_dataframe` does for every other path.
-fn infer_and_convert_column_native(name: &str, raw: &StringChunked) -> (Column, Vec<(usize, String)>) {
+fn infer_and_convert_column_native(
+    name: &str,
+    raw: &StringChunked,
+) -> (Column, Vec<(usize, String)>) {
     let n = raw.len();
 
     let mut reasons: Vec<(usize, String)> = Vec::new();
@@ -2037,31 +2397,54 @@ fn infer_and_convert_column_native(name: &str, raw: &StringChunked) -> (Column, 
         // Empty or entirely-NA column: no non-NA cell to infer a dtype from, same
         // Float64-nulls fallback `value_column_to_polars` uses for this case.
         let data: Vec<Option<f64>> = vec![None; n];
-        let col = data.into_iter().collect::<Float64Chunked>().with_name(name.into()).into_column();
+        let col = data
+            .into_iter()
+            .collect::<Float64Chunked>()
+            .with_name(name.into())
+            .into_column();
         return (col, reasons);
     }
 
     if all_i64 {
-        let col = i64_buf.into_iter().collect::<Int64Chunked>().with_name(name.into()).into_column();
+        let col = i64_buf
+            .into_iter()
+            .collect::<Int64Chunked>()
+            .with_name(name.into())
+            .into_column();
         return (col, reasons);
     }
 
     if all_f64 {
-        let col = f64_buf.into_iter().collect::<Float64Chunked>().with_name(name.into()).into_column();
+        let col = f64_buf
+            .into_iter()
+            .collect::<Float64Chunked>()
+            .with_name(name.into())
+            .into_column();
         return (col, reasons);
     }
 
     if all_bool {
-        let col = bool_buf.into_iter().collect::<BooleanChunked>().with_name(name.into()).into_column();
+        let col = bool_buf
+            .into_iter()
+            .collect::<BooleanChunked>()
+            .with_name(name.into())
+            .into_column();
         return (col, reasons);
     }
 
     // Fallback: string. Build StringChunked directly from raw iterator.
-    let data: Vec<Option<&str>> = raw.iter().map(|opt| {
-        let s = opt.unwrap_or("");
-        if is_na_token(s) { None } else { Some(s) }
-    }).collect();
-    let col = data.into_iter().collect::<StringChunked>().with_name(name.into()).into_column();
+    let data: Vec<Option<&str>> = raw
+        .iter()
+        .map(|opt| {
+            let s = opt.unwrap_or("");
+            if is_na_token(s) { None } else { Some(s) }
+        })
+        .collect();
+    let col = data
+        .into_iter()
+        .collect::<StringChunked>()
+        .with_name(name.into())
+        .into_column();
     (col, reasons)
 }
 
@@ -2109,8 +2492,10 @@ fn infer_and_convert_column(raw: &[String]) -> Vec<Value> {
 
     // 4. Check if all non-NA parse as bool
     let all_bool = non_na_entries.iter().all(|s| {
-        s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("false")
-            || s.eq_ignore_ascii_case("t") || s.eq_ignore_ascii_case("f")
+        s.eq_ignore_ascii_case("true")
+            || s.eq_ignore_ascii_case("false")
+            || s.eq_ignore_ascii_case("t")
+            || s.eq_ignore_ascii_case("f")
     });
     if all_bool {
         return raw
@@ -2151,7 +2536,6 @@ fn is_na_token(s: &str) -> bool {
     let t = s.trim();
     t.is_empty() || t == "NA" || t == "NaN" || t == "null" || t == "None" || t.starts_with("NA:")
 }
-
 
 fn parse_na_token(s: &str) -> Value {
     let t = s.trim();
@@ -2214,8 +2598,15 @@ mod tests {
 "#;
         let df_val = parse_csv_string(csv_data, None).expect("CSV parsed");
         if let Value::DataFrame { frame, na_reasons } = &df_val {
-            let names: Vec<String> = frame.get_column_names().iter().map(|s| s.to_string()).collect();
-            assert_eq!(names, vec!["id", "name", "score", "active", "sensor_status"]);
+            let names: Vec<String> = frame
+                .get_column_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert_eq!(
+                names,
+                vec!["id", "name", "score", "active", "sensor_status"]
+            );
 
             // id is i64
             let ids = polars_bridge::pull_column_as_values(frame, na_reasons, "id").unwrap();
@@ -2228,7 +2619,8 @@ mod tests {
             assert_eq!(scores[1], Value::NA(None));
 
             // sensor_status with reasoned NA
-            let sensors = polars_bridge::pull_column_as_values(frame, na_reasons, "sensor_status").unwrap();
+            let sensors =
+                polars_bridge::pull_column_as_values(frame, na_reasons, "sensor_status").unwrap();
             assert_eq!(sensors[0], Value::String("OK".into()));
             assert_eq!(sensors[1], Value::NA(Some("SensorDropout".into())));
             assert_eq!(sensors[3], Value::NA(Some("LowBattery".into())));
@@ -2254,7 +2646,8 @@ mod tests {
         let p_str = path.to_str().unwrap();
         write_file(p_str, csv_data).unwrap();
 
-        let from_string = parse_csv_string(csv_data, None).expect("parse_csv_string should succeed");
+        let from_string =
+            parse_csv_string(csv_data, None).expect("parse_csv_string should succeed");
         let from_file = read_csv_file(p_str, None).expect("read_csv_file should succeed");
         let _ = fs::remove_file(&path);
 
@@ -2268,13 +2661,24 @@ mod tests {
         };
 
         assert_eq!(
-            frame_a.get_column_names().iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-            frame_b.get_column_names().iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            frame_a
+                .get_column_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+            frame_b
+                .get_column_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
         );
         for col in frame_a.get_column_names() {
             let vals_a = polars_bridge::pull_column_as_values(frame_a, reasons_a, col).unwrap();
             let vals_b = polars_bridge::pull_column_as_values(frame_b, reasons_b, col).unwrap();
-            assert_eq!(vals_a, vals_b, "column `{col}` differs between the two CSV paths");
+            assert_eq!(
+                vals_a, vals_b,
+                "column `{col}` differs between the two CSV paths"
+            );
         }
     }
 
@@ -2293,11 +2697,15 @@ mod tests {
         let p_str = path.to_str().unwrap();
         write_file(p_str, csv_data).unwrap();
 
-        let from_string = parse_csv_string(csv_data, None).expect("parse_csv_string should succeed");
+        let from_string =
+            parse_csv_string(csv_data, None).expect("parse_csv_string should succeed");
         let from_file = read_csv_file(p_str, None).expect("read_csv_file should succeed");
         let _ = fs::remove_file(&path);
 
-        for (label, value) in [("parse_csv_string", &from_string), ("read_csv_file", &from_file)] {
+        for (label, value) in [
+            ("parse_csv_string", &from_string),
+            ("read_csv_file", &from_file),
+        ] {
             let (frame, reasons) = match value {
                 Value::DataFrame { frame, na_reasons } => (frame, na_reasons),
                 _ => panic!("Expected DataFrame from {label}"),
@@ -2305,7 +2713,12 @@ mod tests {
             let vals = polars_bridge::pull_column_as_values(frame, reasons, "big").unwrap();
             assert_eq!(
                 vals,
-                vec![Value::F64(100.0), Value::F64(200.0), Value::F64(99999999999999999999.0), Value::F64(300.0)],
+                vec![
+                    Value::F64(100.0),
+                    Value::F64(200.0),
+                    Value::F64(99999999999999999999.0),
+                    Value::F64(300.0)
+                ],
                 "{label}: overflowing column should fall back to f64, not stay i64/truncate"
             );
         }
@@ -2318,7 +2731,11 @@ mod tests {
 
         let selected = df_select(&df, &["z".into(), "x".into()]).unwrap();
         if let Value::DataFrame { frame, .. } = &selected {
-            let names: Vec<String> = frame.get_column_names().iter().map(|s| s.to_string()).collect();
+            let names: Vec<String> = frame
+                .get_column_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
             assert_eq!(names, vec!["z", "x"]);
             assert_eq!(frame.height(), 5);
         }

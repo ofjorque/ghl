@@ -24,7 +24,9 @@ impl NaReasonTable {
     }
 
     fn get(&self, col: &str, row: usize) -> Option<&str> {
-        self.reasons.get(&(col.to_string(), row)).map(|s| s.as_str())
+        self.reasons
+            .get(&(col.to_string(), row))
+            .map(|s| s.as_str())
     }
 
     /// Reindexes reasons after an operation selecting a subset of rows.
@@ -71,17 +73,27 @@ fn filter_with_reasons(
 }
 
 fn score_and_keep_df(scores: &[Option<f64>], keep: &[i64]) -> DataFrame {
-    let score: Float64Chunked = scores.iter().copied().collect::<Float64Chunked>().with_name("score".into());
+    let score: Float64Chunked = scores
+        .iter()
+        .copied()
+        .collect::<Float64Chunked>()
+        .with_name("score".into());
     let keep_flag = Int64Chunked::from_vec("keep".into(), keep.to_vec());
 
-    DataFrame::new_infer_height(vec![score.into_series().into(), keep_flag.into_series().into()])
-        .expect("DataFrame construction should succeed")
+    DataFrame::new_infer_height(vec![
+        score.into_series().into(),
+        keep_flag.into_series().into(),
+    ])
+    .expect("DataFrame construction should succeed")
 }
 
 #[test]
 fn na_reason_reindexes_to_new_row_position_after_filter() {
     // score: [10.0, NA, 30.0, NA, 50.0] — reasons recorded on rows 1 and 3.
-    let df = score_and_keep_df(&[Some(10.0), None, Some(30.0), None, Some(50.0)], &[1, 1, 0, 1, 1]);
+    let df = score_and_keep_df(
+        &[Some(10.0), None, Some(30.0), None, Some(50.0)],
+        &[1, 1, 0, 1, 1],
+    );
 
     let mut reasons = NaReasonTable::default();
     reasons.set("score", 1, "SensorDropout");
@@ -129,5 +141,8 @@ fn na_reason_survives_a_no_op_filter_unchanged() {
     let (filtered_df, filtered_reasons) = filter_with_reasons(&df, &reasons, &mask).unwrap();
 
     assert_eq!(filtered_df.height(), 3);
-    assert_eq!(filtered_reasons, reasons, "with no discarded rows, the reason table should remain unchanged");
+    assert_eq!(
+        filtered_reasons, reasons,
+        "with no discarded rows, the reason table should remain unchanged"
+    );
 }

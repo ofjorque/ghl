@@ -1,9 +1,13 @@
-use std::env;
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps};
+use std::env;
 
 fn print_banner(caps: &RenderCaps) {
     let mut panel = CockpitPanel::new("GHL Cockpit Deck");
-    panel.with_badge(if caps.unicode_enabled { "𝑴𝒆𝒐𝒘. ฅ(•- •マ v0.1.0" } else { "v0.1.0" });
+    panel.with_badge(if caps.unicode_enabled {
+        "𝑴𝒆𝒐𝒘. ฅ(•- •マ v0.1.0"
+    } else {
+        "v0.1.0"
+    });
 
     let caps_str = if caps.unicode_enabled && caps.color_enabled {
         "[UTF8, ANSI]"
@@ -22,10 +26,10 @@ fn print_banner(caps: &RenderCaps) {
     println!("{}", panel.render(caps));
 }
 
-
 fn print_help(caps: &RenderCaps) {
     print_banner(caps);
-    println!(r#"Usage: ghl <command> [options]
+    println!(
+        r#"Usage: ghl <command> [options]
 
 Commands:
     run <file|options>         Execute a GHL script with fast Cranelift JIT
@@ -51,16 +55,17 @@ Examples:
     ghl build model.gh --release
     ghl build model.gh --shared -o libmodel.so
     ghl repl
-"#);
+"#
+    );
 }
 
-mod repl;
-mod package;
-mod jit_bridge;
-mod run;
-mod check;
 mod build;
+mod check;
 mod fmt;
+mod jit_bridge;
+mod package;
+mod repl;
+mod run;
 
 fn run_repl(caps: &RenderCaps) {
     let mut session = repl::ReplSession::new(caps.clone());
@@ -103,7 +108,9 @@ fn real_main() {
             rt.block_on(ghl_lsp::run_server());
         }
         "version" | "-v" | "--version" => {
-            println!("ghl version 0.1.0 (built with Cranelift 0.135 JIT for x86_64-unknown-linux-gnu)");
+            println!(
+                "ghl version 0.1.0 (built with Cranelift 0.135 JIT for x86_64-unknown-linux-gnu)"
+            );
         }
         "new" => {
             if args.len() < 3 {
@@ -124,8 +131,13 @@ fn real_main() {
                 std::path::PathBuf::from("ghl.toml")
             };
             if !manifest_path.exists() {
-                let err = Diagnostic::compute_error("C0607", format!("Cannot find manifest `{}`", manifest_path.display()))
-                    .with_help("Run `ghl new <name>` to create a new project, or navigate to a project root.");
+                let err = Diagnostic::compute_error(
+                    "C0607",
+                    format!("Cannot find manifest `{}`", manifest_path.display()),
+                )
+                .with_help(
+                    "Run `ghl new <name>` to create a new project, or navigate to a project root.",
+                );
                 eprintln!("{}", err.render_with_caps(&caps));
                 std::process::exit(1);
             }
@@ -140,7 +152,7 @@ fn real_main() {
             } else {
                 std::path::PathBuf::from(".")
             };
-            if let Err(_) = package::cmd_test(&root, &caps) {
+            if package::cmd_test(&root, &caps).is_err() {
                 std::process::exit(1);
             }
         }
@@ -207,5 +219,3 @@ fn real_main() {
         }
     }
 }
-
-

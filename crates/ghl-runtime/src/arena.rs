@@ -3,10 +3,10 @@
 //! Provides ultra-fast bump allocation inside iterative algorithms (MCMC, Bootstrap,
 //! Gibbs Sampler) with $O(1)$ instant memory reclamation at iteration scope boundaries.
 
-use std::sync::Arc;
-use bumpalo::Bump;
 use crate::value::Value;
 use crate::vector_data::VectorData;
+use bumpalo::Bump;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct ArenaState {

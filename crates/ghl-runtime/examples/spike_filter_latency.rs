@@ -4,11 +4,11 @@
 //!
 //! Usage: `cargo run --release --example spike_filter_latency -p ghl-runtime -- <parquet_path>`
 
-use std::time::Instant;
-use ghl_syntax::ast::BinaryOp;
-use ghl_runtime::io::{read_parquet_file, df_filter_by_col_predicate};
-use ghl_runtime::polars_bridge::pull_column_as_values;
 use ghl_runtime::Value;
+use ghl_runtime::io::{df_filter_by_col_predicate, read_parquet_file};
+use ghl_runtime::polars_bridge::pull_column_as_values;
+use ghl_syntax::ast::BinaryOp;
+use std::time::Instant;
 
 /// Reconstructs the overhead of the previous `filter()` implementation:
 /// boxing the entire column to `Vec<Value>` and comparing cell by cell in Rust,
@@ -35,7 +35,10 @@ fn height_of(df: &Value) -> usize {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let path = args.get(1).cloned().unwrap_or_else(|| "target/synthetic.parquet".to_string());
+    let path = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| "target/synthetic.parquet".to_string());
 
     let df = read_parquet_file(&path).unwrap_or_else(|e| {
         eprintln!("Could not read {path}: {e:?}");
@@ -47,8 +50,9 @@ fn main() {
 
     // Numeric: value_a > 500000 (~50% of rows, vectorized i64 comparison).
     let start = Instant::now();
-    let numeric_filtered = df_filter_by_col_predicate(&df, "value_a", BinaryOp::Gt, &Value::I64(500_000))
-        .expect("numeric filter should succeed");
+    let numeric_filtered =
+        df_filter_by_col_predicate(&df, "value_a", BinaryOp::Gt, &Value::I64(500_000))
+            .expect("numeric filter should succeed");
     let elapsed = start.elapsed();
     println!(
         "\n[new]    value_a > 500000: {} of {} rows in {:.2?} ({:.0} rows/s)",
@@ -73,8 +77,9 @@ fn main() {
 
     // String: category == "A" (~20% of rows, vectorized string comparison).
     let start = Instant::now();
-    let string_filtered = df_filter_by_col_predicate(&df, "category", BinaryOp::Eq, &Value::String("A".into()))
-        .expect("string filter should succeed");
+    let string_filtered =
+        df_filter_by_col_predicate(&df, "category", BinaryOp::Eq, &Value::String("A".into()))
+            .expect("string filter should succeed");
     let elapsed = start.elapsed();
     println!(
         "[category == \"A\"] {} of {} rows in {:.2?} ({:.0} rows/s)",

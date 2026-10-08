@@ -1,7 +1,7 @@
 //! Integration tests for fused tensor operations and matrix axis reductions (Pillar 5 / Roadmap Part H).
 
-use ghl_runtime::value::Value;
 use ghl_runtime::eval::Interpreter;
+use ghl_runtime::value::Value;
 use ghl_syntax::parser::parse;
 
 #[test]
@@ -99,35 +99,51 @@ fn test_eval_matrix_axis_reductions() {
 
     if let Some(Value::Vector(vd)) = interp.env.get("r_sum") {
         assert_eq!(vd.as_f64_view().unwrap().as_slice(), &[6.0, 15.0]);
-    } else { panic!("r_sum"); }
+    } else {
+        panic!("r_sum");
+    }
 
     if let Some(Value::Vector(vd)) = interp.env.get("c_sum") {
         assert_eq!(vd.as_f64_view().unwrap().as_slice(), &[5.0, 7.0, 9.0]);
-    } else { panic!("c_sum"); }
+    } else {
+        panic!("c_sum");
+    }
 
     if let Some(Value::Vector(vd)) = interp.env.get("r_avg") {
         assert_eq!(vd.as_f64_view().unwrap().as_slice(), &[2.0, 5.0]);
-    } else { panic!("r_avg"); }
+    } else {
+        panic!("r_avg");
+    }
 
     if let Some(Value::Vector(vd)) = interp.env.get("c_avg") {
         assert_eq!(vd.as_f64_view().unwrap().as_slice(), &[2.5, 3.5, 4.5]);
-    } else { panic!("c_avg"); }
+    } else {
+        panic!("c_avg");
+    }
 
     if let Some(Value::Vector(vd)) = interp.env.get("r_max") {
         assert_eq!(vd.as_f64_view().unwrap().as_slice(), &[3.0, 6.0]);
-    } else { panic!("r_max"); }
+    } else {
+        panic!("r_max");
+    }
 
     if let Some(Value::Vector(vd)) = interp.env.get("c_max") {
         assert_eq!(vd.as_f64_view().unwrap().as_slice(), &[4.0, 5.0, 6.0]);
-    } else { panic!("c_max"); }
+    } else {
+        panic!("c_max");
+    }
 
     if let Some(Value::Vector(vd)) = interp.env.get("r_min") {
         assert_eq!(vd.as_f64_view().unwrap().as_slice(), &[1.0, 4.0]);
-    } else { panic!("r_min"); }
+    } else {
+        panic!("r_min");
+    }
 
     if let Some(Value::Vector(vd)) = interp.env.get("c_min") {
         assert_eq!(vd.as_f64_view().unwrap().as_slice(), &[1.0, 2.0, 3.0]);
-    } else { panic!("c_min"); }
+    } else {
+        panic!("c_min");
+    }
 }
 
 #[test]
@@ -174,28 +190,39 @@ fn test_matrix_arithmetic_and_row_selection() {
     if let Some(Value::Matrix { rows, cols, data }) = interp.env.get("M2") {
         assert_eq!((rows, cols), (2, 3));
         assert_eq!(data.as_slice(), &[2.0, 4.0, 6.0, 8.0, 10.0, 12.0]);
-    } else { panic!("M2"); }
+    } else {
+        panic!("M2");
+    }
 
     if let Some(Value::Matrix { data, .. }) = interp.env.get("M_sub") {
         assert_eq!(data.as_slice(), &[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-    } else { panic!("M_sub"); }
+    } else {
+        panic!("M_sub");
+    }
 
     if let Some(Value::Matrix { data, .. }) = interp.env.get("M_plus_1") {
         assert_eq!(data.as_slice(), &[11.0, 12.0, 13.0, 14.0, 15.0, 16.0]);
-    } else { panic!("M_plus_1"); }
+    } else {
+        panic!("M_plus_1");
+    }
 
     if let Some(Value::Matrix { data, .. }) = interp.env.get("one_minus_M") {
         assert_eq!(data.as_slice(), &[9.0, 8.0, 7.0, 6.0, 5.0, 4.0]);
-    } else { panic!("one_minus_M"); }
+    } else {
+        panic!("one_minus_M");
+    }
 
     if let Some(Value::Matrix { data, .. }) = interp.env.get("M_clamped") {
         assert_eq!(data.as_slice(), &[2.0, 2.0, 3.0, 4.0, 5.0, 5.0]);
-    } else { panic!("M_clamped"); }
+    } else {
+        panic!("M_clamped");
+    }
 
     if let Some(Value::Matrix { rows, cols, data }) = interp.env.get("selected") {
         assert_eq!((rows, cols), (2, 3));
         // Row 0 from M (cond=true): [1, 2, 3]; Row 1 from M_alt (cond=false): [99, 99, 99]
         assert_eq!(data.as_slice(), &[1.0, 2.0, 3.0, 99.0, 99.0, 99.0]);
-    } else { panic!("selected"); }
+    } else {
+        panic!("selected");
+    }
 }
-

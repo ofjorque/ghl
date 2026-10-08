@@ -1,9 +1,9 @@
 //! Code intelligence engine: Hover documentation, autocompletion, and navigation.
 
-use tower_lsp::lsp_types::*;
-use ghl_runtime::doc::{lookup_doc, all_docs, FunctionDoc};
-use ghl_syntax::ast::{Program, StmtKind, ExprKind};
+use ghl_runtime::doc::{FunctionDoc, all_docs, lookup_doc};
+use ghl_syntax::ast::{ExprKind, Program, StmtKind};
 use ghl_syntax::source::SourceIndex;
+use tower_lsp::lsp_types::*;
 
 /// Extract word at a given (0-based line, 0-based character) position.
 pub fn ident_at_position(text: &str, line: usize, col: usize) -> Option<String> {
@@ -33,11 +33,7 @@ pub fn ident_at_position(text: &str, line: usize, col: usize) -> Option<String> 
     }
 
     let word: String = chars[start..end].iter().collect();
-    if word.is_empty() {
-        None
-    } else {
-        Some(word)
-    }
+    if word.is_empty() { None } else { Some(word) }
 }
 
 /// Format a `FunctionDoc` as rich Markdown for hover tooltips.
@@ -81,7 +77,12 @@ pub fn format_function_doc(doc: &FunctionDoc) -> String {
 /// so a user's own `fn mean(...)` (or any other name shadowing a builtin)
 /// shows its own signature/doc instead of the builtin's — matching how
 /// `compute_definition` already resolves such names to the user's code.
-pub fn compute_hover(text: &str, line: usize, col: usize, program: Option<&Program>) -> Option<Hover> {
+pub fn compute_hover(
+    text: &str,
+    line: usize,
+    col: usize,
+    program: Option<&Program>,
+) -> Option<Hover> {
     let ident = ident_at_position(text, line, col)?;
 
     // 1. User-defined symbols in the AST
@@ -99,7 +100,9 @@ pub fn compute_hover(text: &str, line: usize, col: usize, program: Option<&Progr
 
         for stmt in &prog.statements {
             match &stmt.kind {
-                StmtKind::Let { name, is_mut, ty, .. } if name == &ident => {
+                StmtKind::Let {
+                    name, is_mut, ty, ..
+                } if name == &ident => {
                     let mut decl = format!("let {}{}", if *is_mut { "mut " } else { "" }, name);
                     if let Some(ty) = ty {
                         decl.push_str(&format!(": {}", ty));
@@ -133,10 +136,37 @@ pub fn compute_hover(text: &str, line: usize, col: usize, program: Option<&Progr
 }
 
 const KEYWORDS: &[&str] = &[
-    "let", "mut", "const", "fn", "struct", "enum", "trait", "impl", "type",
-    "if", "else", "match", "while", "for", "in", "return", "break", "continue",
-    "use", "pub", "mod", "as", "extern", "async", "await",
-    "dataframe", "mat", "col", "NA", "true", "false",
+    "let",
+    "mut",
+    "const",
+    "fn",
+    "struct",
+    "enum",
+    "trait",
+    "impl",
+    "type",
+    "if",
+    "else",
+    "match",
+    "while",
+    "for",
+    "in",
+    "return",
+    "break",
+    "continue",
+    "use",
+    "pub",
+    "mod",
+    "as",
+    "extern",
+    "async",
+    "await",
+    "dataframe",
+    "mat",
+    "col",
+    "NA",
+    "true",
+    "false",
 ];
 
 /// Collect all completions (built-ins, keywords, local symbols, dataframe columns).
@@ -162,7 +192,12 @@ pub fn compute_completions(program: Option<&Program>) -> Vec<CompletionItem> {
     if let Some(prog) = program {
         for stmt in &prog.statements {
             match &stmt.kind {
-                StmtKind::Fn { name, params, ret_ty, .. } => {
+                StmtKind::Fn {
+                    name,
+                    params,
+                    ret_ty,
+                    ..
+                } => {
                     let sig = format!("{}(...)", name);
                     let mut detail = sig.clone();
                     if let Some(r) = ret_ty {
@@ -184,7 +219,10 @@ pub fn compute_completions(program: Option<&Program>) -> Vec<CompletionItem> {
                     }
                 }
                 StmtKind::Let { name, ty, init, .. } => {
-                    let detail = ty.as_ref().map(|t| t.to_string()).unwrap_or_else(|| "variable".to_string());
+                    let detail = ty
+                        .as_ref()
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "variable".to_string());
                     items.push(CompletionItem {
                         label: name.clone(),
                         kind: Some(CompletionItemKind::VARIABLE),
@@ -287,7 +325,7 @@ pub fn compute_definition(
                     },
                 });
             }
-            StmtKind::Struct(decl) if &decl.name == &ident => {
+            StmtKind::Struct(decl) if decl.name == ident => {
                 let ((sl, sc), (el, ec)) = index.span_to_range(&stmt.span);
                 return Some(Location {
                     uri: uri.clone(),
@@ -369,10 +407,19 @@ mod tests {
         let program = parse(text).expect("syntax ok");
         let hover = compute_hover(text, 1, 9, Some(&program)).expect("hover for shadowed mean");
         if let HoverContents::Markup(content) = hover.contents {
-            assert!(content.value.contains("fn mean(x: f64) -> f64"), "must show the user's own signature");
+            assert!(
+                content.value.contains("fn mean(x: f64) -> f64"),
+                "must show the user's own signature"
+            );
             assert!(content.value.contains("User-defined function"));
-            assert!(!content.value.contains("Vector[T]"), "must not show the stdlib mean's signature");
-            assert!(!content.value.contains("Kleene"), "must not show the stdlib mean's description");
+            assert!(
+                !content.value.contains("Vector[T]"),
+                "must not show the stdlib mean's signature"
+            );
+            assert!(
+                !content.value.contains("Kleene"),
+                "must not show the stdlib mean's description"
+            );
         } else {
             panic!("expected markdown content");
         }
@@ -398,10 +445,15 @@ mod tests {
         let program = parse(text).expect("syntax ok");
         let completions = compute_completions(Some(&program));
 
-        let mean_items: Vec<&CompletionItem> = completions.iter().filter(|c| c.label == "mean").collect();
+        let mean_items: Vec<&CompletionItem> =
+            completions.iter().filter(|c| c.label == "mean").collect();
         assert_eq!(mean_items.len(), 1, "must not list `mean` twice");
         assert_eq!(mean_items[0].kind, Some(CompletionItemKind::FUNCTION));
-        assert_eq!(mean_items[0].detail.as_deref(), Some("mean(...) -> f64"), "must reflect the user's own signature");
+        assert_eq!(
+            mean_items[0].detail.as_deref(),
+            Some("mean(...) -> f64"),
+            "must reflect the user's own signature"
+        );
     }
 
     #[test]
@@ -410,7 +462,8 @@ mod tests {
         let text = "let target_var = 100;\nlet y = target_var + 5;";
         let index = SourceIndex::new(text);
         let program = parse(text).expect("syntax ok");
-        let loc = compute_definition(&uri, text, &index, 1, 10, Some(&program)).expect("find definition");
+        let loc =
+            compute_definition(&uri, text, &index, 1, 10, Some(&program)).expect("find definition");
         assert_eq!(loc.range.start.line, 0);
     }
 }

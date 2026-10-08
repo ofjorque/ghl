@@ -3,10 +3,9 @@
 //! Split out of `env.rs` for maintainability; native fn names are still
 //! referenced unqualified from `RuntimeEnv::with_prelude()` via glob imports.
 
-use ghl_diagnostics::Diagnostic;
 use crate::value::Value;
 use crate::vector_data::VectorData;
-
+use ghl_diagnostics::Diagnostic;
 
 // =========================================================================
 // String helpers — scalar `String` + `Vector[String]`, both vectorized
@@ -34,7 +33,9 @@ pub(crate) fn map_string_fn(v: &Value, f: impl Fn(&str) -> Value + Clone) -> Val
                 }
                 Value::Vector(VectorData::from_values(out))
             }
-            Err(_) => Value::Vector(VectorData::from_values(vd.iter().map(|it| map_string_fn(it, f.clone())).collect())),
+            Err(_) => Value::Vector(VectorData::from_values(
+                vd.iter().map(|it| map_string_fn(it, f.clone())).collect(),
+            )),
         },
         Value::NA(r) => Value::NA(r.clone()),
         other => Value::NA(Some(format!("NotString:{}", other.type_name()))),
@@ -42,91 +43,150 @@ pub(crate) fn map_string_fn(v: &Value, f: impl Fn(&str) -> Value + Clone) -> Val
 }
 
 pub(crate) fn native_str_upper(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`str_upper()` requires 1 argument"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`str_upper()` requires 1 argument"))?;
     Ok(map_string_fn(v, |s| Value::String(s.to_uppercase())))
 }
 
 pub(crate) fn native_str_lower(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`str_lower()` requires 1 argument"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`str_lower()` requires 1 argument"))?;
     Ok(map_string_fn(v, |s| Value::String(s.to_lowercase())))
 }
 
 pub(crate) fn native_str_trim(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`str_trim()` requires 1 argument"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`str_trim()` requires 1 argument"))?;
     Ok(map_string_fn(v, |s| Value::String(s.trim().to_string())))
 }
 
 pub(crate) fn native_str_len(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`str_len()` requires 1 argument"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`str_len()` requires 1 argument"))?;
     Ok(map_string_fn(v, |s| Value::I64(s.chars().count() as i64)))
 }
 
 pub(crate) fn native_str_contains(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`str_contains()` requires 2 arguments"))?;
-    let pat = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`str_contains()` second argument must be a string")
-    })?.to_string();
+    let v = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`str_contains()` requires 2 arguments")
+    })?;
+    let pat = args
+        .get(1)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            Diagnostic::compute_error("C0201", "`str_contains()` second argument must be a string")
+        })?
+        .to_string();
     Ok(map_string_fn(v, move |s| Value::Bool(s.contains(&pat))))
 }
 
 pub(crate) fn native_str_starts(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`str_starts()` requires 2 arguments"))?;
-    let pat = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`str_starts()` second argument must be a string")
-    })?.to_string();
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`str_starts()` requires 2 arguments"))?;
+    let pat = args
+        .get(1)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            Diagnostic::compute_error("C0201", "`str_starts()` second argument must be a string")
+        })?
+        .to_string();
     Ok(map_string_fn(v, move |s| Value::Bool(s.starts_with(&pat))))
 }
 
 pub(crate) fn native_str_ends(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`str_ends()` requires 2 arguments"))?;
-    let pat = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`str_ends()` second argument must be a string")
-    })?.to_string();
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`str_ends()` requires 2 arguments"))?;
+    let pat = args
+        .get(1)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            Diagnostic::compute_error("C0201", "`str_ends()` second argument must be a string")
+        })?
+        .to_string();
     Ok(map_string_fn(v, move |s| Value::Bool(s.ends_with(&pat))))
 }
 
 pub(crate) fn native_str_replace(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`str_replace()` requires 3 arguments"))?;
-    let from = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`str_replace()` second argument must be a string")
-    })?.to_string();
-    let to = args.get(2).and_then(|v| v.as_str()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`str_replace()` third argument must be a string")
-    })?.to_string();
-    Ok(map_string_fn(v, move |s| Value::String(s.replace(&from, &to))))
+    let v = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`str_replace()` requires 3 arguments")
+    })?;
+    let from = args
+        .get(1)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            Diagnostic::compute_error("C0201", "`str_replace()` second argument must be a string")
+        })?
+        .to_string();
+    let to = args
+        .get(2)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            Diagnostic::compute_error("C0201", "`str_replace()` third argument must be a string")
+        })?
+        .to_string();
+    Ok(map_string_fn(v, move |s| {
+        Value::String(s.replace(&from, &to))
+    }))
 }
 
 pub(crate) fn native_str_split(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`str_split()` requires 2 arguments"))?;
-    let sep = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`str_split()` second argument must be a string")
-    })?.to_string();
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`str_split()` requires 2 arguments"))?;
+    let sep = args
+        .get(1)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            Diagnostic::compute_error("C0201", "`str_split()` second argument must be a string")
+        })?
+        .to_string();
     Ok(map_string_fn(v, move |s| {
-        Value::Vector(VectorData::from_values(s.split(sep.as_str()).map(|p| Value::String(p.to_string())).collect()))
+        Value::Vector(VectorData::from_values(
+            s.split(sep.as_str())
+                .map(|p| Value::String(p.to_string()))
+                .collect(),
+        ))
     }))
 }
 
 pub(crate) fn native_str_pad(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`str_pad()` requires 3 arguments"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`str_pad()` requires 3 arguments"))?;
     let width = args.get(1).and_then(|v| v.as_i64()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`str_pad()` second argument (width) must be an integer")
+        Diagnostic::compute_error(
+            "C0201",
+            "`str_pad()` second argument (width) must be an integer",
+        )
     })? as usize;
-    let pad_char = args.get(2).and_then(|v| v.as_str()).and_then(|s| s.chars().next()).unwrap_or(' ');
+    let pad_char = args
+        .get(2)
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.chars().next())
+        .unwrap_or(' ');
     Ok(map_string_fn(v, move |s| {
         let len = s.chars().count();
         if len >= width {
             Value::String(s.to_string())
         } else {
-            let padding: String = std::iter::repeat(pad_char).take(width - len).collect();
+            let padding: String = std::iter::repeat_n(pad_char, width - len).collect();
             Value::String(format!("{}{}", padding, s))
         }
     }))
 }
 
-
 pub(crate) fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Err(Diagnostic::compute_error("C0201", "`filter()` requires a DataFrame or Vector as its first argument"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`filter()` requires a DataFrame or Vector as its first argument",
+        ));
     }
 
     let target = args[0].clone();
@@ -139,19 +199,28 @@ pub(crate) fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
             // A boolean Vector mask (`filter(df, [true, false, ...])`).
             if let Value::Vector(mask) = predicate {
-                let keep_indices: Vec<usize> = mask.iter().enumerate()
+                let keep_indices: Vec<usize> = mask
+                    .iter()
+                    .enumerate()
                     .filter(|(_, m)| m.as_bool() == Some(true))
                     .map(|(i, _)| i)
                     .collect();
-                let (new_frame, new_reasons) = crate::io::take_rows(&frame, &na_reasons, &keep_indices)?;
-                return Ok(Value::DataFrame { frame: new_frame, na_reasons: new_reasons });
+                let (new_frame, new_reasons) =
+                    crate::io::take_rows(&frame, &na_reasons, &keep_indices)?;
+                return Ok(Value::DataFrame {
+                    frame: new_frame,
+                    na_reasons: new_reasons,
+                });
             }
 
             // Any predicate tree: `col(x) > 5`, `is_na(col(y))`, and `!`/`&&`/`||`
             // combinations of those (Suite 02, Caso 2.3) -- vectorized straight against
             // polars columns, no boxing to Vec<Value> and comparing scalar-by-scalar.
             if crate::eval::is_predicate(predicate) {
-                return crate::io::df_filter_by_predicate(&Value::DataFrame { frame, na_reasons }, predicate);
+                return crate::io::df_filter_by_predicate(
+                    &Value::DataFrame { frame, na_reasons },
+                    predicate,
+                );
             }
 
             // Anything else is a mistake, not a no-op: GHL doesn't silently ignore a
@@ -208,8 +277,9 @@ pub(crate) fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
                             let mut new_row = 0;
                             for old_row in 0..vd.len() {
                                 if ca.get(old_row) == Some(true) {
-                                    if let Some(r) = vd.na_reasons().get("__ghl_vector__", old_row) {
-                                        new_reasons.set("__ghl_vector__", new_row, r.to_string());
+                                    if let Some(r) = vd.na_reasons().get("__ghl_vector__", old_row)
+                                    {
+                                        new_reasons.set("__ghl_vector__", new_row, r);
                                     }
                                     new_row += 1;
                                 }
@@ -222,7 +292,9 @@ pub(crate) fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     }
                 }
                 // Fallback for non-Arrow boolean chunked or mixed values
-                let keep_indices: Vec<usize> = mask.iter().enumerate()
+                let keep_indices: Vec<usize> = mask
+                    .iter()
+                    .enumerate()
                     .filter(|(_, m)| m.as_bool() == Some(true))
                     .map(|(i, _)| i)
                     .collect();
@@ -236,7 +308,10 @@ pub(crate) fn native_filter(args: Vec<Value>) -> Result<Value, Diagnostic> {
             }
             Err(Diagnostic::compute_error(
                 "C0202",
-                format!("`filter()` on a Vector expects a boolean Vector mask, found `{}`", predicate.type_name()),
+                format!(
+                    "`filter()` on a Vector expects a boolean Vector mask, found `{}`",
+                    predicate.type_name()
+                ),
             ))
         }
         other => Ok(other),
@@ -250,19 +325,31 @@ pub(crate) fn native_zeros(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 Diagnostic::compute_error("C0201", "`zeros(n)` requires an integer length argument")
             })?;
             if n < 0 {
-                return Err(Diagnostic::compute_error("C0201", format!("`zeros()` length must be non-negative, found {n}")));
+                return Err(Diagnostic::compute_error(
+                    "C0201",
+                    format!("`zeros()` length must be non-negative, found {n}"),
+                ));
             }
             Ok(Value::Vector(VectorData::from_f64(vec![0.0; n as usize])))
         }
         2 => {
             let r = args[0].as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`zeros(rows, cols)` requires integer dimensions")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`zeros(rows, cols)` requires integer dimensions",
+                )
             })?;
             let c = args[1].as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`zeros(rows, cols)` requires integer dimensions")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`zeros(rows, cols)` requires integer dimensions",
+                )
             })?;
             if r < 0 || c < 0 {
-                return Err(Diagnostic::compute_error("C0201", format!("`zeros()` dimensions must be non-negative, found ({r}, {c})")));
+                return Err(Diagnostic::compute_error(
+                    "C0201",
+                    format!("`zeros()` dimensions must be non-negative, found ({r}, {c})"),
+                ));
             }
             let rows = r as usize;
             let cols = c as usize;
@@ -272,7 +359,10 @@ pub(crate) fn native_zeros(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 data: std::sync::Arc::new(vec![0.0; rows * cols]),
             })
         }
-        _ => Err(Diagnostic::compute_error("C0201", "`zeros()` expects 1 argument (vector length) or 2 arguments (matrix rows, cols)")),
+        _ => Err(Diagnostic::compute_error(
+            "C0201",
+            "`zeros()` expects 1 argument (vector length) or 2 arguments (matrix rows, cols)",
+        )),
     }
 }
 
@@ -281,35 +371,69 @@ pub(crate) fn native_matrix(args: Vec<Value>) -> Result<Value, Diagnostic> {
         2 => {
             // matrix(rows, cols) -> zeros(rows, cols)
             let r = args[0].as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`matrix(rows, cols)` requires integer dimensions")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`matrix(rows, cols)` requires integer dimensions",
+                )
             })?;
             let c = args[1].as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`matrix(rows, cols)` requires integer dimensions")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`matrix(rows, cols)` requires integer dimensions",
+                )
             })?;
             if r < 0 || c < 0 {
-                return Err(Diagnostic::compute_error("C0201", format!("`matrix()` dimensions must be non-negative, found ({r}, {c})")));
+                return Err(Diagnostic::compute_error(
+                    "C0201",
+                    format!("`matrix()` dimensions must be non-negative, found ({r}, {c})"),
+                ));
             }
-            Ok(Value::matrix(r as usize, c as usize, vec![0.0; (r * c) as usize]))
+            Ok(Value::matrix(
+                r as usize,
+                c as usize,
+                vec![0.0; (r * c) as usize],
+            ))
         }
         3 => {
             // Case A: matrix(rows, cols, default_fill)
             if let (Some(r), Some(c)) = (args[0].as_i64(), args[1].as_i64()) {
                 if r < 0 || c < 0 {
-                    return Err(Diagnostic::compute_error("C0201", format!("`matrix()` dimensions must be non-negative, found ({r}, {c})")));
+                    return Err(Diagnostic::compute_error(
+                        "C0201",
+                        format!("`matrix()` dimensions must be non-negative, found ({r}, {c})"),
+                    ));
                 }
-                let fill = args[2].as_f64().ok_or_else(|| Diagnostic::compute_error("C0201", "`matrix(rows, cols, default)` requires numeric default value"))?;
-                return Ok(Value::matrix(r as usize, c as usize, vec![fill; (r * c) as usize]));
+                let fill = args[2].as_f64().ok_or_else(|| {
+                    Diagnostic::compute_error(
+                        "C0201",
+                        "`matrix(rows, cols, default)` requires numeric default value",
+                    )
+                })?;
+                return Ok(Value::matrix(
+                    r as usize,
+                    c as usize,
+                    vec![fill; (r * c) as usize],
+                ));
             }
 
             // Case B: matrix(data, rows, cols)
             let r = args[1].as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`matrix(data, rows, cols)` requires integer row dimension")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`matrix(data, rows, cols)` requires integer row dimension",
+                )
             })?;
             let c = args[2].as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`matrix(data, rows, cols)` requires integer col dimension")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`matrix(data, rows, cols)` requires integer col dimension",
+                )
             })?;
             if r < 0 || c < 0 {
-                return Err(Diagnostic::compute_error("C0201", format!("`matrix()` dimensions must be non-negative, found ({r}, {c})")));
+                return Err(Diagnostic::compute_error(
+                    "C0201",
+                    format!("`matrix()` dimensions must be non-negative, found ({r}, {c})"),
+                ));
             }
             let rows = r as usize;
             let cols = c as usize;
@@ -320,13 +444,18 @@ pub(crate) fn native_matrix(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     if vd.len() != required_len {
                         return Err(Diagnostic::compute_error(
                             "C0201",
-                            format!("`matrix()` size mismatch: Vector has {} elements, but requested shape ({rows}x{cols}) requires {}", vd.len(), required_len),
+                            format!(
+                                "`matrix()` size mismatch: Vector has {} elements, but requested shape ({rows}x{cols}) requires {}",
+                                vd.len(),
+                                required_len
+                            ),
                         ));
                     }
                     if let Ok(view) = vd.as_f64_view() {
                         Ok(Value::matrix(rows, cols, view.as_slice().to_vec()))
                     } else {
-                        let data: Vec<f64> = vd.iter().map(|it| it.as_f64().unwrap_or(0.0)).collect();
+                        let data: Vec<f64> =
+                            vd.iter().map(|it| it.as_f64().unwrap_or(0.0)).collect();
                         Ok(Value::matrix(rows, cols, data))
                     }
                 }
@@ -334,7 +463,11 @@ pub(crate) fn native_matrix(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     if data.len() != required_len {
                         return Err(Diagnostic::compute_error(
                             "C0201",
-                            format!("`matrix()` reshape size mismatch: Matrix has {} elements, but requested shape ({rows}x{cols}) requires {}", data.len(), required_len),
+                            format!(
+                                "`matrix()` reshape size mismatch: Matrix has {} elements, but requested shape ({rows}x{cols}) requires {}",
+                                data.len(),
+                                required_len
+                            ),
                         ));
                     }
                     Ok(Value::matrix(rows, cols, data.as_slice().to_vec()))
@@ -345,18 +478,24 @@ pub(crate) fn native_matrix(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 }
                 other => Err(Diagnostic::compute_error(
                     "C0202",
-                    format!("`matrix(data, rows, cols)` expects Vector, Matrix, or scalar as first argument, found `{}`", other.type_name()),
+                    format!(
+                        "`matrix(data, rows, cols)` expects Vector, Matrix, or scalar as first argument, found `{}`",
+                        other.type_name()
+                    ),
                 )),
             }
         }
-        _ => Err(Diagnostic::compute_error("C0201", "`matrix()` expects 2 arguments (rows, cols) or 3 arguments (data, rows, cols)")),
+        _ => Err(Diagnostic::compute_error(
+            "C0201",
+            "`matrix()` expects 2 arguments (rows, cols) or 3 arguments (data, rows, cols)",
+        )),
     }
 }
 
 pub(crate) fn native_len(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`len()` requires 1 argument")
-    })?;
+    let val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`len()` requires 1 argument"))?;
     match val {
         Value::Vector(vd) => Ok(Value::I64(vd.len() as i64)),
         Value::String(s) => Ok(Value::I64(s.chars().count() as i64)),
@@ -364,7 +503,10 @@ pub(crate) fn native_len(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Value::Matrix { rows, .. } => Ok(Value::I64(*rows as i64)),
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("`len()` expects a Vector, String, DataFrame, or Matrix, found `{}`", other.type_name()),
+            format!(
+                "`len()` expects a Vector, String, DataFrame, or Matrix, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -380,7 +522,10 @@ pub(crate) fn native_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     if i < 0 || (i as usize) >= vd.len() {
                         return Err(Diagnostic::compute_error(
                             "C0203",
-                            format!("Index out of bounds in `get(vector, idx)`: index {i} for vector of length {}", vd.len()),
+                            format!(
+                                "Index out of bounds in `get(vector, idx)`: index {i} for vector of length {}",
+                                vd.len()
+                            ),
                         ));
                     }
                     Ok(vd.value_at(i as usize).unwrap_or(Value::NA(None)))
@@ -393,12 +538,18 @@ pub(crate) fn native_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
                             let mut gathered = Vec::with_capacity(indices.len());
                             for idx_val in indices.iter() {
                                 let i = idx_val.as_i64().ok_or_else(|| {
-                                    Diagnostic::compute_error("C0202", "`get()` with index vector expects integer indices")
+                                    Diagnostic::compute_error(
+                                        "C0202",
+                                        "`get()` with index vector expects integer indices",
+                                    )
                                 })?;
                                 if i < 0 || (i as usize) >= slice.len() {
                                     return Err(Diagnostic::compute_error(
                                         "C0203",
-                                        format!("Index out of bounds in `get()`: index {i} for vector of length {}", slice.len()),
+                                        format!(
+                                            "Index out of bounds in `get()`: index {i} for vector of length {}",
+                                            slice.len()
+                                        ),
                                     ));
                                 }
                                 gathered.push(slice[i as usize]);
@@ -409,12 +560,18 @@ pub(crate) fn native_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     let mut gathered = Vec::with_capacity(indices.len());
                     for idx_val in indices.iter() {
                         let i = idx_val.as_i64().ok_or_else(|| {
-                            Diagnostic::compute_error("C0202", "`get()` with index vector expects integer indices")
+                            Diagnostic::compute_error(
+                                "C0202",
+                                "`get()` with index vector expects integer indices",
+                            )
                         })?;
                         if i < 0 || (i as usize) >= vd.len() {
                             return Err(Diagnostic::compute_error(
                                 "C0203",
-                                format!("Index out of bounds in `get()`: index {i} for vector of length {}", vd.len()),
+                                format!(
+                                    "Index out of bounds in `get()`: index {i} for vector of length {}",
+                                    vd.len()
+                                ),
                             ));
                         }
                         gathered.push(vd.value_at(i as usize).unwrap_or(Value::NA(None)));
@@ -427,7 +584,9 @@ pub(crate) fn native_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     if i < 0 || (i as usize) >= len {
                         return Err(Diagnostic::compute_error(
                             "C0203",
-                            format!("Index out of bounds in `get(string, idx)`: index {i} for string of length {len}"),
+                            format!(
+                                "Index out of bounds in `get(string, idx)`: index {i} for string of length {len}"
+                            ),
                         ));
                     }
                     let ch = s.chars().nth(i as usize).unwrap();
@@ -435,12 +594,19 @@ pub(crate) fn native_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 }
                 (Value::Record(map), Value::String(field)) => {
                     map.get(field).cloned().ok_or_else(|| {
-                        Diagnostic::compute_error("C0102", format!("Field `{field}` not found in record"))
+                        Diagnostic::compute_error(
+                            "C0102",
+                            format!("Field `{field}` not found in record"),
+                        )
                     })
                 }
                 (c, i) => Err(Diagnostic::compute_error(
                     "C0202",
-                    format!("`get()` requires a (Vector, index), (String, index), or (Record, field), found (`{}`, `{}`)", c.type_name(), i.type_name()),
+                    format!(
+                        "`get()` requires a (Vector, index), (String, index), or (Record, field), found (`{}`, `{}`)",
+                        c.type_name(),
+                        i.type_name()
+                    ),
                 )),
             }
         }
@@ -448,10 +614,16 @@ pub(crate) fn native_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
             // Matrix get: get(m, row, col)
             let matrix = &args[0];
             let row = args[1].as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`get(matrix, row, col)` requires integer row index")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`get(matrix, row, col)` requires integer row index",
+                )
             })?;
             let col = args[2].as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`get(matrix, row, col)` requires integer col index")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`get(matrix, row, col)` requires integer col index",
+                )
             })?;
             if let Value::Matrix { rows, cols, data } = matrix {
                 let r = row as usize;
@@ -459,18 +631,26 @@ pub(crate) fn native_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 if row < 0 || r >= *rows || col < 0 || c >= *cols {
                     return Err(Diagnostic::compute_error(
                         "C0203",
-                        format!("Matrix index out of bounds in `get(m, {row}, {col})`: matrix is ({rows}x{cols})"),
+                        format!(
+                            "Matrix index out of bounds in `get(m, {row}, {col})`: matrix is ({rows}x{cols})"
+                        ),
                     ));
                 }
                 Ok(Value::F64(data[r * cols + c]))
             } else {
                 Err(Diagnostic::compute_error(
                     "C0202",
-                    format!("`get()` with 3 arguments requires a Matrix, found `{}`", matrix.type_name()),
+                    format!(
+                        "`get()` with 3 arguments requires a Matrix, found `{}`",
+                        matrix.type_name()
+                    ),
                 ))
             }
         }
-        _ => Err(Diagnostic::compute_error("C0201", "`get()` expects 2 arguments (collection, index) or 3 arguments (matrix, row, col)")),
+        _ => Err(Diagnostic::compute_error(
+            "C0201",
+            "`get()` expects 2 arguments (collection, index) or 3 arguments (matrix, row, col)",
+        )),
     }
 }
 
@@ -484,7 +664,10 @@ pub(crate) fn native_set(mut args: Vec<Value>) -> Result<Value, Diagnostic> {
                 Value::I64(i) => *i,
                 Value::F64(f) if f.fract() == 0.0 => *f as i64,
                 _ => {
-                    return Err(Diagnostic::compute_error("C0201", "`set(vector, index, val)` requires an integer index"));
+                    return Err(Diagnostic::compute_error(
+                        "C0201",
+                        "`set(vector, index, val)` requires an integer index",
+                    ));
                 }
             };
             let collection = args.pop().unwrap();
@@ -493,7 +676,10 @@ pub(crate) fn native_set(mut args: Vec<Value>) -> Result<Value, Diagnostic> {
                 if idx < 0 || i >= vd.len() {
                     return Err(Diagnostic::compute_error(
                         "C0203",
-                        format!("Index out of bounds in `set(vector, {idx}, val)`: vector length is {}", vd.len()),
+                        format!(
+                            "Index out of bounds in `set(vector, {idx}, val)`: vector length is {}",
+                            vd.len()
+                        ),
                     ));
                 }
                 if vd.null_count() == 0 {
@@ -504,59 +690,89 @@ pub(crate) fn native_set(mut args: Vec<Value>) -> Result<Value, Diagnostic> {
                     }
                 }
                 let values: Vec<Value> = (0..vd.len())
-                    .map(|k| if k == i { val.clone() } else { vd.value_at(k).unwrap_or(Value::NA(None)) })
+                    .map(|k| {
+                        if k == i {
+                            val.clone()
+                        } else {
+                            vd.value_at(k).unwrap_or(Value::NA(None))
+                        }
+                    })
                     .collect();
                 Ok(Value::Vector(VectorData::from_values(values)))
             } else {
                 Err(Diagnostic::compute_error(
                     "C0202",
-                    format!("`set()` with 3 arguments requires a Vector, found `{}`", collection.type_name()),
+                    format!(
+                        "`set()` with 3 arguments requires a Vector, found `{}`",
+                        collection.type_name()
+                    ),
                 ))
             }
         }
         4 => {
             // set(matrix, row, col, val)
             let val = args.pop().unwrap().as_f64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`set(matrix, row, col, val)` requires numeric value")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`set(matrix, row, col, val)` requires numeric value",
+                )
             })?;
             let col = args.pop().unwrap().as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`set(matrix, row, col, val)` requires integer col index")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`set(matrix, row, col, val)` requires integer col index",
+                )
             })?;
             let row = args.pop().unwrap().as_i64().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", "`set(matrix, row, col, val)` requires integer row index")
+                Diagnostic::compute_error(
+                    "C0201",
+                    "`set(matrix, row, col, val)` requires integer row index",
+                )
             })?;
             let matrix = args.pop().unwrap();
-            if let Value::Matrix { rows, cols, mut data } = matrix {
+            if let Value::Matrix {
+                rows,
+                cols,
+                mut data,
+            } = matrix
+            {
                 let r = row as usize;
                 let c = col as usize;
                 if row < 0 || r >= rows || col < 0 || c >= cols {
                     return Err(Diagnostic::compute_error(
                         "C0203",
-                        format!("Matrix index out of bounds in `set(m, {row}, {col}, val)`: matrix is ({rows}x{cols})"),
+                        format!(
+                            "Matrix index out of bounds in `set(m, {row}, {col}, val)`: matrix is ({rows}x{cols})"
+                        ),
                     ));
                 }
                 // CoW: in-place mutation if unique (strong_count == 1), clone-on-write if shared
                 let slice = std::sync::Arc::make_mut(&mut data);
                 slice[r * cols + c] = val;
-                Ok(Value::Matrix {
-                    rows,
-                    cols,
-                    data,
-                })
+                Ok(Value::Matrix { rows, cols, data })
             } else {
                 Err(Diagnostic::compute_error(
                     "C0202",
-                    format!("`set()` with 4 arguments requires a Matrix, found `{}`", matrix.type_name()),
+                    format!(
+                        "`set()` with 4 arguments requires a Matrix, found `{}`",
+                        matrix.type_name()
+                    ),
                 ))
             }
         }
-        _ => Err(Diagnostic::compute_error("C0201", "`set()` expects 3 arguments (vector, index, val) or 4 arguments (matrix, row, col, val)")),
+        _ => Err(Diagnostic::compute_error(
+            "C0201",
+            "`set()` expects 3 arguments (vector, index, val) or 4 arguments (matrix, row, col, val)",
+        )),
     }
 }
 
 pub(crate) fn native_get_row(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
-        return Err(Diagnostic::compute_error("C0201", "`get_row()` requires a Matrix and an integer row index"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`get_row()` requires a Matrix and an integer row index",
+        ));
     }
     let matrix = &args[0];
     let row_idx = args[1].as_i64().ok_or_else(|| {
@@ -567,7 +783,9 @@ pub(crate) fn native_get_row(args: Vec<Value>) -> Result<Value, Diagnostic> {
         if row_idx < 0 || r >= *rows {
             return Err(Diagnostic::compute_error(
                 "C0203",
-                format!("Row index out of bounds in `get_row(m, {row_idx})`: matrix has {rows} rows"),
+                format!(
+                    "Row index out of bounds in `get_row(m, {row_idx})`: matrix has {rows} rows"
+                ),
             ));
         }
         let start = r * cols;
@@ -576,32 +794,52 @@ pub(crate) fn native_get_row(args: Vec<Value>) -> Result<Value, Diagnostic> {
     } else {
         Err(Diagnostic::compute_error(
             "C0202",
-            format!("`get_row()` requires a Matrix, found `{}`", matrix.type_name()),
+            format!(
+                "`get_row()` requires a Matrix, found `{}`",
+                matrix.type_name()
+            ),
         ))
     }
 }
 
 pub(crate) fn native_set_row(mut args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 3 {
-        return Err(Diagnostic::compute_error("C0201", "`set_row()` requires a Matrix, an integer row index, and a Vector"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`set_row()` requires a Matrix, an integer row index, and a Vector",
+        ));
     }
     let vec_val = args.pop().unwrap();
     let row_idx = args.pop().unwrap().as_i64().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`set_row()` requires an integer row index")
     })?;
     let matrix = args.pop().unwrap();
-    if let (Value::Matrix { rows, cols, mut data }, Value::Vector(vd)) = (matrix, vec_val) {
+    if let (
+        Value::Matrix {
+            rows,
+            cols,
+            mut data,
+        },
+        Value::Vector(vd),
+    ) = (matrix, vec_val)
+    {
         let r = row_idx as usize;
         if row_idx < 0 || r >= rows {
             return Err(Diagnostic::compute_error(
                 "C0203",
-                format!("Row index out of bounds in `set_row(m, {row_idx}, vec)`: matrix has {rows} rows"),
+                format!(
+                    "Row index out of bounds in `set_row(m, {row_idx}, vec)`: matrix has {rows} rows"
+                ),
             ));
         }
         if vd.len() != cols {
             return Err(Diagnostic::compute_error(
                 "C0202",
-                format!("`set_row()` dimension mismatch: matrix has {} columns, but vector has length {}", cols, vd.len()),
+                format!(
+                    "`set_row()` dimension mismatch: matrix has {} columns, but vector has length {}",
+                    cols,
+                    vd.len()
+                ),
             ));
         }
         let start = r * cols;
@@ -610,32 +848,27 @@ pub(crate) fn native_set_row(mut args: Vec<Value>) -> Result<Value, Diagnostic> 
         if vd.null_count() == 0 {
             if let Ok(view) = vd.as_f64_view() {
                 slice[start..start + cols].copy_from_slice(view.as_slice());
-                return Ok(Value::Matrix {
-                    rows,
-                    cols,
-                    data,
-                });
+                return Ok(Value::Matrix { rows, cols, data });
             }
         }
         for (j, item) in vd.iter().enumerate() {
             slice[start + j] = item.as_f64().unwrap_or(0.0);
         }
-        Ok(Value::Matrix {
-            rows,
-            cols,
-            data,
-        })
+        Ok(Value::Matrix { rows, cols, data })
     } else {
         Err(Diagnostic::compute_error(
             "C0202",
-            format!("`set_row()` requires (Matrix, integer, Vector)"),
+            "`set_row()` requires (Matrix, integer, Vector)".to_string(),
         ))
     }
 }
 
 pub(crate) fn native_get_col(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
-        return Err(Diagnostic::compute_error("C0201", "`get_col()` requires a Matrix and an integer column index"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`get_col()` requires a Matrix and an integer column index",
+        ));
     }
     let matrix = &args[0];
     let col_idx = args[1].as_i64().ok_or_else(|| {
@@ -646,7 +879,9 @@ pub(crate) fn native_get_col(args: Vec<Value>) -> Result<Value, Diagnostic> {
         if col_idx < 0 || c >= *cols {
             return Err(Diagnostic::compute_error(
                 "C0203",
-                format!("Column index out of bounds in `get_col(m, {col_idx})`: matrix has {cols} columns"),
+                format!(
+                    "Column index out of bounds in `get_col(m, {col_idx})`: matrix has {cols} columns"
+                ),
             ));
         }
         let mut col_data = Vec::with_capacity(*rows);
@@ -657,18 +892,22 @@ pub(crate) fn native_get_col(args: Vec<Value>) -> Result<Value, Diagnostic> {
     } else {
         Err(Diagnostic::compute_error(
             "C0202",
-            format!("`get_col()` requires a Matrix, found `{}`", matrix.type_name()),
+            format!(
+                "`get_col()` requires a Matrix, found `{}`",
+                matrix.type_name()
+            ),
         ))
     }
 }
 
 pub(crate) fn native_transpose(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let m = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`transpose()` requires a Matrix")
-    })?;
+    let m = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`transpose()` requires a Matrix"))?;
     match m {
         Value::Matrix { rows, cols, data } => {
-            let (new_rows, new_cols, new_data) = crate::matrix::MatrixOps::transpose(*rows, *cols, data)?;
+            let (new_rows, new_cols, new_data) =
+                crate::matrix::MatrixOps::transpose(*rows, *cols, data)?;
             Ok(Value::Matrix {
                 rows: new_rows,
                 cols: new_cols,
@@ -677,7 +916,10 @@ pub(crate) fn native_transpose(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("`transpose()` requires a Matrix, found `{}`", other.type_name()),
+            format!(
+                "`transpose()` requires a Matrix, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -690,14 +932,21 @@ pub(crate) fn native_identity(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Diagnostic::compute_error("C0201", "`identity()` requires an integer dimension n")
     })?;
     if n < 0 {
-        return Err(Diagnostic::compute_error("C0201", format!("`identity()` dimension must be non-negative, found {n}")));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`identity()` dimension must be non-negative, found {n}"),
+        ));
     }
     let dim = n as usize;
     let mut data = vec![0.0; dim * dim];
     for i in 0..dim {
         data[i * dim + i] = 1.0;
     }
-    Ok(Value::Matrix { rows: dim, cols: dim, data: std::sync::Arc::new(data) })
+    Ok(Value::Matrix {
+        rows: dim,
+        cols: dim,
+        data: std::sync::Arc::new(data),
+    })
 }
 
 pub(crate) fn native_diag(args: Vec<Value>) -> Result<Value, Diagnostic> {
@@ -714,14 +963,22 @@ pub(crate) fn native_diag(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     for i in 0..n {
                         data[i * n + i] = slice[i];
                     }
-                    return Ok(Value::Matrix { rows: n, cols: n, data: std::sync::Arc::new(data) });
+                    return Ok(Value::Matrix {
+                        rows: n,
+                        cols: n,
+                        data: std::sync::Arc::new(data),
+                    });
                 }
             }
             for i in 0..n {
                 let v = vd.value_at(i).and_then(|val| val.as_f64()).unwrap_or(0.0);
                 data[i * n + i] = v;
             }
-            Ok(Value::Matrix { rows: n, cols: n, data: std::sync::Arc::new(data) })
+            Ok(Value::Matrix {
+                rows: n,
+                cols: n,
+                data: std::sync::Arc::new(data),
+            })
         }
         Value::Matrix { rows, cols, data } => {
             let n = (*rows).min(*cols);
@@ -733,7 +990,10 @@ pub(crate) fn native_diag(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("`diag()` requires a Vector or Matrix, found `{}`", other.type_name()),
+            format!(
+                "`diag()` requires a Vector or Matrix, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }

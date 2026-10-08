@@ -2,9 +2,9 @@
 
 mod common;
 
-use ghl_runtime::value::Value;
-use ghl_runtime::eval::Interpreter;
 use ghl_runtime::env::RuntimeEnv;
+use ghl_runtime::eval::Interpreter;
+use ghl_runtime::value::Value;
 use ghl_runtime::vector_data::VectorData;
 use ghl_syntax::parser::parse;
 
@@ -130,7 +130,10 @@ fn test_matrix_cow_inplace_when_unique_and_clones_when_shared() {
     };
 
     // Pointer must be identical: zero copies, zero allocations!
-    assert_eq!(orig_ptr, new_ptr, "Matrix with strong_count==1 must mutate in-place without reallocation");
+    assert_eq!(
+        orig_ptr, new_ptr,
+        "Matrix with strong_count==1 must mutate in-place without reallocation"
+    );
 
     // 2. Clone-on-write when shared (strong_count > 1)
     let m_shared = mutated.clone(); // strong_count becomes 2
@@ -141,7 +144,13 @@ fn test_matrix_cow_inplace_when_unique_and_clones_when_shared() {
     };
 
     let mutated2 = if let Value::NativeFn(f) = set_fn {
-        f(vec![mutated, Value::I64(1), Value::I64(1), Value::F64(555.0)]).unwrap()
+        f(vec![
+            mutated,
+            Value::I64(1),
+            Value::I64(1),
+            Value::F64(555.0),
+        ])
+        .unwrap()
     } else {
         panic!("Expected NativeFn");
     };
@@ -153,7 +162,10 @@ fn test_matrix_cow_inplace_when_unique_and_clones_when_shared() {
     };
 
     // Since it was shared, Arc::make_mut cloned the buffer!
-    assert_ne!(shared_ptr, mutated2_ptr, "Matrix with strong_count > 1 must clone buffer on write");
+    assert_ne!(
+        shared_ptr, mutated2_ptr,
+        "Matrix with strong_count > 1 must clone buffer on write"
+    );
     // And the shared original keeps its previous values unchanged
     if let Value::Matrix { ref data, .. } = m_shared {
         assert_eq!(data[0], 99.0);
@@ -211,9 +223,16 @@ fn test_regional_arena_lifecycle_and_reset() {
         let b_after = vd.value_at(1).unwrap().as_i64().unwrap_or(0);
         let v_sum = vd.value_at(2).unwrap().as_f64().unwrap_or(0.0);
 
-        assert!(b_before > 0, "Arena must allocate bytes for vector and matrix");
+        assert!(
+            b_before > 0,
+            "Arena must allocate bytes for vector and matrix"
+        );
         assert_eq!(b_after, 0, "reset(a) must instantly reclaim memory (O(1))");
-        assert_eq!(v_sum, 50.0 * 2.5, "alloc_vector values must be valid and computable by verbs");
+        assert_eq!(
+            v_sum,
+            50.0 * 2.5,
+            "alloc_vector values must be valid and computable by verbs"
+        );
     } else {
         panic!("Expected vector result from arena scope, found {res:?}");
     }
@@ -241,7 +260,10 @@ fn test_lag_lead_zero_boxing_and_na_reasons() {
         // Row 2 is 20.0
         assert_eq!(vd.value_at(2), Some(Value::F64(20.0)));
         // Row 3 is NA:SensorDropout (shifted from row 2)
-        assert_eq!(vd.value_at(3), Some(Value::NA(Some("SensorDropout".into()))));
+        assert_eq!(
+            vd.value_at(3),
+            Some(Value::NA(Some("SensorDropout".into())))
+        );
         // Row 4 is 40.0
         assert_eq!(vd.value_at(4), Some(Value::F64(40.0)));
     } else {
@@ -254,7 +276,10 @@ fn test_lag_lead_zero_boxing_and_na_reasons() {
         // Row 0 is 20.0
         assert_eq!(vd.value_at(0), Some(Value::F64(20.0)));
         // Row 1 is NA:SensorDropout (shifted from row 2)
-        assert_eq!(vd.value_at(1), Some(Value::NA(Some("SensorDropout".into()))));
+        assert_eq!(
+            vd.value_at(1),
+            Some(Value::NA(Some("SensorDropout".into())))
+        );
         // Row 2 is 40.0
         assert_eq!(vd.value_at(2), Some(Value::F64(40.0)));
         // Row 3 is 50.0
@@ -355,10 +380,17 @@ fn test_matrix_clone_is_zero_copy_cow() {
     // no data copy. Arc::ptr_eq verifies the raw pointer identity.
     use std::sync::Arc;
     let data: Arc<Vec<f64>> = Arc::new((0..1_000_000).map(|i| i as f64).collect());
-    let original = Value::Matrix { rows: 1000, cols: 1000, data: Arc::clone(&data) };
+    let original = Value::Matrix {
+        rows: 1000,
+        cols: 1000,
+        data: Arc::clone(&data),
+    };
     let cloned = original.clone();
     if let (Value::Matrix { data: d1, .. }, Value::Matrix { data: d2, .. }) = (&original, &cloned) {
-        assert!(Arc::ptr_eq(d1, d2), "Clone must share the same Arc buffer (zero-copy)");
+        assert!(
+            Arc::ptr_eq(d1, d2),
+            "Clone must share the same Arc buffer (zero-copy)"
+        );
     } else {
         panic!("Expected Matrix variants");
     }
@@ -385,7 +417,13 @@ fn test_pivot_wider_basic() {
 
     let cols = interp.env.get("cols").expect("cols exists");
     if let Value::Vector(v) = cols {
-        let col_names: Vec<String> = v.iter().map(|x| match x { Value::String(s) => s.clone(), other => other.to_string() }).collect();
+        let col_names: Vec<String> = v
+            .iter()
+            .map(|x| match x {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .collect();
         assert_eq!(col_names, vec!["patient_id", "v1", "v2"]);
     } else {
         panic!("expected vector for colnames");
@@ -413,7 +451,13 @@ fn test_pivot_longer_basic() {
 
     let cols = interp.env.get("cols").expect("cols exists");
     if let Value::Vector(v) = cols {
-        let col_names: Vec<String> = v.iter().map(|x| match x { Value::String(s) => s.clone(), other => other.to_string() }).collect();
+        let col_names: Vec<String> = v
+            .iter()
+            .map(|x| match x {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .collect();
         assert_eq!(col_names, vec!["id", "time", "val"]);
     } else {
         panic!("expected vector for colnames");
@@ -442,7 +486,13 @@ fn test_pivot_roundtrip() {
 
     let cols = interp.env.get("cols").expect("cols exists");
     if let Value::Vector(v) = cols {
-        let col_names: Vec<String> = v.iter().map(|x| match x { Value::String(s) => s.clone(), other => other.to_string() }).collect();
+        let col_names: Vec<String> = v
+            .iter()
+            .map(|x| match x {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .collect();
         assert_eq!(col_names, vec!["id", "a", "b"]);
     } else {
         panic!("expected vector for colnames");
@@ -496,7 +546,13 @@ fn test_pivot_named_colon_and_bare_identifiers() {
 
     let cols = interp.env.get("cols").expect("cols exists");
     if let Value::Vector(v) = cols {
-        let col_names: Vec<String> = v.iter().map(|x| match x { Value::String(s) => s.clone(), other => other.to_string() }).collect();
+        let col_names: Vec<String> = v
+            .iter()
+            .map(|x| match x {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .collect();
         assert_eq!(col_names, vec!["patient_id", "v1", "v2"]);
     } else {
         panic!("expected vector for colnames");
@@ -674,7 +730,10 @@ fn test_record_literal_and_field_access() {
     let mut interp = Interpreter::new();
     interp.eval_program(&program).expect("evaluation ok");
 
-    assert_eq!(interp.env.get("sid").unwrap(), Value::String("SMP-001".into()));
+    assert_eq!(
+        interp.env.get("sid").unwrap(),
+        Value::String("SMP-001".into())
+    );
     assert_eq!(interp.env.get("reps").unwrap(), Value::I64(4));
     assert_eq!(interp.env.get("p").unwrap(), Value::F64(0.0042));
     assert_eq!(interp.env.get("p_piped").unwrap(), Value::F64(0.0042));
@@ -714,4 +773,3 @@ fn test_ufcs_method_call() {
     assert_eq!(interp.env.get("s").unwrap(), Value::F64(10.0));
     assert_eq!(interp.env.get("m").unwrap(), Value::F64(2.5));
 }
-

@@ -5,10 +5,10 @@
 //! pipelines, and control flow blocks while preserving comment trivia (leading,
 //! inline, block, inside blocks) and intentional blank lines.
 
-use std::fmt::Write;
-use ghl_diagnostics::Diagnostic;
 use crate::ast::*;
 use crate::parser::parse;
+use ghl_diagnostics::Diagnostic;
+use std::fmt::Write;
 
 /// A comment trivia token extracted from source text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,7 +180,11 @@ impl<'a> CommentState<'a> {
             let c = &self.comments[self.cursor];
             if c.start >= after_offset && c.start <= self.source.len() {
                 let between = &self.source[after_offset.min(self.source.len())..c.start];
-                if !between.contains('\n') && between.chars().all(|ch| ch == ' ' || ch == '\t' || ch == ',' || ch == ';') {
+                if !between.contains('\n')
+                    && between
+                        .chars()
+                        .all(|ch| ch == ' ' || ch == '\t' || ch == ',' || ch == ';')
+                {
                     out.push(' ');
                     out.push_str(&c.text);
                     after_offset = c.end;
@@ -216,9 +220,8 @@ impl<'a> CommentState<'a> {
 
 /// Formats GHL source code into canonical style preserving comments and intentional blank lines.
 pub fn format_source(source: &str) -> Result<String, Diagnostic> {
-    let program = parse(source).map_err(|errs| {
-        Diagnostic::compute_error("P0100", errs.join("\n"))
-    })?;
+    let program =
+        parse(source).map_err(|errs| Diagnostic::compute_error("P0100", errs.join("\n")))?;
     Ok(format_program_with_comments(&program.statements, source))
 }
 
@@ -253,9 +256,8 @@ pub fn format_range(
     start_line: usize,
     end_line: usize,
 ) -> Result<Option<(TextRange, String)>, Diagnostic> {
-    let program = parse(source).map_err(|errs| {
-        Diagnostic::compute_error("P0100", errs.join("\n"))
-    })?;
+    let program =
+        parse(source).map_err(|errs| Diagnostic::compute_error("P0100", errs.join("\n")))?;
 
     if program.statements.is_empty() {
         return Ok(None);
@@ -358,7 +360,10 @@ fn format_statements_with_state(
             };
 
             if i > 0 {
-                if is_fn_or_decl || prev_was_fn_or_decl || has_blank_line_before(st.source, check_offset) {
+                if is_fn_or_decl
+                    || prev_was_fn_or_decl
+                    || has_blank_line_before(st.source, check_offset)
+                {
                     if !out.ends_with("\n\n") {
                         if out.ends_with('\n') {
                             out.push('\n');
@@ -373,7 +378,10 @@ fn format_statements_with_state(
 
             st.emit_leading(&mut out, stmt.span.start, level, i == 0);
 
-            if has_blank_line_before(st.source, stmt.span.start) && !out.ends_with("\n\n") && !out.is_empty() {
+            if has_blank_line_before(st.source, stmt.span.start)
+                && !out.ends_with("\n\n")
+                && !out.is_empty()
+            {
                 out.push('\n');
             }
         } else if i > 0 {
@@ -419,7 +427,12 @@ fn format_stmt_internal(
 ) {
     indent(out, level);
     match &stmt.kind {
-        StmtKind::Let { name, is_mut, ty, init } => {
+        StmtKind::Let {
+            name,
+            is_mut,
+            ty,
+            init,
+        } => {
             out.push_str("let ");
             if *is_mut {
                 out.push_str("mut ");
@@ -441,7 +454,12 @@ fn format_stmt_internal(
             format_expr_internal(out, value, level, state.as_deref_mut());
             out.push(';');
         }
-        StmtKind::FieldAssign { target, fields, op, value } => {
+        StmtKind::FieldAssign {
+            target,
+            fields,
+            op,
+            value,
+        } => {
             out.push_str(target);
             for f in fields {
                 out.push('.');
@@ -453,7 +471,12 @@ fn format_stmt_internal(
             format_expr_internal(out, value, level, state.as_deref_mut());
             out.push(';');
         }
-        StmtKind::IndexAssign { target, indices, op, value } => {
+        StmtKind::IndexAssign {
+            target,
+            indices,
+            op,
+            value,
+        } => {
             out.push_str(target);
             out.push('[');
             for (i, idx) in indices.iter().enumerate() {
@@ -463,7 +486,11 @@ fn format_stmt_internal(
                 match idx {
                     IndexSpec::Expr(e) => format_expr_internal(out, e, level, state.as_deref_mut()),
                     IndexSpec::All => out.push_str(".."),
-                    IndexSpec::Range { start, end, inclusive } => {
+                    IndexSpec::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
                         if let Some(s) = start {
                             format_expr_internal(out, s, level, state.as_deref_mut());
                         }
@@ -518,7 +545,13 @@ fn format_stmt_internal(
             }
             out.push(';');
         }
-        StmtKind::Fn { name, params, ret_ty, body, export_ffi } => {
+        StmtKind::Fn {
+            name,
+            params,
+            ret_ty,
+            body,
+            export_ffi,
+        } => {
             if *export_ffi {
                 out.push_str("#[export_ffi]\n");
                 indent(out, level);
@@ -630,7 +663,13 @@ fn format_stmt_internal(
                     out.push('\n');
                 }
                 match item {
-                    ImplItem::Method { name, params, ret_ty, body, span } => {
+                    ImplItem::Method {
+                        name,
+                        params,
+                        ret_ty,
+                        body,
+                        span,
+                    } => {
                         if let Some(st) = state.as_deref_mut() {
                             st.emit_leading(out, span.start, level + 1, idx == 0);
                         }
@@ -700,7 +739,9 @@ fn format_expr_internal(
 ) {
     match &expr.kind {
         ExprKind::Lit(lit) => match lit {
-            Literal::Int(n) => { let _ = write!(out, "{}", n); }
+            Literal::Int(n) => {
+                let _ = write!(out, "{}", n);
+            }
             Literal::Float(f) => {
                 if f.fract() == 0.0 && !f.is_nan() && !f.is_infinite() {
                     let _ = write!(out, "{:.1}", f);
@@ -708,8 +749,12 @@ fn format_expr_internal(
                     let _ = write!(out, "{}", f);
                 }
             }
-            Literal::String(s) => { let _ = write!(out, "{:?}", s); }
-            Literal::Bool(b) => { out.push_str(if *b { "true" } else { "false" }); }
+            Literal::String(s) => {
+                let _ = write!(out, "{:?}", s);
+            }
+            Literal::Bool(b) => {
+                out.push_str(if *b { "true" } else { "false" });
+            }
             Literal::NA(reason) => match reason {
                 None => out.push_str("NA"),
                 Some(r) => {
@@ -732,7 +777,9 @@ fn format_expr_internal(
         ExprKind::Binary { op, lhs, rhs } => {
             let parent_prec = binary_op_precedence(*op);
             let need_parens_l = match &lhs.kind {
-                ExprKind::Binary { op: child_op, .. } => binary_op_precedence(*child_op) < parent_prec,
+                ExprKind::Binary { op: child_op, .. } => {
+                    binary_op_precedence(*child_op) < parent_prec
+                }
                 _ => false,
             };
             if need_parens_l {
@@ -750,7 +797,9 @@ fn format_expr_internal(
             let need_parens_r = match &rhs.kind {
                 ExprKind::Binary { op: child_op, .. } => {
                     let child_prec = binary_op_precedence(*child_op);
-                    child_prec < parent_prec || (child_prec == parent_prec && (*op == BinaryOp::Sub || *op == BinaryOp::Div))
+                    child_prec < parent_prec
+                        || (child_prec == parent_prec
+                            && (*op == BinaryOp::Sub || *op == BinaryOp::Div))
                 }
                 _ => false,
             };
@@ -762,7 +811,10 @@ fn format_expr_internal(
                 out.push(')');
             }
         }
-        ExprKind::Pipe { expr: lhs, target: rhs } => {
+        ExprKind::Pipe {
+            expr: lhs,
+            target: rhs,
+        } => {
             format_expr_internal(out, lhs, level, state.as_deref_mut());
             out.push_str(" |> ");
             format_expr_internal(out, rhs, level, state.as_deref_mut());
@@ -783,13 +835,19 @@ fn format_expr_internal(
             out.push_str(" = ");
             format_expr_internal(out, value, level, state.as_deref_mut());
         }
-        ExprKind::Block { stmts, expr: trailing } => {
+        ExprKind::Block {
+            stmts,
+            expr: trailing,
+        } => {
             out.push_str("{\n");
             let mut prev_was_fn_or_decl = false;
             for (i, stmt) in stmts.iter().enumerate() {
                 let is_fn_or_decl = matches!(
                     stmt.kind,
-                    StmtKind::Fn { .. } | StmtKind::Struct(_) | StmtKind::Trait(_) | StmtKind::Impl(_)
+                    StmtKind::Fn { .. }
+                        | StmtKind::Struct(_)
+                        | StmtKind::Trait(_)
+                        | StmtKind::Impl(_)
                 );
 
                 if let Some(st) = state.as_deref_mut() {
@@ -799,13 +857,20 @@ fn format_expr_internal(
                     } else {
                         stmt.span.start
                     };
-                    if i > 0 && (is_fn_or_decl || prev_was_fn_or_decl || has_blank_line_before(st.source, check_offset)) {
+                    if i > 0
+                        && (is_fn_or_decl
+                            || prev_was_fn_or_decl
+                            || has_blank_line_before(st.source, check_offset))
+                    {
                         if !out.ends_with("\n\n") {
                             out.push('\n');
                         }
                     }
                     st.emit_leading(out, stmt.span.start, level + 1, i == 0);
-                    if has_blank_line_before(st.source, stmt.span.start) && !out.ends_with("\n\n") && !out.is_empty() {
+                    if has_blank_line_before(st.source, stmt.span.start)
+                        && !out.ends_with("\n\n")
+                        && !out.is_empty()
+                    {
                         out.push('\n');
                     }
                 } else if i > 0 && (is_fn_or_decl || prev_was_fn_or_decl) {
@@ -836,7 +901,10 @@ fn format_expr_internal(
                         }
                     }
                     st.emit_leading(out, t.span.start, level + 1, stmts.is_empty());
-                    if has_blank_line_before(st.source, t.span.start) && !out.ends_with("\n\n") && !out.is_empty() {
+                    if has_blank_line_before(st.source, t.span.start)
+                        && !out.ends_with("\n\n")
+                        && !out.is_empty()
+                    {
                         out.push('\n');
                     }
                 }
@@ -849,13 +917,23 @@ fn format_expr_internal(
             }
 
             if let Some(st) = state.as_deref_mut() {
-                st.emit_leading(out, expr.span.end, level + 1, stmts.is_empty() && trailing.is_none());
+                st.emit_leading(
+                    out,
+                    expr.span.end,
+                    level + 1,
+                    stmts.is_empty() && trailing.is_none(),
+                );
             }
 
             indent(out, level);
             out.push('}');
         }
-        ExprKind::Formula { op, response, terms, parts } => {
+        ExprKind::Formula {
+            op,
+            response,
+            terms,
+            parts,
+        } => {
             format_expr_internal(out, response, level, state.as_deref_mut());
             out.push(' ');
             out.push_str(&op.to_string());
@@ -900,7 +978,11 @@ fn format_expr_internal(
             indent(out, level);
             out.push('}');
         }
-        ExprKind::If { cond, then_branch, else_branch } => {
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
             out.push_str("if ");
             format_expr_internal(out, cond, level, state.as_deref_mut());
             out.push(' ');
@@ -916,7 +998,12 @@ fn format_expr_internal(
             out.push(' ');
             format_expr_internal(out, body, level, state.as_deref_mut());
         }
-        ExprKind::For { var, start, end, body } => {
+        ExprKind::For {
+            var,
+            start,
+            end,
+            body,
+        } => {
             out.push_str("for ");
             out.push_str(var);
             out.push_str(" in ");
@@ -926,7 +1013,11 @@ fn format_expr_internal(
             out.push(' ');
             format_expr_internal(out, body, level, state.as_deref_mut());
         }
-        ExprKind::Range { start, end, inclusive } => {
+        ExprKind::Range {
+            start,
+            end,
+            inclusive,
+        } => {
             format_expr_internal(out, start, level, state.as_deref_mut());
             if *inclusive {
                 out.push_str("..=");
@@ -945,7 +1036,11 @@ fn format_expr_internal(
             }
             out.push(']');
         }
-        ExprKind::Comprehension { expr, clauses, condition } => {
+        ExprKind::Comprehension {
+            expr,
+            clauses,
+            condition,
+        } => {
             out.push('[');
             format_expr_internal(out, expr, level, state.as_deref_mut());
             for (idx, clause) in clauses.iter().enumerate() {
@@ -1065,7 +1160,11 @@ fn format_expr_internal(
                 match spec {
                     IndexSpec::Expr(e) => format_expr_internal(out, e, level, state.as_deref_mut()),
                     IndexSpec::All => out.push_str(".."),
-                    IndexSpec::Range { start, end, inclusive } => {
+                    IndexSpec::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
                         if let Some(s) = start {
                             format_expr_internal(out, s, level, state.as_deref_mut());
                         }
@@ -1082,7 +1181,10 @@ fn format_expr_internal(
             }
             out.push(']');
         }
-        ExprKind::Match { expr: match_expr, arms } => {
+        ExprKind::Match {
+            expr: match_expr,
+            arms,
+        } => {
             out.push_str("match ");
             format_expr_internal(out, match_expr, level, state.as_deref_mut());
             out.push_str(" {\n");
@@ -1118,10 +1220,18 @@ fn format_pattern(out: &mut String, pat: &Pattern) {
         Pattern::Wildcard => out.push('_'),
         Pattern::Ident(name) => out.push_str(name),
         Pattern::Lit(lit) => match lit {
-            Literal::Int(n) => { let _ = write!(out, "{}", n); }
-            Literal::Float(f) => { let _ = write!(out, "{}", f); }
-            Literal::String(s) => { let _ = write!(out, "{:?}", s); }
-            Literal::Bool(b) => { out.push_str(if *b { "true" } else { "false" }); }
+            Literal::Int(n) => {
+                let _ = write!(out, "{}", n);
+            }
+            Literal::Float(f) => {
+                let _ = write!(out, "{}", f);
+            }
+            Literal::String(s) => {
+                let _ = write!(out, "{:?}", s);
+            }
+            Literal::Bool(b) => {
+                out.push_str(if *b { "true" } else { "false" });
+            }
             Literal::NA(_) => out.push_str("NA"),
         },
         Pattern::NA => out.push_str("NA"),
@@ -1162,9 +1272,19 @@ fn binary_op_precedence(op: BinaryOp) -> u8 {
         BinaryOp::BitOr => 0,
         BinaryOp::Or => 1,
         BinaryOp::And => 2,
-        BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => 3,
+        BinaryOp::Eq
+        | BinaryOp::NotEq
+        | BinaryOp::Lt
+        | BinaryOp::LtEq
+        | BinaryOp::Gt
+        | BinaryOp::GtEq => 3,
         BinaryOp::Add | BinaryOp::Sub | BinaryOp::DotAdd | BinaryOp::DotSub => 4,
-        BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::DotMul | BinaryOp::DotDiv | BinaryOp::MatSolve => 5,
+        BinaryOp::Mul
+        | BinaryOp::Div
+        | BinaryOp::Mod
+        | BinaryOp::DotMul
+        | BinaryOp::DotDiv
+        | BinaryOp::MatSolve => 5,
         BinaryOp::Pow => 6,
     }
 }
@@ -1203,7 +1323,9 @@ mod tests {
 
         let reparsed = crate::parser::parse(&formatted).expect("formatted output must still parse");
         match &reparsed.statements[0].kind {
-            StmtKind::Fn { name, export_ffi, .. } => {
+            StmtKind::Fn {
+                name, export_ffi, ..
+            } => {
                 assert_eq!(name, "calc");
                 assert!(*export_ffi, "export_ffi flag must survive the round trip");
             }
@@ -1288,7 +1410,10 @@ fn add(a: int, b: int) -> int {
     fn test_format_intentional_blank_lines_preservation() {
         let code = "let a = 1;\n\n// Group 2\nlet b = 2;\n\nlet c = 3;\n";
         let formatted = format_source(code).expect("format ok");
-        assert_eq!(formatted, "let a = 1;\n\n// Group 2\nlet b = 2;\n\nlet c = 3;\n");
+        assert_eq!(
+            formatted,
+            "let a = 1;\n\n// Group 2\nlet b = 2;\n\nlet c = 3;\n"
+        );
     }
 
     #[test]

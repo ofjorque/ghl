@@ -71,7 +71,11 @@ fn test_fuzz_truncated_valid_programs() {
                 let _ = check(&prog, "fuzz.gh", truncated);
             }
         });
-        assert!(res.is_ok(), "Parser / typechecker panicked on truncation at byte {}", len);
+        assert!(
+            res.is_ok(),
+            "Parser / typechecker panicked on truncation at byte {}",
+            len
+        );
     }
 }
 
@@ -141,7 +145,11 @@ fn test_fuzz_malformed_formulas_and_literals() {
                 let _ = check(&prog, "fuzz.gh", input);
             }
         });
-        assert!(res.is_ok(), "Compiler must handle malformed syntax cleanly without panic: {:?}", input);
+        assert!(
+            res.is_ok(),
+            "Compiler must handle malformed syntax cleanly without panic: {:?}",
+            input
+        );
     }
 }
 

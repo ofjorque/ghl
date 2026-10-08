@@ -155,13 +155,22 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
   - Implementar biblioteca de imputación científica multivariada: MICE (Predictive Mean Matching PMM, regresión estocástica bayesiana norm, k-NN ponderada por distancia Gower, media/mediana). Validado: 7/7 bloques de prueba superados.
   - Soportar arquitectura plug-in de modelos universales arbitrarios (first-class closures en MICE), reglas de combinación de Rubin (1987) con corrección de grados de libertad para muestras pequeñas de Barnard-Rubin (1999), métricas de información faltante (RIV, FMI) y diagnósticos VIM/VIF con paneles Cockpit Deck (`vim_cockpit`, `impute_cockpit`, `pool_cockpit`, `vif_cockpit`). Documentado en [`packages/ghl_impute/GUIDE.md`](packages/ghl_impute/GUIDE.md).
   - Publicar cuaderno reproducible Quarto (`.qmd`) de diagnóstico y multi-imputación de datos faltantes en [`examples/imputation_analysis.qmd`](examples/imputation_analysis.qmd).
-- [ ] **`packages/ghl_db` / Conectores SQL Extendido — [#10](https://github.com/ofjorque/ghl/issues/10):**
-  - Conector nativo hacia DuckDB / SQLite para consultas SQL analíticas directamente sobre DataFrames y archivos Parquet.
+- [x] **`packages/ghl_db` (Conectores SQL Extendido y Zero-Copy) — [#10](https://github.com/ofjorque/ghl/issues/10):**
+  - Implementar conector nativo hacia DuckDB / SQLite (`db_connect`, `db_query`, `db_execute`, `db_disconnect`) con soporte para tablas virtuales en memoria y consultas analíticas `query_sql` zero-copy sobre DataFrames y archivos Parquet. Validado: suite de pruebas superada. Documentado en [`packages/ghl_db/GUIDE.md`](packages/ghl_db/GUIDE.md).
 
 ### 3. Developer Experience (DX), CI/CD y Distribución — [Milestone v0.4.0](https://github.com/ofjorque/ghl/milestone/3)
-- [ ] **GitHub Actions Matrix Multi-Plataforma — [#11](https://github.com/ofjorque/ghl/issues/11):**
-  - Workflows automatizados de compilación y pruebas para Ubuntu, macOS y Windows con cacheo de dependencias.
+- [x] **GitHub Actions Matrix Multi-Plataforma — [#11](https://github.com/ofjorque/ghl/issues/11):**
+  - Workflows automatizados de compilación y pruebas en `.github/workflows/ci.yml` con matriz de SO (`ubuntu-latest`, `macos-latest`, `windows-latest`) y Rust stable.
+  - Cacheo inteligente de dependencias con `Swatinem/rust-cache@v2` para tiempos de ejecución < 5 minutos.
+  - Ejecución de `cargo check --workspace`, `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, `cargo fmt --check`.
+  - Ejecución automatizada de suites de pruebas de paquetes `packages/*` con el CLI compilado.
+  - Badge oficial de status CI y licencia en [`README.md`](README.md).
+- [x] **Barras de Progreso Dinámicas y Telemetría en Cockpit Deck — [#14](https://github.com/ofjorque/ghl/issues/14):**
+  - Telemetría interactiva in-place en una sola línea (`\r\x1b[2K`) con sub-bloques Unicode (`█`, `▉`, `▊`, `▋`, `▌`, `▍`, `▎`, `▏`), fallback ASCII y temas vibrantes (`cyan`, `haru`, `emerald`, `magenta`, `gradient`).
+  - Motor de spinners animados (`dots`, `circle`, `arc`, `pie`, `haru`, `ascii`) y discos (`○`, `◔`, `◑`, `◕`, `●`) integrados en runtime (`progress_bar`, `progress_spinner`, `progress_done`) y tarjetas Cockpit Deck.
+  - Detección de ancho de consola interactiva en Windows Terminal mediante API Win32 (`GetConsoleScreenBufferInfo`) con visual width clamping sin saltos de línea indeseados.
 - [ ] **Pipeline de Releases Automatizados y Empaquetado VSIX — [#12](https://github.com/ofjorque/ghl/issues/12):**
   - Empaquetado automático de binarios optimizados (Linux, macOS, Windows) y extensión VS Code / Positron al publicar tags `v*.*.*`.
 - [ ] **Generador de Documentación HTML Estática (`ghl doc`) — [#13](https://github.com/ofjorque/ghl/issues/13):**
   - Extracción de comentarios `///` y renderizado de sitio web estático moderno con fórmulas KaTeX y buscador en cliente.
+

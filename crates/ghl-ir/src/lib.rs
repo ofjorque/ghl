@@ -4,4 +4,4 @@ pub mod hir;
 pub mod lower;
 
 pub use hir::*;
-pub use lower::{lower_ast, LoweringContext};
+pub use lower::{LoweringContext, lower_ast};

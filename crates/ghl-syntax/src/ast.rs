@@ -7,10 +7,27 @@ pub type Span = std::ops::Range<usize>;
 /// instead of erroring. Shared between the interpreter (`ghl-runtime::eval`) and the
 /// type checker (`ghl-types::checker`) so the two never drift out of sync.
 pub const COLUMN_CONTEXT_VERBS: &[&str] = &[
-    "filter", "select", "arrange", "desc", "group_by", "summarize",
-    "mutate", "drop", "distinct", "pull", "count", "fill_na",
-    "slice_min", "slice_max", "inner_join", "left_join", "na_reasons",
-    "pivot_wider", "pivot_longer", "impute", "filter_na_reason",
+    "filter",
+    "select",
+    "arrange",
+    "desc",
+    "group_by",
+    "summarize",
+    "mutate",
+    "drop",
+    "distinct",
+    "pull",
+    "count",
+    "fill_na",
+    "slice_min",
+    "slice_max",
+    "inner_join",
+    "left_join",
+    "na_reasons",
+    "pivot_wider",
+    "pivot_longer",
+    "impute",
+    "filter_na_reason",
 ];
 
 pub fn is_column_context_verb(name: &str) -> bool {
@@ -343,7 +360,11 @@ impl std::fmt::Display for IndexSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             IndexSpec::Expr(e) => write!(f, "{e}"),
-            IndexSpec::Range { start, end, inclusive } => {
+            IndexSpec::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 if let Some(s) = start {
                     write!(f, "{s}")?;
                 }
@@ -536,7 +557,12 @@ impl std::fmt::Display for ExprKind {
                 }
                 write!(f, "}}")
             }
-            ExprKind::Formula { op, response, terms, parts } => {
+            ExprKind::Formula {
+                op,
+                response,
+                terms,
+                parts,
+            } => {
                 write!(f, "{response} {op} ")?;
                 if parts.is_empty() {
                     for (i, t) in terms.iter().enumerate() {
@@ -562,7 +588,11 @@ impl std::fmt::Display for ExprKind {
                 }
                 write!(f, "}}")
             }
-            ExprKind::If { cond, then_branch, else_branch } => {
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 write!(f, "if {cond} {then_branch}")?;
                 if let Some(eb) = else_branch {
                     write!(f, " else {eb}")?;
@@ -577,7 +607,12 @@ impl std::fmt::Display for ExprKind {
                 write!(f, "}}")
             }
             ExprKind::While { cond, body } => write!(f, "while {cond} {body}"),
-            ExprKind::For { var, start, end, body } => write!(f, "for {var} in {start}..{end} {body}"),
+            ExprKind::For {
+                var,
+                start,
+                end,
+                body,
+            } => write!(f, "for {var} in {start}..{end} {body}"),
             ExprKind::DataFrameLit(cols) => {
                 write!(f, "dataframe [")?;
                 for (i, (col, expr)) in cols.iter().enumerate() {
@@ -616,7 +651,11 @@ impl std::fmt::Display for ExprKind {
                 }
                 write!(f, "]")
             }
-            ExprKind::Comprehension { expr, clauses, condition } => {
+            ExprKind::Comprehension {
+                expr,
+                clauses,
+                condition,
+            } => {
                 write!(f, "[{expr}")?;
                 for (i, clause) in clauses.iter().enumerate() {
                     if i == 0 {
@@ -661,10 +700,22 @@ impl std::fmt::Display for ExprKind {
                     }
                     match idx {
                         IndexSpec::Expr(e) => write!(f, "{e}")?,
-                        IndexSpec::Range { start, end, inclusive } => {
-                            if let Some(s) = start { write!(f, "{s}")?; }
-                            if *inclusive { write!(f, "..=")?; } else { write!(f, "..")?; }
-                            if let Some(e) = end { write!(f, "{e}")?; }
+                        IndexSpec::Range {
+                            start,
+                            end,
+                            inclusive,
+                        } => {
+                            if let Some(s) = start {
+                                write!(f, "{s}")?;
+                            }
+                            if *inclusive {
+                                write!(f, "..=")?;
+                            } else {
+                                write!(f, "..")?;
+                            }
+                            if let Some(e) = end {
+                                write!(f, "{e}")?;
+                            }
                         }
                         IndexSpec::All => write!(f, "..")?,
                     }
@@ -672,7 +723,11 @@ impl std::fmt::Display for ExprKind {
                 write!(f, "]")
             }
             ExprKind::Path(parts) => write!(f, "{}", parts.join("::")),
-            ExprKind::Range { start, end, inclusive } => {
+            ExprKind::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 if *inclusive {
                     write!(f, "{start}..={end}")
                 } else {
@@ -698,7 +753,12 @@ impl std::fmt::Display for Pattern {
 impl std::fmt::Display for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.kind {
-            StmtKind::Let { name, is_mut, ty, init } => {
+            StmtKind::Let {
+                name,
+                is_mut,
+                ty,
+                init,
+            } => {
                 let mut_str = if *is_mut { "mut " } else { "" };
                 if let Some(t) = ty {
                     write!(f, "let {mut_str}{name}: {t} = {init};")
@@ -706,15 +766,27 @@ impl std::fmt::Display for Stmt {
                     write!(f, "let {mut_str}{name} = {init};")
                 }
             }
-            StmtKind::Fn { name, params, ret_ty, body, .. } => {
+            StmtKind::Fn {
+                name,
+                params,
+                ret_ty,
+                body,
+                ..
+            } => {
                 write!(f, "fn {name}(")?;
                 for (i, p) in params.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", p.name)?;
-                    if let Some(t) = &p.ty { write!(f, ": {t}")?; }
+                    if let Some(t) = &p.ty {
+                        write!(f, ": {t}")?;
+                    }
                 }
                 write!(f, ")")?;
-                if let Some(r) = ret_ty { write!(f, " -> {r}")?; }
+                if let Some(r) = ret_ty {
+                    write!(f, " -> {r}")?;
+                }
                 write!(f, " {body}")
             }
             StmtKind::Expr(e) => write!(f, "{e};"),
@@ -726,17 +798,29 @@ impl std::fmt::Display for Stmt {
                 }
             }
             StmtKind::Assign { name, op, value } => write!(f, "{name} {op} {value};"),
-            StmtKind::FieldAssign { target, fields, op, value } => {
+            StmtKind::FieldAssign {
+                target,
+                fields,
+                op,
+                value,
+            } => {
                 write!(f, "{target}")?;
                 for field in fields {
                     write!(f, ".{field}")?;
                 }
                 write!(f, " {op} {value};")
             }
-            StmtKind::IndexAssign { target, indices, op, value } => {
+            StmtKind::IndexAssign {
+                target,
+                indices,
+                op,
+                value,
+            } => {
                 write!(f, "{target}[")?;
                 for (i, idx) in indices.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{idx}")?;
                 }
                 write!(f, "] {op} {value};")
@@ -746,4 +830,3 @@ impl std::fmt::Display for Stmt {
         }
     }
 }
-

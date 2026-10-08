@@ -78,12 +78,21 @@ fn test_fisher_snedecor_f_distribution_for_anova() {
     let q95 = interp.env.get("q95").unwrap().as_f64().unwrap();
 
     // p-value should be approx 0.05
-    assert!((p_value - 0.05).abs() < 1e-4, "Expected p-value ~0.05, got {p_value}");
-    assert!((q95 - 3.492828).abs() < 1e-4, "Expected critical F ~3.4928, got {q95}");
+    assert!(
+        (p_value - 0.05).abs() < 1e-4,
+        "Expected p-value ~0.05, got {p_value}"
+    );
+    assert!(
+        (q95 - 3.492828).abs() < 1e-4,
+        "Expected critical F ~3.4928, got {q95}"
+    );
 
     let samples = vector_f64(&interp.env.get("samples").unwrap());
     assert_eq!(samples.len(), 100);
-    assert!(samples.iter().all(|&x| x >= 0.0), "F-distributed values must be non-negative");
+    assert!(
+        samples.iter().all(|&x| x >= 0.0),
+        "F-distributed values must be non-negative"
+    );
 }
 
 #[test]

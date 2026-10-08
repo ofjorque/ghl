@@ -1,7 +1,7 @@
-use ghl_syntax::parser::parse;
-use ghl_types::checker::TypeChecker;
 use ghl_runtime::eval::Interpreter;
 use ghl_runtime::value::Value;
+use ghl_syntax::parser::parse;
+use ghl_types::checker::TypeChecker;
 
 #[test]
 fn test_vector_scalar_in_place_assignment() {
@@ -232,8 +232,13 @@ fn test_immutable_indexed_assignment_rejected_by_typechecker() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut checker = TypeChecker::new("test.gh".to_string(), code);
-    let diags = checker.check_program(&program).expect_err("Should reject assigning to immutable variable");
-    assert!(diags.iter().any(|d| d.code == "C0104"), "Expected C0104 error");
+    let diags = checker
+        .check_program(&program)
+        .expect_err("Should reject assigning to immutable variable");
+    assert!(
+        diags.iter().any(|d| d.code == "C0104"),
+        "Expected C0104 error"
+    );
 }
 
 #[test]
@@ -449,8 +454,8 @@ fn test_vector_and_matrix_compound_ops() {
             assert_eq!(cols, 2);
             assert_eq!(data[0 * 2 + 0], 1.0);
             assert_eq!(data[0 * 2 + 1], 12.0); // 2.0 + 10.0
-            assert_eq!(data[1 * 2 + 0], 6.0);  // 3.0 * 2.0
-            assert_eq!(data[1 * 2 + 1], 8.0);  // 4.0 * 2.0
+            assert_eq!(data[1 * 2 + 0], 6.0); // 3.0 * 2.0
+            assert_eq!(data[1 * 2 + 1], 8.0); // 4.0 * 2.0
         }
         other => panic!("Expected Matrix, found {other:?}"),
     }
@@ -465,8 +470,13 @@ fn test_immutable_field_and_df_rejected_by_typechecker() {
     "#;
     let program = parse(code_struct).expect("syntax ok");
     let mut checker = TypeChecker::new("test_struct.gh".to_string(), code_struct);
-    let diags = checker.check_program(&program).expect_err("Should reject immutable struct field assign");
-    assert!(diags.iter().any(|d| d.code == "C0104"), "Expected C0104 for struct");
+    let diags = checker
+        .check_program(&program)
+        .expect_err("Should reject immutable struct field assign");
+    assert!(
+        diags.iter().any(|d| d.code == "C0104"),
+        "Expected C0104 for struct"
+    );
 
     let code_df = r#"
         let df = dataframe { score: [1.0, 2.0] };
@@ -474,7 +484,11 @@ fn test_immutable_field_and_df_rejected_by_typechecker() {
     "#;
     let program = parse(code_df).expect("syntax ok");
     let mut checker = TypeChecker::new("test_df.gh".to_string(), code_df);
-    let diags = checker.check_program(&program).expect_err("Should reject immutable dataframe assign");
-    assert!(diags.iter().any(|d| d.code == "C0104"), "Expected C0104 for dataframe");
+    let diags = checker
+        .check_program(&program)
+        .expect_err("Should reject immutable dataframe assign");
+    assert!(
+        diags.iter().any(|d| d.code == "C0104"),
+        "Expected C0104 for dataframe"
+    );
 }
-

@@ -79,12 +79,18 @@ pub fn native_http_serve(interp: &mut Interpreter, args: Vec<Value>) -> Result<V
     }
 
     let addr_str = args[0].as_str().ok_or_else(|| {
-        Diagnostic::compute_error("C0202", "`http::serve` address must be a string (e.g. \"127.0.0.1:8080\")")
+        Diagnostic::compute_error(
+            "C0202",
+            "`http::serve` address must be a string (e.g. \"127.0.0.1:8080\")",
+        )
     })?;
     let handler = args[1].clone();
 
     let listener = TcpListener::bind(addr_str).map_err(|e| {
-        Diagnostic::compute_error("C0301", format!("Failed to bind HTTP server to `{addr_str}`: {e}"))
+        Diagnostic::compute_error(
+            "C0301",
+            format!("Failed to bind HTTP server to `{addr_str}`: {e}"),
+        )
     })?;
 
     let local_addr = listener.local_addr().map_err(|e| {
@@ -129,12 +135,17 @@ pub fn native_http_serve(interp: &mut Interpreter, args: Vec<Value>) -> Result<V
 
                     // Execute user handler in a fresh interpreter instance with prelude
                     let mut req_interp = Interpreter::new();
-                    let res_val = req_interp.call_value(handler.clone(), vec![Value::Record(Arc::new(req_record))]);
+                    let res_val = req_interp
+                        .call_value(handler.clone(), vec![Value::Record(Arc::new(req_record))]);
 
                     let (status, content_type, resp_body) = match res_val {
                         Ok(Value::Record(map)) => {
                             let s = map.get("status").and_then(|v| v.as_i64()).unwrap_or(200);
-                            let ct = map.get("content_type").and_then(|v| v.as_str()).unwrap_or("application/json").to_string();
+                            let ct = map
+                                .get("content_type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("application/json")
+                                .to_string();
                             let b = match map.get("body") {
                                 Some(Value::String(s)) => s.clone(),
                                 Some(v) => v.to_string(),
@@ -144,7 +155,11 @@ pub fn native_http_serve(interp: &mut Interpreter, args: Vec<Value>) -> Result<V
                         }
                         Ok(Value::String(s)) => (200, "text/plain".to_string(), s),
                         Ok(val) => (200, "text/plain".to_string(), val.to_string()),
-                        Err(err) => (500, "text/plain".to_string(), format!("Internal Error: {}", err.message)),
+                        Err(err) => (
+                            500,
+                            "text/plain".to_string(),
+                            format!("Internal Error: {}", err.message),
+                        ),
                     };
 
                     let response = format!(
@@ -184,10 +199,18 @@ pub fn native_http_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let addr = format!("{}:{}", host, port);
 
     let mut stream = TcpStream::connect_timeout(
-        &addr.to_socket_addrs().map_err(|e| Diagnostic::compute_error("C0302", format!("DNS lookup failed for `{host}`: {e}")))?
-            .next().ok_or_else(|| Diagnostic::compute_error("C0302", "Could not resolve address"))?,
+        &addr
+            .to_socket_addrs()
+            .map_err(|e| {
+                Diagnostic::compute_error("C0302", format!("DNS lookup failed for `{host}`: {e}"))
+            })?
+            .next()
+            .ok_or_else(|| Diagnostic::compute_error("C0302", "Could not resolve address"))?,
         Duration::from_secs(5),
-    ).map_err(|e| Diagnostic::compute_error("C0302", format!("Failed to connect to `{addr}`: {e}")))?;
+    )
+    .map_err(|e| {
+        Diagnostic::compute_error("C0302", format!("Failed to connect to `{addr}`: {e}"))
+    })?;
 
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
 
@@ -195,9 +218,9 @@ pub fn native_http_get(args: Vec<Value>) -> Result<Value, Diagnostic> {
         "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: GHL/0.1\r\n\r\n",
         path, host
     );
-    stream.write_all(request.as_bytes()).map_err(|e| {
-        Diagnostic::compute_error("C0302", format!("Failed to write request: {e}"))
-    })?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| Diagnostic::compute_error("C0302", format!("Failed to write request: {e}")))?;
 
     let mut resp_bytes = Vec::new();
     let _ = stream.read_to_end(&mut resp_bytes);
@@ -239,20 +262,32 @@ pub fn native_http_post(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let addr = format!("{}:{}", host, port);
 
     let mut stream = TcpStream::connect_timeout(
-        &addr.to_socket_addrs().map_err(|e| Diagnostic::compute_error("C0302", format!("DNS lookup failed for `{host}`: {e}")))?
-            .next().ok_or_else(|| Diagnostic::compute_error("C0302", "Could not resolve address"))?,
+        &addr
+            .to_socket_addrs()
+            .map_err(|e| {
+                Diagnostic::compute_error("C0302", format!("DNS lookup failed for `{host}`: {e}"))
+            })?
+            .next()
+            .ok_or_else(|| Diagnostic::compute_error("C0302", "Could not resolve address"))?,
         Duration::from_secs(5),
-    ).map_err(|e| Diagnostic::compute_error("C0302", format!("Failed to connect to `{addr}`: {e}")))?;
+    )
+    .map_err(|e| {
+        Diagnostic::compute_error("C0302", format!("Failed to connect to `{addr}`: {e}"))
+    })?;
 
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
 
     let request = format!(
         "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\nUser-Agent: GHL/0.1\r\n\r\n{}",
-        path, host, content_type, body.len(), body
+        path,
+        host,
+        content_type,
+        body.len(),
+        body
     );
-    stream.write_all(request.as_bytes()).map_err(|e| {
-        Diagnostic::compute_error("C0302", format!("Failed to write request: {e}"))
-    })?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| Diagnostic::compute_error("C0302", format!("Failed to write request: {e}")))?;
 
     let mut resp_bytes = Vec::new();
     let _ = stream.read_to_end(&mut resp_bytes);
@@ -272,12 +307,20 @@ pub fn native_http_post(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// `net::tcp_connect(addr)`: Basic TCP connection check/ping.
 pub fn native_tcp_connect(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let addr = args.first().and_then(|v| v.as_str()).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`net::tcp_connect(addr)` requires an address string")
+        Diagnostic::compute_error(
+            "C0201",
+            "`net::tcp_connect(addr)` requires an address string",
+        )
     })?;
 
     match TcpStream::connect_timeout(
-        &addr.to_socket_addrs().map_err(|e| Diagnostic::compute_error("C0302", format!("Invalid address `{addr}`: {e}")))?
-            .next().ok_or_else(|| Diagnostic::compute_error("C0302", "Could not resolve address"))?,
+        &addr
+            .to_socket_addrs()
+            .map_err(|e| {
+                Diagnostic::compute_error("C0302", format!("Invalid address `{addr}`: {e}"))
+            })?
+            .next()
+            .ok_or_else(|| Diagnostic::compute_error("C0302", "Could not resolve address"))?,
         Duration::from_secs(2),
     ) {
         Ok(_) => Ok(Value::Bool(true)),
@@ -352,4 +395,3 @@ fn parse_http_response(raw: &str) -> (i64, String) {
 
     (status, body)
 }
-

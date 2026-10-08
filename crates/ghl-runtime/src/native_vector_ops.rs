@@ -3,13 +3,12 @@
 //! Split out of `env.rs` for maintainability; native fn names are still
 //! referenced unqualified from `RuntimeEnv::with_prelude()` via glob imports.
 
-use std::sync::Arc;
+use crate::value::Value;
+use crate::vector_data::{NumericView, VectorData};
 use ghl_diagnostics::Diagnostic;
 use polars_core::prelude::*;
 use rayon::prelude::*;
-use crate::value::Value;
-use crate::vector_data::{NumericView, VectorData};
-
+use std::sync::Arc;
 
 // =========================================================================
 // Vector / window helpers
@@ -33,7 +32,11 @@ pub(crate) fn as_vector_data(v: &Value) -> Option<&VectorData> {
     }
 }
 
-pub(crate) fn cumulative(items: &[Value], init: f64, combine: impl Fn(f64, f64) -> f64) -> Vec<Value> {
+pub(crate) fn cumulative(
+    items: &[Value],
+    init: f64,
+    combine: impl Fn(f64, f64) -> f64,
+) -> Vec<Value> {
     let mut acc = init;
     let mut out = Vec::with_capacity(items.len());
     let mut poisoned: Option<Option<String>> = None;
@@ -60,7 +63,11 @@ pub(crate) fn cumulative(items: &[Value], init: f64, combine: impl Fn(f64, f64) 
 /// `rayon::par_iter()`, and isn't attempted here. With any NA present, falls back
 /// unchanged to `cumulative()`'s existing "one NA poisons everything after it" loop --
 /// that boxed path already handles NA-mixed input correctly, no change needed there.
-pub(crate) fn cumulative_fast(vd: &VectorData, init: f64, combine: impl Fn(f64, f64) -> f64) -> Value {
+pub(crate) fn cumulative_fast(
+    vd: &VectorData,
+    init: f64,
+    combine: impl Fn(f64, f64) -> f64,
+) -> Value {
     if vd.null_count() == 0 {
         if let Ok(view) = vd.as_f64_view() {
             let mut acc = init;
@@ -107,9 +114,10 @@ pub(crate) fn native_cummin(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_lag(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`lag()` requires a Vector argument")
-    })?;
+    let vd = args
+        .first()
+        .and_then(as_vector_data)
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`lag()` requires a Vector argument"))?;
     let len = vd.len();
     let n = args.get(1).and_then(|v| v.as_i64()).unwrap_or(1).max(0) as usize;
     if n == 0 {
@@ -117,13 +125,17 @@ pub(crate) fn native_lag(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
     let shifted_col = vd.column().shift(n as i64);
     let shifted_reasons = vd.na_reasons().shift(n as i64, len);
-    Ok(Value::Vector(VectorData::from_column_and_reasons(shifted_col, Arc::new(shifted_reasons))))
+    Ok(Value::Vector(VectorData::from_column_and_reasons(
+        shifted_col,
+        Arc::new(shifted_reasons),
+    )))
 }
 
 pub(crate) fn native_lead(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`lead()` requires a Vector argument")
-    })?;
+    let vd = args
+        .first()
+        .and_then(as_vector_data)
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`lead()` requires a Vector argument"))?;
     let len = vd.len();
     let n = args.get(1).and_then(|v| v.as_i64()).unwrap_or(1).max(0) as usize;
     if n == 0 {
@@ -131,7 +143,10 @@ pub(crate) fn native_lead(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
     let shifted_col = vd.column().shift(-(n as i64));
     let shifted_reasons = vd.na_reasons().shift(-(n as i64), len);
-    Ok(Value::Vector(VectorData::from_column_and_reasons(shifted_col, Arc::new(shifted_reasons))))
+    Ok(Value::Vector(VectorData::from_column_and_reasons(
+        shifted_col,
+        Arc::new(shifted_reasons),
+    )))
 }
 
 pub(crate) fn broadcast_get(v: &Value, i: usize) -> Value {
@@ -178,9 +193,15 @@ fn as_numeric_source(v: &Value, expected_len: usize) -> Option<NumericSource<'_>
 }
 
 pub(crate) fn native_if_else(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let cond = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
-    let yes = args.get(1).ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
-    let no = args.get(2).ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
+    let cond = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
+    let yes = args
+        .get(1)
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
+    let no = args
+        .get(2)
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`if_else()` requires 3 arguments"))?;
 
     match cond {
         Value::Bool(b) => Ok(if *b { yes.clone() } else { no.clone() }),
@@ -190,9 +211,18 @@ pub(crate) fn native_if_else(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
             // Matrix row-wise selection: cond is Vector of length M, yes/no are Matrix(M, N)
             if let (
-                Value::Matrix { rows: r1, cols: c1, data: d1 },
-                Value::Matrix { rows: r2, cols: c2, data: d2 },
-            ) = (yes, no) {
+                Value::Matrix {
+                    rows: r1,
+                    cols: c1,
+                    data: d1,
+                },
+                Value::Matrix {
+                    rows: r2,
+                    cols: c2,
+                    data: d2,
+                },
+            ) = (yes, no)
+            {
                 if *r1 == *r2 && *c1 == *c2 && len == *r1 {
                     let m = *r1;
                     let n = *c1;
@@ -227,24 +257,31 @@ pub(crate) fn native_if_else(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
             // Fast-path: numeric yes/no, cond has no NAs and is boolean
             if cond_data.null_count() == 0 {
-                if let (Some(yes_src), Some(no_src)) = (as_numeric_source(yes, len), as_numeric_source(no, len)) {
+                if let (Some(yes_src), Some(no_src)) =
+                    (as_numeric_source(yes, len), as_numeric_source(no, len))
+                {
                     if let Ok(bool_ca) = cond_data.column().bool() {
                         let data: Vec<f64> = if len >= crate::eval::PARALLEL_THRESHOLD {
-                            (0..len).into_par_iter().map(|i| {
-                                if bool_ca.get(i).unwrap_or(false) {
-                                    yes_src.get(i)
-                                } else {
-                                    no_src.get(i)
-                                }
-                            }).collect()
+                            (0..len)
+                                .into_par_iter()
+                                .map(|i| {
+                                    if bool_ca.get(i).unwrap_or(false) {
+                                        yes_src.get(i)
+                                    } else {
+                                        no_src.get(i)
+                                    }
+                                })
+                                .collect()
                         } else {
-                            (0..len).map(|i| {
-                                if bool_ca.get(i).unwrap_or(false) {
-                                    yes_src.get(i)
-                                } else {
-                                    no_src.get(i)
-                                }
-                            }).collect()
+                            (0..len)
+                                .map(|i| {
+                                    if bool_ca.get(i).unwrap_or(false) {
+                                        yes_src.get(i)
+                                    } else {
+                                        no_src.get(i)
+                                    }
+                                })
+                                .collect()
                         };
                         return Ok(Value::Vector(VectorData::from_f64(data)));
                     }
@@ -265,13 +302,18 @@ pub(crate) fn native_if_else(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("`if_else()` condition must be Bool or Vector[Bool], found `{}`", other.type_name()),
+            format!(
+                "`if_else()` condition must be Bool or Vector[Bool], found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
 
 pub(crate) fn native_between(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`between()` requires 3 arguments"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`between()` requires 3 arguments"))?;
     let lo = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`between()` second argument (lo) must be numeric")
     })?;
@@ -303,17 +345,28 @@ pub(crate) fn native_between(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 };
                 Ok(Value::Vector(VectorData::from_bool(data)))
             } else {
-                Ok(Value::Vector(VectorData::from_values(vd.iter().map(|it| check(it, lo, hi)).collect())))
+                Ok(Value::Vector(VectorData::from_values(
+                    vd.iter().map(|it| check(it, lo, hi)).collect(),
+                )))
             }
         }
-        Value::Vector(items) => Ok(Value::Vector(VectorData::from_values(items.iter().map(|it| check(it, lo, hi)).collect()))),
+        Value::Vector(items) => Ok(Value::Vector(VectorData::from_values(
+            items.iter().map(|it| check(it, lo, hi)).collect(),
+        ))),
         other => Ok(check(other, lo, hi)),
     }
 }
 
-pub(crate) fn sort_vector(args: Vec<Value>, desc: bool, fn_name: &str) -> Result<Value, Diagnostic> {
+pub(crate) fn sort_vector(
+    args: Vec<Value>,
+    desc: bool,
+    fn_name: &str,
+) -> Result<Value, Diagnostic> {
     let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", format!("`{}()` requires a Vector argument", fn_name))
+        Diagnostic::compute_error(
+            "C0201",
+            format!("`{}()` requires a Vector argument", fn_name),
+        )
     })?;
 
     // Fast path: no NA, and the Vector is numeric -- get the sort order from a cheap
@@ -339,7 +392,10 @@ pub(crate) fn sort_vector(args: Vec<Value>, desc: bool, fn_name: &str) -> Result
             }
             let idx_ca = IdxCa::from_vec(PlSmallStr::EMPTY, idx);
             let new_col = vd.column().take(&idx_ca).map_err(|e| {
-                Diagnostic::compute_error("C0210", format!("internal error reordering `{}()`'s result: {e}", fn_name))
+                Diagnostic::compute_error(
+                    "C0210",
+                    format!("internal error reordering `{}()`'s result: {e}", fn_name),
+                )
             })?;
             return Ok(Value::Vector(VectorData::from_column_no_na(new_col)));
         }
@@ -367,9 +423,10 @@ pub(crate) fn native_sort_desc(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// side needs to go fast: `as_f64_view()` + `total_cmp` when the input is NA-free and
 /// numeric, instead of `compare_values` over a fully materialized `Vec<Value>`.
 pub(crate) fn native_rank(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let vd = args.first().and_then(as_vector_data).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`rank()` requires a Vector argument")
-    })?;
+    let vd = args
+        .first()
+        .and_then(as_vector_data)
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`rank()` requires a Vector argument"))?;
 
     if vd.null_count() == 0 {
         if let Ok(view) = vd.as_f64_view() {
@@ -404,7 +461,8 @@ pub(crate) fn native_rank(args: Vec<Value>) -> Result<Value, Diagnostic> {
     while i < n {
         let mut j = i;
         while j + 1 < n
-            && crate::io::compare_values(items.get(order[j + 1]), items.get(order[i])) == std::cmp::Ordering::Equal
+            && crate::io::compare_values(items.get(order[j + 1]), items.get(order[i]))
+                == std::cmp::Ordering::Equal
         {
             j += 1;
         }
@@ -424,22 +482,35 @@ pub(crate) fn native_filter_na(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if vd.null_count() == 0 {
         return Ok(Value::Vector(vd.clone()));
     }
-    let non_na: Vec<Value> = vd.iter().filter(|v| !matches!(v, Value::NA(_))).cloned().collect();
+    let non_na: Vec<Value> = vd
+        .iter()
+        .filter(|v| !matches!(v, Value::NA(_)))
+        .cloned()
+        .collect();
     Ok(Value::Vector(VectorData::from_values(non_na)))
 }
 
 pub(crate) fn native_quantile(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
-        return Err(Diagnostic::compute_error("C0201", "`quantile()` requires 2 arguments: (vector, prob)"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`quantile()` requires 2 arguments: (vector, prob)",
+        ));
     }
     let vd = as_vector_data(&args[0]).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`quantile()` first argument must be a Vector")
     })?;
     let prob = args[1].as_f64().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`quantile()` second argument must be a number between 0 and 1")
+        Diagnostic::compute_error(
+            "C0201",
+            "`quantile()` second argument must be a number between 0 and 1",
+        )
     })?;
     if prob < 0.0 || prob > 1.0 {
-        return Err(Diagnostic::compute_error("C0202", format!("Quantile prob must be in [0, 1], got {prob}")));
+        return Err(Diagnostic::compute_error(
+            "C0202",
+            format!("Quantile prob must be in [0, 1], got {prob}"),
+        ));
     }
 
     let mut vals: Vec<f64> = Vec::new();
@@ -470,7 +541,10 @@ pub(crate) fn native_quantile(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub(crate) fn native_append(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
-        return Err(Diagnostic::compute_error("C0201", "`append()` requires at least 2 arguments: (vector, element)"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`append()` requires at least 2 arguments: (vector, element)",
+        ));
     }
     let mut items: Vec<Value> = match &args[0] {
         Value::Vector(vd) => vd.iter().cloned().collect(),
@@ -484,7 +558,10 @@ pub(crate) fn native_append(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub(crate) fn native_sort(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Err(Diagnostic::compute_error("C0201", "`sort()` requires a vector argument"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`sort()` requires a vector argument",
+        ));
     }
     match &args[0] {
         Value::Vector(vd) => {
@@ -495,7 +572,9 @@ pub(crate) fn native_sort(args: Vec<Value>) -> Result<Value, Diagnostic> {
             } else {
                 let mut items: Vec<Value> = vd.iter().cloned().collect();
                 items.sort_by(|a, b| match (a, b) {
-                    (Value::F64(x), Value::F64(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+                    (Value::F64(x), Value::F64(y)) => {
+                        x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
+                    }
                     (Value::I64(x), Value::I64(y)) => x.cmp(y),
                     (Value::String(x), Value::String(y)) => x.cmp(y),
                     _ => std::cmp::Ordering::Equal,
@@ -506,5 +585,3 @@ pub(crate) fn native_sort(args: Vec<Value>) -> Result<Value, Diagnostic> {
         other => Ok(Value::Vector(VectorData::from_values(vec![other.clone()]))),
     }
 }
-
-

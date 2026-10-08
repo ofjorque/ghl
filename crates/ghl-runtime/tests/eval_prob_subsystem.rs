@@ -194,7 +194,10 @@ fn test_z_test_and_cor_test() {
 
     // a and b are almost perfectly linearly correlated: r > 0.999
     assert!(r_est > 0.999, "Expected r > 0.999, got {r_est}");
-    assert!(cor_pval < 0.0001, "Expected highly significant correlation, got {cor_pval}");
+    assert!(
+        cor_pval < 0.0001,
+        "Expected highly significant correlation, got {cor_pval}"
+    );
 
     let cor_td_val = interp.env.get("cor_td").unwrap();
     assert!(matches!(cor_td_val, Value::DataFrame { .. }));

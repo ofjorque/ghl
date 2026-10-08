@@ -77,7 +77,9 @@ mod tests {
         let mut jit = JitEngine::new().expect("jit init ok");
         jit.compile_module(&hir_module).expect("jit compilation ok");
 
-        let hypot_fn = jit.get_fn_f64_2("hypot_approx").expect("hypot_approx compiled");
+        let hypot_fn = jit
+            .get_fn_f64_2("hypot_approx")
+            .expect("hypot_approx compiled");
         // 3.0^2 + 4.0^2 = 9.0 + 16.0 = 25.0
         let res = hypot_fn(3.0, 4.0);
         assert!((res - 25.0).abs() < 1e-6);
@@ -145,7 +147,9 @@ mod tests {
         let mut jit = JitEngine::new().expect("jit init ok");
         jit.compile_module(&hir_module).expect("jit compilation ok");
 
-        let dead_fn = jit.get_fn_i64_1("dead_branch").expect("dead_branch compiled");
+        let dead_fn = jit
+            .get_fn_i64_1("dead_branch")
+            .expect("dead_branch compiled");
         assert_eq!(dead_fn(21), 42);
     }
 
@@ -167,7 +171,8 @@ mod tests {
         let obj_bytes = aot.compile_module(&hir_module).expect("aot compilation ok");
 
         assert!(!obj_bytes.is_empty(), "Object bytes should not be empty");
-        let obj_file = cranelift_object::object::File::parse(&*obj_bytes).expect("parse valid object file");
+        let obj_file =
+            cranelift_object::object::File::parse(&*obj_bytes).expect("parse valid object file");
         use cranelift_object::object::{Object, ObjectSymbol};
         let symbols: Vec<_> = obj_file.symbols().filter_map(|s| s.name().ok()).collect();
         assert!(
@@ -201,11 +206,14 @@ mod tests {
         // Test AOT object emission
         let aot = AotEngine::new("script_main").expect("aot init ok");
         let obj_bytes = aot.compile_module(&hir_module).expect("aot compilation ok");
-        let obj_file = cranelift_object::object::File::parse(&*obj_bytes).expect("parse valid object file");
+        let obj_file =
+            cranelift_object::object::File::parse(&*obj_bytes).expect("parse valid object file");
         use cranelift_object::object::{Object, ObjectSymbol};
         let symbols: Vec<_> = obj_file.symbols().filter_map(|s| s.name().ok()).collect();
         assert!(
-            symbols.iter().any(|&s| s == "__ghl_main" || s == "___ghl_main"),
+            symbols
+                .iter()
+                .any(|&s| s == "__ghl_main" || s == "___ghl_main"),
             "Object should export `__ghl_main` (found: {:?})",
             symbols
         );
@@ -228,14 +236,23 @@ mod tests {
         let mut jit = JitEngine::new().expect("jit init ok");
         jit.compile_module(&hir_module).expect("jit compilation ok");
 
-        let sum_fn = jit.get_fn_i64_2("sum_tail_rec").expect("compiled sum_tail_rec");
+        let sum_fn = jit
+            .get_fn_i64_2("sum_tail_rec")
+            .expect("compiled sum_tail_rec");
 
         let t0 = std::time::Instant::now();
         let res = sum_fn(100_000, 0);
         let elapsed = t0.elapsed();
 
-        assert_eq!(res, 5000050000, "100k tail-recursive sum must match Gauss formula");
-        assert!(elapsed.as_millis() < 50, "Native TCO must run 100k iterations in milliseconds (took {:?})", elapsed);
+        assert_eq!(
+            res, 5000050000,
+            "100k tail-recursive sum must match Gauss formula"
+        );
+        assert!(
+            elapsed.as_millis() < 50,
+            "Native TCO must run 100k iterations in milliseconds (took {:?})",
+            elapsed
+        );
     }
 
     #[test]
@@ -285,7 +302,11 @@ mod tests {
         let elapsed = t0.elapsed();
 
         assert_eq!(res, 500000500000);
-        assert!(elapsed.as_millis() < 50, "1M iteration while-loop in native Cranelift must run in <50ms (took {:?})", elapsed);
+        assert!(
+            elapsed.as_millis() < 50,
+            "1M iteration while-loop in native Cranelift must run in <50ms (took {:?})",
+            elapsed
+        );
     }
 
     #[test]
@@ -336,7 +357,9 @@ mod tests {
         let mut jit = JitEngine::new().expect("jit init ok");
         jit.compile_module(&hir_module).expect("jit compilation ok");
 
-        let sum_fn = jit.get_fn_i64_1("sum_evens_until").expect("compiled sum_evens_until");
+        let sum_fn = jit
+            .get_fn_i64_1("sum_evens_until")
+            .expect("compiled sum_evens_until");
         // evens: 2, 4, 6, 8, 10
         // cumsums: 2, 6, 12, 20, 30
         assert_eq!(sum_fn(15), 12);
@@ -363,10 +386,11 @@ mod tests {
         let mut jit = JitEngine::new().expect("jit init ok");
         jit.compile_module(&hir_module).expect("jit compilation ok");
 
-        let sqrt_fn = jit.get_fn_f64_1("newton_sqrt").expect("compiled newton_sqrt");
+        let sqrt_fn = jit
+            .get_fn_f64_1("newton_sqrt")
+            .expect("compiled newton_sqrt");
         assert!((sqrt_fn(2.0) - std::f64::consts::SQRT_2).abs() < 1e-10);
         assert!((sqrt_fn(144.0) - 12.0).abs() < 1e-10);
         assert!((sqrt_fn(625.0) - 25.0).abs() < 1e-10);
     }
 }
-

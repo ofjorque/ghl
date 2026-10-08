@@ -13,17 +13,17 @@
 //! - `IvResult` struct packaging with full NEKO contract (`summary`, `tidy`, `glance`,
 //!   `vcov`, `coef`, `residuals`).
 
-use std::sync::Arc;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use faer::prelude::*;
 use faer::Mat;
-use polars_core::prelude::*;
-use statrs::distribution::{ContinuousCDF, StudentsT, FisherSnedecor, ChiSquared, Normal};
+use faer::prelude::*;
 use ghl_diagnostics::Diagnostic;
+use polars_core::prelude::*;
+use statrs::distribution::{ChiSquared, ContinuousCDF, FisherSnedecor, Normal, StudentsT};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
-use crate::value::{Value, FormulaParts};
-use crate::vector_data::VectorData;
 use crate::polars_bridge::pull_column_as_values;
+use crate::value::{FormulaParts, Value};
+use crate::vector_data::VectorData;
 
 // ---------------------------------------------------------------------------
 // 1. Data Structures & Options
@@ -57,12 +57,14 @@ fn solve_ols_faer(
     let k = x_mat.ncols();
 
     let xt = x_mat.transpose();
-    let xtx = &xt * x_mat;
-    let xty = &xt * y_vec;
+    let xtx = xt * x_mat;
+    let xty = xt * y_vec;
 
     let lu = xtx.partial_piv_lu();
     let u = lu.U();
-    let min_pivot = (0..k).map(|i| u[(i, i)].abs()).fold(f64::INFINITY, f64::min);
+    let min_pivot = (0..k)
+        .map(|i| u[(i, i)].abs())
+        .fold(f64::INFINITY, f64::min);
     if min_pivot < 1e-12 {
         return Err(Diagnostic::statistical_error(
             "S0101",
@@ -125,9 +127,21 @@ pub fn fit_iv(
     let x_set: BTreeSet<String> = x_terms.iter().cloned().collect();
     let z_set: BTreeSet<String> = z_terms.iter().cloned().collect();
 
-    let x_exog: Vec<String> = x_terms.iter().filter(|t| z_set.contains(*t)).cloned().collect();
-    let x_endog: Vec<String> = x_terms.iter().filter(|t| !z_set.contains(*t)).cloned().collect();
-    let z_excluded: Vec<String> = z_terms.iter().filter(|t| !x_set.contains(*t)).cloned().collect();
+    let x_exog: Vec<String> = x_terms
+        .iter()
+        .filter(|t| z_set.contains(*t))
+        .cloned()
+        .collect();
+    let x_endog: Vec<String> = x_terms
+        .iter()
+        .filter(|t| !z_set.contains(*t))
+        .cloned()
+        .collect();
+    let z_excluded: Vec<String> = z_terms
+        .iter()
+        .filter(|t| !x_set.contains(*t))
+        .cloned()
+        .collect();
 
     let k_endog = x_endog.len();
     let l_excluded = z_excluded.len();
@@ -186,14 +200,18 @@ pub fn fit_iv(
     if n <= l_instruments {
         return Err(Diagnostic::statistical_error(
             "S0101",
-            format!("Sample size N={n} must be strictly greater than total number of instruments l={l_instruments}"),
+            format!(
+                "Sample size N={n} must be strictly greater than total number of instruments l={l_instruments}"
+            ),
         ));
     }
 
     // 5. Build numeric matrices X, Z, y
     // y: (N x 1)
     let y_vals = &var_columns[y_col];
-    let faer_y = Mat::<f64>::from_fn(n, 1, |r, _| value_to_f64_opt(&y_vals[valid_rows[r]]).unwrap());
+    let faer_y = Mat::<f64>::from_fn(n, 1, |r, _| {
+        value_to_f64_opt(&y_vals[valid_rows[r]]).unwrap()
+    });
 
     // X: (N x k_regressors), col 0 = 1.0 (Intercept)
     let faer_x = Mat::<f64>::from_fn(n, k_regressors, |r, c| {
@@ -218,11 +236,13 @@ pub fn fit_iv(
     // 6. Stage 1: Projection of X onto Z
     // Compute (Z'Z)^-1
     let zt = faer_z.transpose();
-    let ztz = &zt * &faer_z;
+    let ztz = zt * &faer_z;
     let lu_zz = ztz.partial_piv_lu();
 
     let u_zz = lu_zz.U();
-    let min_piv_zz = (0..l_instruments).map(|i| u_zz[(i, i)].abs()).fold(f64::INFINITY, f64::min);
+    let min_piv_zz = (0..l_instruments)
+        .map(|i| u_zz[(i, i)].abs())
+        .fold(f64::INFINITY, f64::min);
     if min_piv_zz < 1e-12 {
         return Err(Diagnostic::statistical_error(
             "S0101",
@@ -230,11 +250,15 @@ pub fn fit_iv(
         ).with_help("Check for collinear instruments or redundant variables in the instrument specification."));
     }
 
-    let ident_l = Mat::<f64>::from_fn(l_instruments, l_instruments, |r, c| if r == c { 1.0 } else { 0.0 });
+    let ident_l = Mat::<f64>::from_fn(
+        l_instruments,
+        l_instruments,
+        |r, c| if r == c { 1.0 } else { 0.0 },
+    );
     let zz_inv = lu_zz.solve(&ident_l);
 
     // Compute first-stage coefficients: Gamma = (Z'Z)^-1 (Z' X) of size (l x k)
-    let ztx = &zt * &faer_x;
+    let ztx = zt * &faer_x;
     let gamma = &zz_inv * &ztx;
 
     // Compute projected regressors: X_hat = Z * Gamma of size (N x k)
@@ -282,18 +306,23 @@ pub fn fit_iv(
         }
     }
 
-    let min_f_stat = first_stage_f_stats.iter().copied().fold(f64::INFINITY, f64::min);
+    let min_f_stat = first_stage_f_stats
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
     let is_weak_instruments = min_f_stat < 10.0 && k_endog > 0;
 
     // 7. Stage 2: Second-stage OLS on instrumented regressors (X_hat)
     // Normal equations: A = X_hat' X_hat = X' P_Z X
     let x_hat_t = x_hat.transpose();
-    let x_hat_tx_hat = &x_hat_t * &x_hat;
-    let x_hat_ty = &x_hat_t * &faer_y;
+    let x_hat_tx_hat = x_hat_t * &x_hat;
+    let x_hat_ty = x_hat_t * &faer_y;
 
     let lu_a = x_hat_tx_hat.partial_piv_lu();
     let u_a = lu_a.U();
-    let min_piv_a = (0..k_regressors).map(|i| u_a[(i, i)].abs()).fold(f64::INFINITY, f64::min);
+    let min_piv_a = (0..k_regressors)
+        .map(|i| u_a[(i, i)].abs())
+        .fold(f64::INFINITY, f64::min);
     if min_piv_a < 1e-12 {
         return Err(Diagnostic::statistical_error(
             "S0101",
@@ -305,7 +334,11 @@ pub fn fit_iv(
     let beta: Vec<f64> = (0..k_regressors).map(|r| faer_beta[(r, 0)]).collect();
 
     // Bread matrix Q = (X_hat' X_hat)^-1
-    let ident_k = Mat::<f64>::from_fn(k_regressors, k_regressors, |r, c| if r == c { 1.0 } else { 0.0 });
+    let ident_k = Mat::<f64>::from_fn(
+        k_regressors,
+        k_regressors,
+        |r, c| if r == c { 1.0 } else { 0.0 },
+    );
     let q_mat = lu_a.solve(&ident_k);
 
     // 8. Compute Structural Residuals using ACTUAL X
@@ -323,7 +356,9 @@ pub fn fit_iv(
     let s2 = ssr / df_resid_f64;
 
     let y_mean = (0..n).map(|r| faer_y[(r, 0)]).sum::<f64>() / (n as f64);
-    let tss = (0..n).map(|r| (faer_y[(r, 0)] - y_mean).powi(2)).sum::<f64>();
+    let tss = (0..n)
+        .map(|r| (faer_y[(r, 0)] - y_mean).powi(2))
+        .sum::<f64>();
     let r2 = if tss > 1e-15 {
         (1.0 - ssr / tss).clamp(0.0, 1.0)
     } else {
@@ -462,11 +497,29 @@ pub fn fit_iv(
     }
 
     let param_columns: Vec<(String, Vec<Value>)> = vec![
-        ("term".to_string(), term_names.iter().map(|s| Value::String(s.clone())).collect()),
-        ("estimate".to_string(), beta.iter().map(|&x| Value::F64(x)).collect()),
-        ("std_error".to_string(), std_errors.iter().map(|&x| Value::F64(x)).collect()),
-        ("statistic".to_string(), t_stats.iter().map(|&x| Value::F64(x)).collect()),
-        ("p_value".to_string(), p_values.iter().map(|&x| Value::F64(x)).collect()),
+        (
+            "term".to_string(),
+            term_names
+                .iter()
+                .map(|s| Value::String(s.clone()))
+                .collect(),
+        ),
+        (
+            "estimate".to_string(),
+            beta.iter().map(|&x| Value::F64(x)).collect(),
+        ),
+        (
+            "std_error".to_string(),
+            std_errors.iter().map(|&x| Value::F64(x)).collect(),
+        ),
+        (
+            "statistic".to_string(),
+            t_stats.iter().map(|&x| Value::F64(x)).collect(),
+        ),
+        (
+            "p_value".to_string(),
+            p_values.iter().map(|&x| Value::F64(x)).collect(),
+        ),
     ];
     let (param_frame, param_na) = crate::polars_bridge::build_dataframe(&param_columns)?;
     let params_df = Value::DataFrame {
@@ -488,37 +541,71 @@ pub fn fit_iv(
     fields.insert("response".to_string(), Value::String(y_col.clone()));
     fields.insert(
         "terms".to_string(),
-        Value::Vector(VectorData::from_values(term_names.iter().map(|s| Value::String(s.clone())).collect())),
+        Value::Vector(VectorData::from_values(
+            term_names
+                .iter()
+                .map(|s| Value::String(s.clone()))
+                .collect(),
+        )),
     );
     fields.insert(
         "endogenous".to_string(),
-        Value::Vector(VectorData::from_values(x_endog.iter().map(|s| Value::String(s.clone())).collect())),
+        Value::Vector(VectorData::from_values(
+            x_endog.iter().map(|s| Value::String(s.clone())).collect(),
+        )),
     );
     fields.insert(
         "instruments".to_string(),
-        Value::Vector(VectorData::from_values(z_terms.iter().map(|s| Value::String(s.clone())).collect())),
+        Value::Vector(VectorData::from_values(
+            z_terms.iter().map(|s| Value::String(s.clone())).collect(),
+        )),
     );
-    fields.insert("coefficients".to_string(), Value::Vector(VectorData::from_f64(beta)));
-    fields.insert("std_errors".to_string(), Value::Vector(VectorData::from_f64(std_errors)));
-    fields.insert("t_stats".to_string(), Value::Vector(VectorData::from_f64(t_stats)));
-    fields.insert("p_values".to_string(), Value::Vector(VectorData::from_f64(p_values)));
+    fields.insert(
+        "coefficients".to_string(),
+        Value::Vector(VectorData::from_f64(beta)),
+    );
+    fields.insert(
+        "std_errors".to_string(),
+        Value::Vector(VectorData::from_f64(std_errors)),
+    );
+    fields.insert(
+        "t_stats".to_string(),
+        Value::Vector(VectorData::from_f64(t_stats)),
+    );
+    fields.insert(
+        "p_values".to_string(),
+        Value::Vector(VectorData::from_f64(p_values)),
+    );
     fields.insert("r2".to_string(), Value::F64(r2));
     fields.insert("n_obs".to_string(), Value::I64(n as i64));
     fields.insert("df_resid".to_string(), Value::I64(df_resid));
     fields.insert("vcov_type".to_string(), Value::String(vcov_desc));
     fields.insert(
         "first_stage_f".to_string(),
-        if min_f_stat.is_finite() { Value::F64(min_f_stat) } else { Value::NA(None) },
+        if min_f_stat.is_finite() {
+            Value::F64(min_f_stat)
+        } else {
+            Value::NA(None)
+        },
     );
-    fields.insert("weak_instruments".to_string(), Value::Bool(is_weak_instruments));
+    fields.insert(
+        "weak_instruments".to_string(),
+        Value::Bool(is_weak_instruments),
+    );
     fields.insert("wu_hausman_stat".to_string(), Value::F64(wu_hausman_stat));
     fields.insert("wu_hausman_p".to_string(), Value::F64(wu_hausman_p));
     fields.insert("sargan_stat".to_string(), sargan_stat);
     fields.insert("sargan_df".to_string(), sargan_df);
     fields.insert("sargan_p".to_string(), sargan_p);
     fields.insert("parameters".to_string(), params_df);
-    fields.insert("residuals".to_string(), Value::Vector(VectorData::from_f64(residuals)));
-    fields.insert("fitted".to_string(), Value::Vector(VectorData::from_f64(fitted)));
+    fields.insert(
+        "residuals".to_string(),
+        Value::Vector(VectorData::from_f64(residuals)),
+    );
+    fields.insert(
+        "fitted".to_string(),
+        Value::Vector(VectorData::from_f64(fitted)),
+    );
     fields.insert(
         "vcov".to_string(),
         Value::Matrix {
@@ -548,11 +635,16 @@ pub fn native_iv_regress(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 
     let formula_parts = match &args[0] {
-        Value::Formula { response, parts, .. } => FormulaParts::new(response.clone(), parts.clone()),
+        Value::Formula {
+            response, parts, ..
+        } => FormulaParts::new(response.clone(), parts.clone()),
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `iv_regress()` must be a Formula, found `{}`", other.type_name()),
+                format!(
+                    "First argument of `iv_regress()` must be a Formula, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -562,7 +654,10 @@ pub fn native_iv_regress(args: Vec<Value>) -> Result<Value, Diagnostic> {
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("Second argument of `iv_regress()` must be a DataFrame, found `{}`", other.type_name()),
+                format!(
+                    "Second argument of `iv_regress()` must be a DataFrame, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };

@@ -1,6 +1,6 @@
-use chumsky::prelude::*;
-use crate::lexer::{Token, lex};
 use crate::ast::*;
+use crate::lexer::{Token, lex};
+use chumsky::prelude::*;
 
 pub fn type_parser() -> impl Parser<Token, TypeAnnotation, Error = Simple<Token>> + Clone {
     recursive(|ty| {
@@ -75,23 +75,24 @@ pub fn fn_param_parser() -> impl Parser<Token, FnParam, Error = Simple<Token>> +
 
     let self_param = just(Token::Amp)
         .ignore_then(just(Token::Mut).or_not())
-        .then(self_tok.clone())
+        .then(self_tok)
         .map_with_span(|(is_mut, _name), span| {
-            let ref_str = if is_mut.is_some() { "&mut self" } else { "&self" };
+            let ref_str = if is_mut.is_some() {
+                "&mut self"
+            } else {
+                "&self"
+            };
             FnParam {
                 name: ref_str.to_string(),
                 ty: Some(TypeAnnotation::Simple("Self".to_string())),
                 span,
             }
         })
-        .or(
-            self_tok
-                .map_with_span(|name, span| FnParam {
-                    name,
-                    ty: Some(TypeAnnotation::Simple("Self".to_string())),
-                    span,
-                })
-        );
+        .or(self_tok.map_with_span(|name, span| FnParam {
+            name,
+            ty: Some(TypeAnnotation::Simple("Self".to_string())),
+            span,
+        }));
 
     let ident_str = select! {
         Token::Ident(name) => name,
@@ -110,32 +111,43 @@ where
     E: Parser<Token, Expr, Error = Simple<Token>> + Clone,
 {
     let colon_wildcard = just(Token::Colon).to(IndexSpec::All);
-    let range_starts_with_dotdot_eq = just(Token::DotDotEq)
-        .ignore_then(expr.clone())
-        .map(|e| IndexSpec::Range {
-            start: None,
-            end: Some(Box::new(e)),
-            inclusive: true,
-        });
-    let range_starts_with_dotdot = just(Token::DotDot)
-        .ignore_then(expr.clone().or_not())
-        .map(|opt_e| match opt_e {
-            Some(e) => IndexSpec::Range {
+    let range_starts_with_dotdot_eq =
+        just(Token::DotDotEq)
+            .ignore_then(expr.clone())
+            .map(|e| IndexSpec::Range {
                 start: None,
                 end: Some(Box::new(e)),
-                inclusive: false,
-            },
-            None => IndexSpec::All,
-        });
-    let index_from_expr = expr.clone()
+                inclusive: true,
+            });
+    let range_starts_with_dotdot =
+        just(Token::DotDot)
+            .ignore_then(expr.clone().or_not())
+            .map(|opt_e| match opt_e {
+                Some(e) => IndexSpec::Range {
+                    start: None,
+                    end: Some(Box::new(e)),
+                    inclusive: false,
+                },
+                None => IndexSpec::All,
+            });
+    let index_from_expr = expr
+        .clone()
         .then(
-            just(Token::DotDotEq).ignore_then(expr.clone()).map(|e| Some((true, Some(e))))
-                .or(just(Token::DotDot).ignore_then(expr.clone().or_not()).map(|opt_e| Some((false, opt_e))))
-                .or(empty().to(None))
+            just(Token::DotDotEq)
+                .ignore_then(expr.clone())
+                .map(|e| Some((true, Some(e))))
+                .or(just(Token::DotDot)
+                    .ignore_then(expr.clone().or_not())
+                    .map(|opt_e| Some((false, opt_e))))
+                .or(empty().to(None)),
         )
         .map(|(first, opt_range)| match opt_range {
             None => match first.kind {
-                ExprKind::Range { start, end, inclusive } => IndexSpec::Range {
+                ExprKind::Range {
+                    start,
+                    end,
+                    inclusive,
+                } => IndexSpec::Range {
                     start: Some(start),
                     end: Some(end),
                     inclusive,
@@ -155,7 +167,9 @@ where
         .or(index_from_expr)
 }
 
-pub fn index_bracket_parser<E>(expr: E) -> impl Parser<Token, Vec<IndexSpec>, Error = Simple<Token>> + Clone
+pub fn index_bracket_parser<E>(
+    expr: E,
+) -> impl Parser<Token, Vec<IndexSpec>, Error = Simple<Token>> + Clone
 where
     E: Parser<Token, Expr, Error = Simple<Token>> + Clone,
 {
@@ -186,7 +200,12 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
         };
 
         let multi_segment_path = path_segment
-            .then(just(Token::PathSep).ignore_then(path_segment).repeated().at_least(1))
+            .then(
+                just(Token::PathSep)
+                    .ignore_then(path_segment)
+                    .repeated()
+                    .at_least(1),
+            )
             .map_with_span(|(first, rest), span| {
                 let mut segments = vec![first];
                 segments.extend(rest);
@@ -230,7 +249,9 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 .allow_trailing()
                 .delimited_by(just(Token::LBrace), just(Token::RBrace)),
         )
-        .map_with_span(|(name, fields), span| Expr::new(ExprKind::StructLit { name, fields }, span));
+        .map_with_span(|(name, fields), span| {
+            Expr::new(ExprKind::StructLit { name, fields }, span)
+        });
 
         let val = lit_val.or(struct_literal).or(ident_or_path);
 
@@ -244,7 +265,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
         };
 
         let first_comp_clause = just(Token::For)
-            .ignore_then(comp_var.clone())
+            .ignore_then(comp_var)
             .then_ignore(just(Token::In))
             .then(expr.clone())
             .map_with_span(|(var, iter), span| ComprehensionClause { var, iter, span });
@@ -278,12 +299,14 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .then(
                 comp_tail
                     .map(|(clauses, cond)| BracketTail::Comp(clauses, cond))
-                    .or(
-                        just(Token::Comma)
-                            .ignore_then(expr.clone().separated_by(just(Token::Comma)).allow_trailing())
-                            .or_not()
-                            .map(|rest| BracketTail::Vec(rest.unwrap_or_default()))
-                    )
+                    .or(just(Token::Comma)
+                        .ignore_then(
+                            expr.clone()
+                                .separated_by(just(Token::Comma))
+                                .allow_trailing(),
+                        )
+                        .or_not()
+                        .map(|rest| BracketTail::Vec(rest.unwrap_or_default()))),
             )
             .delimited_by(just(Token::LBracket), just(Token::RBracket))
             .map_with_span(|(first, tail), span| match tail {
@@ -355,7 +378,10 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .map_with_span(|fields, span| Expr::new(ExprKind::RecordLit(fields), span));
 
         // Matrix literal: mat [ 1.0, 2.0 ; 3.0, 4.0 ]
-        let mat_row = expr.clone().separated_by(just(Token::Comma)).allow_trailing();
+        let mat_row = expr
+            .clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing();
         let matrix_literal = just(Token::Mat)
             .ignore_then(
                 mat_row
@@ -457,7 +483,15 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .then(expr.clone())
             .then_ignore(just(Token::Semicolon).or_not())
             .map_with_span(|(((target, indices), op), value), span| {
-                Stmt::new(StmtKind::IndexAssign { target, indices, op, value }, span)
+                Stmt::new(
+                    StmtKind::IndexAssign {
+                        target,
+                        indices,
+                        op,
+                        value,
+                    },
+                    span,
+                )
             });
 
             // `target.field1[.field2...] <op> value;` -- in-place mutation of struct, record, or dataframe field.
@@ -478,7 +512,15 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .then(expr.clone())
             .then_ignore(just(Token::Semicolon).or_not())
             .map_with_span(|(((target, fields), op), value), span| {
-                Stmt::new(StmtKind::FieldAssign { target, fields, op, value }, span)
+                Stmt::new(
+                    StmtKind::FieldAssign {
+                        target,
+                        fields,
+                        op,
+                        value,
+                    },
+                    span,
+                )
             });
 
             // `name <op> value;` -- variable reassignment or compound assignment (`+=`, `-=`, `*=`, `/=`).
@@ -486,14 +528,18 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 .then(assign_op_parser())
                 .then(expr.clone())
                 .then_ignore(just(Token::Semicolon).or_not())
-                .map_with_span(|((name, op), value), span| Stmt::new(StmtKind::Assign { name, op, value }, span));
+                .map_with_span(|((name, op), value), span| {
+                    Stmt::new(StmtKind::Assign { name, op, value }, span)
+                });
 
             let expr_stmt = expr
                 .clone()
                 .then(
-                    just(Token::Semicolon)
-                        .map(|_| true)
-                        .or(filter(|t: &Token| *t != Token::RBrace).rewind().map(|_| false)),
+                    just(Token::Semicolon).map(|_| true).or(filter(|t: &Token| {
+                        *t != Token::RBrace
+                    })
+                    .rewind()
+                    .map(|_| false)),
                 )
                 .try_map(|(e, has_semi), span| {
                     if has_semi
@@ -625,28 +671,28 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 let start_idx = for_span.start;
                 let end_idx = body.span.end;
                 match iter_expr.kind {
-                    ExprKind::Range { start, end, inclusive: _ } => {
-                        Expr::new(
-                            ExprKind::For {
-                                var,
-                                start,
-                                end,
-                                body: Box::new(body),
-                            },
-                            start_idx..end_idx,
-                        )
-                    }
-                    _ => {
-                        Expr::new(
-                            ExprKind::For {
-                                var,
-                                start: Box::new(Expr::new(ExprKind::Lit(Literal::Int(0)), 0..0)),
-                                end: Box::new(iter_expr),
-                                body: Box::new(body),
-                            },
-                            start_idx..end_idx,
-                        )
-                    }
+                    ExprKind::Range {
+                        start,
+                        end,
+                        inclusive: _,
+                    } => Expr::new(
+                        ExprKind::For {
+                            var,
+                            start,
+                            end,
+                            body: Box::new(body),
+                        },
+                        start_idx..end_idx,
+                    ),
+                    _ => Expr::new(
+                        ExprKind::For {
+                            var,
+                            start: Box::new(Expr::new(ExprKind::Lit(Literal::Int(0)), 0..0)),
+                            end: Box::new(iter_expr),
+                            body: Box::new(body),
+                        },
+                        start_idx..end_idx,
+                    ),
                 }
             });
 
@@ -673,7 +719,13 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
         .then_ignore(just(Token::Eq).or(just(Token::Colon)))
         .then(expr.clone())
         .map_with_span(|(name, value), span| {
-            Expr::new(ExprKind::NamedArg { name, value: Box::new(value) }, span)
+            Expr::new(
+                ExprKind::NamedArg {
+                    name,
+                    value: Box::new(value),
+                },
+                span,
+            )
         });
         let call_arg = named_arg.or(expr.clone());
 
@@ -829,32 +881,36 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
         let range_expr = comparison
             .clone()
             .then(
-                just(Token::DotDotEq).to(true)
+                just(Token::DotDotEq)
+                    .to(true)
                     .or(just(Token::DotDot).to(false))
                     .then(comparison.clone())
-                    .or_not()
+                    .or_not(),
             )
-            .map(|(start, opt_end)| {
-                match opt_end {
-                    Some((inclusive, end)) => {
-                        let span = start.span.start..end.span.end;
-                        Expr::new(
-                            ExprKind::Range {
-                                start: Box::new(start),
-                                end: Box::new(end),
-                                inclusive,
-                            },
-                            span,
-                        )
-                    }
-                    None => start,
+            .map(|(start, opt_end)| match opt_end {
+                Some((inclusive, end)) => {
+                    let span = start.span.start..end.span.end;
+                    Expr::new(
+                        ExprKind::Range {
+                            start: Box::new(start),
+                            end: Box::new(end),
+                            inclusive,
+                        },
+                        span,
+                    )
                 }
+                None => start,
             });
 
         // Logical AND: &&
         let logical_and = range_expr
             .clone()
-            .then(just(Token::AndAnd).to(BinaryOp::And).then(range_expr).repeated())
+            .then(
+                just(Token::AndAnd)
+                    .to(BinaryOp::And)
+                    .then(range_expr)
+                    .repeated(),
+            )
             .foldl(|lhs, (op, rhs)| {
                 let span = lhs.span.start..rhs.span.end;
                 Expr::new(
@@ -870,7 +926,12 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
         // Logical OR: ||
         let logical_or = logical_and
             .clone()
-            .then(just(Token::OrOr).to(BinaryOp::Or).then(logical_and).repeated())
+            .then(
+                just(Token::OrOr)
+                    .to(BinaryOp::Or)
+                    .then(logical_and)
+                    .repeated(),
+            )
             .foldl(|lhs, (op, rhs)| {
                 let span = lhs.span.start..rhs.span.end;
                 Expr::new(
@@ -937,9 +998,14 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             .boxed();
 
         // Patchwork composition: p1 | p2 (Token::VBar)
-        let patchwork = formula
+        formula
             .clone()
-            .then(just(Token::VBar).to(BinaryOp::BitOr).then(formula).repeated())
+            .then(
+                just(Token::VBar)
+                    .to(BinaryOp::BitOr)
+                    .then(formula)
+                    .repeated(),
+            )
             .foldl(|lhs, (op, rhs)| {
                 let span = lhs.span.start..rhs.span.end;
                 Expr::new(
@@ -951,9 +1017,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                     span,
                 )
             })
-            .boxed();
-
-        patchwork
+            .boxed()
     })
 }
 
@@ -969,15 +1033,11 @@ pub fn use_stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Cl
         .then(just(Token::As).ignore_then(ident_name).or_not())
         .map(|(name, alias)| UseItem { name, alias });
 
-    let group_or_glob = just(Token::Star)
-        .map(|_| UseKind::Glob)
-        .or(
-            use_item
-                .separated_by(just(Token::Comma))
-                .allow_trailing()
-                .delimited_by(just(Token::LBrace), just(Token::RBrace))
-                .map(UseKind::Items),
-        );
+    let group_or_glob = just(Token::Star).map(|_| UseKind::Glob).or(use_item
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .delimited_by(just(Token::LBrace), just(Token::RBrace))
+        .map(UseKind::Items));
 
     // Form 1: use a::b::{c, d} or use a::b::*
     let complex_use = ident_name
@@ -993,15 +1053,19 @@ pub fn use_stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Cl
         .then(just(Token::As).ignore_then(ident_name).or_not())
         .map(|(mut segments, alias)| {
             let item_name = segments.pop().expect("at_least(1)");
-            (segments, UseKind::Items(vec![UseItem { name: item_name, alias }]))
+            (
+                segments,
+                UseKind::Items(vec![UseItem {
+                    name: item_name,
+                    alias,
+                }]),
+            )
         });
 
     just(Token::Use)
         .ignore_then(complex_use.or(simple_use))
         .then_ignore(just(Token::Semicolon).or_not())
-        .map_with_span(|(path, kind), span| {
-            Stmt::new(StmtKind::Use(UseStmt { path, kind }), span)
-        })
+        .map_with_span(|(path, kind), span| Stmt::new(StmtKind::Use(UseStmt { path, kind }), span))
 }
 
 pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone {
@@ -1010,13 +1074,12 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         .then_ignore(just(Token::Ident("export_ffi".to_string())))
         .then_ignore(just(Token::RBracket))
         .to(true)
-        .or(
-            just(Token::Extern)
-                .then_ignore(just(Token::StringLit("C".to_string())))
-                .to(true),
-        );
+        .or(just(Token::Extern)
+            .then_ignore(just(Token::StringLit("C".to_string())))
+            .to(true));
 
-    let fn_stmt = just(Token::Pub).or_not()
+    let fn_stmt = just(Token::Pub)
+        .or_not()
         .ignore_then(fn_prefix.or_not())
         .then_ignore(just(Token::Pub).or_not())
         .then_ignore(just(Token::Fn))
@@ -1089,7 +1152,15 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
     .then(expr_parser())
     .then_ignore(just(Token::Semicolon).or_not())
     .map_with_span(|(((target, indices), op), value), span| {
-        Stmt::new(StmtKind::IndexAssign { target, indices, op, value }, span)
+        Stmt::new(
+            StmtKind::IndexAssign {
+                target,
+                indices,
+                op,
+                value,
+            },
+            span,
+        )
     });
 
     let field_assign_stmt = select! {
@@ -1109,14 +1180,24 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
     .then(expr_parser())
     .then_ignore(just(Token::Semicolon).or_not())
     .map_with_span(|(((target, fields), op), value), span| {
-        Stmt::new(StmtKind::FieldAssign { target, fields, op, value }, span)
+        Stmt::new(
+            StmtKind::FieldAssign {
+                target,
+                fields,
+                op,
+                value,
+            },
+            span,
+        )
     });
 
     let assign_stmt = select! { Token::Ident(name) => name }
         .then(assign_op_parser())
         .then(expr_parser())
         .then_ignore(just(Token::Semicolon).or_not())
-        .map_with_span(|((name, op), value), span| Stmt::new(StmtKind::Assign { name, op, value }, span));
+        .map_with_span(|((name, op), value), span| {
+            Stmt::new(StmtKind::Assign { name, op, value }, span)
+        });
 
     let expr_stmt = expr_parser()
         .then_ignore(just(Token::Semicolon).or_not())
@@ -1209,14 +1290,12 @@ pub fn stmt_parser() -> impl Parser<Token, Stmt, Error = Simple<Token>> + Clone 
         )
         .then(just(Token::Arrow).ignore_then(type_parser()).or_not())
         .then(expr_parser())
-        .map_with_span(|(((name, params), ret_ty), body), span| {
-            ImplItem::Method {
-                name,
-                params,
-                ret_ty,
-                body,
-                span,
-            }
+        .map_with_span(|(((name, params), ret_ty), body), span| ImplItem::Method {
+            name,
+            params,
+            ret_ty,
+            body,
+            span,
         });
 
     let impl_stmt = just(Token::Impl)
@@ -1286,9 +1365,15 @@ pub fn program_parser() -> impl Parser<Token, Program, Error = Simple<Token>> {
     // return `Err` whenever any error was recorded, regardless of how much of
     // the program still parsed.
     stmt_parser()
-        .recover_with(skip_until([Token::Semicolon], |span: std::ops::Range<usize>| {
-            Stmt::new(StmtKind::Expr(Expr::new(ExprKind::Placeholder, span.clone())), span)
-        }).consume_end())
+        .recover_with(
+            skip_until([Token::Semicolon], |span: std::ops::Range<usize>| {
+                Stmt::new(
+                    StmtKind::Expr(Expr::new(ExprKind::Placeholder, span.clone())),
+                    span,
+                )
+            })
+            .consume_end(),
+        )
         .repeated()
         .then_ignore(end())
         .map(|statements| Program { statements })
@@ -1405,7 +1490,12 @@ mod tests {
         let measurement = parse("let f = f1 =~ x1 + x2 + x3;").expect("Should parse =~");
         match &measurement.statements[0].kind {
             StmtKind::Let { init, .. } => match &init.kind {
-                ExprKind::Formula { op, response, terms, .. } => {
+                ExprKind::Formula {
+                    op,
+                    response,
+                    terms,
+                    ..
+                } => {
                     // `x1 + x2 + x3` parses as a single `+`-chain expression here;
                     // it's `ghl-runtime`'s `extract_formula_term` that flattens it
                     // into individual predictor names at evaluation time.
@@ -1413,7 +1503,11 @@ mod tests {
                     assert!(matches!(&response.kind, ExprKind::Ident(s) if s == "f1"));
                     assert_eq!(terms.len(), 1);
                     let rendered = terms[0].to_string();
-                    assert!(rendered.contains("x1") && rendered.contains("x2") && rendered.contains("x3"));
+                    assert!(
+                        rendered.contains("x1")
+                            && rendered.contains("x2")
+                            && rendered.contains("x3")
+                    );
                 }
                 other => panic!("Expected Formula, got {other:?}"),
             },
@@ -1472,7 +1566,13 @@ mod tests {
     fn test_parse_multipart_formulas() {
         let single = parse("let f = y ~ x1 + x2;").expect("Should parse single part");
         if let StmtKind::Let { init, .. } = &single.statements[0].kind {
-            if let ExprKind::Formula { op, response, terms, parts } = &init.kind {
+            if let ExprKind::Formula {
+                op,
+                response,
+                terms,
+                parts,
+            } = &init.kind
+            {
                 assert_eq!(*op, FormulaOp::Regression);
                 assert!(matches!(&response.kind, ExprKind::Ident(s) if s == "y"));
                 assert_eq!(terms.len(), 1);
@@ -1482,9 +1582,16 @@ mod tests {
             }
         }
 
-        let two_parts = parse("let f = y ~ x1 + x2 | entity + time;").expect("Should parse 2 parts");
+        let two_parts =
+            parse("let f = y ~ x1 + x2 | entity + time;").expect("Should parse 2 parts");
         if let StmtKind::Let { init, .. } = &two_parts.statements[0].kind {
-            if let ExprKind::Formula { op, response, terms, parts } = &init.kind {
+            if let ExprKind::Formula {
+                op,
+                response,
+                terms,
+                parts,
+            } = &init.kind
+            {
                 assert_eq!(*op, FormulaOp::Regression);
                 assert!(matches!(&response.kind, ExprKind::Ident(s) if s == "y"));
                 assert_eq!(terms.len(), 1);
@@ -1494,9 +1601,16 @@ mod tests {
             }
         }
 
-        let three_parts = parse("let f = y ~ x_exog + x_endog | entity + time | z_instr;").expect("Should parse 3 parts");
+        let three_parts = parse("let f = y ~ x_exog + x_endog | entity + time | z_instr;")
+            .expect("Should parse 3 parts");
         if let StmtKind::Let { init, .. } = &three_parts.statements[0].kind {
-            if let ExprKind::Formula { op, response, terms, parts } = &init.kind {
+            if let ExprKind::Formula {
+                op,
+                response,
+                terms,
+                parts,
+            } = &init.kind
+            {
                 assert_eq!(*op, FormulaOp::Regression);
                 assert!(matches!(&response.kind, ExprKind::Ident(s) if s == "y"));
                 assert_eq!(terms.len(), 1);
@@ -1510,7 +1624,10 @@ mod tests {
         let code = "let f = y ~ x1 + x2 | entity + time | z1 + z2;";
         let parsed = parse(code).unwrap();
         let formatted = crate::fmt::format_program(&parsed.statements);
-        assert_eq!(formatted.trim(), "let f = y ~ x1 + x2 | entity + time | z1 + z2;");
+        assert_eq!(
+            formatted.trim(),
+            "let f = y ~ x1 + x2 | entity + time | z1 + z2;"
+        );
     }
 
     #[test]
@@ -1711,7 +1828,9 @@ mod tests {
                 assert_eq!(name, "res");
                 match &init.kind {
                     ExprKind::Call { callee, args } => {
-                        assert!(matches!(&callee.kind, ExprKind::Path(p) if p == &vec!["arena", "scope"]));
+                        assert!(
+                            matches!(&callee.kind, ExprKind::Path(p) if p == &vec!["arena", "scope"])
+                        );
                         assert_eq!(args.len(), 1);
                         match &args[0].kind {
                             ExprKind::Lambda { params, body } => {
@@ -1888,7 +2007,11 @@ mod tests {
                 ExprKind::Index { indices, .. } => {
                     assert_eq!(indices.len(), 1);
                     match &indices[0] {
-                        IndexSpec::Range { start, end, inclusive } => {
+                        IndexSpec::Range {
+                            start,
+                            end,
+                            inclusive,
+                        } => {
                             assert!(!inclusive);
                             assert!(start.is_some());
                             assert!(end.is_some());
@@ -1906,7 +2029,11 @@ mod tests {
                 ExprKind::Index { indices, .. } => {
                     assert_eq!(indices.len(), 1);
                     match &indices[0] {
-                        IndexSpec::Range { start, end, inclusive } => {
+                        IndexSpec::Range {
+                            start,
+                            end,
+                            inclusive,
+                        } => {
                             assert!(*inclusive);
                             assert!(start.is_some());
                             assert!(end.is_some());
@@ -1934,7 +2061,13 @@ mod tests {
             match &init.kind {
                 ExprKind::Index { indices, .. } => {
                     assert_eq!(indices.len(), 2);
-                    assert!(matches!(&indices[0], IndexSpec::Range { inclusive: false, .. }));
+                    assert!(matches!(
+                        &indices[0],
+                        IndexSpec::Range {
+                            inclusive: false,
+                            ..
+                        }
+                    ));
                     assert_eq!(indices[1], IndexSpec::All);
                 }
                 _ => panic!("expected Index"),
@@ -2028,15 +2161,13 @@ mod tests {
             _ => panic!("expected Impl"),
         }
         match &program.statements[3].kind {
-            StmtKind::Let { init, .. } => {
-                match &init.kind {
-                    ExprKind::StructLit { name, fields } => {
-                        assert_eq!(name, "NormalDistribution");
-                        assert_eq!(fields.len(), 2);
-                    }
-                    _ => panic!("expected StructLit"),
+            StmtKind::Let { init, .. } => match &init.kind {
+                ExprKind::StructLit { name, fields } => {
+                    assert_eq!(name, "NormalDistribution");
+                    assert_eq!(fields.len(), 2);
                 }
-            }
+                _ => panic!("expected StructLit"),
+            },
             _ => panic!("expected Let"),
         }
     }
@@ -2055,7 +2186,13 @@ mod tests {
 
         match &program.statements[0].kind {
             StmtKind::Let { init, .. } => {
-                assert!(matches!(init.kind, ExprKind::Range { inclusive: false, .. }));
+                assert!(matches!(
+                    init.kind,
+                    ExprKind::Range {
+                        inclusive: false,
+                        ..
+                    }
+                ));
             }
             _ => panic!("expected Let"),
         }
@@ -2091,7 +2228,9 @@ mod tests {
         assert_eq!(program.statements.len(), 2);
 
         match &program.statements[0].kind {
-            StmtKind::Fn { name, export_ffi, .. } => {
+            StmtKind::Fn {
+                name, export_ffi, ..
+            } => {
                 assert_eq!(name, "custom_sampler");
                 assert!(*export_ffi);
             }
@@ -2099,7 +2238,9 @@ mod tests {
         }
 
         match &program.statements[1].kind {
-            StmtKind::Fn { name, export_ffi, .. } => {
+            StmtKind::Fn {
+                name, export_ffi, ..
+            } => {
                 assert_eq!(name, "foreign_func");
                 assert!(*export_ffi);
             }
@@ -2123,7 +2264,11 @@ mod tests {
     fn test_parse_recovers_multiple_independent_errors() {
         let code = "let x = ;\nlet y = ;\nlet z = 5;\n";
         let errs = parse_spanned(code).expect_err("should have syntax errors");
-        assert_eq!(errs.len(), 2, "must report both broken statements, not just the first");
+        assert_eq!(
+            errs.len(),
+            2,
+            "must report both broken statements, not just the first"
+        );
 
         // Each error must point at its own statement's `;`, not be misattributed
         // to some other position (a risk with naive recovery strategies).
@@ -2140,7 +2285,11 @@ mod tests {
     fn test_parse_recovery_preserves_valid_statements_around_bad_one() {
         let code = "let a = 1;\nlet bad = ;\nlet b = 2;\n";
         let errs = parse_spanned(code).expect_err("should have exactly one syntax error");
-        assert_eq!(errs.len(), 1, "only the malformed statement should produce an error");
+        assert_eq!(
+            errs.len(),
+            1,
+            "only the malformed statement should produce an error"
+        );
 
         let bad_semicolon = code.rfind("= ;").unwrap() + 2;
         assert_eq!(errs[0].span.start, bad_semicolon);
@@ -2151,15 +2300,27 @@ mod tests {
     /// match), so their `;` can safely be optional there, same as top level.
     #[test]
     fn test_block_let_and_return_semicolons_are_optional() {
-        let code = "fn f(a: int, b: int) -> int {\n    let x = a + 1\n    let y = b + 1\n    x + y\n}";
+        let code =
+            "fn f(a: int, b: int) -> int {\n    let x = a + 1\n    let y = b + 1\n    x + y\n}";
         let program = parse(code).expect("optional `;` on let inside a block must parse");
-        let StmtKind::Fn { body, .. } = &program.statements[0].kind else { panic!("expected fn") };
-        let ExprKind::Block { stmts, expr, .. } = &body.kind else { panic!("expected block body") };
+        let StmtKind::Fn { body, .. } = &program.statements[0].kind else {
+            panic!("expected fn")
+        };
+        let ExprKind::Block { stmts, expr, .. } = &body.kind else {
+            panic!("expected block body")
+        };
 
-        assert_eq!(stmts.len(), 2, "both `let`s must be recognized as separate statements");
+        assert_eq!(
+            stmts.len(),
+            2,
+            "both `let`s must be recognized as separate statements"
+        );
         assert!(matches!(stmts[0].kind, StmtKind::Let { ref name, .. } if name == "x"));
         assert!(matches!(stmts[1].kind, StmtKind::Let { ref name, .. } if name == "y"));
-        assert!(expr.is_some(), "`x + y` must still be captured as the block's trailing value");
+        assert!(
+            expr.is_some(),
+            "`x + y` must still be captured as the block's trailing value"
+        );
     }
 
     /// Regression guard for the one case that must NOT become semicolon-optional:
@@ -2171,12 +2332,22 @@ mod tests {
     fn test_block_trailing_expression_is_still_the_return_value() {
         let code = "fn add(a: int, b: int) -> int {\n    a + b\n}";
         let program = parse(code).expect("syntax ok");
-        let StmtKind::Fn { body, .. } = &program.statements[0].kind else { panic!("expected fn") };
-        let ExprKind::Block { stmts, expr, .. } = &body.kind else { panic!("expected block body") };
+        let StmtKind::Fn { body, .. } = &program.statements[0].kind else {
+            panic!("expected fn")
+        };
+        let ExprKind::Block { stmts, expr, .. } = &body.kind else {
+            panic!("expected block body")
+        };
 
-        assert!(stmts.is_empty(), "`a + b` must not be swallowed as a semicolon-less statement");
         assert!(
-            matches!(expr.as_deref().map(|e| &e.kind), Some(ExprKind::Binary { .. })),
+            stmts.is_empty(),
+            "`a + b` must not be swallowed as a semicolon-less statement"
+        );
+        assert!(
+            matches!(
+                expr.as_deref().map(|e| &e.kind),
+                Some(ExprKind::Binary { .. })
+            ),
             "`a + b` must be the block's trailing value"
         );
     }
@@ -2196,59 +2367,82 @@ mod tests {
 
         // v1: 1D without if
         if let StmtKind::Let { init, .. } = &program.statements[0].kind {
-            if let ExprKind::Comprehension { clauses, condition, .. } = &init.kind {
+            if let ExprKind::Comprehension {
+                clauses, condition, ..
+            } = &init.kind
+            {
                 assert_eq!(clauses.len(), 1);
                 assert_eq!(clauses[0].var, "x");
                 assert!(condition.is_none());
-            } else { panic!("expected comprehension for v1"); }
+            } else {
+                panic!("expected comprehension for v1");
+            }
         }
 
         // v2: 1D with if
         if let StmtKind::Let { init, .. } = &program.statements[1].kind {
-            if let ExprKind::Comprehension { clauses, condition, .. } = &init.kind {
+            if let ExprKind::Comprehension {
+                clauses, condition, ..
+            } = &init.kind
+            {
                 assert_eq!(clauses.len(), 1);
                 assert_eq!(clauses[0].var, "x");
                 assert!(condition.is_some());
-            } else { panic!("expected comprehension for v2"); }
+            } else {
+                panic!("expected comprehension for v2");
+            }
         }
 
         // m1: 2D comma-separated
         if let StmtKind::Let { init, .. } = &program.statements[2].kind {
-            if let ExprKind::Comprehension { clauses, condition, .. } = &init.kind {
+            if let ExprKind::Comprehension {
+                clauses, condition, ..
+            } = &init.kind
+            {
                 assert_eq!(clauses.len(), 2);
                 assert_eq!(clauses[0].var, "r");
                 assert_eq!(clauses[1].var, "c");
                 assert!(condition.is_none());
-            } else { panic!("expected comprehension for m1"); }
+            } else {
+                panic!("expected comprehension for m1");
+            }
         }
 
         // m2: 2D for-separated
         if let StmtKind::Let { init, .. } = &program.statements[3].kind {
-            if let ExprKind::Comprehension { clauses, condition, .. } = &init.kind {
+            if let ExprKind::Comprehension {
+                clauses, condition, ..
+            } = &init.kind
+            {
                 assert_eq!(clauses.len(), 2);
                 assert_eq!(clauses[0].var, "r");
                 assert_eq!(clauses[1].var, "c");
                 assert!(condition.is_none());
-            } else { panic!("expected comprehension for m2"); }
+            } else {
+                panic!("expected comprehension for m2");
+            }
         }
 
         // v3: 2D with if
         if let StmtKind::Let { init, .. } = &program.statements[4].kind {
-            if let ExprKind::Comprehension { clauses, condition, .. } = &init.kind {
+            if let ExprKind::Comprehension {
+                clauses, condition, ..
+            } = &init.kind
+            {
                 assert_eq!(clauses.len(), 2);
                 assert!(condition.is_some());
-            } else { panic!("expected comprehension for v3"); }
+            } else {
+                panic!("expected comprehension for v3");
+            }
         }
 
         // cube: 3D
         if let StmtKind::Let { init, .. } = &program.statements[5].kind {
             if let ExprKind::Comprehension { clauses, .. } = &init.kind {
                 assert_eq!(clauses.len(), 3);
-            } else { panic!("expected comprehension for cube"); }
+            } else {
+                panic!("expected comprehension for cube");
+            }
         }
     }
 }
-
-
-
-

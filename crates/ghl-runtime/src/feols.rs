@@ -12,17 +12,17 @@
 //! - `FeolsResult` struct packaging with full NEKO contract (`summary`, `tidy`, `glance`,
 //!   `vcov`, `coef`, `residuals`).
 
-use std::sync::Arc;
-use std::collections::{BTreeMap, HashMap};
-use faer::prelude::*;
 use faer::Mat;
-use polars_core::prelude::*;
-use statrs::distribution::{ContinuousCDF, StudentsT, Normal};
+use faer::prelude::*;
 use ghl_diagnostics::Diagnostic;
+use polars_core::prelude::*;
+use statrs::distribution::{ContinuousCDF, Normal, StudentsT};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
-use crate::value::{Value, FormulaParts};
-use crate::vector_data::VectorData;
 use crate::polars_bridge::pull_column_as_values;
+use crate::value::{FormulaParts, Value};
+use crate::vector_data::VectorData;
 
 // ---------------------------------------------------------------------------
 // 1. Group-mean Demeaning Algorithms (Method of Alternating Projections)
@@ -60,7 +60,11 @@ pub fn demean_vector(
         let mut out = Vec::with_capacity(n);
         for i in 0..n {
             let g = groups[i];
-            let mean = if counts[g] > 0 { sums[g] / (counts[g] as f64) } else { 0.0 };
+            let mean = if counts[g] > 0 {
+                sums[g] / (counts[g] as f64)
+            } else {
+                0.0
+            };
             out.push(vec[i] - mean);
         }
         return out;
@@ -298,7 +302,7 @@ pub fn fit_feols(
     } else {
         let mut sum = n_groups_per_dim[0];
         for dim in 1..d {
-            sum += if n_groups_per_dim[dim] > 1 { n_groups_per_dim[dim] - 1 } else { 0 };
+            sum += n_groups_per_dim[dim].saturating_sub(1);
         }
         sum
     };
@@ -358,7 +362,9 @@ pub fn fit_feols(
 
     // Check singularity on LU diagonal
     let u = lu.U();
-    let min_pivot = (0..k).map(|i| u[(i, i)].abs()).fold(f64::INFINITY, f64::min);
+    let min_pivot = (0..k)
+        .map(|i| u[(i, i)].abs())
+        .fold(f64::INFINITY, f64::min);
     if min_pivot < 1e-12 {
         return Err(Diagnostic::statistical_error(
             "S0101",
@@ -461,7 +467,10 @@ pub fn fit_feols(
             };
 
             let v = &q_mat * (&m_mat * &q_mat) * factor;
-            (v, format!("Clustered by `{}` ({} clusters)", c_name, n_clusters))
+            (
+                v,
+                format!("Clustered by `{}` ({} clusters)", c_name, n_clusters),
+            )
         }
     };
 
@@ -498,11 +507,26 @@ pub fn fit_feols(
 
     // 12. Build Parameters DataFrame
     let param_columns: Vec<(String, Vec<Value>)> = vec![
-        ("term".to_string(), x_cols.iter().map(|s| Value::String(s.clone())).collect()),
-        ("estimate".to_string(), beta.iter().map(|&x| Value::F64(x)).collect()),
-        ("std_error".to_string(), std_errors.iter().map(|&x| Value::F64(x)).collect()),
-        ("statistic".to_string(), t_stats.iter().map(|&x| Value::F64(x)).collect()),
-        ("p_value".to_string(), p_values.iter().map(|&x| Value::F64(x)).collect()),
+        (
+            "term".to_string(),
+            x_cols.iter().map(|s| Value::String(s.clone())).collect(),
+        ),
+        (
+            "estimate".to_string(),
+            beta.iter().map(|&x| Value::F64(x)).collect(),
+        ),
+        (
+            "std_error".to_string(),
+            std_errors.iter().map(|&x| Value::F64(x)).collect(),
+        ),
+        (
+            "statistic".to_string(),
+            t_stats.iter().map(|&x| Value::F64(x)).collect(),
+        ),
+        (
+            "p_value".to_string(),
+            p_values.iter().map(|&x| Value::F64(x)).collect(),
+        ),
     ];
     let (param_frame, param_na) = crate::polars_bridge::build_dataframe(&param_columns)?;
     let params_df = Value::DataFrame {
@@ -526,10 +550,22 @@ pub fn fit_feols(
             fe_cols.iter().map(|s| Value::String(s.clone())).collect(),
         )),
     );
-    fields.insert("coefficients".to_string(), Value::Vector(VectorData::from_f64(beta)));
-    fields.insert("std_errors".to_string(), Value::Vector(VectorData::from_f64(std_errors)));
-    fields.insert("t_stats".to_string(), Value::Vector(VectorData::from_f64(t_stats)));
-    fields.insert("p_values".to_string(), Value::Vector(VectorData::from_f64(p_values)));
+    fields.insert(
+        "coefficients".to_string(),
+        Value::Vector(VectorData::from_f64(beta)),
+    );
+    fields.insert(
+        "std_errors".to_string(),
+        Value::Vector(VectorData::from_f64(std_errors)),
+    );
+    fields.insert(
+        "t_stats".to_string(),
+        Value::Vector(VectorData::from_f64(t_stats)),
+    );
+    fields.insert(
+        "p_values".to_string(),
+        Value::Vector(VectorData::from_f64(p_values)),
+    );
     fields.insert("r2".to_string(), Value::F64(r2_overall));
     fields.insert("r2_within".to_string(), Value::F64(r2_within));
     fields.insert("n_obs".to_string(), Value::I64(n as i64));
@@ -544,8 +580,14 @@ pub fn fit_feols(
         },
     );
     fields.insert("parameters".to_string(), params_df);
-    fields.insert("residuals".to_string(), Value::Vector(VectorData::from_f64(residuals)));
-    fields.insert("fitted".to_string(), Value::Vector(VectorData::from_f64(fitted)));
+    fields.insert(
+        "residuals".to_string(),
+        Value::Vector(VectorData::from_f64(residuals)),
+    );
+    fields.insert(
+        "fitted".to_string(),
+        Value::Vector(VectorData::from_f64(fitted)),
+    );
     fields.insert(
         "vcov".to_string(),
         Value::Matrix {
@@ -575,11 +617,16 @@ pub fn native_feols(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 
     let formula_parts = match &args[0] {
-        Value::Formula { response, parts, .. } => FormulaParts::new(response.clone(), parts.clone()),
+        Value::Formula {
+            response, parts, ..
+        } => FormulaParts::new(response.clone(), parts.clone()),
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `feols()` must be a Formula, found `{}`", other.type_name()),
+                format!(
+                    "First argument of `feols()` must be a Formula, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -589,7 +636,10 @@ pub fn native_feols(args: Vec<Value>) -> Result<Value, Diagnostic> {
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("Second argument of `feols()` must be a DataFrame, found `{}`", other.type_name()),
+                format!(
+                    "Second argument of `feols()` must be a DataFrame, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -623,7 +673,10 @@ pub fn native_feols(args: Vec<Value>) -> Result<Value, Diagnostic> {
             other => {
                 return Err(Diagnostic::statistical_error(
                     "S0200",
-                    format!("Third argument of `feols()` (vcov / cluster option) must be a String, found `{}`", other.type_name()),
+                    format!(
+                        "Third argument of `feols()` (vcov / cluster option) must be a String, found `{}`",
+                        other.type_name()
+                    ),
                 ));
             }
         }

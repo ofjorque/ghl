@@ -3,10 +3,9 @@
 //! Split out of `env.rs` for maintainability; native fn names are still
 //! referenced unqualified from `RuntimeEnv::with_prelude()` via glob imports.
 
-use ghl_diagnostics::Diagnostic;
-use crate::value::Value;
 use crate::native_dataframe_agg::*;
-
+use crate::value::Value;
+use ghl_diagnostics::Diagnostic;
 
 // =========================================================================
 // Extended DataFrame Verb Native Functions
@@ -25,7 +24,10 @@ pub(crate) fn native_mutate(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     let df = &args[0];
     let col_name = args[1].as_str().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`mutate()` second argument must be a column name string")
+        Diagnostic::compute_error(
+            "C0201",
+            "`mutate()` second argument must be a column name string",
+        )
     })?;
 
     // args[2] is the new column values — can be a Vector or a scalar
@@ -55,10 +57,16 @@ pub(crate) fn native_rename(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     let df = &args[0];
     let old_name = args[1].as_str().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`rename()`: second argument must be the old column name string")
+        Diagnostic::compute_error(
+            "C0201",
+            "`rename()`: second argument must be the old column name string",
+        )
     })?;
     let new_name = args[2].as_str().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`rename()`: third argument must be the new column name string")
+        Diagnostic::compute_error(
+            "C0201",
+            "`rename()`: third argument must be the new column name string",
+        )
     })?;
 
     crate::io::df_rename(df, old_name, new_name)
@@ -92,9 +100,9 @@ pub(crate) fn native_drop(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// `distinct(df)` — deduplicate all rows.
 /// `distinct(df, ["col"])` — deduplicate by key column subset.
 pub(crate) fn native_distinct(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`distinct()` requires a DataFrame")
-    })?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`distinct()` requires a DataFrame"))?;
 
     let key_cols: Option<Vec<String>> = if args.len() > 1 {
         let mut cols = Vec::new();
@@ -121,33 +129,33 @@ pub(crate) fn native_distinct(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_nrow(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`nrow()` requires a DataFrame")
-    })?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`nrow()` requires a DataFrame"))?;
     crate::io::df_nrow(df)
 }
 
 pub(crate) fn native_ncol(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`ncol()` requires a DataFrame")
-    })?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`ncol()` requires a DataFrame"))?;
     crate::io::df_ncol(df)
 }
 
 pub(crate) fn native_colnames(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`colnames()` requires a DataFrame")
-    })?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`colnames()` requires a DataFrame"))?;
     crate::io::df_colnames(df)
 }
 
 /// `slice(df, from, to)` — 0-based inclusive [from, to) row slice.
 pub(crate) fn native_slice(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`slice()` requires a DataFrame")
-    })?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`slice()` requires a DataFrame"))?;
     let from = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
-    let to   = args.get(2).and_then(|v| v.as_i64()).unwrap_or(5) as usize;
+    let to = args.get(2).and_then(|v| v.as_i64()).unwrap_or(5) as usize;
     crate::io::df_slice(df, from, to)
 }
 
@@ -342,7 +350,13 @@ pub(crate) fn native_pivot_longer(args: Vec<Value>) -> Result<Value, Diagnostic>
         }
     }
 
-    crate::io::df_pivot_longer(df, cols.as_deref(), &names_to, &values_to, id_cols.as_deref())
+    crate::io::df_pivot_longer(
+        df,
+        cols.as_deref(),
+        &names_to,
+        &values_to,
+        id_cols.as_deref(),
+    )
 }
 
 pub(crate) fn extract_reason_str(v: &Value) -> Option<String> {
@@ -437,9 +451,8 @@ pub(crate) fn native_impute(args: Vec<Value>) -> Result<Value, Diagnostic> {
         const_val = Some(positional[3].clone());
     }
 
-    let col_name = col.ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`impute()` requires a column name")
-    })?;
+    let col_name =
+        col.ok_or_else(|| Diagnostic::compute_error("C0201", "`impute()` requires a column name"))?;
     let strat = strategy.unwrap_or_else(|| "mean".to_string());
 
     crate::io::df_impute(

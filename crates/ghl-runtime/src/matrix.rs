@@ -9,8 +9,8 @@
 //! already pulled in transitively) -- Case 1.2 ("multithreaded blocked dense matrix
 //! multiplication") falls out of this for free; it is not hand-implemented here.
 
-use faer::prelude::*;
 use faer::Mat;
+use faer::prelude::*;
 use ghl_diagnostics::Diagnostic;
 
 pub struct MatrixOps;
@@ -72,7 +72,9 @@ impl MatrixOps {
                 "S0412",
                 format!(
                     "Dimension mismatch in matrix solve `A \\ b`: A is ({}x{}), but b has {} elements",
-                    n, n, b.len()
+                    n,
+                    n,
+                    b.len()
                 ),
             ));
         }
@@ -81,7 +83,9 @@ impl MatrixOps {
         let lu = ma.partial_piv_lu();
 
         let u = lu.U();
-        let min_pivot = (0..n).map(|i| u[(i, i)].abs()).fold(f64::INFINITY, f64::min);
+        let min_pivot = (0..n)
+            .map(|i| u[(i, i)].abs())
+            .fold(f64::INFINITY, f64::min);
         if min_pivot < 1e-12 {
             return Err(Diagnostic::statistical_error(
                 "S0101",
@@ -132,7 +136,10 @@ impl MatrixOps {
         if a.len() != rows * cols {
             return Err(Diagnostic::statistical_error(
                 "S0412",
-                format!("`qr()`: matrix is ({rows}x{cols}) but data has {} entries", a.len()),
+                format!(
+                    "`qr()`: matrix is ({rows}x{cols}) but data has {} entries",
+                    a.len()
+                ),
             ));
         }
         let ma = to_faer_mat(rows, cols, a);
@@ -153,7 +160,10 @@ impl MatrixOps {
         if a.len() != n * n {
             return Err(Diagnostic::statistical_error(
                 "S0412",
-                format!("`cholesky()`: matrix is ({n}x{n}) but data has {} entries", a.len()),
+                format!(
+                    "`cholesky()`: matrix is ({n}x{n}) but data has {} entries",
+                    a.len()
+                ),
             ));
         }
         check_symmetric(n, a, "cholesky()")?;
@@ -173,11 +183,18 @@ impl MatrixOps {
     /// `(u_data, s_values, v_data, k)` -- `s_values` as a plain `Vec<f64>` (the singular
     /// values, nonincreasing) rather than a diagonal matrix, since a `Vector` is what
     /// GHL's own `Value` model already has for "one value per component".
-    pub fn svd(rows: usize, cols: usize, a: &[f64]) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, usize), Diagnostic> {
+    pub fn svd(
+        rows: usize,
+        cols: usize,
+        a: &[f64],
+    ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, usize), Diagnostic> {
         if a.len() != rows * cols {
             return Err(Diagnostic::statistical_error(
                 "S0412",
-                format!("`svd()`: matrix is ({rows}x{cols}) but data has {} entries", a.len()),
+                format!(
+                    "`svd()`: matrix is ({rows}x{cols}) but data has {} entries",
+                    a.len()
+                ),
             ));
         }
         let ma = to_faer_mat(rows, cols, a);
@@ -200,7 +217,10 @@ impl MatrixOps {
         if a.len() != n * n {
             return Err(Diagnostic::statistical_error(
                 "S0412",
-                format!("`eigen()`: matrix is ({n}x{n}) but data has {} entries", a.len()),
+                format!(
+                    "`eigen()`: matrix is ({n}x{n}) but data has {} entries",
+                    a.len()
+                ),
             ));
         }
         check_symmetric(n, a, "eigen()")?;
@@ -222,7 +242,11 @@ impl MatrixOps {
         if a.len() != b.len() {
             return Err(Diagnostic::statistical_error(
                 "S0412",
-                format!("`dot()`: vectors have different lengths ({} vs {})", a.len(), b.len()),
+                format!(
+                    "`dot()`: vectors have different lengths ({} vs {})",
+                    a.len(),
+                    b.len()
+                ),
             ));
         }
         let row = faer::RowRef::from_slice(a);
@@ -231,11 +255,18 @@ impl MatrixOps {
     }
 
     /// Transpose of a matrix: A (rows × cols) -> Aᵀ (cols × rows).
-    pub fn transpose(rows: usize, cols: usize, a: &[f64]) -> Result<(usize, usize, Vec<f64>), Diagnostic> {
+    pub fn transpose(
+        rows: usize,
+        cols: usize,
+        a: &[f64],
+    ) -> Result<(usize, usize, Vec<f64>), Diagnostic> {
         if a.len() != rows * cols {
             return Err(Diagnostic::statistical_error(
                 "S0412",
-                format!("`transpose()`: matrix is ({rows}x{cols}) but data has {} entries", a.len()),
+                format!(
+                    "`transpose()`: matrix is ({rows}x{cols}) but data has {} entries",
+                    a.len()
+                ),
             ));
         }
         let mut out = vec![0.0; rows * cols];
@@ -258,7 +289,9 @@ fn check_symmetric(n: usize, a: &[f64], ctx: &str) -> Result<(), Diagnostic> {
             if (aij - aji).abs() > 1e-9 * (1.0 + aij.abs().max(aji.abs())) {
                 return Err(Diagnostic::statistical_error(
                     "S0412",
-                    format!("`{ctx}` requires a symmetric matrix, but ({i},{j})={aij} and ({j},{i})={aji} differ"),
+                    format!(
+                        "`{ctx}` requires a symmetric matrix, but ({i},{j})={aij} and ({j},{i})={aji} differ"
+                    ),
                 ));
             }
         }

@@ -6,8 +6,8 @@
 
 #![allow(dead_code)]
 
-use ghl_runtime::value::Value;
 use ghl_runtime::polars_bridge;
+use ghl_runtime::value::Value;
 
 /// Test helper: extract a column's values from a `Value::DataFrame`, panicking with
 /// a clear message if `v` isn't one or the column doesn't exist — keeps assertions
@@ -24,7 +24,11 @@ pub fn df_column(v: &Value, col: &str) -> Vec<Value> {
 
 pub fn df_columns(v: &Value) -> Vec<String> {
     match v {
-        Value::DataFrame { frame, .. } => frame.get_column_names().iter().map(|s| s.to_string()).collect(),
+        Value::DataFrame { frame, .. } => frame
+            .get_column_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
         other => panic!("Expected DataFrame, found `{}`", other.type_name()),
     }
 }

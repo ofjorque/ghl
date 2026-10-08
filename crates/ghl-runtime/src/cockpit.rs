@@ -4,11 +4,11 @@
 //! directly to the runtime so packages like `spring_pact` and `ghl_causal` can
 //! render rich, responsive terminal cards without hardcoded string formatting.
 
-use ghl_diagnostics::{
-    finish_progress, set_progress_delay_ms, update_progress_bar, update_progress_spinner,
-    CockpitPanel, Diagnostic, ProgressTheme, RenderCaps, Sparkline, SpinnerStyle,
-};
 use crate::value::Value;
+use ghl_diagnostics::{
+    CockpitPanel, Diagnostic, ProgressTheme, RenderCaps, Sparkline, SpinnerStyle, finish_progress,
+    set_progress_delay_ms, update_progress_bar, update_progress_spinner,
+};
 
 /// Creates a new `CockpitPanel` card with an optional badge.
 ///
@@ -41,12 +41,23 @@ pub fn native_cockpit(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// Signature: `cockpit_with_badge(panel: CockpitPanel, badge: String) -> CockpitPanel`
 pub fn native_cockpit_with_badge(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
-        return Err(Diagnostic::compute_error("C0201", "`cockpit_with_badge()` requires 2 arguments: (panel, badge)"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`cockpit_with_badge()` requires 2 arguments: (panel, badge)",
+        ));
     }
 
     let panel = match &args[0] {
         Value::CockpitPanel(p) => (**p).clone(),
-        other => return Err(Diagnostic::compute_error("C0202", format!("`cockpit_with_badge()` expects a CockpitPanel, found `{}`", other.type_name()))),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!(
+                    "`cockpit_with_badge()` expects a CockpitPanel, found `{}`",
+                    other.type_name()
+                ),
+            ));
+        }
     };
 
     let badge = match &args[1] {
@@ -64,12 +75,23 @@ pub fn native_cockpit_with_badge(args: Vec<Value>) -> Result<Value, Diagnostic> 
 /// Signature: `cockpit_add_kv(panel: CockpitPanel, key: Any, val: Any) -> CockpitPanel`
 pub fn native_cockpit_add_kv(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 3 {
-        return Err(Diagnostic::compute_error("C0201", "`cockpit_add_kv()` requires 3 arguments: (panel, key, val)"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`cockpit_add_kv()` requires 3 arguments: (panel, key, val)",
+        ));
     }
 
     let panel = match &args[0] {
         Value::CockpitPanel(p) => (**p).clone(),
-        other => return Err(Diagnostic::compute_error("C0202", format!("`cockpit_add_kv()` expects a CockpitPanel, found `{}`", other.type_name()))),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!(
+                    "`cockpit_add_kv()` expects a CockpitPanel, found `{}`",
+                    other.type_name()
+                ),
+            ));
+        }
     };
 
     let key = match &args[1] {
@@ -92,12 +114,23 @@ pub fn native_cockpit_add_kv(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// Signature: `cockpit_add_line(panel: CockpitPanel, line: Any) -> CockpitPanel`
 pub fn native_cockpit_add_line(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
-        return Err(Diagnostic::compute_error("C0201", "`cockpit_add_line()` requires 2 arguments: (panel, line)"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`cockpit_add_line()` requires 2 arguments: (panel, line)",
+        ));
     }
 
     let panel = match &args[0] {
         Value::CockpitPanel(p) => (**p).clone(),
-        other => return Err(Diagnostic::compute_error("C0202", format!("`cockpit_add_line()` expects a CockpitPanel, found `{}`", other.type_name()))),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!(
+                    "`cockpit_add_line()` expects a CockpitPanel, found `{}`",
+                    other.type_name()
+                ),
+            ));
+        }
     };
 
     let line = match &args[1] {
@@ -115,12 +148,23 @@ pub fn native_cockpit_add_line(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// Signature: `cockpit_add_divider(panel: CockpitPanel) -> CockpitPanel`
 pub fn native_cockpit_add_divider(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let panel_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`cockpit_add_divider()` requires 1 argument: (panel)")
+        Diagnostic::compute_error(
+            "C0201",
+            "`cockpit_add_divider()` requires 1 argument: (panel)",
+        )
     })?;
 
     let panel = match panel_val {
         Value::CockpitPanel(p) => (**p).clone(),
-        other => return Err(Diagnostic::compute_error("C0202", format!("`cockpit_add_divider()` expects a CockpitPanel, found `{}`", other.type_name()))),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!(
+                    "`cockpit_add_divider()` expects a CockpitPanel, found `{}`",
+                    other.type_name()
+                ),
+            ));
+        }
     };
 
     let mut panel = panel;
@@ -164,15 +208,29 @@ pub fn native_format_cockpit(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// Signature: `sparkline(values: Vector, [max_len: i64]) -> String` (aliased as `cockpit_sparkline`)
 pub fn native_sparkline(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`sparkline()` requires at least 1 argument (vector)")
+        Diagnostic::compute_error(
+            "C0201",
+            "`sparkline()` requires at least 1 argument (vector)",
+        )
     })?;
 
     let values: Vec<f64> = match val {
         Value::Vector(vd) => vd.iter().filter_map(|v| v.as_f64()).collect(),
-        _ => return Err(Diagnostic::compute_error("C0202", format!("`sparkline()` expects a numeric Vector, found `{}`", val.type_name()))),
+        _ => {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!(
+                    "`sparkline()` expects a numeric Vector, found `{}`",
+                    val.type_name()
+                ),
+            ));
+        }
     };
 
-    let max_len = args.get(1).and_then(|v| v.as_i64()).map(|n| n.max(1) as usize);
+    let max_len = args
+        .get(1)
+        .and_then(|v| v.as_i64())
+        .map(|n| n.max(1) as usize);
     let caps = RenderCaps::detect();
     let rendered = Sparkline::render(&values, max_len, &caps);
     Ok(Value::String(rendered))
@@ -198,20 +256,29 @@ pub fn native_progress_bar(args: Vec<Value>) -> Result<Value, Diagnostic> {
         .or_else(|| args[1].as_f64().map(|f| f as i64))
         .unwrap_or(1);
 
-    let label = args.get(2).map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_default();
+    let label = args
+        .get(2)
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_default();
 
-    let details = args.get(3).map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_default();
+    let details = args
+        .get(3)
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_default();
 
-    let theme_str = args.get(4).map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_else(|| "cyan".to_string());
+    let theme_str = args
+        .get(4)
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_else(|| "cyan".to_string());
 
     let theme = ProgressTheme::parse(&theme_str);
     let caps = RenderCaps::detect();
@@ -224,25 +291,37 @@ pub fn native_progress_bar(args: Vec<Value>) -> Result<Value, Diagnostic> {
 ///
 /// Signature: `progress_spinner(label: String, [details: String, style: String, theme: String]) -> ()`
 pub fn native_progress_spinner(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let label = args.first().map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_default();
+    let label = args
+        .first()
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_default();
 
-    let details = args.get(1).map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_default();
+    let details = args
+        .get(1)
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_default();
 
-    let style_str = args.get(2).map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_else(|| "dots".to_string());
+    let style_str = args
+        .get(2)
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_else(|| "dots".to_string());
 
-    let theme_str = args.get(3).map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_else(|| "cyan".to_string());
+    let theme_str = args
+        .get(3)
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_else(|| "cyan".to_string());
 
     let style = SpinnerStyle::parse(&style_str);
     let theme = ProgressTheme::parse(&theme_str);
@@ -256,10 +335,13 @@ pub fn native_progress_spinner(args: Vec<Value>) -> Result<Value, Diagnostic> {
 ///
 /// Signature: `progress_done([message: String]) -> ()`
 pub fn native_progress_done(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let message = args.first().map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_default();
+    let message = args
+        .first()
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_default();
 
     let caps = RenderCaps::detect();
     finish_progress(&message, &caps);
@@ -279,7 +361,15 @@ pub fn native_cockpit_add_progress(args: Vec<Value>) -> Result<Value, Diagnostic
 
     let panel = match &args[0] {
         Value::CockpitPanel(p) => (**p).clone(),
-        other => return Err(Diagnostic::compute_error("C0202", format!("`cockpit_add_progress()` expects a CockpitPanel, found `{}`", other.type_name()))),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!(
+                    "`cockpit_add_progress()` expects a CockpitPanel, found `{}`",
+                    other.type_name()
+                ),
+            ));
+        }
     };
 
     let current = args[1]
@@ -291,15 +381,21 @@ pub fn native_cockpit_add_progress(args: Vec<Value>) -> Result<Value, Diagnostic
         .or_else(|| args[2].as_f64().map(|f| f as i64))
         .unwrap_or(1);
 
-    let label = args.get(3).map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_default();
+    let label = args
+        .get(3)
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_default();
 
-    let theme = args.get(4).map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_else(|| "cyan".to_string());
+    let theme = args
+        .get(4)
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_else(|| "cyan".to_string());
 
     let mut panel = panel;
     panel.add_progress(label, current, total, theme);
@@ -319,7 +415,15 @@ pub fn native_cockpit_add_circle(args: Vec<Value>) -> Result<Value, Diagnostic> 
 
     let panel = match &args[0] {
         Value::CockpitPanel(p) => (**p).clone(),
-        other => return Err(Diagnostic::compute_error("C0202", format!("`cockpit_add_circle()` expects a CockpitPanel, found `{}`", other.type_name()))),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0202",
+                format!(
+                    "`cockpit_add_circle()` expects a CockpitPanel, found `{}`",
+                    other.type_name()
+                ),
+            ));
+        }
     };
 
     let current = args[1]
@@ -331,15 +435,21 @@ pub fn native_cockpit_add_circle(args: Vec<Value>) -> Result<Value, Diagnostic> 
         .or_else(|| args[2].as_f64().map(|f| f as i64))
         .unwrap_or(1);
 
-    let label = args.get(3).map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_default();
+    let label = args
+        .get(3)
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_default();
 
-    let theme = args.get(4).map(|v| match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }).unwrap_or_else(|| "cyan".to_string());
+    let theme = args
+        .get(4)
+        .map(|v| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_else(|| "cyan".to_string());
 
     let mut panel = panel;
     panel.add_circle(label, current, total, theme);
@@ -350,7 +460,8 @@ pub fn native_cockpit_add_circle(args: Vec<Value>) -> Result<Value, Diagnostic> 
 ///
 /// Signature: `sleep(ms: Int | Float) -> ()`
 pub fn native_sleep(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let ms = args.first()
+    let ms = args
+        .first()
         .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
         .unwrap_or(0)
         .max(0) as u64;
@@ -364,7 +475,8 @@ pub fn native_sleep(args: Vec<Value>) -> Result<Value, Diagnostic> {
 ///
 /// Signature: `set_progress_delay(delay_ms: Int) -> ()`
 pub fn native_set_progress_delay(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let delay = args.first()
+    let delay = args
+        .first()
         .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
         .unwrap_or(0)
         .max(0) as u64;

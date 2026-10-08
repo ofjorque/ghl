@@ -3,11 +3,10 @@
 //! Split out of `env.rs` for maintainability; native fn names are still
 //! referenced unqualified from `RuntimeEnv::with_prelude()` via glob imports.
 
-use ghl_diagnostics::Diagnostic;
+use crate::native_core::*;
 use crate::value::Value;
 use crate::vector_data::VectorData;
-use crate::native_core::*;
-
+use ghl_diagnostics::Diagnostic;
 
 // =========================================================================
 // Extra aggregation functions (dual behavior: real compute over a Vector,
@@ -15,41 +14,72 @@ use crate::native_core::*;
 // =========================================================================
 
 pub(crate) fn native_first(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`first()` requires 1 argument"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`first()` requires 1 argument"))?;
     match v {
-        Value::ColRef(name) => Ok(Value::AggSpec { kind: "first".into(), col: Some(name.clone()) }),
+        Value::ColRef(name) => Ok(Value::AggSpec {
+            kind: "first".into(),
+            col: Some(name.clone()),
+        }),
         Value::Vector(vd) => Ok(vd.value_at(0).unwrap_or(Value::NA(None))),
-        other => Err(Diagnostic::compute_error("C0202", format!("`first()` expects a Vector, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::compute_error(
+            "C0202",
+            format!("`first()` expects a Vector, found `{}`", other.type_name()),
+        )),
     }
 }
 
 pub(crate) fn native_last(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`last()` requires 1 argument"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`last()` requires 1 argument"))?;
     match v {
-        Value::ColRef(name) => Ok(Value::AggSpec { kind: "last".into(), col: Some(name.clone()) }),
-        Value::Vector(vd) => Ok(vd.value_at(vd.len().saturating_sub(1)).unwrap_or(Value::NA(None))),
-        other => Err(Diagnostic::compute_error("C0202", format!("`last()` expects a Vector, found `{}`", other.type_name()))),
+        Value::ColRef(name) => Ok(Value::AggSpec {
+            kind: "last".into(),
+            col: Some(name.clone()),
+        }),
+        Value::Vector(vd) => Ok(vd
+            .value_at(vd.len().saturating_sub(1))
+            .unwrap_or(Value::NA(None))),
+        other => Err(Diagnostic::compute_error(
+            "C0202",
+            format!("`last()` expects a Vector, found `{}`", other.type_name()),
+        )),
     }
 }
 
 pub(crate) fn native_median(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`median()` requires 1 argument"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`median()` requires 1 argument"))?;
     match v {
-        Value::ColRef(name) => Ok(Value::AggSpec { kind: "median".into(), col: Some(name.clone()) }),
+        Value::ColRef(name) => Ok(Value::AggSpec {
+            kind: "median".into(),
+            col: Some(name.clone()),
+        }),
         Value::Vector(vd) => {
             if vd.is_empty() {
                 return Ok(Value::NA(None));
             }
             vector_native_reduce(vd, "median")
         }
-        other => Err(Diagnostic::compute_error("C0202", format!("`median()` expects a Vector, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::compute_error(
+            "C0202",
+            format!("`median()` expects a Vector, found `{}`", other.type_name()),
+        )),
     }
 }
 
 pub(crate) fn native_n_distinct(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`n_distinct()` requires 1 argument"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`n_distinct()` requires 1 argument"))?;
     match v {
-        Value::ColRef(name) => Ok(Value::AggSpec { kind: "n_distinct".into(), col: Some(name.clone()) }),
+        Value::ColRef(name) => Ok(Value::AggSpec {
+            kind: "n_distinct".into(),
+            col: Some(name.clone()),
+        }),
         // Delegates straight to polars' own `Column::n_unique()` instead of
         // `format!("{:?}", it)`-ing every element into a `HashSet<String>` -- a real
         // correctness fix, not just a speedup: two NAs with different reasons
@@ -59,11 +89,20 @@ pub(crate) fn native_n_distinct(args: Vec<Value>) -> Result<Value, Diagnostic> {
         // value, matching how every other statistics library treats it.
         Value::Vector(vd) => {
             let n = vd.column().n_unique().map_err(|e| {
-                Diagnostic::compute_error("C0210", format!("internal error computing `n_distinct()`: {e}"))
+                Diagnostic::compute_error(
+                    "C0210",
+                    format!("internal error computing `n_distinct()`: {e}"),
+                )
             })?;
             Ok(Value::I64(n as i64))
         }
-        other => Err(Diagnostic::compute_error("C0202", format!("`n_distinct()` expects a Vector, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::compute_error(
+            "C0202",
+            format!(
+                "`n_distinct()` expects a Vector, found `{}`",
+                other.type_name()
+            ),
+        )),
     }
 }
 
@@ -71,7 +110,10 @@ pub(crate) fn native_n_distinct(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// `count(df, col)` — standalone frequency-table verb, returns `DataFrame[col, n]`.
 pub(crate) fn native_count(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Ok(Value::AggSpec { kind: "count".into(), col: None });
+        return Ok(Value::AggSpec {
+            kind: "count".into(),
+            col: None,
+        });
     }
     let df = &args[0];
     let col = args.get(1).and_then(col_name_of).ok_or_else(|| {
@@ -144,7 +186,10 @@ pub(crate) fn native_join(
         }
     }
     if on.is_empty() {
-        return Err(Diagnostic::compute_error("C0201", format!("`{verb}()` requires at least one join column")));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            format!("`{verb}()` requires at least one join column"),
+        ));
     }
 
     join_fn(left, right, &on)
@@ -152,7 +197,10 @@ pub(crate) fn native_join(
 
 pub(crate) fn native_group_by(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let df = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`group_by()` requires a DataFrame as first argument")
+        Diagnostic::compute_error(
+            "C0201",
+            "`group_by()` requires a DataFrame as first argument",
+        )
     })?;
 
     let mut keys = Vec::new();
@@ -173,7 +221,10 @@ pub(crate) fn native_group_by(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
     }
     if keys.is_empty() {
-        return Err(Diagnostic::compute_error("C0201", "`group_by()` requires at least one grouping column"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`group_by()` requires at least one grouping column",
+        ));
     }
 
     crate::io::df_group_by(df, &keys)
@@ -195,13 +246,16 @@ pub(crate) fn native_summarize(args: Vec<Value>) -> Result<Value, Diagnostic> {
     for arg in &args[1..] {
         match arg {
             Value::NamedArg(name, value) => match value.as_ref() {
-                Value::AggSpec { kind, col } => specs.push((name.clone(), kind.clone(), col.clone())),
+                Value::AggSpec { kind, col } => {
+                    specs.push((name.clone(), kind.clone(), col.clone()))
+                }
                 other => {
                     return Err(Diagnostic::compute_error(
                         "C0201",
                         format!(
                             "`summarize()`: `{}` must be an aggregation like `mean(x)` or `count()`, found `{}`",
-                            name, other.type_name()
+                            name,
+                            other.type_name()
                         ),
                     ));
                 }
@@ -209,7 +263,10 @@ pub(crate) fn native_summarize(args: Vec<Value>) -> Result<Value, Diagnostic> {
             other => {
                 return Err(Diagnostic::compute_error(
                     "C0201",
-                    format!("`summarize()` expects named arguments like `n = count()`, found `{}`", other.type_name()),
+                    format!(
+                        "`summarize()` expects named arguments like `n = count()`, found `{}`",
+                        other.type_name()
+                    ),
                 ));
             }
         }
@@ -226,19 +283,31 @@ pub(crate) fn native_summarize(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub(crate) fn native_ungroup(args: Vec<Value>) -> Result<Value, Diagnostic> {
     match args.first() {
-        Some(Value::GroupedDataFrame { frame, na_reasons, .. }) => {
-            Ok(Value::DataFrame { frame: frame.clone(), na_reasons: na_reasons.clone() })
-        }
-        Some(Value::GroupedLazyFrame { plan, na_reasons, .. }) => {
-            Ok(Value::LazyFrame { plan: plan.clone(), na_reasons: na_reasons.clone() })
-        }
+        Some(Value::GroupedDataFrame {
+            frame, na_reasons, ..
+        }) => Ok(Value::DataFrame {
+            frame: frame.clone(),
+            na_reasons: na_reasons.clone(),
+        }),
+        Some(Value::GroupedLazyFrame {
+            plan, na_reasons, ..
+        }) => Ok(Value::LazyFrame {
+            plan: plan.clone(),
+            na_reasons: na_reasons.clone(),
+        }),
         Some(df @ Value::DataFrame { .. }) => Ok(df.clone()),
         Some(lf @ Value::LazyFrame { .. }) => Ok(lf.clone()),
         Some(other) => Err(Diagnostic::compute_error(
             "C0201",
-            format!("`ungroup()` requires a GroupedDataFrame or GroupedLazyFrame, found `{}`", other.type_name()),
+            format!(
+                "`ungroup()` requires a GroupedDataFrame or GroupedLazyFrame, found `{}`",
+                other.type_name()
+            ),
         )),
-        None => Err(Diagnostic::compute_error("C0201", "`ungroup()` requires an argument")),
+        None => Err(Diagnostic::compute_error(
+            "C0201",
+            "`ungroup()` requires an argument",
+        )),
     }
 }
 
@@ -248,17 +317,24 @@ pub(crate) fn native_ungroup(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 /// `desc(col)` — marks a column descending inside `arrange()`.
 pub(crate) fn native_desc(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let name = args.first().and_then(col_name_of).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`desc()` requires a column name")
-    })?;
-    Ok(Value::SortSpec { col: name, desc: true })
+    let name = args
+        .first()
+        .and_then(col_name_of)
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`desc()` requires a column name"))?;
+    Ok(Value::SortSpec {
+        col: name,
+        desc: true,
+    })
 }
 
 /// `arrange(df, col1, col2, ...)` — variadic, multi-column sort.
 /// Each column may be bare/`ColRef`/string (ascending) or `desc(col)` (descending).
 pub(crate) fn native_arrange(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let df = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`arrange()` requires a DataFrame as first argument")
+        Diagnostic::compute_error(
+            "C0201",
+            "`arrange()` requires a DataFrame as first argument",
+        )
     })?;
 
     let mut specs: Vec<(String, bool)> = Vec::new();
@@ -273,7 +349,10 @@ pub(crate) fn native_arrange(args: Vec<Value>) -> Result<Value, Diagnostic> {
                             None => {
                                 return Err(Diagnostic::compute_error(
                                     "C0201",
-                                    format!("`arrange()` expects column names or `desc(col)`, found `{}`", other.type_name()),
+                                    format!(
+                                        "`arrange()` expects column names or `desc(col)`, found `{}`",
+                                        other.type_name()
+                                    ),
                                 ));
                             }
                         },
@@ -286,14 +365,20 @@ pub(crate) fn native_arrange(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 None => {
                     return Err(Diagnostic::compute_error(
                         "C0201",
-                        format!("`arrange()` expects column names or `desc(col)`, found `{}`", other.type_name()),
+                        format!(
+                            "`arrange()` expects column names or `desc(col)`, found `{}`",
+                            other.type_name()
+                        ),
                     ));
                 }
             },
         }
     }
     if specs.is_empty() {
-        return Err(Diagnostic::compute_error("C0201", "`arrange()` requires at least one column"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`arrange()` requires at least one column",
+        ));
     }
 
     crate::io::df_arrange(df, &specs)
@@ -304,17 +389,22 @@ pub(crate) fn native_arrange(args: Vec<Value>) -> Result<Value, Diagnostic> {
 // =========================================================================
 
 pub(crate) fn native_pull(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`pull()` requires a DataFrame"))?;
-    let col = args.get(1).and_then(col_name_of).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`pull()` requires a column name")
-    })?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`pull()` requires a DataFrame"))?;
+    let col = args
+        .get(1)
+        .and_then(col_name_of)
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`pull()` requires a column name"))?;
     crate::io::df_pull(df, &col)
 }
 
 /// `na_reason(x)` — the recorded reason for a single NA value, or `NA` if `x` isn't NA
 /// or has no reason attached. Mirrors RFC 02 §2.2's `x.na_reason()`.
 pub(crate) fn native_na_reason(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`na_reason()` requires 1 argument"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`na_reason()` requires 1 argument"))?;
     match v.na_reason() {
         Some(reason) => Ok(Value::String(reason.to_string())),
         None => Ok(Value::NA(None)),
@@ -323,7 +413,9 @@ pub(crate) fn native_na_reason(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 /// `na_reasons(df, col)` — the recorded reasons for a whole column, aligned by row.
 pub(crate) fn native_na_reasons(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`na_reasons()` requires a DataFrame"))?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`na_reasons()` requires a DataFrame"))?;
     let col = args.get(1).and_then(col_name_of).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`na_reasons()` requires a column name")
     })?;
@@ -333,22 +425,29 @@ pub(crate) fn native_na_reasons(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// `is_na(x)` — RFC 02's `x.is_na()` as a callable function, vectorized over a `Vector`
 /// the same way the math/string helpers are (`is_na(pull(df, "col"))` -> `Vector[Bool]`).
 pub(crate) fn native_is_na(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`is_na()` requires 1 argument"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`is_na()` requires 1 argument"))?;
     match v {
         // `is_na(col(...))` / `is_na(bare_column)` inside filter()'s argument tree:
         // no data to check yet, stay deferred as a predicate the same way `col(x) > 5`
         // does (see Value::IsNaPredicate).
         Value::ColRef(col) => Ok(Value::IsNaPredicate(col.clone())),
-        Value::Vector(items) => Ok(Value::Vector(VectorData::from_values(items.iter().map(|it| Value::Bool(it.is_na())).collect()))),
+        Value::Vector(items) => Ok(Value::Vector(VectorData::from_values(
+            items.iter().map(|it| Value::Bool(it.is_na())).collect(),
+        ))),
         other => Ok(Value::Bool(other.is_na())),
     }
 }
 
 pub(crate) fn native_fill_na(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`fill_na()` requires a DataFrame"))?;
-    let col = args.get(1).and_then(col_name_of).ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`fill_na()` requires a column name")
-    })?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`fill_na()` requires a DataFrame"))?;
+    let col = args
+        .get(1)
+        .and_then(col_name_of)
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`fill_na()` requires a column name"))?;
     let default = args.get(2).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`fill_na()` requires a default value")
     })?;
@@ -356,7 +455,9 @@ pub(crate) fn native_fill_na(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_fill_na_all(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`fill_na_all()` requires a DataFrame"))?;
+    let df = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`fill_na_all()` requires a DataFrame")
+    })?;
     let default = args.get(1).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`fill_na_all()` requires a default value")
     })?;
@@ -364,12 +465,16 @@ pub(crate) fn native_fill_na_all(args: Vec<Value>) -> Result<Value, Diagnostic> 
 }
 
 pub(crate) fn native_glimpse(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`glimpse()` requires a DataFrame"))?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`glimpse()` requires a DataFrame"))?;
     crate::io::df_glimpse(df)
 }
 
 pub(crate) fn native_slice_min(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`slice_min()` requires a DataFrame"))?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`slice_min()` requires a DataFrame"))?;
     let col = args.get(1).and_then(col_name_of).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`slice_min()` requires a column name")
     })?;
@@ -378,7 +483,9 @@ pub(crate) fn native_slice_min(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_slice_max(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`slice_max()` requires a DataFrame"))?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`slice_max()` requires a DataFrame"))?;
     let col = args.get(1).and_then(col_name_of).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`slice_max()` requires a column name")
     })?;
@@ -387,13 +494,17 @@ pub(crate) fn native_slice_max(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_sample_n(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`sample_n()` requires a DataFrame"))?;
+    let df = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`sample_n()` requires a DataFrame"))?;
     let n = args.get(1).and_then(|v| v.as_i64()).unwrap_or(1) as usize;
     crate::io::df_sample_n(df, n)
 }
 
 pub(crate) fn native_sample_frac(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let df = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`sample_frac()` requires a DataFrame"))?;
+    let df = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`sample_frac()` requires a DataFrame")
+    })?;
     let frac = args.get(1).and_then(|v| v.as_f64()).unwrap_or(1.0);
     crate::io::df_sample_frac(df, frac)
 }

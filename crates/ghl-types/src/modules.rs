@@ -206,22 +206,49 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             // implementation type-checks fine and then crashes at runtime -
             // exactly the bug this registry unification was meant to prevent.
             let mut items = vec![
-                ("mean".into(), Type::Function { params: vec![Type::Vector(Box::new(Type::Any))], ret: Box::new(Type::F64) }),
-                ("median".into(), Type::Function { params: vec![Type::Vector(Box::new(Type::Any))], ret: Box::new(Type::F64) }),
-                ("var".into(), Type::Function { params: vec![Type::Vector(Box::new(Type::Any))], ret: Box::new(Type::F64) }),
-                ("std_dev".into(), Type::Function { params: vec![Type::Vector(Box::new(Type::Any))], ret: Box::new(Type::F64) }),
+                (
+                    "mean".into(),
+                    Type::Function {
+                        params: vec![Type::Vector(Box::new(Type::Any))],
+                        ret: Box::new(Type::F64),
+                    },
+                ),
+                (
+                    "median".into(),
+                    Type::Function {
+                        params: vec![Type::Vector(Box::new(Type::Any))],
+                        ret: Box::new(Type::F64),
+                    },
+                ),
+                (
+                    "var".into(),
+                    Type::Function {
+                        params: vec![Type::Vector(Box::new(Type::Any))],
+                        ret: Box::new(Type::F64),
+                    },
+                ),
+                (
+                    "std_dev".into(),
+                    Type::Function {
+                        params: vec![Type::Vector(Box::new(Type::Any))],
+                        ret: Box::new(Type::F64),
+                    },
+                ),
                 ("min".into(), any_fn()),
                 ("max".into(), any_fn()),
                 ("bootstrap_mean".into(), any_fn_multi(3)),
                 ("is_vector".into(), any_fn()),
             ];
-            if let Some(dist) = get_module_items(&["std".into(), "stats".into(), "distributions".into()]) {
+            if let Some(dist) =
+                get_module_items(&["std".into(), "stats".into(), "distributions".into()])
+            {
                 items.extend(dist);
             }
             if let Some(rng) = get_module_items(&["std".into(), "stats".into(), "rng".into()]) {
                 items.extend(rng);
             }
-            if let Some(models) = get_module_items(&["std".into(), "stats".into(), "models".into()]) {
+            if let Some(models) = get_module_items(&["std".into(), "stats".into(), "models".into()])
+            {
                 items.extend(models);
             }
             Some(items)
@@ -330,13 +357,9 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("post".into(), any_fn_multi(2)),
         ]),
 
-        ["net"] | ["std", "net"] => Some(vec![
-            ("tcp_connect".into(), any_fn()),
-        ]),
+        ["net"] | ["std", "net"] => Some(vec![("tcp_connect".into(), any_fn())]),
 
-        ["concurrency"] | ["std", "concurrency"] => Some(vec![
-            ("par_iter".into(), any_fn()),
-        ]),
+        ["concurrency"] | ["std", "concurrency"] => Some(vec![("par_iter".into(), any_fn())]),
 
         // `GpuMatrix`/`GpuVector` are intentionally not listed: they're never
         // constructed by calling a bare name, only produced by calling

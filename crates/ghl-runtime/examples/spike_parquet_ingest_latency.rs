@@ -4,12 +4,15 @@
 //!
 //! Usage: `cargo run --release --example spike_parquet_ingest_latency -p ghl-runtime -- <parquet_path>`
 
-use std::time::Instant;
 use ghl_runtime::io::read_parquet_file;
+use std::time::Instant;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let path = args.get(1).cloned().unwrap_or_else(|| "target/synthetic.parquet".to_string());
+    let path = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| "target/synthetic.parquet".to_string());
 
     let size_mb = std::fs::metadata(&path)
         .map(|m| m.len() as f64 / (1024.0 * 1024.0))
@@ -40,6 +43,9 @@ fn main() {
     let csv_path = path.replace(".parquet", ".csv");
     if let Ok(csv_meta) = std::fs::metadata(&csv_path) {
         let csv_mb = csv_meta.len() as f64 / (1024.0 * 1024.0);
-        println!("Disk size: {size_mb:.1} MB (Parquet) vs {csv_mb:.1} MB (CSV) -> {:.1}x smaller", csv_mb / size_mb);
+        println!(
+            "Disk size: {size_mb:.1} MB (Parquet) vs {csv_mb:.1} MB (CSV) -> {:.1}x smaller",
+            csv_mb / size_mb
+        );
     }
 }

@@ -17,10 +17,10 @@
 //! boxing at all — that new path never materializing `Vec<Value>` unless something
 //! (a legacy consumer, `print`, ...) actually forces it is the entire point of this change.
 
-use std::ops::Deref;
-use std::sync::{Arc, OnceLock};
 use ghl_diagnostics::Diagnostic;
 use polars_core::prelude::*;
+use std::ops::Deref;
+use std::sync::{Arc, OnceLock};
 
 use crate::na_reasons::NaReasonTable;
 use crate::polars_bridge;
@@ -60,10 +60,7 @@ impl VectorData {
         let has_complex = values.iter().any(|v| {
             matches!(
                 v,
-                Value::Struct { .. }
-                    | Value::Record(_)
-                    | Value::Closure { .. }
-                    | Value::Vector(_)
+                Value::Struct { .. } | Value::Record(_) | Value::Closure { .. } | Value::Vector(_)
             )
         });
         if has_complex {
@@ -176,7 +173,6 @@ impl VectorData {
         }
     }
 
-
     pub fn column(&self) -> &Column {
         &self.column
     }
@@ -203,7 +199,12 @@ impl VectorData {
             return mat.get(index).cloned();
         }
         let av = self.column.get(index).ok()?;
-        Some(polars_bridge::any_value_to_value(&av, VECTOR_COL, index, &self.na_reasons))
+        Some(polars_bridge::any_value_to_value(
+            &av,
+            VECTOR_COL,
+            index,
+            &self.na_reasons,
+        ))
     }
 
     /// If this vector has any null, returns `Some(Value::NA(reason))` for the *first* one
@@ -261,7 +262,10 @@ pub(crate) fn column_as_f64_view(column: &Column) -> Result<NumericView<'_>, Dia
     })?;
     let rechunked = ca.rechunk();
     let slice = rechunked.cont_slice().map_err(|e| {
-        Diagnostic::compute_error("C0210", format!("internal error: expected no nulls after null_count() check: {e}"))
+        Diagnostic::compute_error(
+            "C0210",
+            format!("internal error: expected no nulls after null_count() check: {e}"),
+        )
     })?;
     Ok(NumericView::Owned(slice.to_vec()))
 }
@@ -288,7 +292,10 @@ impl std::ops::Deref for VectorData {
         self.materialized.get_or_init(|| {
             (0..self.column.len())
                 .map(|i| {
-                    let av = self.column.get(i).expect("VectorData row index is always in bounds");
+                    let av = self
+                        .column
+                        .get(i)
+                        .expect("VectorData row index is always in bounds");
                     polars_bridge::any_value_to_value(&av, VECTOR_COL, i, &self.na_reasons)
                 })
                 .collect()
@@ -329,6 +336,9 @@ mod tests {
         let vd = VectorData::from_f64(vec![1.0, 2.0, 3.0]);
         assert_eq!(vd.len(), 3);
         let materialized: &Vec<Value> = &vd;
-        assert_eq!(*materialized, vec![Value::F64(1.0), Value::F64(2.0), Value::F64(3.0)]);
+        assert_eq!(
+            *materialized,
+            vec![Value::F64(1.0), Value::F64(2.0), Value::F64(3.0)]
+        );
     }
 }

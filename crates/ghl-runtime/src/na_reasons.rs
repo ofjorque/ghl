@@ -34,11 +34,14 @@ impl NaReasonTable {
     }
 
     pub fn set(&mut self, col: &str, row: usize, reason: impl AsRef<str>) {
-        self.reasons.insert((col.to_string(), row), Arc::from(reason.as_ref()));
+        self.reasons
+            .insert((col.to_string(), row), Arc::from(reason.as_ref()));
     }
 
     pub fn get(&self, col: &str, row: usize) -> Option<&str> {
-        self.reasons.get(&(col.to_string(), row)).map(|s| s.as_ref())
+        self.reasons
+            .get(&(col.to_string(), row))
+            .map(|s| s.as_ref())
     }
 
     pub fn remove(&mut self, col: &str, row: usize) {
@@ -59,7 +62,8 @@ impl NaReasonTable {
         let mut out = NaReasonTable::default();
         for ((col, old_row), reason) in &self.reasons {
             if let Some(&new_row) = position_of_old.get(old_row) {
-                out.reasons.insert((col.clone(), new_row), Arc::clone(reason));
+                out.reasons
+                    .insert((col.clone(), new_row), Arc::clone(reason));
             }
         }
         out
@@ -69,8 +73,13 @@ impl NaReasonTable {
     pub fn rename_column(&self, old_col: &str, new_col: &str) -> NaReasonTable {
         let mut out = NaReasonTable::default();
         for ((col, row), reason) in &self.reasons {
-            let mapped = if col == old_col { new_col } else { col.as_str() };
-            out.reasons.insert((mapped.to_string(), *row), Arc::clone(reason));
+            let mapped = if col == old_col {
+                new_col
+            } else {
+                col.as_str()
+            };
+            out.reasons
+                .insert((mapped.to_string(), *row), Arc::clone(reason));
         }
         out
     }
@@ -118,7 +127,8 @@ impl NaReasonTable {
         for ((col, old_row), reason) in &self.reasons {
             let new_row = (*old_row as i64) + periods;
             if new_row >= 0 && (new_row as usize) < len {
-                out.reasons.insert((col.clone(), new_row as usize), Arc::clone(reason));
+                out.reasons
+                    .insert((col.clone(), new_row as usize), Arc::clone(reason));
             }
         }
         out
@@ -201,7 +211,9 @@ mod tests {
 
         let orig = t.reasons.get(&("col".to_string(), 0)).unwrap();
         let copy = reindexed.reasons.get(&("col".to_string(), 0)).unwrap();
-        assert!(Arc::ptr_eq(orig, copy),
-            "reindex must share Arc pointers, not clone string data");
+        assert!(
+            Arc::ptr_eq(orig, copy),
+            "reindex must share Arc pointers, not clone string data"
+        );
     }
 }

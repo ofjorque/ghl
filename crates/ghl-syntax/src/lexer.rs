@@ -15,7 +15,7 @@ fn skip_block_comment(lex: &mut logos::Lexer<Token>) -> logos::Skip {
 
 #[derive(Logos, Debug, Clone, PartialEq, Eq, Hash)]
 #[logos(skip r"[ \t\n\r\f]+")] // Skip whitespace
-#[logos(skip r"//[^\n]*")]     // Skip line comments
+#[logos(skip r"//[^\n]*")] // Skip line comments
 pub enum Token {
     #[regex(r"/\*", skip_block_comment)]
     BlockComment,
@@ -331,10 +331,7 @@ mod tests {
     #[test]
     fn test_lex_matrix_operators() {
         let src = r#"let c = A \ b + (X .* Y);"#;
-        let tokens: Vec<Token> = lex(src)
-            .into_iter()
-            .map(|(r, _)| r.unwrap())
-            .collect();
+        let tokens: Vec<Token> = lex(src).into_iter().map(|(r, _)| r.unwrap()).collect();
 
         assert_eq!(
             tokens,
@@ -362,10 +359,7 @@ mod tests {
             let a = 10; /* this is a block comment
             spanning multiple lines */ let b = 20;
         "#;
-        let tokens: Vec<Token> = lex(src)
-            .into_iter()
-            .map(|(r, _)| r.unwrap())
-            .collect();
+        let tokens: Vec<Token> = lex(src).into_iter().map(|(r, _)| r.unwrap()).collect();
 
         assert_eq!(
             tokens,
@@ -387,10 +381,7 @@ mod tests {
     #[test]
     fn test_lex_pipe_and_vbar() {
         let src = r#"|arena| || |> |"#;
-        let tokens: Vec<Token> = lex(src)
-            .into_iter()
-            .map(|(r, _)| r.unwrap())
-            .collect();
+        let tokens: Vec<Token> = lex(src).into_iter().map(|(r, _)| r.unwrap()).collect();
 
         assert_eq!(
             tokens,
@@ -408,10 +399,7 @@ mod tests {
     #[test]
     fn test_lex_scientific_and_underscored_numbers() {
         let src = r#"1e-10 1.0e-10 1e4 2.5e+3 1_000_000 1_000.5_000"#;
-        let tokens: Vec<Token> = lex(src)
-            .into_iter()
-            .map(|(r, _)| r.unwrap())
-            .collect();
+        let tokens: Vec<Token> = lex(src).into_iter().map(|(r, _)| r.unwrap()).collect();
 
         assert_eq!(
             tokens,
@@ -426,4 +414,3 @@ mod tests {
         );
     }
 }
-

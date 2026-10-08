@@ -11,7 +11,8 @@ use ghl_runtime::{Interpreter, Value};
 use ghl_syntax::parser::parse;
 
 fn eval_script(code: &str) -> Interpreter {
-    let program = parse(code).unwrap_or_else(|e| panic!("Syntax error in test script: {e:?}\nCode:\n{code}"));
+    let program =
+        parse(code).unwrap_or_else(|e| panic!("Syntax error in test script: {e:?}\nCode:\n{code}"));
     let mut interp = Interpreter::new();
     interp
         .eval_program(&program)
@@ -67,7 +68,12 @@ fn test_lazy_arrange_head_tail() {
 
     if let Value::DataFrame { frame, .. } = top2 {
         assert_eq!(frame.height(), 2);
-        let vals = frame.column("val").unwrap().as_materialized_series().f64().unwrap();
+        let vals = frame
+            .column("val")
+            .unwrap()
+            .as_materialized_series()
+            .f64()
+            .unwrap();
         assert_eq!(vals.get(0), Some(50.0));
         assert_eq!(vals.get(1), Some(40.0));
     } else {
@@ -76,7 +82,12 @@ fn test_lazy_arrange_head_tail() {
 
     if let Value::DataFrame { frame, .. } = bot2 {
         assert_eq!(frame.height(), 2);
-        let vals = frame.column("val").unwrap().as_materialized_series().f64().unwrap();
+        let vals = frame
+            .column("val")
+            .unwrap()
+            .as_materialized_series()
+            .f64()
+            .unwrap();
         assert_eq!(vals.get(0), Some(10.0));
         assert_eq!(vals.get(1), Some(20.0));
     } else {
@@ -124,7 +135,9 @@ fn test_lazy_group_by_summarize() {
     let res = interp.env.get("res").expect("res");
     let eager_res = interp.env.get("eager_res").expect("eager_res");
 
-    if let (Value::DataFrame { frame: f_lazy, .. }, Value::DataFrame { frame: f_eager, .. }) = (res, eager_res) {
+    if let (Value::DataFrame { frame: f_lazy, .. }, Value::DataFrame { frame: f_eager, .. }) =
+        (res, eager_res)
+    {
         assert_eq!(f_lazy.height(), f_eager.height());
         assert_eq!(f_lazy.height(), 2);
     } else {
@@ -222,7 +235,12 @@ fn test_scan_parquet_deferred() {
 
     if let Value::DataFrame { frame, .. } = filtered {
         assert_eq!(frame.height(), 2);
-        let genes = frame.column("gene").unwrap().as_materialized_series().str().unwrap();
+        let genes = frame
+            .column("gene")
+            .unwrap()
+            .as_materialized_series()
+            .str()
+            .unwrap();
         assert_eq!(genes.get(0), Some("TP53"));
         assert_eq!(genes.get(1), Some("MYC"));
     } else {

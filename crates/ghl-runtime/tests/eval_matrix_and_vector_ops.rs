@@ -3,8 +3,8 @@
 mod common;
 use common::*;
 
-use ghl_runtime::value::Value;
 use ghl_runtime::eval::Interpreter;
+use ghl_runtime::value::Value;
 use ghl_syntax::parser::parse;
 
 #[test]
@@ -87,7 +87,10 @@ fn test_matrix_multiplication_real_product() {
             assert_eq!((rows, cols), (2, 2));
             let expected = [58.0, 64.0, 139.0, 154.0];
             for (got, want) in data.iter().zip(expected.iter()) {
-                assert!((got - want).abs() < 1e-9, "got {data:?}, expected {expected:?}");
+                assert!(
+                    (got - want).abs() < 1e-9,
+                    "got {data:?}, expected {expected:?}"
+                );
             }
         }
         other => panic!("Expected Matrix, found {other:?}"),
@@ -103,7 +106,9 @@ fn test_matrix_multiplication_rejects_non_conformable_dimensions() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("2x2 * 3x3 must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("2x2 * 3x3 must fail");
     assert_eq!(err.code, "S0412");
 }
 
@@ -125,7 +130,10 @@ fn test_qr_decomposition_reconstructs_original_matrix() {
     let a = matrix_data(&interp.env.get("a").unwrap());
     let reconstructed = matrix_data(&interp.env.get("reconstructed").unwrap());
     for (got, want) in reconstructed.iter().zip(a.iter()) {
-        assert!((got - want).abs() < 1e-9, "QR reconstruction mismatch: {reconstructed:?} vs {a:?}");
+        assert!(
+            (got - want).abs() < 1e-9,
+            "QR reconstruction mismatch: {reconstructed:?} vs {a:?}"
+        );
     }
 }
 
@@ -143,12 +151,17 @@ fn test_cholesky_reconstructs_symmetric_positive_definite_matrix() {
     let (l11, l12, l21, l22) = (l[0], l[1], l[2], l[3]);
     assert!(l12.abs() < 1e-12, "L must be lower triangular, got {l:?}");
     let reconstructed = [
-        l11 * l11 + l12 * l12, l11 * l21 + l12 * l22,
-        l21 * l11 + l22 * l12, l21 * l21 + l22 * l22,
+        l11 * l11 + l12 * l12,
+        l11 * l21 + l12 * l22,
+        l21 * l11 + l22 * l12,
+        l21 * l21 + l22 * l22,
     ];
     let expected = [4.0, 2.0, 2.0, 3.0];
     for (got, want) in reconstructed.iter().zip(expected.iter()) {
-        assert!((got - want).abs() < 1e-9, "L * Lt mismatch: {reconstructed:?} vs {expected:?}");
+        assert!(
+            (got - want).abs() < 1e-9,
+            "L * Lt mismatch: {reconstructed:?} vs {expected:?}"
+        );
     }
 }
 
@@ -160,7 +173,9 @@ fn test_cholesky_rejects_asymmetric_matrix() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("asymmetric matrix must be rejected");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("asymmetric matrix must be rejected");
     assert_eq!(err.code, "S0412");
 }
 
@@ -174,7 +189,9 @@ fn test_cholesky_rejects_non_positive_definite_matrix() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("indefinite matrix must be rejected");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("indefinite matrix must be rejected");
     assert_eq!(err.code, "S0101");
 }
 
@@ -204,7 +221,9 @@ fn test_eigen_rejects_asymmetric_matrix() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("asymmetric matrix must be rejected");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("asymmetric matrix must be rejected");
     assert_eq!(err.code, "S0412");
 }
 
@@ -248,7 +267,10 @@ fn test_svd_reconstructs_matrix() {
         }
     }
     for (got, want) in reconstructed.iter().zip(a.iter()) {
-        assert!((got - want).abs() < 1e-9, "SVD reconstruction mismatch: {reconstructed:?} vs {a:?}");
+        assert!(
+            (got - want).abs() < 1e-9,
+            "SVD reconstruction mismatch: {reconstructed:?} vs {a:?}"
+        );
     }
 }
 
@@ -275,7 +297,9 @@ fn test_dot_product_rejects_mismatched_lengths() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("mismatched lengths must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("mismatched lengths must fail");
     assert_eq!(err.code, "S0412");
 }
 
@@ -289,7 +313,10 @@ fn test_dot_product_propagates_na_with_reason() {
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
     interp.eval_program(&program).expect("evaluation ok");
-    assert_eq!(interp.env.get("d"), Some(Value::NA(Some("SensorDropout".into()))));
+    assert_eq!(
+        interp.env.get("d"),
+        Some(Value::NA(Some("SensorDropout".into())))
+    );
 }
 
 #[test]
@@ -306,8 +333,14 @@ fn test_mean_sum_preserve_na_reason_over_vector() {
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
     interp.eval_program(&program).expect("evaluation ok");
-    assert_eq!(interp.env.get("m"), Some(Value::NA(Some("SensorDropout".into()))));
-    assert_eq!(interp.env.get("s"), Some(Value::NA(Some("SensorDropout".into()))));
+    assert_eq!(
+        interp.env.get("m"),
+        Some(Value::NA(Some("SensorDropout".into())))
+    );
+    assert_eq!(
+        interp.env.get("s"),
+        Some(Value::NA(Some("SensorDropout".into())))
+    );
 }
 
 #[test]
@@ -330,7 +363,10 @@ fn test_map_applies_closure_over_vector() {
         .collect();
     assert_eq!(y.len(), 3);
     for (got, want) in y.iter().zip(expected.iter()) {
-        assert!((got - want).abs() < 1e-9, "map() mismatch: {y:?} vs {expected:?}");
+        assert!(
+            (got - want).abs() < 1e-9,
+            "map() mismatch: {y:?} vs {expected:?}"
+        );
     }
 }
 
@@ -365,7 +401,11 @@ fn test_map_preserves_per_element_na() {
     match interp.env.get("y").unwrap() {
         Value::Vector(vd) => {
             assert_eq!(vd.value_at(0), Some(Value::F64(2.0)));
-            assert!(matches!(vd.value_at(1), Some(Value::NA(_))), "expected NA at index 1, got {:?}", vd.value_at(1));
+            assert!(
+                matches!(vd.value_at(1), Some(Value::NA(_))),
+                "expected NA at index 1, got {:?}",
+                vd.value_at(1)
+            );
             assert_eq!(vd.value_at(2), Some(Value::F64(3.0)));
         }
         other => panic!("Expected Vector, found {other:?}"),
@@ -379,7 +419,9 @@ fn test_map_rejects_non_vector_first_argument() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("non-Vector first argument must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("non-Vector first argument must fail");
     assert_eq!(err.code, "C0202");
 }
 
@@ -391,7 +433,9 @@ fn test_map_rejects_non_callable_second_argument() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("non-callable second argument must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("non-callable second argument must fail");
     assert_eq!(err.code, "C0203");
 }
 
@@ -411,10 +455,22 @@ fn test_scalar_vector_arithmetic_is_symmetric() {
     let mut interp = Interpreter::new();
     interp.eval_program(&program).expect("evaluation ok");
 
-    assert_eq!(vector_f64(&interp.env.get("a").unwrap()), vec![11.0, 12.0, 14.0]);
-    assert_eq!(vector_f64(&interp.env.get("a").unwrap()), vector_f64(&interp.env.get("b").unwrap()));
-    assert_eq!(vector_f64(&interp.env.get("c").unwrap()), vec![9.0, 8.0, 6.0]);
-    assert_eq!(vector_f64(&interp.env.get("d").unwrap()), vec![100.0, 50.0, 25.0]);
+    assert_eq!(
+        vector_f64(&interp.env.get("a").unwrap()),
+        vec![11.0, 12.0, 14.0]
+    );
+    assert_eq!(
+        vector_f64(&interp.env.get("a").unwrap()),
+        vector_f64(&interp.env.get("b").unwrap())
+    );
+    assert_eq!(
+        vector_f64(&interp.env.get("c").unwrap()),
+        vec![9.0, 8.0, 6.0]
+    );
+    assert_eq!(
+        vector_f64(&interp.env.get("d").unwrap()),
+        vec![100.0, 50.0, 25.0]
+    );
 }
 
 #[test]
@@ -435,10 +491,22 @@ fn test_vector_vector_plain_operators_are_elementwise() {
     let mut interp = Interpreter::new();
     interp.eval_program(&program).expect("evaluation ok");
 
-    assert_eq!(vector_f64(&interp.env.get("sum").unwrap()), vec![11.0, 22.0, 33.0]);
-    assert_eq!(vector_f64(&interp.env.get("diff").unwrap()), vec![9.0, 18.0, 27.0]);
-    assert_eq!(vector_f64(&interp.env.get("prod").unwrap()), vec![10.0, 40.0, 90.0]);
-    assert_eq!(vector_f64(&interp.env.get("quot").unwrap()), vec![10.0, 10.0, 10.0]);
+    assert_eq!(
+        vector_f64(&interp.env.get("sum").unwrap()),
+        vec![11.0, 22.0, 33.0]
+    );
+    assert_eq!(
+        vector_f64(&interp.env.get("diff").unwrap()),
+        vec![9.0, 18.0, 27.0]
+    );
+    assert_eq!(
+        vector_f64(&interp.env.get("prod").unwrap()),
+        vec![10.0, 40.0, 90.0]
+    );
+    assert_eq!(
+        vector_f64(&interp.env.get("quot").unwrap()),
+        vec![10.0, 10.0, 10.0]
+    );
 }
 
 #[test]
@@ -450,7 +518,9 @@ fn test_vector_vector_plain_operators_reject_mismatched_lengths() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("mismatched lengths must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("mismatched lengths must fail");
     assert_eq!(err.code, "S0412");
 }
 
@@ -523,7 +593,11 @@ fn test_vector_elementwise_na_fallback_unaffected() {
     match interp.env.get("sum").unwrap() {
         Value::Vector(vd) => {
             assert_eq!(vd.value_at(0), Some(Value::F64(11.0)));
-            assert!(matches!(vd.value_at(1), Some(Value::NA(_))), "expected NA at index 1, got {:?}", vd.value_at(1));
+            assert!(
+                matches!(vd.value_at(1), Some(Value::NA(_))),
+                "expected NA at index 1, got {:?}",
+                vd.value_at(1)
+            );
             assert_eq!(vd.value_at(2), Some(Value::F64(33.0)));
         }
         other => panic!("Expected Vector, found {other:?}"),
@@ -566,7 +640,11 @@ fn test_pow_fast_path_produces_na_on_nan_without_input_na() {
     match interp.env.get("p").unwrap() {
         Value::Vector(vd) => {
             assert_eq!(vd.value_at(0), Some(Value::F64(2.0)));
-            assert!(matches!(vd.value_at(1), Some(Value::NA(_))), "expected NA at index 1, got {:?}", vd.value_at(1));
+            assert!(
+                matches!(vd.value_at(1), Some(Value::NA(_))),
+                "expected NA at index 1, got {:?}",
+                vd.value_at(1)
+            );
             assert!((vd.value_at(2).unwrap().as_f64().unwrap() - 3.0).abs() < 1e-9);
         }
         other => panic!("Expected Vector, found {other:?}"),
@@ -625,7 +703,10 @@ fn test_cumsum_fast_path_matches_boxed_reference() {
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
     interp.eval_program(&program).expect("evaluation ok");
-    assert_eq!(vector_f64(&interp.env.get("running").unwrap()), vec![1.0, 3.0, 6.0, 10.0]);
+    assert_eq!(
+        vector_f64(&interp.env.get("running").unwrap()),
+        vec![1.0, 3.0, 6.0, 10.0]
+    );
 }
 
 #[test]
@@ -644,7 +725,10 @@ fn test_cumsum_na_poisons_rest_unaffected() {
         Value::Vector(vd) => {
             assert_eq!(vd.value_at(0), Some(Value::F64(1.0)));
             assert!(matches!(vd.value_at(1), Some(Value::NA(_))));
-            assert!(matches!(vd.value_at(2), Some(Value::NA(_))), "NA must poison everything after it");
+            assert!(
+                matches!(vd.value_at(2), Some(Value::NA(_))),
+                "NA must poison everything after it"
+            );
         }
         other => panic!("Expected Vector, found {other:?}"),
     }
@@ -701,7 +785,10 @@ fn test_rank_fast_path_matches_boxed_reference() {
     let mut interp = Interpreter::new();
     interp.eval_program(&program).expect("evaluation ok");
     // 10 -> rank 1; 20 -> rank 2; the two 30s tie for ranks 3 and 4, averaged to 3.5.
-    assert_eq!(vector_f64(&interp.env.get("ranks").unwrap()), vec![1.0, 3.5, 2.0, 3.5]);
+    assert_eq!(
+        vector_f64(&interp.env.get("ranks").unwrap()),
+        vec![1.0, 3.5, 2.0, 3.5]
+    );
 }
 
 #[test]
@@ -742,4 +829,3 @@ fn test_n_distinct_counts_different_na_reasons_as_one_missing_value() {
     // collapse to a single missing-value bucket, giving 2 total, not 3.
     assert_eq!(interp.env.get("n").unwrap(), Value::I64(2));
 }
-

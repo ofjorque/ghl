@@ -6,8 +6,8 @@
 //!
 //! Usage: `cargo run --release --example spike_sort_threshold_latency -p ghl-runtime`
 
-use std::time::{Duration, Instant};
 use rayon::prelude::*;
+use std::time::{Duration, Instant};
 
 const REPEATS: u32 = 10;
 
@@ -25,7 +25,9 @@ fn best_of<T>(f: impl Fn() -> T) -> (Duration, T) {
 
 fn run_size(n: usize) {
     println!("\nN = {n} elements");
-    let base: Vec<f64> = (0..n).map(|i| ((i * 2654435761) % 1_000_003) as f64).collect();
+    let base: Vec<f64> = (0..n)
+        .map(|i| ((i * 2654435761) % 1_000_003) as f64)
+        .collect();
 
     let (t_seq, seq) = best_of(|| {
         let mut idx: Vec<u32> = (0..n as u32).collect();
@@ -43,7 +45,10 @@ fn run_size(n: usize) {
 
     assert_eq!(seq.len(), par.len());
     for i in 0..seq.len() {
-        assert_eq!(base[seq[i] as usize], base[par[i] as usize], "both must produce the same sort order");
+        assert_eq!(
+            base[seq[i] as usize], base[par[i] as usize],
+            "both must produce the same sort order"
+        );
     }
 
     let speedup = t_seq.as_secs_f64() / t_par.as_secs_f64().max(1e-12);
@@ -51,8 +56,13 @@ fn run_size(n: usize) {
 }
 
 fn main() {
-    println!("Threads available for rayon: {}", rayon::current_num_threads());
-    for n in [1_000usize, 2_000, 3_000, 4_000, 5_000, 10_000, 20_000, 50_000, 1_000_000] {
+    println!(
+        "Threads available for rayon: {}",
+        rayon::current_num_threads()
+    );
+    for n in [
+        1_000usize, 2_000, 3_000, 4_000, 5_000, 10_000, 20_000, 50_000, 1_000_000,
+    ] {
         run_size(n);
     }
 }

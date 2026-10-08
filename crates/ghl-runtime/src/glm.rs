@@ -11,16 +11,19 @@
 //! the parallelized O(n*p^2) assembly, `sandwich_vcov` for robust covariance, and
 //! `normal_cdf` for p-values.
 
-use std::fmt;
-use std::sync::Arc;
+use crate::matrix::MatrixOps;
+use crate::na_reasons::NaReasonTable;
+use crate::neko::{
+    Blueprint, RowDisposition, VcovKind, assemble_weighted_normal_equations, normal_cdf,
+    sandwich_vcov,
+};
+use crate::value::Value;
+use crate::vector_data::VectorData;
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps, Sparkline};
 use polars_core::frame::DataFrame;
 use rayon::prelude::*;
-use crate::matrix::MatrixOps;
-use crate::na_reasons::NaReasonTable;
-use crate::neko::{assemble_weighted_normal_equations, normal_cdf, sandwich_vcov, Blueprint, RowDisposition, VcovKind};
-use crate::value::Value;
-use crate::vector_data::VectorData;
+use std::fmt;
+use std::sync::Arc;
 
 const MAX_IRLS_ITER: usize = 25;
 const IRLS_TOL: f64 = 1e-8;
@@ -102,7 +105,8 @@ impl FittedGlm {
         frame: &DataFrame,
         na_reasons: &NaReasonTable,
     ) -> Result<Self, Diagnostic> {
-        let (x_data, y_data, dispositions, n, p, baked_term_names, baked_term_levels) = blueprint.bake(frame, na_reasons)?;
+        let (x_data, y_data, dispositions, n, p, baked_term_names, baked_term_levels) =
+            blueprint.bake(frame, na_reasons)?;
         let mut blueprint = blueprint;
         blueprint.term_names = baked_term_names;
         blueprint.term_levels = baked_term_levels;
@@ -160,7 +164,8 @@ impl FittedGlm {
                 (0..n).map(compute_row).unzip()
             };
 
-            let (xtwx, xtwz) = assemble_weighted_normal_equations(n, p, &x_data, Some(&weights), &z);
+            let (xtwx, xtwz) =
+                assemble_weighted_normal_equations(n, p, &x_data, Some(&weights), &z);
             let beta_new = MatrixOps::solve(p, &xtwx, &xtwz)?;
 
             let max_delta = beta_new
@@ -179,7 +184,10 @@ impl FittedGlm {
         if !converged {
             return Err(Diagnostic::statistical_error(
                 "S0205",
-                format!("IRLS did not converge in {} iterations for `fit_logistic()`", MAX_IRLS_ITER),
+                format!(
+                    "IRLS did not converge in {} iterations for `fit_logistic()`",
+                    MAX_IRLS_ITER
+                ),
             ));
         }
 
@@ -204,7 +212,10 @@ impl FittedGlm {
         // form, no IRLS needed) -- deviance still sums bernoulli_ll_term per observation
         // since y_i itself varies row to row even though mu doesn't.
         let y_bar = y_data.iter().sum::<f64>() / n as f64;
-        let null_deviance: f64 = y_data.iter().map(|&y| -2.0 * bernoulli_ll_term(y, y_bar)).sum();
+        let null_deviance: f64 = y_data
+            .iter()
+            .map(|&y| -2.0 * bernoulli_ll_term(y, y_bar))
+            .sum();
 
         let df_resid = n - p;
         let pseudo_r_squared = if null_deviance > 0.0 {
@@ -231,7 +242,8 @@ impl FittedGlm {
         } else {
             (0..n).map(final_weight_at_row).collect()
         };
-        let (final_xtwx, _) = assemble_weighted_normal_equations(n, p, &x_data, Some(&final_weights), &vec![0.0; n]);
+        let (final_xtwx, _) =
+            assemble_weighted_normal_equations(n, p, &x_data, Some(&final_weights), &vec![0.0; n]);
         let mut inv_xtwx = vec![0.0; p * p];
         for col_idx in 0..p {
             let mut e = vec![0.0; p];
@@ -291,7 +303,8 @@ impl FittedGlm {
         frame: &DataFrame,
         na_reasons: &NaReasonTable,
     ) -> Result<Self, Diagnostic> {
-        let (x_data, y_data, dispositions, n, p, baked_term_names, baked_term_levels) = blueprint.bake(frame, na_reasons)?;
+        let (x_data, y_data, dispositions, n, p, baked_term_names, baked_term_levels) =
+            blueprint.bake(frame, na_reasons)?;
         let mut blueprint = blueprint;
         blueprint.term_names = baked_term_names;
         blueprint.term_levels = baked_term_levels;
@@ -354,7 +367,8 @@ impl FittedGlm {
                 (0..n).map(compute_row).unzip()
             };
 
-            let (xtwx, xtwz) = assemble_weighted_normal_equations(n, p, &x_data, Some(&weights), &z);
+            let (xtwx, xtwz) =
+                assemble_weighted_normal_equations(n, p, &x_data, Some(&weights), &z);
             let beta_new = MatrixOps::solve(p, &xtwx, &xtwz)?;
 
             let max_delta = beta_new
@@ -373,7 +387,10 @@ impl FittedGlm {
         if !converged {
             return Err(Diagnostic::statistical_error(
                 "S0205",
-                format!("IRLS did not converge in {} iterations for `poisson()`", MAX_IRLS_ITER),
+                format!(
+                    "IRLS did not converge in {} iterations for `poisson()`",
+                    MAX_IRLS_ITER
+                ),
             ));
         }
 
@@ -397,13 +414,16 @@ impl FittedGlm {
         }
 
         let mu_null = y_bar.max(MU_EPS);
-        let null_deviance: f64 = y_data.iter().map(|&y| {
-            if y > 0.0 {
-                2.0 * (y * (y / mu_null).ln() - (y - mu_null))
-            } else {
-                2.0 * mu_null
-            }
-        }).sum();
+        let null_deviance: f64 = y_data
+            .iter()
+            .map(|&y| {
+                if y > 0.0 {
+                    2.0 * (y * (y / mu_null).ln() - (y - mu_null))
+                } else {
+                    2.0 * mu_null
+                }
+            })
+            .sum();
 
         let df_resid = n - p;
         let pseudo_r_squared = if null_deviance > 0.0 {
@@ -424,7 +444,8 @@ impl FittedGlm {
         } else {
             (0..n).map(final_weight_at_row).collect()
         };
-        let (final_xtwx, _) = assemble_weighted_normal_equations(n, p, &x_data, Some(&final_weights), &vec![0.0; n]);
+        let (final_xtwx, _) =
+            assemble_weighted_normal_equations(n, p, &x_data, Some(&final_weights), &vec![0.0; n]);
         let mut inv_xtwx = vec![0.0; p * p];
         for col_idx in 0..p {
             let mut e = vec![0.0; p];
@@ -494,7 +515,15 @@ impl FittedGlm {
                     .zip(&self.fitted_values)
                     .map(|(&y, &mu)| (y - mu).powi(2))
                     .collect();
-                sandwich_vcov(p, self.n_obs, self.df_resid, &self.x_data, &sq_score, &self.inv_xtwx, kind)
+                sandwich_vcov(
+                    p,
+                    self.n_obs,
+                    self.df_resid,
+                    &self.x_data,
+                    &sq_score,
+                    &self.inv_xtwx,
+                    kind,
+                )
             }
         }
     }
@@ -530,13 +559,25 @@ impl FittedGlm {
     pub fn glance(&self) -> Value {
         let cols = vec![
             ("deviance".to_string(), vec![Value::F64(self.deviance)]),
-            ("null_deviance".to_string(), vec![Value::F64(self.null_deviance)]),
-            ("pseudo_r_squared".to_string(), vec![Value::F64(self.pseudo_r_squared)]),
+            (
+                "null_deviance".to_string(),
+                vec![Value::F64(self.null_deviance)],
+            ),
+            (
+                "pseudo_r_squared".to_string(),
+                vec![Value::F64(self.pseudo_r_squared)],
+            ),
             ("aic".to_string(), vec![Value::F64(self.aic)]),
             ("bic".to_string(), vec![Value::F64(self.bic)]),
             ("n_obs".to_string(), vec![Value::I64(self.n_obs as i64)]),
-            ("dropped_n".to_string(), vec![Value::I64(self.dropped_n as i64)]),
-            ("iterations".to_string(), vec![Value::I64(self.iterations as i64)]),
+            (
+                "dropped_n".to_string(),
+                vec![Value::I64(self.dropped_n as i64)],
+            ),
+            (
+                "iterations".to_string(),
+                vec![Value::I64(self.iterations as i64)],
+            ),
         ];
 
         let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&cols)
@@ -566,26 +607,41 @@ impl FittedGlm {
                             fitted_col.push(None);
                             res_col.push(None);
                             used_col.push(false);
-                            reason_col.push(reason.clone().unwrap_or_else(|| "unspecified".to_string()));
+                            reason_col
+                                .push(reason.clone().unwrap_or_else(|| "unspecified".to_string()));
                         }
                     }
                 }
 
                 let mut new_frame = frame.clone();
-                new_frame.with_column(crate::polars_bridge::f64_opt_column(".fitted", fitted_col)).map_err(|e| {
-                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
-                })?;
-                new_frame.with_column(crate::polars_bridge::f64_opt_column(".residual", res_col)).map_err(|e| {
-                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
-                })?;
-                new_frame.with_column(crate::polars_bridge::bool_column(".used_in_fit", used_col)).map_err(|e| {
-                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
-                })?;
-                new_frame.with_column(crate::polars_bridge::string_column(".na_reason", reason_col)).map_err(|e| {
-                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
-                })?;
+                new_frame
+                    .with_column(crate::polars_bridge::f64_opt_column(".fitted", fitted_col))
+                    .map_err(|e| {
+                        Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                    })?;
+                new_frame
+                    .with_column(crate::polars_bridge::f64_opt_column(".residual", res_col))
+                    .map_err(|e| {
+                        Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                    })?;
+                new_frame
+                    .with_column(crate::polars_bridge::bool_column(".used_in_fit", used_col))
+                    .map_err(|e| {
+                        Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                    })?;
+                new_frame
+                    .with_column(crate::polars_bridge::string_column(
+                        ".na_reason",
+                        reason_col,
+                    ))
+                    .map_err(|e| {
+                        Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                    })?;
 
-                Ok(Value::DataFrame { frame: new_frame, na_reasons: Arc::clone(na_reasons) })
+                Ok(Value::DataFrame {
+                    frame: new_frame,
+                    na_reasons: Arc::clone(na_reasons),
+                })
             }
             _ => Err(Diagnostic::compute_error(
                 "C0201",
@@ -619,7 +675,8 @@ impl FittedGlm {
                 } else {
                     frame
                 };
-                let (x_data, _, dispositions, _, p, _, _) = self.blueprint.bake(frame_ref, na_reasons)?;
+                let (x_data, _, dispositions, _, p, _, _) =
+                    self.blueprint.bake(frame_ref, na_reasons)?;
                 let mut predictions = Vec::with_capacity(dispositions.len());
                 let mut included_idx = 0;
 
@@ -659,17 +716,30 @@ impl FittedGlm {
         };
         let mut panel = CockpitPanel::new(family_title);
         let badge = if caps.unicode_enabled {
-            format!("/ᐠ˵- ⩊ -˵マ ✧ IRLS CONVERGED in {} iterations", self.iterations)
+            format!(
+                "/ᐠ˵- ⩊ -˵マ ✧ IRLS CONVERGED in {} iterations",
+                self.iterations
+            )
         } else {
             format!("[CONVERGED in {} iterations]", self.iterations)
         };
 
         panel.with_badge(&badge);
 
-        panel.add_kv("Formula", format!("{} ~ {}", self.blueprint.response, self.blueprint.terms.join(" + ")));
+        panel.add_kv(
+            "Formula",
+            format!(
+                "{} ~ {}",
+                self.blueprint.response,
+                self.blueprint.terms.join(" + ")
+            ),
+        );
 
         let obs_text = if self.dropped_n > 0 {
-            format!("{} valid ({} dropped due to NA)", self.n_obs, self.dropped_n)
+            format!(
+                "{} valid ({} dropped due to NA)",
+                self.n_obs, self.dropped_n
+            )
         } else {
             format!("{} valid", self.n_obs)
         };
@@ -677,19 +747,41 @@ impl FittedGlm {
 
         let spark = Sparkline::render(&self.residuals, Some(16), caps);
         let min_res = self.residuals.iter().copied().fold(f64::INFINITY, f64::min);
-        let max_res = self.residuals.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        panel.add_kv("Deviance Residuals", format!("{spark}  (min: {:.3}, max: +{:.3})", min_res, max_res));
+        let max_res = self
+            .residuals
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        panel.add_kv(
+            "Deviance Residuals",
+            format!("{spark}  (min: {:.3}, max: +{:.3})", min_res, max_res),
+        );
 
         panel.add_kv(
             "Goodness of Fit",
-            format!("Deviance = {:.4} | Null Deviance = {:.4} | Pseudo R2 = {:.4}", self.deviance, self.null_deviance, self.pseudo_r_squared),
+            format!(
+                "Deviance = {:.4} | Null Deviance = {:.4} | Pseudo R2 = {:.4}",
+                self.deviance, self.null_deviance, self.pseudo_r_squared
+            ),
         );
-        panel.add_kv("Criteria", format!("AIC = {:.2} | BIC = {:.2} on {} DF", self.aic, self.bic, self.df_resid));
+        panel.add_kv(
+            "Criteria",
+            format!(
+                "AIC = {:.2} | BIC = {:.2} on {} DF",
+                self.aic, self.bic, self.df_resid
+            ),
+        );
 
         panel.add_divider();
 
-        panel.add_line(format!("{:<16} {:>10} {:>10} {:>9} {:>9}  {:^6}", "Term", "Estimate", "Std.Err", "z-stat", "p-val", "Signif"));
-        panel.add_line(format!("{:<16} {:>10} {:>10} {:>9} {:>9}  {:^6}", "----------------", "----------", "----------", "---------", "---------", "------"));
+        panel.add_line(format!(
+            "{:<16} {:>10} {:>10} {:>9} {:>9}  {:^6}",
+            "Term", "Estimate", "Std.Err", "z-stat", "p-val", "Signif"
+        ));
+        panel.add_line(format!(
+            "{:<16} {:>10} {:>10} {:>9} {:>9}  {:^6}",
+            "----------------", "----------", "----------", "---------", "---------", "------"
+        ));
 
         for i in 0..self.blueprint.term_names.len() {
             let term = &self.blueprint.term_names[i];

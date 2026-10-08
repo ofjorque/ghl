@@ -2,8 +2,8 @@
 
 mod common;
 
-use ghl_runtime::value::Value;
 use ghl_runtime::eval::Interpreter;
+use ghl_runtime::value::Value;
 use ghl_runtime::vector_data::VectorData;
 use ghl_syntax::parser::parse;
 use rand::SeedableRng;
@@ -157,8 +157,15 @@ fn test_gibbs_sampler_runs_end_to_end_and_recovers_means() {
     "#;
     let program = parse(runner_code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    interp.env.set("y".to_string(), Value::Vector(VectorData::from_f64(y)));
-    interp.env.set("groups".to_string(), Value::Vector(VectorData::from_values(groups.into_iter().map(Value::I64).collect())));
+    interp
+        .env
+        .set("y".to_string(), Value::Vector(VectorData::from_f64(y)));
+    interp.env.set(
+        "groups".to_string(),
+        Value::Vector(VectorData::from_values(
+            groups.into_iter().map(Value::I64).collect(),
+        )),
+    );
     interp.eval_program(&program).expect("evaluation ok");
 
     assert_eq!(interp.env.get("trace_rows"), Some(Value::I64(200)));
@@ -167,9 +174,21 @@ fn test_gibbs_sampler_runs_end_to_end_and_recovers_means() {
     let m2 = interp.env.get("mean2").unwrap().as_f64().unwrap();
 
     // Check that posterior means converge closely to true values (3.0, 8.0, -4.0)
-    assert!((m0 - 3.0).abs() < 0.25, "mean0 {} expected close to 3.0", m0);
-    assert!((m1 - 8.0).abs() < 0.25, "mean1 {} expected close to 8.0", m1);
-    assert!((m2 - (-4.0)).abs() < 0.25, "mean2 {} expected close to -4.0", m2);
+    assert!(
+        (m0 - 3.0).abs() < 0.25,
+        "mean0 {} expected close to 3.0",
+        m0
+    );
+    assert!(
+        (m1 - 8.0).abs() < 0.25,
+        "mean1 {} expected close to 8.0",
+        m1
+    );
+    assert!(
+        (m2 - (-4.0)).abs() < 0.25,
+        "mean2 {} expected close to -4.0",
+        m2
+    );
 }
 
 #[test]
@@ -266,8 +285,8 @@ fn test_log_sum_exp_stability() {
 #[test]
 fn test_em_gmm_end_to_end_and_recovers_clusters() {
     use rand::SeedableRng;
-    use rand_xoshiro::Xoshiro256PlusPlus;
     use rand_distr::{Distribution, Normal as RNormal};
+    use rand_xoshiro::Xoshiro256PlusPlus;
 
     // 1. Generate 200 2D synthetic observations from 2 Gaussian clusters:
     // Cluster 0: 100 points around (-3.0, -3.0)
@@ -413,11 +432,27 @@ fn test_em_gmm_end_to_end_and_recovers_clusters() {
     let m1_y = interp.env.get("m1_y").unwrap().as_f64().unwrap();
 
     // One cluster should converge to ~(-3, -3) and the other to ~(4, 4)
-    let (lo_x, hi_x) = if m0_x < m1_x { (m0_x, m1_x) } else { (m1_x, m0_x) };
-    let (lo_y, hi_y) = if m0_y < m1_y { (m0_y, m1_y) } else { (m1_y, m0_y) };
+    let (lo_x, hi_x) = if m0_x < m1_x {
+        (m0_x, m1_x)
+    } else {
+        (m1_x, m0_x)
+    };
+    let (lo_y, hi_y) = if m0_y < m1_y {
+        (m0_y, m1_y)
+    } else {
+        (m1_y, m0_y)
+    };
 
-    assert!((lo_x - (-3.0)).abs() < 0.2, "lo_x {} expected near -3.0", lo_x);
-    assert!((lo_y - (-3.0)).abs() < 0.2, "lo_y {} expected near -3.0", lo_y);
+    assert!(
+        (lo_x - (-3.0)).abs() < 0.2,
+        "lo_x {} expected near -3.0",
+        lo_x
+    );
+    assert!(
+        (lo_y - (-3.0)).abs() < 0.2,
+        "lo_y {} expected near -3.0",
+        lo_y
+    );
     assert!((hi_x - 4.0).abs() < 0.2, "hi_x {} expected near 4.0", hi_x);
     assert!((hi_y - 4.0).abs() < 0.2, "hi_y {} expected near 4.0", hi_y);
 }
@@ -446,7 +481,8 @@ fn test_neko_fit_gmm_recovers_clusters_and_verbs() {
     let (frame, na_reasons) = ghl_runtime::polars_bridge::build_dataframe(&[
         ("x".to_string(), x_vals),
         ("y".to_string(), y_vals),
-    ]).unwrap();
+    ])
+    .unwrap();
 
     let ghl_code = r#"
         let model = fit_gmm(df, 2, 50, 0.0001);
@@ -464,7 +500,9 @@ fn test_neko_fit_gmm_recovers_clusters_and_verbs() {
 
     let program = parse(ghl_code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    interp.env.set("df".to_string(), Value::DataFrame { frame, na_reasons });
+    interp
+        .env
+        .set("df".to_string(), Value::DataFrame { frame, na_reasons });
     interp.eval_program(&program).expect("eval ok");
 
     // Verify model exists and is GmmFit
@@ -482,8 +520,16 @@ fn test_neko_fit_gmm_recovers_clusters_and_verbs() {
         // Check recovered centers
         let (m0_x, m0_y) = (gmm.means[0], gmm.means[1]);
         let (m1_x, m1_y) = (gmm.means[2], gmm.means[3]);
-        let (lo_x, hi_x) = if m0_x < m1_x { (m0_x, m1_x) } else { (m1_x, m0_x) };
-        let (lo_y, hi_y) = if m0_y < m1_y { (m0_y, m1_y) } else { (m1_y, m0_y) };
+        let (lo_x, hi_x) = if m0_x < m1_x {
+            (m0_x, m1_x)
+        } else {
+            (m1_x, m0_x)
+        };
+        let (lo_y, hi_y) = if m0_y < m1_y {
+            (m0_y, m1_y)
+        } else {
+            (m1_y, m0_y)
+        };
 
         assert!((lo_x - (-3.0)).abs() < 0.5, "GMM lo_x {} near -3.0", lo_x);
         assert!((lo_y - (-3.0)).abs() < 0.5, "GMM lo_y {} near -3.0", lo_y);
@@ -589,8 +635,9 @@ fn test_neko_fit_gmm_on_matrix_and_error_handling() {
     let err_code = "let err_m = fit_gmm(m, 0);";
     let err_prog = parse(err_code).expect("syntax ok");
     let mut interp_err = Interpreter::new();
-    interp_err.env.set("m".to_string(), interp.env.get("m").unwrap());
+    interp_err
+        .env
+        .set("m".to_string(), interp.env.get("m").unwrap());
     let res = interp_err.eval_program(&err_prog);
     assert!(res.is_err());
 }
-

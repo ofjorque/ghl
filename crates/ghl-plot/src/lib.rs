@@ -18,14 +18,16 @@ pub mod render_vega;
 pub mod spec;
 
 pub use fonts::{discover_and_register_font, os_font_directories};
-pub use palette::{get_dark2_color, get_okabe_ito_color, sample_viridis, PaletteColor, DARK2, OKABE_ITO, VIRIDIS};
+pub use palette::{
+    DARK2, OKABE_ITO, PaletteColor, VIRIDIS, get_dark2_color, get_okabe_ito_color, sample_viridis,
+};
 pub use render_native::NativeRenderer;
 pub use render_terminal::TerminalRenderer;
 pub use render_vega::VegaRenderer;
 pub use spec::{
     AestheticMap, CompositePlot, DataSeries, FacetLayout, FacetPanel, FacetScales, FacetSpec,
-    FiveNumberSummary, GeomKind, GeomLayer, HistogramBins, LayerData, LinearFit, MarkerShape, PlotLabels,
-    PlotSpec, PlotTheme, ScaleModifier, ScaleTransform, ThemeModifier,
+    FiveNumberSummary, GeomKind, GeomLayer, HistogramBins, LayerData, LinearFit, MarkerShape,
+    PlotLabels, PlotSpec, PlotTheme, ScaleModifier, ScaleTransform, ThemeModifier,
 };
 
 impl PlotSpec {
@@ -63,10 +65,20 @@ mod tests {
     fn test_multi_layer_spec_creation() {
         let spec = PlotSpec::new()
             .with_title("Engine Displacement vs MPG")
-            .with_labels(Some("MTcars".into()), Some("Displacement".into()), Some("MPG".into()))
-            .with_xy_data(vec![160.0, 160.0, 108.0, 258.0], vec![21.0, 21.0, 22.8, 21.4])
+            .with_labels(
+                Some("MTcars".into()),
+                Some("Displacement".into()),
+                Some("MPG".into()),
+            )
+            .with_xy_data(
+                vec![160.0, 160.0, 108.0, 258.0],
+                vec![21.0, 21.0, 22.8, 21.4],
+            )
             .add_layer(GeomLayer::point())
-            .add_layer(GeomLayer::smooth_with_fit(LinearFit { slope: -0.04, intercept: 28.0 }));
+            .add_layer(GeomLayer::smooth_with_fit(LinearFit {
+                slope: -0.04,
+                intercept: 28.0,
+            }));
 
         assert_eq!(spec.layers.len(), 2);
         assert!(spec.smooth_fit().is_some());

@@ -1,9 +1,9 @@
 //! AST Lowering to High-Level Intermediate Representation (HIR).
 
-use std::collections::HashMap;
+use crate::hir::*;
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::{BinaryOp, Expr, ExprKind, Literal, Program, Stmt, StmtKind, TypeAnnotation};
-use crate::hir::*;
+use std::collections::HashMap;
 
 pub struct LoweringContext {
     pub scopes: Vec<HashMap<String, HirType>>,
@@ -64,19 +64,33 @@ impl LoweringContext {
 
         // 1. First pass: register function signatures
         for stmt in &program.statements {
-            if let StmtKind::Fn { name, params, ret_ty, .. } = &stmt.kind {
+            if let StmtKind::Fn {
+                name,
+                params,
+                ret_ty,
+                ..
+            } = &stmt.kind
+            {
                 let param_types: Vec<HirType> = params
                     .iter()
                     .map(|p| Self::lower_type_annotation(&p.ty))
                     .collect();
                 let return_type = Self::lower_type_annotation(ret_ty);
-                self.function_signatures.insert(name.clone(), (param_types, return_type));
+                self.function_signatures
+                    .insert(name.clone(), (param_types, return_type));
             }
         }
 
         // 2. Second pass: lower function bodies
         for stmt in &program.statements {
-            if let StmtKind::Fn { name, params, ret_ty, body, .. } = &stmt.kind {
+            if let StmtKind::Fn {
+                name,
+                params,
+                ret_ty,
+                body,
+                ..
+            } = &stmt.kind
+            {
                 self.push_scope();
 
                 let mut hir_params = Vec::new();
@@ -116,7 +130,16 @@ impl LoweringContext {
         let top_level_stmts: Vec<&Stmt> = program
             .statements
             .iter()
-            .filter(|s| !matches!(&s.kind, StmtKind::Fn { .. } | StmtKind::Use(_) | StmtKind::Struct(_) | StmtKind::Trait(_) | StmtKind::Impl(_)))
+            .filter(|s| {
+                !matches!(
+                    &s.kind,
+                    StmtKind::Fn { .. }
+                        | StmtKind::Use(_)
+                        | StmtKind::Struct(_)
+                        | StmtKind::Trait(_)
+                        | StmtKind::Impl(_)
+                )
+            })
             .collect();
 
         if !top_level_stmts.is_empty() {
@@ -124,11 +147,12 @@ impl LoweringContext {
             let mut hir_stmts = Vec::with_capacity(top_level_stmts.len());
             let num_stmts = top_level_stmts.len();
 
-            let (stmts_to_lower, trailing_expr) = if let StmtKind::Expr(e) = &top_level_stmts[num_stmts - 1].kind {
-                (&top_level_stmts[..num_stmts - 1], Some(e))
-            } else {
-                (&top_level_stmts[..], None)
-            };
+            let (stmts_to_lower, trailing_expr) =
+                if let StmtKind::Expr(e) = &top_level_stmts[num_stmts - 1].kind {
+                    (&top_level_stmts[..num_stmts - 1], Some(e))
+                } else {
+                    (&top_level_stmts[..], None)
+                };
 
             let mut lower_ok = true;
             for stmt in stmts_to_lower {
@@ -148,7 +172,10 @@ impl LoweringContext {
                         (Some(Box::new(lowered)), ty)
                     })
                 } else {
-                    Some((Some(Box::new(HirExpr::Literal(HirLiteral::I64(0), HirType::I64))), HirType::I64))
+                    Some((
+                        Some(Box::new(HirExpr::Literal(HirLiteral::I64(0), HirType::I64))),
+                        HirType::I64,
+                    ))
                 };
 
                 if let Some((result_expr, return_ty)) = result_pair {
@@ -216,7 +243,7 @@ impl LoweringContext {
                         return Err(Diagnostic::compute_error(
                             "C0302",
                             format!("Binary operator {:?} not supported in scalar JIT", op),
-                        ))
+                        ));
                     }
                 };
 
@@ -252,7 +279,7 @@ impl LoweringContext {
                         return Err(Diagnostic::compute_error(
                             "C0303",
                             "Indirect function calls not yet supported in scalar JIT",
-                        ))
+                        ));
                     }
                 };
 
@@ -273,7 +300,11 @@ impl LoweringContext {
                     ty: ret_ty,
                 })
             }
-            ExprKind::If { cond, then_branch, else_branch } => {
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 let cond_hir = self.lower_expr(cond)?;
                 let then_hir = self.lower_expr(then_branch)?;
                 let else_hir = if let Some(el) = else_branch {
@@ -325,7 +356,12 @@ impl LoweringContext {
                     ty: HirType::Unit,
                 })
             }
-            ExprKind::For { var, start, end, body } => {
+            ExprKind::For {
+                var,
+                start,
+                end,
+                body,
+            } => {
                 let start_hir = self.lower_expr(start)?;
                 let end_hir = self.lower_expr(end)?;
                 self.push_scope();
@@ -380,16 +416,24 @@ impl LoweringContext {
             StmtKind::Continue => Ok(HirStatement::Continue),
             StmtKind::Assign { name, op, value } => {
                 let value_hir = if let Some(bin_op) = op.to_binary_op() {
-                    let lhs_hir = self.lower_expr(&Expr::new(ExprKind::Ident(name.clone()), value.span.clone()))?;
+                    let lhs_hir = self.lower_expr(&Expr::new(
+                        ExprKind::Ident(name.clone()),
+                        value.span.clone(),
+                    ))?;
                     let rhs_hir = self.lower_expr(value)?;
                     let hir_op = match bin_op {
                         BinaryOp::Add => HirBinaryOp::Add,
                         BinaryOp::Sub => HirBinaryOp::Sub,
                         BinaryOp::Mul => HirBinaryOp::Mul,
                         BinaryOp::Div => HirBinaryOp::Div,
-                        _ => return Err(Diagnostic::compute_error("C0305", "Unsupported compound operator in scalar JIT")),
+                        _ => {
+                            return Err(Diagnostic::compute_error(
+                                "C0305",
+                                "Unsupported compound operator in scalar JIT",
+                            ));
+                        }
                     };
-                    let ty = lhs_hir.ty().clone();
+                    let ty = lhs_hir.ty();
                     HirExpr::Binary {
                         op: hir_op,
                         lhs: Box::new(lhs_hir),
@@ -406,7 +450,10 @@ impl LoweringContext {
             }
             StmtKind::Use(_) | StmtKind::Struct(_) | StmtKind::Trait(_) | StmtKind::Impl(_) => {
                 // Static imports and type declarations don't emit instructions in scalar JIT function body
-                Ok(HirStatement::Expr(HirExpr::Literal(HirLiteral::I64(0), HirType::Unit)))
+                Ok(HirStatement::Expr(HirExpr::Literal(
+                    HirLiteral::I64(0),
+                    HirType::Unit,
+                )))
             }
             _ => Err(Diagnostic::compute_error(
                 "C0305",
@@ -493,10 +540,15 @@ mod tests {
         let program = ghl_syntax::parse(code).expect("syntax ok");
         let module = lower_ast(&program).expect("lowering ok");
 
-        assert!(module.functions.contains_key("add_nums"), "unaffected function must still lower");
-        assert!(!module.functions.contains_key("greet"), "incompatible function must not be in the module");
+        assert!(
+            module.functions.contains_key("add_nums"),
+            "unaffected function must still lower"
+        );
+        assert!(
+            !module.functions.contains_key("greet"),
+            "incompatible function must not be in the module"
+        );
         assert_eq!(module.skipped.len(), 1);
         assert_eq!(module.skipped[0].0, "greet");
     }
 }
-

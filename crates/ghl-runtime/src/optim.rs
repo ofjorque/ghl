@@ -11,12 +11,12 @@
 //! - `optim(f, init, [method], [max_iter], [tol], [lower], [upper])`
 //! - `nls(residuals_fn, init, [max_iter], [tol])`
 
-use std::sync::Arc;
-use std::collections::BTreeMap;
-use ghl_diagnostics::Diagnostic;
 use crate::eval::Interpreter;
 use crate::value::Value;
 use crate::vector_data::VectorData;
+use ghl_diagnostics::Diagnostic;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// Result of a numerical optimization routine.
 #[derive(Debug, Clone)]
@@ -34,12 +34,7 @@ pub struct OptimizationResult {
 
 /// Minimizes `f: &[f64] -> f64` using the BFGS Quasi-Newton algorithm
 /// with backtracking Armijo line search.
-pub fn minimize_bfgs<F>(
-    mut f: F,
-    init: &[f64],
-    max_iter: usize,
-    tol: f64,
-) -> OptimizationResult
+pub fn minimize_bfgs<F>(mut f: F, init: &[f64], max_iter: usize, tol: f64) -> OptimizationResult
 where
     F: FnMut(&[f64]) -> f64,
 {
@@ -540,10 +535,10 @@ where
         };
     }
 
-    let alpha = 1.0;  // Reflection
-    let gamma = 2.0;  // Expansion
-    let rho = 0.5;    // Contraction
-    let sigma = 0.5;  // Shrink
+    let alpha = 1.0; // Reflection
+    let gamma = 2.0; // Expansion
+    let rho = 0.5; // Contraction
+    let sigma = 0.5; // Shrink
 
     // Build simplex with n + 1 vertices
     let mut simplex: Vec<(Vec<f64>, f64)> = Vec::with_capacity(n + 1);
@@ -552,7 +547,11 @@ where
 
     for i in 0..n {
         let mut p = init.to_vec();
-        let h = if p[i].abs() > 1e-4 { 0.05 * p[i] } else { 0.00025 };
+        let h = if p[i].abs() > 1e-4 {
+            0.05 * p[i]
+        } else {
+            0.00025
+        };
         p[i] += h;
         let fp = f(&p);
         simplex.push((p, fp));
@@ -716,7 +715,10 @@ pub fn native_optim(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value,
         other => {
             return Err(Diagnostic::compute_error(
                 "C0202",
-                format!("`optim()` second argument must be Vector or numeric, found `{}`", other.type_name()),
+                format!(
+                    "`optim()` second argument must be Vector or numeric, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -772,10 +774,7 @@ pub fn native_optim(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value,
     let objective = |point: &[f64]| -> f64 {
         let arg = Value::Vector(VectorData::from_f64(point.to_vec()));
         match interp.call_value(callable.clone(), vec![arg]) {
-            Ok(v) => match extract_numeric(&v) {
-                Ok(val) => val,
-                Err(_) => f64::NAN,
-            },
+            Ok(v) => extract_numeric(&v).unwrap_or(f64::NAN),
             Err(_) => f64::NAN,
         }
     };
@@ -786,7 +785,9 @@ pub fn native_optim(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value,
         || method.eq_ignore_ascii_case("LBFGS-B")
         || method.eq_ignore_ascii_case("L-BFGS");
 
-    let res = if method.eq_ignore_ascii_case("Nelder-Mead") || method.eq_ignore_ascii_case("NelderMead") {
+    let res = if method.eq_ignore_ascii_case("Nelder-Mead")
+        || method.eq_ignore_ascii_case("NelderMead")
+    {
         minimize_nelder_mead(objective, &init_vec, max_iter, tol)
     } else if is_lbfgs || has_bounds {
         let lower = lower_vec.unwrap_or_else(|| vec![f64::NEG_INFINITY; init_vec.len()]);
@@ -797,7 +798,10 @@ pub fn native_optim(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value,
     };
 
     let mut record = BTreeMap::new();
-    record.insert("par".to_string(), Value::Vector(VectorData::from_f64(res.par)));
+    record.insert(
+        "par".to_string(),
+        Value::Vector(VectorData::from_f64(res.par)),
+    );
     record.insert("value".to_string(), Value::F64(res.value));
     record.insert("converged".to_string(), Value::Bool(res.converged));
     record.insert("iterations".to_string(), Value::I64(res.iterations as i64));
@@ -829,7 +833,10 @@ pub fn native_nls(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, D
         other => {
             return Err(Diagnostic::compute_error(
                 "C0202",
-                format!("`nls()` second argument must be Vector or numeric, found `{}`", other.type_name()),
+                format!(
+                    "`nls()` second argument must be Vector or numeric, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -877,7 +884,10 @@ pub fn native_nls(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, D
     let res = minimize_levenberg_marquardt(residuals_fn, &init_vec, max_iter, tol);
 
     let mut record = BTreeMap::new();
-    record.insert("par".to_string(), Value::Vector(VectorData::from_f64(res.par)));
+    record.insert(
+        "par".to_string(),
+        Value::Vector(VectorData::from_f64(res.par)),
+    );
     record.insert("value".to_string(), Value::F64(res.value));
     record.insert("converged".to_string(), Value::Bool(res.converged));
     record.insert("iterations".to_string(), Value::I64(res.iterations as i64));

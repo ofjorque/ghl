@@ -2,14 +2,14 @@
 //!
 //! Implements RFC 02 (Type System & NA semantics) and RFC 09 (Factors & Categorical Data).
 
-pub mod types;
-pub mod env;
 pub mod checker;
+pub mod env;
 pub mod modules;
+pub mod types;
 
-pub use types::Type;
-pub use env::{TypeEnv, SymbolInfo};
 pub use checker::TypeChecker;
+pub use env::{SymbolInfo, TypeEnv};
+pub use types::Type;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NAReason {
@@ -29,10 +29,7 @@ pub enum GhlValue<T> {
 
 impl<T> GhlValue<T> {
     pub fn is_na(&self) -> bool {
-        match self {
-            Self::NA(_) => true,
-            _ => false,
-        }
+        matches!(self, Self::NA(_))
     }
 
     pub fn na_reason(&self) -> Option<&NAReason> {
@@ -125,7 +122,11 @@ mod tests {
         "#;
         let program = parse(code).expect("syntax ok");
         let res = check(&program, "test.gh", code);
-        assert!(res.is_ok(), "A sem_spec of formula-only equations should type-check: {:?}", res.err());
+        assert!(
+            res.is_ok(),
+            "A sem_spec of formula-only equations should type-check: {:?}",
+            res.err()
+        );
     }
 
     #[test]
@@ -138,7 +139,10 @@ mod tests {
         "#;
         let program = parse(code).expect("syntax ok");
         let res = check(&program, "test.gh", code);
-        assert!(res.is_err(), "A non-formula equation inside sem_spec must be rejected");
+        assert!(
+            res.is_err(),
+            "A non-formula equation inside sem_spec must be rejected"
+        );
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0615"));
     }
@@ -160,7 +164,11 @@ mod tests {
         "#;
         let program = parse(code).expect("syntax ok");
         let res = check(&program, "test.gh", code);
-        assert!(res.is_ok(), "Bare column verbs should type-check cleanly: {:?}", res.err());
+        assert!(
+            res.is_ok(),
+            "Bare column verbs should type-check cleanly: {:?}",
+            res.err()
+        );
     }
 
     #[test]
@@ -195,7 +203,10 @@ mod tests {
         "#;
         let program = parse(code).expect("syntax ok");
         let res = check(&program, "test.gh", code);
-        assert!(res.is_err(), "Assigning to a non-mut binding must be rejected");
+        assert!(
+            res.is_err(),
+            "Assigning to a non-mut binding must be rejected"
+        );
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0104"));
     }
@@ -205,7 +216,10 @@ mod tests {
         let code = r#"x = 1;"#;
         let program = parse(code).expect("syntax ok");
         let res = check(&program, "test.gh", code);
-        assert!(res.is_err(), "Assigning to an undeclared variable must be rejected");
+        assert!(
+            res.is_err(),
+            "Assigning to an undeclared variable must be rejected"
+        );
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0101"));
     }
@@ -218,7 +232,10 @@ mod tests {
         "#;
         let program = parse(code).expect("syntax ok");
         let res = check(&program, "test.gh", code);
-        assert!(res.is_ok(), "Assigning to a mut binding of the same type must be allowed");
+        assert!(
+            res.is_ok(),
+            "Assigning to a mut binding of the same type must be allowed"
+        );
     }
 
     #[test]
@@ -286,7 +303,11 @@ mod tests {
         "#;
         let program = parse(code).expect("syntax ok");
         let res = check(&program, "test.gh", code);
-        assert!(res.is_ok(), "Type checking should pass for use and qualified paths: {:?}", res.err());
+        assert!(
+            res.is_ok(),
+            "Type checking should pass for use and qualified paths: {:?}",
+            res.err()
+        );
         let env = res.unwrap();
         assert!(env.lookup("read_parquet").is_some());
         assert!(env.lookup("random_normal").is_some());
@@ -346,9 +367,15 @@ mod tests {
         let env = check(&program, "test.gh", code).expect("type check ok");
 
         assert_eq!(env.lookup("elem").unwrap().ty, Type::F64);
-        assert_eq!(env.lookup("sub_v").unwrap().ty, Type::Vector(Box::new(Type::F64)));
+        assert_eq!(
+            env.lookup("sub_v").unwrap().ty,
+            Type::Vector(Box::new(Type::F64))
+        );
         assert_eq!(env.lookup("m_elem").unwrap().ty, Type::F64);
-        assert_eq!(env.lookup("m_sub").unwrap().ty, Type::matrix_dynamic(Type::F64));
+        assert_eq!(
+            env.lookup("m_sub").unwrap().ty,
+            Type::matrix_dynamic(Type::F64)
+        );
     }
 
     #[test]
@@ -372,7 +399,10 @@ mod tests {
         "#;
         let program = parse(code).expect("syntax ok");
         let res = check(&program, "test.gh", code);
-        assert!(res.is_err(), "Matrix dimension mismatch (2x3 * 2x2) must be rejected at compile time");
+        assert!(
+            res.is_err(),
+            "Matrix dimension mismatch (2x3 * 2x2) must be rejected at compile time"
+        );
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0102"));
     }
@@ -391,7 +421,10 @@ mod tests {
         "#;
         let bad_program = parse(bad_code).expect("syntax ok");
         let res = check(&bad_program, "test.gh", bad_code);
-        assert!(res.is_err(), "Annotation dimension mismatch must be rejected");
+        assert!(
+            res.is_err(),
+            "Annotation dimension mismatch must be rejected"
+        );
         let diags = res.unwrap_err();
         assert!(diags.iter().any(|d| d.code == "C0102"));
     }
@@ -449,15 +482,21 @@ mod tests {
         "#;
         let program = parse(code).expect("syntax ok");
         let env = check(&program, "test.gh", code).expect("typecheck ok");
-        
+
         // 1D comprehension produces Vector[f64]
-        assert_eq!(env.lookup("v").unwrap().ty, Type::Vector(Box::new(Type::F64)));
-        
+        assert_eq!(
+            env.lookup("v").unwrap().ty,
+            Type::Vector(Box::new(Type::F64))
+        );
+
         // 2D comprehension without `if` produces Matrix
         assert!(matches!(env.lookup("m").unwrap().ty, Type::Matrix { .. }));
 
         // 2D comprehension with `if` produces Vector[f64] (flattens)
-        assert_eq!(env.lookup("filtered").unwrap().ty, Type::Vector(Box::new(Type::F64)));
+        assert_eq!(
+            env.lookup("filtered").unwrap().ty,
+            Type::Vector(Box::new(Type::F64))
+        );
     }
 
     #[test]

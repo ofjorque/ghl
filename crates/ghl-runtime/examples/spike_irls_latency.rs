@@ -10,13 +10,13 @@
 //!
 //! Usage: `cargo run --release --example spike_irls_latency -p ghl-runtime`
 
-use std::time::Instant;
-use polars_core::prelude::*;
-use rand::{RngExt, SeedableRng};
-use rayon::prelude::*;
 use ghl_runtime::na_reasons::NaReasonTable;
 use ghl_runtime::{Blueprint, FittedGlm, Interpreter, Value};
 use ghl_syntax::parser::parse;
+use polars_core::prelude::*;
+use rand::{RngExt, SeedableRng};
+use rayon::prelude::*;
+use std::time::Instant;
 
 const N: usize = 1_000_000;
 const P_PREDICTORS: usize = 40;
@@ -29,7 +29,11 @@ const P_PREDICTORS: usize = 40;
 /// uses) reads `random_normal`'s already-`Float64`, no-NA output with zero boxing.
 fn vector_f64(v: &Value) -> Vec<f64> {
     match v {
-        Value::Vector(vd) => vd.as_f64_view().expect("random_normal output is numeric").as_slice().to_vec(),
+        Value::Vector(vd) => vd
+            .as_f64_view()
+            .expect("random_normal output is numeric")
+            .as_slice()
+            .to_vec(),
         other => panic!("Expected Vector, found {other:?}"),
     }
 }
@@ -46,7 +50,13 @@ fn sigmoid_stable(x: f64) -> f64 {
 /// Sequential implementation of `assemble_weighted_normal_equations` (`neko.rs`,
 /// `pub(crate)`) -- identical algebra (`X^T W X`, `X^T W z`), self-contained here to
 /// avoid exposing internal crate helper visibility solely for benchmarking.
-fn assemble_seq(n: usize, p: usize, x_data: &[f64], weights: &[f64], target: &[f64]) -> (Vec<f64>, Vec<f64>) {
+fn assemble_seq(
+    n: usize,
+    p: usize,
+    x_data: &[f64],
+    weights: &[f64],
+    target: &[f64],
+) -> (Vec<f64>, Vec<f64>) {
     let mut xtwx = vec![0.0; p * p];
     let mut xtwt = vec![0.0; p];
     for i in 0..n {
@@ -66,7 +76,13 @@ fn assemble_seq(n: usize, p: usize, x_data: &[f64], weights: &[f64], target: &[f
 /// Same algebra partitioned with rayon: each parallel task accumulates a local
 /// p*p/p buffer across a slice of rows (`fold`), followed by a tree reduction (`reduce`),
 /// avoiding lock contention across worker threads.
-fn assemble_par(n: usize, p: usize, x_data: &[f64], weights: &[f64], target: &[f64]) -> (Vec<f64>, Vec<f64>) {
+fn assemble_par(
+    n: usize,
+    p: usize,
+    x_data: &[f64],
+    weights: &[f64],
+    target: &[f64],
+) -> (Vec<f64>, Vec<f64>) {
     (0..n)
         .into_par_iter()
         .fold(
@@ -99,12 +115,20 @@ fn assemble_par(n: usize, p: usize, x_data: &[f64], weights: &[f64], target: &[f
 }
 
 fn main() {
-    println!("Threads available for rayon: {}", rayon::current_num_threads());
+    println!(
+        "Threads available for rayon: {}",
+        rayon::current_num_threads()
+    );
     println!("N = {N}, P = {P_PREDICTORS} continuous predictors\n");
 
     // 1. Predictors generated via seeded GHL random_normal through the interpreter.
     let gen_code: String = (1..=P_PREDICTORS)
-        .map(|j| format!("let x{j} = random_normal({N}, 0.0, 1.0, {seed});\n", seed = 1000 + j))
+        .map(|j| {
+            format!(
+                "let x{j} = random_normal({N}, 0.0, 1.0, {seed});\n",
+                seed = 1000 + j
+            )
+        })
         .collect();
     let program = parse(&gen_code).expect("syntax ok");
     let mut interp = Interpreter::new();
@@ -117,7 +141,13 @@ fn main() {
 
     // 2. Fixed true beta and Bernoulli response generated from the true model.
     let true_beta: Vec<f64> = (0..=P_PREDICTORS)
-        .map(|j| if j == 0 { 0.2 } else { 0.3 * if j % 2 == 0 { 1.0 } else { -1.0 } / (j as f64).sqrt() })
+        .map(|j| {
+            if j == 0 {
+                0.2
+            } else {
+                0.3 * if j % 2 == 0 { 1.0 } else { -1.0 } / (j as f64).sqrt()
+            }
+        })
         .collect();
 
     let mut rng = rand_xoshiro::Xoshiro256PlusPlus::seed_from_u64(777);
@@ -135,10 +165,18 @@ fn main() {
     let mut predictors = predictors;
     let term_names: Vec<String> = (1..=P_PREDICTORS).map(|j| format!("x{j}")).collect();
     let mut columns: Vec<Column> = Vec::with_capacity(P_PREDICTORS + 1);
-    columns.push(Float64Chunked::from_vec(PlSmallStr::from_static("y"), y).into_series().into());
+    columns.push(
+        Float64Chunked::from_vec(PlSmallStr::from_static("y"), y)
+            .into_series()
+            .into(),
+    );
     for (j, name) in term_names.iter().enumerate() {
         let col = std::mem::take(&mut predictors[j]);
-        columns.push(Float64Chunked::from_vec(PlSmallStr::from_string(name.clone()), col).into_series().into());
+        columns.push(
+            Float64Chunked::from_vec(PlSmallStr::from_string(name.clone()), col)
+                .into_series()
+                .into(),
+        );
     }
     drop(predictors);
     let frame = DataFrame::new_infer_height(columns).expect("well-formed equal-length f64 columns");
@@ -166,7 +204,11 @@ fn main() {
 
     // 5. Benchmark sequential vs parallel assembly with converged weights.
     let p_full = P_PREDICTORS + 1; // +intercept
-    let weights: Vec<f64> = fit.fitted_values.iter().map(|&mu| (mu * (1.0 - mu)).max(1e-10)).collect();
+    let weights: Vec<f64> = fit
+        .fitted_values
+        .iter()
+        .map(|&mu| (mu * (1.0 - mu)).max(1e-10))
+        .collect();
     let target = &fit.fitted_values;
 
     const REPEATS: u32 = 5;
@@ -203,7 +245,10 @@ fn main() {
         .zip(&xtwx_par)
         .map(|(&a, &b)| (a - b).abs())
         .fold(0.0_f64, f64::max);
-    assert!(max_diff < 1e-6, "seq and par must match, max_diff={max_diff}");
+    assert!(
+        max_diff < 1e-6,
+        "seq and par must match, max_diff={max_diff}"
+    );
 
     println!("\n=== Assembly X^T W X / X^T W z (typical IRLS iteration) ===");
     println!("  Sequential:  {t_seq:>10.3?}");

@@ -3,12 +3,12 @@
 //! Provides reverse and forward mode differentiation for numerical optimizers,
 //! variational inference, and Hamiltonian Monte Carlo (HMC) algorithms.
 
-use std::sync::Arc;
 use crate::eval::Interpreter;
 use crate::value::Value;
 use crate::vector_data::VectorData;
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::{Expr, ExprKind};
+use std::sync::Arc;
 
 /// Computes the numerical derivative using a 5-point stencil:
 /// f'(x) ≈ (-f(x + 2h) + 8f(x + h) - 8f(x - h) + f(x - 2h)) / (12h)
@@ -127,7 +127,11 @@ fn call_scalar(interp: &mut Interpreter, callable: &Value, x: f64) -> Result<f64
     extract_f64(&res)
 }
 
-fn call_with_vector(interp: &mut Interpreter, callable: &Value, vec_data: &[f64]) -> Result<f64, Diagnostic> {
+fn call_with_vector(
+    interp: &mut Interpreter,
+    callable: &Value,
+    vec_data: &[f64],
+) -> Result<f64, Diagnostic> {
     let vec_val = Value::Vector(VectorData::from_f64(vec_data.to_vec()));
     let res = interp.call_value(callable.clone(), vec![vec_val])?;
     extract_f64(&res)
@@ -152,7 +156,10 @@ fn call_for_vector_result(
         Value::I64(n) => Ok(vec![n as f64]),
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("Expected Vector or numeric output from function in Jacobian, found `{}`", other.type_name()),
+            format!(
+                "Expected Vector or numeric output from function in Jacobian, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -163,7 +170,10 @@ fn extract_f64(val: &Value) -> Result<f64, Diagnostic> {
         Value::I64(n) => Ok(*n as f64),
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("Expected numeric return value for differentiation, found `{}`", other.type_name()),
+            format!(
+                "Expected numeric return value for differentiation, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -173,7 +183,10 @@ fn extract_f64(val: &Value) -> Result<f64, Diagnostic> {
 // ---------------------------------------------------------------------------
 
 /// `autodiff::diff(f, x)`: Computes the derivative of f at x (scalar or vector).
-pub fn native_autodiff_diff(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub fn native_autodiff_diff(
+    interp: &mut Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
         return Err(Diagnostic::compute_error(
             "C0201",
@@ -202,13 +215,19 @@ pub fn native_autodiff_diff(interp: &mut Interpreter, args: Vec<Value>) -> Resul
         }
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("`autodiff::diff` requires f64 or Vector for point, found `{}`", other.type_name()),
+            format!(
+                "`autodiff::diff` requires f64 or Vector for point, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
 
 /// `autodiff::grad(f)`: Higher-order function returning a gradient function `|x| -> diff(f, x)`.
-pub fn native_autodiff_grad(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub fn native_autodiff_grad(
+    interp: &mut Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     let func = args.first().cloned().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`autodiff::grad(f)` requires a function argument")
     })?;
@@ -218,19 +237,10 @@ pub fn native_autodiff_grad(interp: &mut Interpreter, args: Vec<Value>) -> Resul
 
     let body = Expr::new(
         ExprKind::Call {
-            callee: Box::new(Expr::new(
-                ExprKind::Ident("diff".into()),
-                0..0,
-            )),
+            callee: Box::new(Expr::new(ExprKind::Ident("diff".into()), 0..0)),
             args: vec![
-                Expr::new(
-                    ExprKind::Ident("__autodiff_target__".into()),
-                    0..0,
-                ),
-                Expr::new(
-                    ExprKind::Ident("x".into()),
-                    0..0,
-                ),
+                Expr::new(ExprKind::Ident("__autodiff_target__".into()), 0..0),
+                Expr::new(ExprKind::Ident("x".into()), 0..0),
             ],
         },
         0..0,
@@ -245,7 +255,10 @@ pub fn native_autodiff_grad(interp: &mut Interpreter, args: Vec<Value>) -> Resul
 
 /// `autodiff::value_and_grad(f, x)`: Computes both f(x) and ∇f(x) in a single call.
 /// Returns a Record `{ value: f(x), grad: ∇f(x) }`.
-pub fn native_autodiff_value_and_grad(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub fn native_autodiff_value_and_grad(
+    interp: &mut Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
         return Err(Diagnostic::compute_error(
             "C0201",
@@ -265,7 +278,10 @@ pub fn native_autodiff_value_and_grad(interp: &mut Interpreter, args: Vec<Value>
 }
 
 /// `autodiff::jacobian(f, x)`: Computes the Jacobian matrix J_f(x) for f: R^n -> R^m.
-pub fn native_autodiff_jacobian(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub fn native_autodiff_jacobian(
+    interp: &mut Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
         return Err(Diagnostic::compute_error(
             "C0201",
@@ -290,8 +306,10 @@ pub fn native_autodiff_jacobian(interp: &mut Interpreter, args: Vec<Value>) -> R
         }
         other => Err(Diagnostic::compute_error(
             "C0202",
-            format!("`autodiff::jacobian` requires a Vector argument, found `{}`", other.type_name()),
+            format!(
+                "`autodiff::jacobian` requires a Vector argument, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
-

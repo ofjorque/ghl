@@ -12,16 +12,17 @@
 //! module here, it's resolved to its actual implementation by looking it up
 //! in the prelude environment by name.
 
-use std::sync::LazyLock;
 use crate::env::RuntimeEnv;
 use crate::value::Value;
+use std::sync::LazyLock;
 
 static PRELUDE_ENV: LazyLock<RuntimeEnv> = LazyLock::new(RuntimeEnv::with_prelude);
 
 /// Returns the item names belonging to a standard library module path, per
 /// `ghl_types::modules`'s canonical registry.
 pub fn get_module_item_names(path: &[String]) -> Option<Vec<String>> {
-    ghl_types::modules::get_module_items(path).map(|items| items.into_iter().map(|(name, _ty)| name).collect())
+    ghl_types::modules::get_module_items(path)
+        .map(|items| items.into_iter().map(|(name, _ty)| name).collect())
 }
 
 /// Checks if a module path is recognized in the standard library.
@@ -66,7 +67,10 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Value)>> {
     let mut items = Vec::with_capacity(names.len());
     for name in names {
         let full_name = format!("{}::{}", path.join("::"), name);
-        if let Some(val) = PRELUDE_ENV.get(&full_name).or_else(|| PRELUDE_ENV.get(&name)) {
+        if let Some(val) = PRELUDE_ENV
+            .get(&full_name)
+            .or_else(|| PRELUDE_ENV.get(&name))
+        {
             items.push((name, val));
         }
     }

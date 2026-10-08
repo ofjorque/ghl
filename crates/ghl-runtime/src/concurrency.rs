@@ -4,18 +4,21 @@
 //! Supports `(start..end).par_iter()` and `Vector.par_iter()` with chained
 //! `map`, `filter`, `reduce`, `sum`, `count`, `min`, `max`, and `collect`.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
-use rayon::prelude::*;
-use ghl_diagnostics::Diagnostic;
 use crate::eval::Interpreter;
 use crate::value::Value;
 use crate::vector_data::VectorData;
+use ghl_diagnostics::Diagnostic;
+use rayon::prelude::*;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// Constructs a first-class `ParallelIterator` struct from a vector of items.
 pub fn make_parallel_iterator(items: Vec<Value>) -> Value {
     let mut fields = BTreeMap::new();
-    fields.insert("__items".into(), Value::Vector(VectorData::from_values(items)));
+    fields.insert(
+        "__items".into(),
+        Value::Vector(VectorData::from_values(items)),
+    );
     Value::Struct {
         name: "ParallelIterator".into(),
         fields: Arc::new(fields),
@@ -29,10 +32,17 @@ pub fn extract_parallel_items(val: &Value) -> Result<Vec<Value>, Diagnostic> {
             if let Some(Value::Vector(vd)) = fields.get("__items") {
                 Ok(vd.iter().cloned().collect())
             } else {
-                Err(Diagnostic::compute_error("C0201", "Corrupted ParallelIterator struct: missing __items"))
+                Err(Diagnostic::compute_error(
+                    "C0201",
+                    "Corrupted ParallelIterator struct: missing __items",
+                ))
             }
         }
-        &Value::Range { start, end, inclusive } => {
+        &Value::Range {
+            start,
+            end,
+            inclusive,
+        } => {
             let items: Vec<Value> = if inclusive {
                 (start..=end).map(Value::I64).collect()
             } else {
@@ -43,7 +53,10 @@ pub fn extract_parallel_items(val: &Value) -> Result<Vec<Value>, Diagnostic> {
         Value::Vector(vd) => Ok(vd.iter().cloned().collect()),
         other => Err(Diagnostic::compute_error(
             "C0201",
-            format!("Expected ParallelIterator, Range, or Vector, found `{}`", other.type_name()),
+            format!(
+                "Expected ParallelIterator, Range, or Vector, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -101,7 +114,10 @@ pub fn native_par_filter(interp: &mut Interpreter, args: Vec<Value>) -> Result<V
                 Value::Bool(b) => Ok(b),
                 other => Err(Diagnostic::compute_error(
                     "C0102",
-                    format!("Predicate in parallel filter must return bool, found `{}`", other.type_name()),
+                    format!(
+                        "Predicate in parallel filter must return bool, found `{}`",
+                        other.type_name()
+                    ),
                 )),
             }
         })
@@ -121,7 +137,10 @@ pub fn native_par_filter(interp: &mut Interpreter, args: Vec<Value>) -> Result<V
 /// `ParallelIterator::collect(self)` -> `Value::Vector`
 pub fn native_par_collect(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let target = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0101", "ParallelIterator::collect requires 1 argument (self)")
+        Diagnostic::compute_error(
+            "C0101",
+            "ParallelIterator::collect requires 1 argument (self)",
+        )
     })?;
     let items = extract_parallel_items(target)?;
     Ok(Value::Vector(VectorData::from_values(items)))
@@ -142,10 +161,8 @@ pub fn native_par_reduce(interp: &mut Interpreter, args: Vec<Value>) -> Result<V
     let callable = args[1].clone();
     let env_template = interp.env.clone();
 
-    let outcome: Option<Result<Value, Diagnostic>> = items
-        .into_par_iter()
-        .map(Ok)
-        .reduce_with(|a_res, b_res| {
+    let outcome: Option<Result<Value, Diagnostic>> =
+        items.into_par_iter().map(Ok).reduce_with(|a_res, b_res| {
             let a = a_res?;
             let b = b_res?;
             let mut local_interp = Interpreter::with_env(env_template.clone());
@@ -167,10 +184,13 @@ pub fn native_par_sum(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
     let all_ints = items.iter().all(|it| matches!(it, Value::I64(_)));
     if all_ints {
-        let s: i64 = items.par_iter().map(|it| match it {
-            &Value::I64(n) => n,
-            _ => 0,
-        }).sum();
+        let s: i64 = items
+            .par_iter()
+            .map(|it| match it {
+                &Value::I64(n) => n,
+                _ => 0,
+            })
+            .sum();
         Ok(Value::I64(s))
     } else {
         let s: f64 = items.par_iter().map(|it| it.as_f64().unwrap_or(0.0)).sum();
@@ -181,7 +201,10 @@ pub fn native_par_sum(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// `ParallelIterator::count(self)`
 pub fn native_par_count(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let target = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0101", "ParallelIterator::count requires 1 argument (self)")
+        Diagnostic::compute_error(
+            "C0101",
+            "ParallelIterator::count requires 1 argument (self)",
+        )
     })?;
     let items = extract_parallel_items(target)?;
     Ok(Value::I64(items.len() as i64))

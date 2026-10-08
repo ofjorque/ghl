@@ -9,8 +9,8 @@
 //! Example for the full Suite 02 case (~25M rows, ~5GB):
 //!   `cargo run --release --example generate_synthetic_csv -p ghl-runtime -- 25000000 target/synthetic_25m.csv`
 
-use std::io::{BufWriter, Write};
 use std::fs::File;
+use std::io::{BufWriter, Write};
 
 // Deterministic PRNG (same xorshift64 as `crates/ghl-runtime/src/io.rs::sample_indices`,
 // avoiding a dedicated `rand` dependency just for synthetic data generation).
@@ -29,8 +29,14 @@ const NA_REASONS: &[&str] = &["SensorDropout", "LowBattery", "Timeout", "OutOfRa
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let rows: u64 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(1_000_000);
-    let out_path = args.get(2).cloned().unwrap_or_else(|| "target/synthetic.csv".to_string());
+    let rows: u64 = args
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1_000_000);
+    let out_path = args
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "target/synthetic.csv".to_string());
 
     if let Some(parent) = std::path::Path::new(&out_path).parent() {
         std::fs::create_dir_all(parent).expect("could not create output directory");

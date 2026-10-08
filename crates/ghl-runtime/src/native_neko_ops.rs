@@ -3,13 +3,11 @@
 //! Split out of `env.rs` for maintainability; native fn names are still
 //! referenced unqualified from `RuntimeEnv::with_prelude()` via glob imports.
 
+use crate::value::Value;
+use crate::vector_data::VectorData;
 use ghl_diagnostics::Diagnostic;
 use ghl_syntax::ast::FormulaOp;
 use polars_core::prelude::NamedFrom;
-use crate::value::Value;
-use crate::vector_data::VectorData;
-
-
 
 // NEKO Native Invocations
 
@@ -22,17 +20,27 @@ pub(crate) fn native_fit_ols(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 
     let (response, terms) = match &args[0] {
-        Value::Formula { op: FormulaOp::Regression, response, terms, .. } => (response.clone(), terms.clone()),
+        Value::Formula {
+            op: FormulaOp::Regression,
+            response,
+            terms,
+            ..
+        } => (response.clone(), terms.clone()),
         Value::Formula { op, .. } => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `fit()` must be a regression formula (`~`), found `{op}`"),
+                format!(
+                    "First argument of `fit()` must be a regression formula (`~`), found `{op}`"
+                ),
             ));
         }
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `fit()` must be a Formula, found `{}`", other.type_name()),
+                format!(
+                    "First argument of `fit()` must be a Formula, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -42,7 +50,10 @@ pub(crate) fn native_fit_ols(args: Vec<Value>) -> Result<Value, Diagnostic> {
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("Second argument of `fit()` must be a DataFrame, found `{}`", other.type_name()),
+                format!(
+                    "Second argument of `fit()` must be a DataFrame, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -65,17 +76,27 @@ pub(crate) fn native_fit_logistic(args: Vec<Value>) -> Result<Value, Diagnostic>
     }
 
     let (response, terms) = match &args[0] {
-        Value::Formula { op: FormulaOp::Regression, response, terms, .. } => (response.clone(), terms.clone()),
+        Value::Formula {
+            op: FormulaOp::Regression,
+            response,
+            terms,
+            ..
+        } => (response.clone(), terms.clone()),
         Value::Formula { op, .. } => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `fit_logistic()` must be a regression formula (`~`), found `{op}`"),
+                format!(
+                    "First argument of `fit_logistic()` must be a regression formula (`~`), found `{op}`"
+                ),
             ));
         }
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `fit_logistic()` must be a Formula, found `{}`", other.type_name()),
+                format!(
+                    "First argument of `fit_logistic()` must be a Formula, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -85,7 +106,10 @@ pub(crate) fn native_fit_logistic(args: Vec<Value>) -> Result<Value, Diagnostic>
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("Second argument of `fit_logistic()` must be a DataFrame, found `{}`", other.type_name()),
+                format!(
+                    "Second argument of `fit_logistic()` must be a DataFrame, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -104,17 +128,27 @@ pub(crate) fn native_fit_poisson(args: Vec<Value>) -> Result<Value, Diagnostic> 
     }
 
     let (response, terms) = match &args[0] {
-        Value::Formula { op: FormulaOp::Regression, response, terms, .. } => (response.clone(), terms.clone()),
+        Value::Formula {
+            op: FormulaOp::Regression,
+            response,
+            terms,
+            ..
+        } => (response.clone(), terms.clone()),
         Value::Formula { op, .. } => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `poisson()` must be a regression formula (`~`), found `{op}`"),
+                format!(
+                    "First argument of `poisson()` must be a regression formula (`~`), found `{op}`"
+                ),
             ));
         }
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `poisson()` must be a Formula, found `{}`", other.type_name()),
+                format!(
+                    "First argument of `poisson()` must be a Formula, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -124,7 +158,10 @@ pub(crate) fn native_fit_poisson(args: Vec<Value>) -> Result<Value, Diagnostic> 
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("Second argument of `poisson()` must be a DataFrame, found `{}`", other.type_name()),
+                format!(
+                    "Second argument of `poisson()` must be a DataFrame, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -143,10 +180,12 @@ pub(crate) fn native_fit_gmm(args: Vec<Value>) -> Result<Value, Diagnostic> {
     let k = match args.get(1) {
         Some(Value::I64(n)) if *n > 0 => *n as usize,
         Some(Value::F64(f)) if *f > 0.0 => *f as usize,
-        _ => return Err(Diagnostic::statistical_error(
-            "S0200",
-            "Second argument of `fit_gmm` must be a positive integer k (number of clusters)",
-        )),
+        _ => {
+            return Err(Diagnostic::statistical_error(
+                "S0200",
+                "Second argument of `fit_gmm` must be a positive integer k (number of clusters)",
+            ));
+        }
     };
     let max_iter = match args.get(2) {
         Some(Value::I64(n)) if *n > 0 => *n as usize,
@@ -162,9 +201,15 @@ pub(crate) fn native_fit_gmm(args: Vec<Value>) -> Result<Value, Diagnostic> {
     Ok(Value::GmmFit(Box::new(model)))
 }
 
-pub(crate) fn native_summary(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_summary(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`summary()` requires a ModelFit or printable object")
+        Diagnostic::compute_error(
+            "C0201",
+            "`summary()` requires a ModelFit or printable object",
+        )
     })?;
 
     match model_val {
@@ -195,15 +240,28 @@ pub(crate) fn native_summary(interp: &mut crate::eval::Interpreter, args: Vec<Va
                 ) {
                     println!("Number of observations : {}", n);
                     println!("Minimum function value : {}", f_min);
-                    println!("Model Chi-Square       : {} (df = {}, p-value = {})", chisq, df, p_val);
+                    println!(
+                        "Model Chi-Square       : {} (df = {}, p-value = {})",
+                        chisq, df, p_val
+                    );
                 }
-                if let (Some(b_chisq), Some(b_df)) = (fields.get("baseline_chisq"), fields.get("baseline_df")) {
+                if let (Some(b_chisq), Some(b_df)) =
+                    (fields.get("baseline_chisq"), fields.get("baseline_df"))
+                {
                     println!("Baseline Chi-Square    : {} (df = {})", b_chisq, b_df);
                 }
-                if let Some(cfi) = fields.get("cfi") { println!("CFI (Comparative Fit)  : {}", cfi); }
-                if let Some(tli) = fields.get("tli") { println!("TLI (Tucker-Lewis)     : {}", tli); }
-                if let Some(rmsea) = fields.get("rmsea") { println!("RMSEA                  : {}", rmsea); }
-                if let Some(srmr) = fields.get("srmr") { println!("SRMR                   : {}", srmr); }
+                if let Some(cfi) = fields.get("cfi") {
+                    println!("CFI (Comparative Fit)  : {}", cfi);
+                }
+                if let Some(tli) = fields.get("tli") {
+                    println!("TLI (Tucker-Lewis)     : {}", tli);
+                }
+                if let Some(rmsea) = fields.get("rmsea") {
+                    println!("RMSEA                  : {}", rmsea);
+                }
+                if let Some(srmr) = fields.get("srmr") {
+                    println!("SRMR                   : {}", srmr);
+                }
                 println!("---------------------------------------------------------------");
                 println!("Parameter Estimates:");
                 if let Some(params) = fields.get("parameters") {
@@ -272,19 +330,35 @@ pub(crate) fn native_summary(interp: &mut crate::eval::Interpreter, args: Vec<Va
                 println!("---------------------------------------------------------------");
                 println!("Diagnostic Tests:");
                 if let Some(f_stat) = fields.get("first_stage_f") {
-                    let weak_flag = if let Some(Value::Bool(true)) = fields.get("weak_instruments") {
+                    let weak_flag = if let Some(Value::Bool(true)) = fields.get("weak_instruments")
+                    {
                         "[WARNING: F < 10, weak instruments]"
                     } else {
                         "[PASS: F >= 10]"
                     };
-                    println!("  Weak Instruments (1st stage F) : {} {}", f_stat, weak_flag);
+                    println!(
+                        "  Weak Instruments (1st stage F) : {} {}",
+                        f_stat, weak_flag
+                    );
                 }
-                if let (Some(w_stat), Some(w_p)) = (fields.get("wu_hausman_stat"), fields.get("wu_hausman_p")) {
-                    println!("  Wu-Hausman Endogeneity Test    : F = {}, p-value = {}", w_stat, w_p);
+                if let (Some(w_stat), Some(w_p)) =
+                    (fields.get("wu_hausman_stat"), fields.get("wu_hausman_p"))
+                {
+                    println!(
+                        "  Wu-Hausman Endogeneity Test    : F = {}, p-value = {}",
+                        w_stat, w_p
+                    );
                 }
-                if let (Some(s_stat), Some(s_df), Some(s_p)) = (fields.get("sargan_stat"), fields.get("sargan_df"), fields.get("sargan_p")) {
+                if let (Some(s_stat), Some(s_df), Some(s_p)) = (
+                    fields.get("sargan_stat"),
+                    fields.get("sargan_df"),
+                    fields.get("sargan_p"),
+                ) {
                     if !s_stat.is_na() {
-                        println!("  Sargan Overidentification Test : stat = {} (df = {}), p-value = {}", s_stat, s_df, s_p);
+                        println!(
+                            "  Sargan Overidentification Test : stat = {} (df = {}), p-value = {}",
+                            s_stat, s_df, s_p
+                        );
                     }
                 }
                 println!("---------------------------------------------------------------");
@@ -296,8 +370,14 @@ pub(crate) fn native_summary(interp: &mut crate::eval::Interpreter, args: Vec<Va
                 return Ok(Value::Unit);
             }
             if name == "RegularizedResult" {
-                let m_type = fields.get("model_type").map(|v| v.to_string()).unwrap_or_else(|| "Regularized".to_string());
-                println!("/ᐠ˵- ⩊ -˵マ ✧ CONVERGED (Penalized Regularized Regression - {})", m_type);
+                let m_type = fields
+                    .get("model_type")
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "Regularized".to_string());
+                println!(
+                    "/ᐠ˵- ⩊ -˵マ ✧ CONVERGED (Penalized Regularized Regression - {})",
+                    m_type
+                );
                 println!("===============================================================");
                 println!("Model: Penalized Regularized Regression ({})", m_type);
                 println!("---------------------------------------------------------------");
@@ -307,8 +387,13 @@ pub(crate) fn native_summary(interp: &mut crate::eval::Interpreter, args: Vec<Va
                 if let Some(n) = fields.get("n_obs") {
                     println!("Observations       : {}", n);
                 }
-                if let (Some(n_feat), Some(n_sel)) = (fields.get("n_features"), fields.get("n_selected")) {
-                    println!("Features Selected  : {} / {} active (non-zero)", n_sel, n_feat);
+                if let (Some(n_feat), Some(n_sel)) =
+                    (fields.get("n_features"), fields.get("n_selected"))
+                {
+                    println!(
+                        "Features Selected  : {} / {} active (non-zero)",
+                        n_sel, n_feat
+                    );
                 }
                 if let Some(alpha) = fields.get("alpha") {
                     println!("Mixing Parameter α : {}", alpha);
@@ -316,9 +401,14 @@ pub(crate) fn native_summary(interp: &mut crate::eval::Interpreter, args: Vec<Va
                 if let Some(lam) = fields.get("lambda") {
                     println!("Penalty Weight λ   : {}", lam);
                 }
-                if let (Some(l_min), Some(l_1se)) = (fields.get("lambda_min"), fields.get("lambda_1se")) {
+                if let (Some(l_min), Some(l_1se)) =
+                    (fields.get("lambda_min"), fields.get("lambda_1se"))
+                {
                     if !l_min.is_na() {
-                        println!("Cross-Validation   : Optimal λ_min = {}, λ_1se = {}", l_min, l_1se);
+                        println!(
+                            "Cross-Validation   : Optimal λ_min = {}, λ_1se = {}",
+                            l_min, l_1se
+                        );
                     }
                 }
                 if let Some(r2) = fields.get("r2") {
@@ -353,7 +443,10 @@ pub(crate) fn native_summary(interp: &mut crate::eval::Interpreter, args: Vec<Va
     }
 }
 
-pub(crate) fn native_tidy(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_tidy(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`tidy()` requires a ModelFit or Struct")
     })?;
@@ -363,25 +456,38 @@ pub(crate) fn native_tidy(interp: &mut crate::eval::Interpreter, args: Vec<Value
         Value::GlmFit(m) => Ok(m.tidy()),
         Value::GmmFit(m) => Ok(m.tidy()),
         Value::Struct { name, fields } => {
-            if name == "SemResult" || name == "FeolsResult" || name == "IvResult" || name == "RegularizedResult" {
+            if name == "SemResult"
+                || name == "FeolsResult"
+                || name == "IvResult"
+                || name == "RegularizedResult"
+            {
                 if let Some(params) = fields.get("parameters") {
                     return Ok(params.clone());
                 }
             }
             let method_key = format!("{}::tidy", name);
             let fn_val = interp.env.get(&method_key).ok_or_else(|| {
-                Diagnostic::statistical_error("S0200", format!("Method `tidy()` is not implemented for struct `{}`", name))
+                Diagnostic::statistical_error(
+                    "S0200",
+                    format!("Method `tidy()` is not implemented for struct `{}`", name),
+                )
             })?;
             interp.call_value(fn_val, vec![model_val.clone()])
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`tidy()` requires a ModelFit or Struct, found `{}`", other.type_name()),
+            format!(
+                "`tidy()` requires a ModelFit or Struct, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
 
-pub(crate) fn native_glance(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_glance(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`glance()` requires a ModelFit or Struct")
     })?;
@@ -393,71 +499,192 @@ pub(crate) fn native_glance(interp: &mut crate::eval::Interpreter, args: Vec<Val
         Value::Struct { name, fields } => {
             if name == "SemResult" {
                 let columns: Vec<(String, Vec<Value>)> = vec![
-                    ("chisq".to_string(), vec![fields.get("chisq").cloned().unwrap_or(Value::F64(0.0))]),
-                    ("df".to_string(), vec![fields.get("df").cloned().unwrap_or(Value::I64(0))]),
-                    ("p_value".to_string(), vec![fields.get("p_value").cloned().unwrap_or(Value::F64(0.0))]),
-                    ("cfi".to_string(), vec![fields.get("cfi").cloned().unwrap_or(Value::F64(1.0))]),
-                    ("tli".to_string(), vec![fields.get("tli").cloned().unwrap_or(Value::F64(1.0))]),
-                    ("rmsea".to_string(), vec![fields.get("rmsea").cloned().unwrap_or(Value::F64(0.0))]),
-                    ("srmr".to_string(), vec![fields.get("srmr").cloned().unwrap_or(Value::F64(0.0))]),
-                    ("n_obs".to_string(), vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))]),
+                    (
+                        "chisq".to_string(),
+                        vec![fields.get("chisq").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
+                        "df".to_string(),
+                        vec![fields.get("df").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
+                        "p_value".to_string(),
+                        vec![fields.get("p_value").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
+                        "cfi".to_string(),
+                        vec![fields.get("cfi").cloned().unwrap_or(Value::F64(1.0))],
+                    ),
+                    (
+                        "tli".to_string(),
+                        vec![fields.get("tli").cloned().unwrap_or(Value::F64(1.0))],
+                    ),
+                    (
+                        "rmsea".to_string(),
+                        vec![fields.get("rmsea").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
+                        "srmr".to_string(),
+                        vec![fields.get("srmr").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
+                        "n_obs".to_string(),
+                        vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))],
+                    ),
                 ];
                 let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
                 return Ok(Value::DataFrame { frame, na_reasons });
             }
             if name == "FeolsResult" {
                 let columns: Vec<(String, Vec<Value>)> = vec![
-                    ("r2".to_string(), vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))]),
-                    ("r2_within".to_string(), vec![fields.get("r2_within").cloned().unwrap_or(Value::F64(0.0))]),
-                    ("n_obs".to_string(), vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))]),
-                    ("df_fe".to_string(), vec![fields.get("df_fe").cloned().unwrap_or(Value::I64(0))]),
-                    ("df_resid".to_string(), vec![fields.get("df_resid").cloned().unwrap_or(Value::I64(0))]),
-                    ("vcov_type".to_string(), vec![fields.get("vcov_type").cloned().unwrap_or(Value::String("cluster".into()))]),
+                    (
+                        "r2".to_string(),
+                        vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
+                        "r2_within".to_string(),
+                        vec![fields.get("r2_within").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
+                        "n_obs".to_string(),
+                        vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
+                        "df_fe".to_string(),
+                        vec![fields.get("df_fe").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
+                        "df_resid".to_string(),
+                        vec![fields.get("df_resid").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
+                        "vcov_type".to_string(),
+                        vec![
+                            fields
+                                .get("vcov_type")
+                                .cloned()
+                                .unwrap_or(Value::String("cluster".into())),
+                        ],
+                    ),
                 ];
                 let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
                 return Ok(Value::DataFrame { frame, na_reasons });
             }
             if name == "IvResult" {
                 let columns: Vec<(String, Vec<Value>)> = vec![
-                    ("r2".to_string(), vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))]),
-                    ("n_obs".to_string(), vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))]),
-                    ("df_resid".to_string(), vec![fields.get("df_resid").cloned().unwrap_or(Value::I64(0))]),
-                    ("first_stage_f".to_string(), vec![fields.get("first_stage_f").cloned().unwrap_or(Value::NA(None))]),
-                    ("wu_hausman_p".to_string(), vec![fields.get("wu_hausman_p").cloned().unwrap_or(Value::F64(1.0))]),
-                    ("sargan_p".to_string(), vec![fields.get("sargan_p").cloned().unwrap_or(Value::NA(None))]),
-                    ("vcov_type".to_string(), vec![fields.get("vcov_type").cloned().unwrap_or(Value::String("classical".into()))]),
+                    (
+                        "r2".to_string(),
+                        vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
+                        "n_obs".to_string(),
+                        vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
+                        "df_resid".to_string(),
+                        vec![fields.get("df_resid").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
+                        "first_stage_f".to_string(),
+                        vec![
+                            fields
+                                .get("first_stage_f")
+                                .cloned()
+                                .unwrap_or(Value::NA(None)),
+                        ],
+                    ),
+                    (
+                        "wu_hausman_p".to_string(),
+                        vec![
+                            fields
+                                .get("wu_hausman_p")
+                                .cloned()
+                                .unwrap_or(Value::F64(1.0)),
+                        ],
+                    ),
+                    (
+                        "sargan_p".to_string(),
+                        vec![fields.get("sargan_p").cloned().unwrap_or(Value::NA(None))],
+                    ),
+                    (
+                        "vcov_type".to_string(),
+                        vec![
+                            fields
+                                .get("vcov_type")
+                                .cloned()
+                                .unwrap_or(Value::String("classical".into())),
+                        ],
+                    ),
                 ];
                 let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
                 return Ok(Value::DataFrame { frame, na_reasons });
             }
             if name == "RegularizedResult" {
                 let columns: Vec<(String, Vec<Value>)> = vec![
-                    ("model_type".to_string(), vec![fields.get("model_type").cloned().unwrap_or(Value::String("Lasso".into()))]),
-                    ("alpha".to_string(), vec![fields.get("alpha").cloned().unwrap_or(Value::F64(1.0))]),
-                    ("lambda".to_string(), vec![fields.get("lambda").cloned().unwrap_or(Value::F64(0.0))]),
-                    ("n_obs".to_string(), vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))]),
-                    ("n_features".to_string(), vec![fields.get("n_features").cloned().unwrap_or(Value::I64(0))]),
-                    ("n_selected".to_string(), vec![fields.get("n_selected").cloned().unwrap_or(Value::I64(0))]),
-                    ("r2".to_string(), vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))]),
-                    ("mse".to_string(), vec![fields.get("mse").cloned().unwrap_or(Value::F64(0.0))]),
+                    (
+                        "model_type".to_string(),
+                        vec![
+                            fields
+                                .get("model_type")
+                                .cloned()
+                                .unwrap_or(Value::String("Lasso".into())),
+                        ],
+                    ),
+                    (
+                        "alpha".to_string(),
+                        vec![fields.get("alpha").cloned().unwrap_or(Value::F64(1.0))],
+                    ),
+                    (
+                        "lambda".to_string(),
+                        vec![fields.get("lambda").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
+                        "n_obs".to_string(),
+                        vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
+                        "n_features".to_string(),
+                        vec![fields.get("n_features").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
+                        "n_selected".to_string(),
+                        vec![fields.get("n_selected").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
+                        "r2".to_string(),
+                        vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
+                        "mse".to_string(),
+                        vec![fields.get("mse").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
                 ];
                 let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
                 return Ok(Value::DataFrame { frame, na_reasons });
             }
             let method_key = format!("{}::glance", name);
             let fn_val = interp.env.get(&method_key).ok_or_else(|| {
-                Diagnostic::statistical_error("S0200", format!("Method `glance()` is not implemented for struct `{}`", name))
+                Diagnostic::statistical_error(
+                    "S0200",
+                    format!("Method `glance()` is not implemented for struct `{}`", name),
+                )
             })?;
             interp.call_value(fn_val, vec![model_val.clone()])
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`glance()` requires a ModelFit or Struct, found `{}`", other.type_name()),
+            format!(
+                "`glance()` requires a ModelFit or Struct, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
 
-pub(crate) fn native_augment(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_augment(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
         return Err(Diagnostic::compute_error(
             "C0201",
@@ -484,12 +711,18 @@ pub(crate) fn native_augment(interp: &mut crate::eval::Interpreter, args: Vec<Va
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("First argument of `augment()` must be a ModelFit or Struct, found `{}`", other.type_name()),
+            format!(
+                "First argument of `augment()` must be a ModelFit or Struct, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
 
-pub(crate) fn native_predict(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_predict(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
         return Err(Diagnostic::compute_error(
             "C0201",
@@ -504,11 +737,18 @@ pub(crate) fn native_predict(interp: &mut crate::eval::Interpreter, args: Vec<Va
         Value::Struct { name, fields } => {
             if name == "RegularizedResult" {
                 match &args[1] {
-                    Value::DataFrame { frame, .. } => return crate::regularized::predict_regularized(fields, frame),
-                    other => return Err(Diagnostic::statistical_error(
-                        "S0200",
-                        format!("Second argument of `predict()` must be a DataFrame, found `{}`", other.type_name()),
-                    )),
+                    Value::DataFrame { frame, .. } => {
+                        return crate::regularized::predict_regularized(fields, frame);
+                    }
+                    other => {
+                        return Err(Diagnostic::statistical_error(
+                            "S0200",
+                            format!(
+                                "Second argument of `predict()` must be a DataFrame, found `{}`",
+                                other.type_name()
+                            ),
+                        ));
+                    }
                 }
             }
             let method_key = format!("{}::predict", name);
@@ -522,7 +762,10 @@ pub(crate) fn native_predict(interp: &mut crate::eval::Interpreter, args: Vec<Va
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("First argument of `predict()` must be a ModelFit or Model struct, found `{}`", other.type_name()),
+            format!(
+                "First argument of `predict()` must be a ModelFit or Model struct, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -533,12 +776,8 @@ pub(crate) fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
     })?;
 
     match model_val {
-        Value::ModelFit(m) => {
-            Ok(Value::Vector(VectorData::from_f64(m.residuals.clone())))
-        }
-        Value::GlmFit(m) => {
-            Ok(Value::Vector(VectorData::from_f64(m.residuals.clone())))
-        }
+        Value::ModelFit(m) => Ok(Value::Vector(VectorData::from_f64(m.residuals.clone()))),
+        Value::GlmFit(m) => Ok(Value::Vector(VectorData::from_f64(m.residuals.clone()))),
         Value::Struct { name, fields } => {
             if let Some(res) = fields.get("residuals") {
                 return Ok(res.clone());
@@ -550,7 +789,10 @@ pub(crate) fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`residuals()` requires a ModelFit or Struct, found `{}`", other.type_name()),
+            format!(
+                "`residuals()` requires a ModelFit or Struct, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -561,19 +803,13 @@ pub(crate) fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
     })?;
 
     match model_val {
-        Value::ModelFit(m) => {
-            Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone())))
-        }
-        Value::GlmFit(m) => {
-            Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone())))
-        }
-        Value::GmmFit(m) => {
-            Ok(Value::Matrix {
-                rows: m.k,
-                cols: m.dim,
-                data: std::sync::Arc::new(m.means.clone()),
-            })
-        }
+        Value::ModelFit(m) => Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone()))),
+        Value::GlmFit(m) => Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone()))),
+        Value::GmmFit(m) => Ok(Value::Matrix {
+            rows: m.k,
+            cols: m.dim,
+            data: std::sync::Arc::new(m.means.clone()),
+        }),
         Value::Struct { name, fields } => {
             if let Some(c) = fields.get("coefficients") {
                 return Ok(c.clone());
@@ -585,7 +821,10 @@ pub(crate) fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`coef()` requires a ModelFit or Struct, found `{}`", other.type_name()),
+            format!(
+                "`coef()` requires a ModelFit or Struct, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -604,7 +843,10 @@ pub(crate) fn vcov_kind_from_arg(args: &[Value]) -> crate::neko::VcovKind {
     }
 }
 
-pub(crate) fn native_vcov(interp: &mut crate::eval::Interpreter, args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_vcov(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`vcov()` requires a ModelFit or Struct")
     })?;
@@ -614,13 +856,21 @@ pub(crate) fn native_vcov(interp: &mut crate::eval::Interpreter, args: Vec<Value
             let kind = vcov_kind_from_arg(&args);
             let p = m.blueprint.term_names.len();
             let vcov_data = m.compute_vcov(kind)?;
-            Ok(Value::Matrix { rows: p, cols: p, data: std::sync::Arc::new(vcov_data) })
+            Ok(Value::Matrix {
+                rows: p,
+                cols: p,
+                data: std::sync::Arc::new(vcov_data),
+            })
         }
         Value::GlmFit(m) => {
             let kind = vcov_kind_from_arg(&args);
             let p = m.blueprint.term_names.len();
             let vcov_data = m.compute_vcov(kind)?;
-            Ok(Value::Matrix { rows: p, cols: p, data: std::sync::Arc::new(vcov_data) })
+            Ok(Value::Matrix {
+                rows: p,
+                cols: p,
+                data: std::sync::Arc::new(vcov_data),
+            })
         }
         Value::Struct { name, fields } => {
             if name == "SemResult" {
@@ -635,13 +885,19 @@ pub(crate) fn native_vcov(interp: &mut crate::eval::Interpreter, args: Vec<Value
             }
             let method_key = format!("{}::vcov", name);
             let fn_val = interp.env.get(&method_key).ok_or_else(|| {
-                Diagnostic::statistical_error("S0200", format!("Method `vcov()` is not implemented for struct `{}`", name))
+                Diagnostic::statistical_error(
+                    "S0200",
+                    format!("Method `vcov()` is not implemented for struct `{}`", name),
+                )
             })?;
             interp.call_value(fn_val, vec![model_val.clone()])
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`vcov()` requires a ModelFit or Struct, found `{}`", other.type_name()),
+            format!(
+                "`vcov()` requires a ModelFit or Struct, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -656,7 +912,12 @@ pub(crate) fn native_formula_parts(args: Vec<Value>) -> Result<Value, Diagnostic
     }
 
     match &args[0] {
-        Value::Formula { response, terms, parts, .. } => {
+        Value::Formula {
+            response,
+            terms,
+            parts,
+            ..
+        } => {
             let mut fields = std::collections::BTreeMap::new();
             fields.insert("response".to_string(), Value::String(response.clone()));
             fields.insert(
@@ -697,7 +958,10 @@ pub(crate) fn native_formula_parts(args: Vec<Value>) -> Result<Value, Diagnostic
                 )),
             );
             fields.insert("parts_count".to_string(), Value::I64(parts.len() as i64));
-            fields.insert("has_fixed_effects".to_string(), Value::Bool(parts.len() >= 2));
+            fields.insert(
+                "has_fixed_effects".to_string(),
+                Value::Bool(parts.len() >= 2),
+            );
             fields.insert("has_instruments".to_string(), Value::Bool(parts.len() >= 3));
 
             Ok(Value::Struct {
@@ -707,7 +971,10 @@ pub(crate) fn native_formula_parts(args: Vec<Value>) -> Result<Value, Diagnostic
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`formula_parts()` expects a Formula, found `{}`", other.type_name()),
+            format!(
+                "`formula_parts()` expects a Formula, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -727,7 +994,10 @@ pub(crate) fn native_decompose_spec(args: Vec<Value>) -> Result<Value, Diagnosti
         other => {
             return Err(Diagnostic::compute_error(
                 "C0202",
-                format!("`decompose_spec(spec)` expects `sem_spec`, `irt_spec`, or `Formula`, found `{}`", other.type_name()),
+                format!(
+                    "`decompose_spec(spec)` expects `sem_spec`, `irt_spec`, or `Formula`, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -737,7 +1007,13 @@ pub(crate) fn native_decompose_spec(args: Vec<Value>) -> Result<Value, Diagnosti
     let mut rhs_vec: Vec<String> = Vec::with_capacity(equations.len());
 
     for eq in &equations {
-        if let Value::Formula { op, response, terms, .. } = eq {
+        if let Value::Formula {
+            op,
+            response,
+            terms,
+            ..
+        } = eq
+        {
             lhs_vec.push(response.clone());
             op_vec.push(op.to_string());
             rhs_vec.push(terms.join(" + "));
@@ -751,7 +1027,8 @@ pub(crate) fn native_decompose_spec(args: Vec<Value>) -> Result<Value, Diagnosti
             polars_core::series::Series::new("op".into(), op_vec).into(),
             polars_core::series::Series::new("rhs".into(), rhs_vec).into(),
         ],
-    ).map_err(|e| Diagnostic::compute_error("C0105", format!("Failed to create DataFrame: {e}")))?;
+    )
+    .map_err(|e| Diagnostic::compute_error("C0105", format!("Failed to create DataFrame: {e}")))?;
 
     Ok(Value::DataFrame {
         frame,
@@ -770,11 +1047,16 @@ pub(crate) fn native_model_matrix(args: Vec<Value>) -> Result<Value, Diagnostic>
     }
 
     let (response, terms) = match &args[0] {
-        Value::Formula { response, terms, .. } => (response.clone(), terms.clone()),
+        Value::Formula {
+            response, terms, ..
+        } => (response.clone(), terms.clone()),
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `model_matrix()` must be a Formula, found `{}`", other.type_name()),
+                format!(
+                    "First argument of `model_matrix()` must be a Formula, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
@@ -784,13 +1066,17 @@ pub(crate) fn native_model_matrix(args: Vec<Value>) -> Result<Value, Diagnostic>
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("Second argument of `model_matrix()` must be a DataFrame, found `{}`", other.type_name()),
+                format!(
+                    "Second argument of `model_matrix()` must be a DataFrame, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     };
 
     let blueprint = crate::neko::Blueprint::new(response, terms);
-    let (x_data, y_data, _disp, n_obs, p_cols, baked_names, _levels) = blueprint.bake(frame, na_reasons)?;
+    let (x_data, y_data, _disp, n_obs, p_cols, baked_names, _levels) =
+        blueprint.bake(frame, na_reasons)?;
 
     let mut fields = std::collections::BTreeMap::new();
     fields.insert(
@@ -801,10 +1087,7 @@ pub(crate) fn native_model_matrix(args: Vec<Value>) -> Result<Value, Diagnostic>
             data: std::sync::Arc::new(x_data),
         },
     );
-    fields.insert(
-        "y".to_string(),
-        Value::Vector(VectorData::from_f64(y_data)),
-    );
+    fields.insert("y".to_string(), Value::Vector(VectorData::from_f64(y_data)));
     fields.insert(
         "terms".to_string(),
         Value::Vector(VectorData::from_values(

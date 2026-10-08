@@ -11,3 +11,7 @@ ghl-diagnostics = { path = "../ghl-diagnostics" }
 logos = "0.14"
 chumsky = { version = "0.9", default-features = false, features = ["ahash", "std"] }
 
+[lints]
+workspace = true
+
+

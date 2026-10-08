@@ -40,7 +40,11 @@ fn test_feols_single_fixed_effect() {
         }
 
         if let Value::F64(r2) = r2_w {
-            assert!((r2 - 1.0).abs() < 1e-6, "Expected within R2 ≈ 1.0, got {}", r2);
+            assert!(
+                (r2 - 1.0).abs() < 1e-6,
+                "Expected within R2 ≈ 1.0, got {}",
+                r2
+            );
         }
 
         if let Value::I64(dffe) = df_fe {
@@ -88,11 +92,19 @@ fn test_feols_two_way_fixed_effects_map() {
             let b1 = vd[0].as_f64().unwrap();
             let b2 = vd[1].as_f64().unwrap();
             assert!((b1 - 3.0).abs() < 1e-4, "Expected beta1 ≈ 3.0, got {}", b1);
-            assert!((b2 - (-1.5)).abs() < 1e-4, "Expected beta2 ≈ -1.5, got {}", b2);
+            assert!(
+                (b2 - (-1.5)).abs() < 1e-4,
+                "Expected beta2 ≈ -1.5, got {}",
+                b2
+            );
         }
 
         if let Value::F64(r2) = r2_w {
-            assert!((r2 - 1.0).abs() < 1e-4, "Expected within R2 ≈ 1.0, got {}", r2);
+            assert!(
+                (r2 - 1.0).abs() < 1e-4,
+                "Expected within R2 ≈ 1.0, got {}",
+                r2
+            );
         }
 
         // df_FE = G_entity + (G_time - 1) = 3 + 2 = 5
@@ -153,7 +165,10 @@ fn test_feols_invariance_detection_s0101() {
     "#;
 
     let (_, res) = run_ghl(src);
-    assert!(res.is_err(), "Should fail with within-variation invariance error");
+    assert!(
+        res.is_err(),
+        "Should fail with within-variation invariance error"
+    );
     let err = res.err().unwrap();
     assert_eq!(err.code, "S0101");
     assert!(err.message.contains("zero within-variation"));
@@ -202,11 +217,26 @@ fn test_feols_neko_verbs() {
     let (_, res) = run_ghl(src);
     let val = res.expect("neko verbs evaluation succeeded");
     if let Value::Record(fields) = val {
-        assert!(matches!(fields.get("tidy").unwrap(), Value::DataFrame { .. }), "tidy() should return DataFrame");
-        assert!(matches!(fields.get("glance").unwrap(), Value::DataFrame { .. }), "glance() should return DataFrame");
-        assert!(matches!(fields.get("coef").unwrap(), Value::Vector(_)), "coef() should return Vector");
-        assert!(matches!(fields.get("residuals").unwrap(), Value::Vector(_)), "residuals() should return Vector");
-        assert!(matches!(fields.get("vcov").unwrap(), Value::Matrix { .. }), "vcov() should return Matrix");
+        assert!(
+            matches!(fields.get("tidy").unwrap(), Value::DataFrame { .. }),
+            "tidy() should return DataFrame"
+        );
+        assert!(
+            matches!(fields.get("glance").unwrap(), Value::DataFrame { .. }),
+            "glance() should return DataFrame"
+        );
+        assert!(
+            matches!(fields.get("coef").unwrap(), Value::Vector(_)),
+            "coef() should return Vector"
+        );
+        assert!(
+            matches!(fields.get("residuals").unwrap(), Value::Vector(_)),
+            "residuals() should return Vector"
+        );
+        assert!(
+            matches!(fields.get("vcov").unwrap(), Value::Matrix { .. }),
+            "vcov() should return Matrix"
+        );
     } else {
         panic!("Expected record of NEKO outputs");
     }

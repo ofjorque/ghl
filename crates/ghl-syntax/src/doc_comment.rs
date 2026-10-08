@@ -181,7 +181,11 @@ impl ItemDoc {
   </div>
   <pre class="signature"><code>{}</code></pre>
 "#,
-            self.name, self.kind, self.kind, self.name, escape_html(&self.signature)
+            self.name,
+            self.kind,
+            self.kind,
+            self.name,
+            escape_html(&self.signature)
         ));
 
         if !self.summary.is_empty() {
@@ -209,14 +213,17 @@ impl ItemDoc {
         }
 
         if !self.parameters.is_empty() {
-            html.push_str(r#"  <h4>Parameters</h4>
+            html.push_str(
+                r#"  <h4>Parameters</h4>
   <ul class="params-list">
-"#);
+"#,
+            );
             for (param, desc) in &self.parameters {
                 html.push_str(&format!(
                     r#"    <li><code>{}</code> — {}</li>
 "#,
-                    escape_html(param), escape_html(desc)
+                    escape_html(param),
+                    escape_html(desc)
                 ));
             }
             html.push_str("  </ul>\n");
@@ -345,7 +352,13 @@ pub fn parse_doc_comment_fields(
                 let rem = trimmed.trim_start_matches("@param").trim();
                 let mut parts = rem.splitn(2, |c: char| c.is_whitespace() || c == ':');
                 let param_name = parts.next().unwrap_or("").trim().to_string();
-                let param_desc = parts.next().unwrap_or("").trim().trim_start_matches(':').trim().to_string();
+                let param_desc = parts
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_start_matches(':')
+                    .trim()
+                    .to_string();
                 if !param_name.is_empty() {
                     parameters.push((param_name, param_desc));
                 }
@@ -527,7 +540,10 @@ pub fn generate_project_docs_markdown(title: &str, items: &[ItemDoc]) -> String 
 
     md.push_str("## Índice de Símbolos\n\n");
     for item in items {
-        md.push_str(&format!("- [`{}()`](#{}) ({})\n", item.name, item.name, item.kind));
+        md.push_str(&format!(
+            "- [`{}()`](#{}) ({})\n",
+            item.name, item.name, item.kind
+        ));
     }
     md.push_str("\n---\n\n");
 
@@ -746,7 +762,10 @@ let v = [1.0, 2.0, 3.0];
 mean(v);
 "#;
         let (summary, desc, formula, params, ret, example) = parse_doc_comment_fields(raw);
-        assert_eq!(summary, "Sample arithmetic mean with Kleene NA propagation.");
+        assert_eq!(
+            summary,
+            "Sample arithmetic mean with Kleene NA propagation."
+        );
         assert_eq!(desc, "Computes the sample mean of a numeric vector.");
         assert_eq!(formula.as_deref(), Some("x̄ = (1/n) Σ x_i"));
         assert_eq!(params.len(), 1);
@@ -803,7 +822,10 @@ struct Point {
         let prog = parse(code).expect("syntax valid");
         let docs = extract_doc_comments(code, &prog);
 
-        let fn_doc = docs.iter().find(|d| d.name == "calc").expect("calc must be documented");
+        let fn_doc = docs
+            .iter()
+            .find(|d| d.name == "calc")
+            .expect("calc must be documented");
         assert!(fn_doc.signature.contains("#[export_ffi]"));
         assert!(fn_doc.signature.contains("fn calc(a: int, b: int) -> int"));
     }

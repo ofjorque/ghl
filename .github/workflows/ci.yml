@@ -19,10 +19,6 @@ on:
       - 'LICENSE'
   workflow_dispatch:
     inputs:
-      all_platforms:
-        description: 'Run full cross-platform matrix (Windows + macOS [10x billable min])'
-        type: boolean
-        default: false
       run_benchmarks:
         description: 'Run CLBG Performance Microbenchmarks'
         type: boolean
@@ -38,8 +34,8 @@ env:
   RUST_BACKTRACE: "1"
 
 jobs:
-  test-linux:
-    name: Test (Ubuntu Linux)
+  lint-and-format:
+    name: Lint & Code Style (Ubuntu Linux)
     runs-on: ubuntu-latest
 
     steps:
@@ -60,29 +56,47 @@ jobs:
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Run Workspace Tests
-        run: cargo test --workspace --jobs 4
+      - name: Check Formatting (cargo fmt)
+        run: cargo fmt --check
 
-      - name: Check GHL Canonical Code Formatting
-        run: cargo run -p ghl-cli --jobs 4 -- fmt --check validation/reference/compare_r.ghl
+      - name: Workspace Clippy Check
+        run: cargo clippy --workspace -- -D warnings
 
-  test-cross-platform:
+      - name: Workspace Typecheck (cargo check)
+        run: cargo check --workspace
+
+  test-matrix:
     name: Test (${{ matrix.os }})
-    if: github.event.inputs.all_platforms == 'true'
-    needs: test-linux
+    needs: lint-and-format
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
+      - name: Free Disk Space (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Install System Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -93,14 +107,31 @@ jobs:
       - name: Run Workspace Tests
         run: cargo test --workspace --jobs 4
 
+      - name: Build GHL CLI
+        run: cargo build -p ghl-cli --jobs 4
+
       - name: Check GHL Canonical Code Formatting
         run: cargo run -p ghl-cli --jobs 4 -- fmt --check validation/reference/compare_r.ghl
+
+      - name: Run GHL Packages Test Suite
+        shell: bash
+        run: |
+          GHL_BIN="./target/debug/ghl"
+          if [ -f "./target/debug/ghl.exe" ]; then
+            GHL_BIN="./target/debug/ghl.exe"
+          fi
+          for pkg in packages/*; do
+            if [ -d "$pkg" ]; then
+              echo "=== Testing GHL Package: $pkg ==="
+              "$GHL_BIN" test "$pkg"
+            fi
+          done
 
   performance-guard:
     name: Performance Regression Guard
     if: github.event.inputs.run_benchmarks == 'true'
     runs-on: ubuntu-latest
-    needs: test-linux
+    needs: test-matrix
 
     steps:
       - name: Free Disk Space (Linux)

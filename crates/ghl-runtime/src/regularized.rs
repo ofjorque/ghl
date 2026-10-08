@@ -5,10 +5,10 @@
 //! as well as Layer 1 integration with NEKO verbs, K-Fold cross-validation,
 //! and `RegularizedResult` packaging (Roadmap 08, Paso B.4).
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
 use ghl_diagnostics::Diagnostic;
 use polars_core::prelude::*;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::neko::Blueprint;
 use crate::value::Value;
@@ -76,9 +76,9 @@ impl Default for RegularizedOptions {
 /// Fitted parameters for a single lambda value on standardized/centered data.
 #[derive(Debug, Clone)]
 struct SingleLambdaFit {
-    beta: Vec<f64>,        // beta for predictors (standardized scale if standardize=true)
-    beta_orig: Vec<f64>,   // beta for predictors on original scale
-    intercept: f64,        // unpenalized intercept on original scale
+    beta: Vec<f64>,      // beta for predictors (standardized scale if standardize=true)
+    beta_orig: Vec<f64>, // beta for predictors on original scale
+    intercept: f64,      // unpenalized intercept on original scale
     converged: bool,
     iterations: usize,
 }
@@ -279,19 +279,8 @@ fn fit_regularization_path(
 
     for &lambda in lambdas {
         let fit = cd_fit_single(
-            n,
-            p,
-            z_mat,
-            y_tilde,
-            weights_z,
-            scales,
-            means_x,
-            mean_y,
-            lambda,
-            alpha,
-            &warm_beta,
-            tol,
-            max_iter,
+            n, p, z_mat, y_tilde, weights_z, scales, means_x, mean_y, lambda, alpha, &warm_beta,
+            tol, max_iter,
         );
         warm_beta = fit.beta.clone();
         fits.push(fit);
@@ -506,7 +495,9 @@ pub fn fit_regularized(
 ) -> Result<Value, Diagnostic> {
     // 1. Extract formula response and predictors
     let (response_var, predictor_vars) = match formula_val {
-        Value::Formula { response, parts, .. } => {
+        Value::Formula {
+            response, parts, ..
+        } => {
             if response.is_empty() {
                 return Err(Diagnostic::statistical_error(
                     "S0100",
@@ -709,7 +700,10 @@ pub fn fit_regularized(
     }
 
     // 9. Build Parameters DataFrame
-    let param_terms: Vec<Value> = term_names.iter().map(|s| Value::String(s.clone())).collect();
+    let param_terms: Vec<Value> = term_names
+        .iter()
+        .map(|s| Value::String(s.clone()))
+        .collect();
     let param_estimates: Vec<Value> = full_coefficients.iter().map(|&x| Value::F64(x)).collect();
 
     let param_columns: Vec<(String, Vec<Value>)> = vec![
@@ -726,9 +720,18 @@ pub fn fit_regularized(
     // 10. Build CV metrics DataFrame if cross-validation was run
     let cv_metrics_val = if let Some(ref cv) = cv_res_opt {
         let cv_columns: Vec<(String, Vec<Value>)> = vec![
-            ("lambda".to_string(), cv.lambdas.iter().map(|&x| Value::F64(x)).collect()),
-            ("mean_mse".to_string(), cv.mean_mse.iter().map(|&x| Value::F64(x)).collect()),
-            ("se_mse".to_string(), cv.se_mse.iter().map(|&x| Value::F64(x)).collect()),
+            (
+                "lambda".to_string(),
+                cv.lambdas.iter().map(|&x| Value::F64(x)).collect(),
+            ),
+            (
+                "mean_mse".to_string(),
+                cv.mean_mse.iter().map(|&x| Value::F64(x)).collect(),
+            ),
+            (
+                "se_mse".to_string(),
+                cv.se_mse.iter().map(|&x| Value::F64(x)).collect(),
+            ),
         ];
         let (cv_frame, cv_na) = crate::polars_bridge::build_dataframe(&cv_columns)?;
         Value::DataFrame {
@@ -747,16 +750,32 @@ pub fn fit_regularized(
 
     // 11. Package into RegularizedResult struct
     let mut fields = BTreeMap::new();
-    fields.insert("model".to_string(), Value::String(kind.display_name().to_lowercase()));
-    fields.insert("model_type".to_string(), Value::String(kind.display_name().to_string()));
+    fields.insert(
+        "model".to_string(),
+        Value::String(kind.display_name().to_lowercase()),
+    );
+    fields.insert(
+        "model_type".to_string(),
+        Value::String(kind.display_name().to_string()),
+    );
     fields.insert("response".to_string(), Value::String(response_var));
     fields.insert(
         "terms".to_string(),
-        Value::Vector(VectorData::from_values(term_names.iter().map(|s| Value::String(s.clone())).collect())),
+        Value::Vector(VectorData::from_values(
+            term_names
+                .iter()
+                .map(|s| Value::String(s.clone()))
+                .collect(),
+        )),
     );
     fields.insert(
         "active_terms".to_string(),
-        Value::Vector(VectorData::from_values(active_terms.iter().map(|s| Value::String(s.clone())).collect())),
+        Value::Vector(VectorData::from_values(
+            active_terms
+                .iter()
+                .map(|s| Value::String(s.clone()))
+                .collect(),
+        )),
     );
     fields.insert(
         "coefficients".to_string(),
@@ -772,11 +791,20 @@ pub fn fit_regularized(
     fields.insert("n_features".to_string(), Value::I64(p as i64));
     fields.insert("n_selected".to_string(), Value::I64(n_selected as i64));
     fields.insert("converged".to_string(), Value::Bool(final_fit.converged));
-    fields.insert("iterations".to_string(), Value::I64(final_fit.iterations as i64));
+    fields.insert(
+        "iterations".to_string(),
+        Value::I64(final_fit.iterations as i64),
+    );
     fields.insert("parameters".to_string(), params_df);
     fields.insert("cv_metrics".to_string(), cv_metrics_val);
-    fields.insert("residuals".to_string(), Value::Vector(VectorData::from_f64(residuals)));
-    fields.insert("fitted".to_string(), Value::Vector(VectorData::from_f64(fitted)));
+    fields.insert(
+        "residuals".to_string(),
+        Value::Vector(VectorData::from_f64(residuals)),
+    );
+    fields.insert(
+        "fitted".to_string(),
+        Value::Vector(VectorData::from_f64(fitted)),
+    );
 
     Ok(Value::Struct {
         name: "RegularizedResult".to_string(),
@@ -796,9 +824,9 @@ pub fn predict_regularized(
     let coef_val = fields.get("coefficients").ok_or_else(|| {
         Diagnostic::compute_error("C0201", "Missing coefficients in RegularizedResult")
     })?;
-    let terms_val = fields.get("terms").ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "Missing terms in RegularizedResult")
-    })?;
+    let terms_val = fields
+        .get("terms")
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "Missing terms in RegularizedResult"))?;
 
     let coefs = match coef_val {
         Value::Vector(v) => {
@@ -863,11 +891,21 @@ pub fn predict_regularized(
 fn extract_formula_and_df<'a>(
     func_name: &str,
     args: &'a [Value],
-) -> Result<(&'a Value, &'a DataFrame, &'a crate::na_reasons::NaReasonTable), Diagnostic> {
+) -> Result<
+    (
+        &'a Value,
+        &'a DataFrame,
+        &'a crate::na_reasons::NaReasonTable,
+    ),
+    Diagnostic,
+> {
     if args.len() < 2 {
         return Err(Diagnostic::compute_error(
             "C0201",
-            format!("`{}()` requires at least 2 arguments: `{}(formula, df, ...)`", func_name, func_name),
+            format!(
+                "`{}()` requires at least 2 arguments: `{}(formula, df, ...)`",
+                func_name, func_name
+            ),
         ));
     }
 
@@ -876,7 +914,11 @@ fn extract_formula_and_df<'a>(
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("First argument of `{}()` must be a Formula, found `{}`", func_name, other.type_name()),
+                format!(
+                    "First argument of `{}()` must be a Formula, found `{}`",
+                    func_name,
+                    other.type_name()
+                ),
             ));
         }
     }
@@ -885,7 +927,11 @@ fn extract_formula_and_df<'a>(
         Value::DataFrame { frame, na_reasons } => Ok((&args[0], frame, na_reasons)),
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("Second argument of `{}()` must be a DataFrame, found `{}`", func_name, other.type_name()),
+            format!(
+                "Second argument of `{}()` must be a DataFrame, found `{}`",
+                func_name,
+                other.type_name()
+            ),
         )),
     }
 }
@@ -912,7 +958,13 @@ pub fn native_lasso(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
     }
 
-    fit_regularized(formula, frame, na_reasons, RegularizationKind::Lasso, options)
+    fit_regularized(
+        formula,
+        frame,
+        na_reasons,
+        RegularizationKind::Lasso,
+        options,
+    )
 }
 
 /// Native function: `ridge(formula, df, [lambda], [standardize])`
@@ -937,7 +989,13 @@ pub fn native_ridge(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
     }
 
-    fit_regularized(formula, frame, na_reasons, RegularizationKind::Ridge, options)
+    fit_regularized(
+        formula,
+        frame,
+        na_reasons,
+        RegularizationKind::Ridge,
+        options,
+    )
 }
 
 /// Native function: `elastic_net(formula, df, [lambda], [alpha], [standardize])`
@@ -968,7 +1026,13 @@ pub fn native_elastic_net(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
     }
 
-    fit_regularized(formula, frame, na_reasons, RegularizationKind::ElasticNet, options)
+    fit_regularized(
+        formula,
+        frame,
+        na_reasons,
+        RegularizationKind::ElasticNet,
+        options,
+    )
 }
 
 /// Native function: `cv_glmnet(formula, df, [alpha], [n_folds], [n_lambda], [standardize])`

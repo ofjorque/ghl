@@ -3,8 +3,8 @@
 mod common;
 use common::*;
 
-use ghl_runtime::value::Value;
 use ghl_runtime::eval::Interpreter;
+use ghl_runtime::value::Value;
 use ghl_syntax::parser::parse;
 
 #[test]
@@ -166,7 +166,9 @@ fn test_dataframe_tidyverse_pipeline() {
     if let Value::Vector(names) = col_names_val {
         assert_eq!(names.len(), 3);
         assert_eq!(names[0], Value::String("id".into()));
-    } else { panic!("Expected col_names to be Vector"); }
+    } else {
+        panic!("Expected col_names to be Vector");
+    }
 
     // slice(1, 4) = rows 1,2,3 — second id should be 2
     let sliced_val = interp.env.get("sliced").expect("sliced");
@@ -197,18 +199,29 @@ fn test_group_by_summarize_unquoted_columns() {
     let summary = interp.env.get("summary").expect("summary");
     assert_eq!(
         df_columns(&summary),
-        vec!["species".to_string(), "n".to_string(), "mean_x".to_string(), "max_x".to_string()]
+        vec![
+            "species".to_string(),
+            "n".to_string(),
+            "mean_x".to_string(),
+            "max_x".to_string()
+        ]
     );
     let species = df_column(&summary, "species");
     let n = df_column(&summary, "n");
     let mean_x = df_column(&summary, "mean_x");
     assert_eq!(species.len(), 2);
 
-    let a_idx = species.iter().position(|v| v == &Value::String("a".into())).unwrap();
+    let a_idx = species
+        .iter()
+        .position(|v| v == &Value::String("a".into()))
+        .unwrap();
     assert_eq!(n[a_idx], Value::I64(3));
     assert_eq!(mean_x[a_idx], Value::F64(3.0)); // (1+3+5)/3
 
-    let b_idx = species.iter().position(|v| v == &Value::String("b".into())).unwrap();
+    let b_idx = species
+        .iter()
+        .position(|v| v == &Value::String("b".into()))
+        .unwrap();
     assert_eq!(n[b_idx], Value::I64(2));
     assert_eq!(mean_x[b_idx], Value::F64(3.0)); // (2+4)/2
 }
@@ -242,13 +255,19 @@ fn test_summarize_propagates_na_kleene_style() {
 
     // Group "a" (values [1.0, NA:SensorDropout, 5.0]) must come back as plain NA for
     // every value-touching aggregate -- not skip the NA and average [1.0, 5.0] to 3.0.
-    let a_idx = groups.iter().position(|v| v == &Value::String("a".into())).unwrap();
+    let a_idx = groups
+        .iter()
+        .position(|v| v == &Value::String("a".into()))
+        .unwrap();
     assert_eq!(mean_x[a_idx], Value::NA(None));
     assert_eq!(max_x[a_idx], Value::NA(None));
     assert_eq!(sum_x[a_idx], Value::NA(None));
 
     // Group "b" (values [2.0, 4.0], no NA) must still compute normally.
-    let b_idx = groups.iter().position(|v| v == &Value::String("b".into())).unwrap();
+    let b_idx = groups
+        .iter()
+        .position(|v| v == &Value::String("b".into()))
+        .unwrap();
     assert_eq!(mean_x[b_idx], Value::F64(3.0));
     assert_eq!(max_x[b_idx], Value::F64(4.0));
     assert_eq!(sum_x[b_idx], Value::F64(6.0));
@@ -279,11 +298,24 @@ fn test_arrange_multi_column_with_desc() {
     let sorted = interp.env.get("sorted").expect("sorted");
     let groups = df_column(&sorted, "group");
     let xs = df_column(&sorted, "x");
-    assert_eq!(groups, vec![
-        Value::String("a".into()), Value::String("a".into()),
-        Value::String("b".into()), Value::String("b".into()),
-    ]);
-    assert_eq!(xs, vec![Value::F64(2.0), Value::F64(1.0), Value::F64(2.0), Value::F64(1.0)]);
+    assert_eq!(
+        groups,
+        vec![
+            Value::String("a".into()),
+            Value::String("a".into()),
+            Value::String("b".into()),
+            Value::String("b".into()),
+        ]
+    );
+    assert_eq!(
+        xs,
+        vec![
+            Value::F64(2.0),
+            Value::F64(1.0),
+            Value::F64(2.0),
+            Value::F64(1.0)
+        ]
+    );
 }
 
 #[test]
@@ -304,13 +336,19 @@ fn test_slice_min_max_and_sample_n() {
     interp.eval_program(&program).expect("evaluation ok");
 
     if let Some(smallest) = interp.env.get("smallest") {
-        assert_eq!(df_column(&smallest, "x"), vec![Value::F64(10.0), Value::F64(20.0)]);
+        assert_eq!(
+            df_column(&smallest, "x"),
+            vec![Value::F64(10.0), Value::F64(20.0)]
+        );
     } else {
         panic!("Expected smallest to be DataFrame");
     }
 
     if let Some(largest) = interp.env.get("largest") {
-        assert_eq!(df_column(&largest, "x"), vec![Value::F64(50.0), Value::F64(40.0)]);
+        assert_eq!(
+            df_column(&largest, "x"),
+            vec![Value::F64(50.0), Value::F64(40.0)]
+        );
     } else {
         panic!("Expected largest to be DataFrame");
     }
@@ -343,15 +381,27 @@ fn test_inner_join_and_left_join() {
     interp.eval_program(&program).expect("evaluation ok");
 
     let inner = interp.env.get("inner").expect("inner exists");
-    assert_eq!(df_height(&inner), 3, "unmatched customer_id=30 row should be dropped");
+    assert_eq!(
+        df_height(&inner),
+        3,
+        "unmatched customer_id=30 row should be dropped"
+    );
     assert!(df_columns(&inner).contains(&"name".to_string()));
 
     let left = interp.env.get("left").expect("left exists");
-    assert_eq!(df_height(&left), 4, "every `orders` row should survive a left join");
+    assert_eq!(
+        df_height(&left),
+        4,
+        "every `orders` row should survive a left join"
+    );
     let names = df_column(&left, "name");
     let order_ids = df_column(&left, "order_id");
     let unmatched_idx = order_ids.iter().position(|v| v == &Value::I64(4)).unwrap();
-    assert_eq!(names[unmatched_idx], Value::NA(None), "unmatched right side should be NA");
+    assert_eq!(
+        names[unmatched_idx],
+        Value::NA(None),
+        "unmatched right side should be NA"
+    );
 }
 
 #[test]
@@ -390,14 +440,30 @@ fn test_join_preserves_na_reasons_on_both_sides() {
     };
 
     // Inner join: id=3 (left-only) is dropped, id=1/2 both matched.
-    assert_eq!(vec_of(&interp, "inner_left_reasons"), vec![na.clone(), Value::String("SensorDropout".into())]);
-    assert_eq!(vec_of(&interp, "inner_right_reasons"), vec![Value::String("Timeout".into()), na.clone()]);
+    assert_eq!(
+        vec_of(&interp, "inner_left_reasons"),
+        vec![na.clone(), Value::String("SensorDropout".into())]
+    );
+    assert_eq!(
+        vec_of(&interp, "inner_right_reasons"),
+        vec![Value::String("Timeout".into()), na.clone()]
+    );
 
     // Left join: every left row survives, including the unmatched id=3 -- its
     // `score_right` is a real (reason-less) NA, not a fabricated reason from a right
     // row that never existed.
-    assert_eq!(vec_of(&interp, "outer_left_reasons"), vec![na.clone(), Value::String("SensorDropout".into()), na.clone()]);
-    assert_eq!(vec_of(&interp, "outer_right_reasons"), vec![Value::String("Timeout".into()), na.clone(), na.clone()]);
+    assert_eq!(
+        vec_of(&interp, "outer_left_reasons"),
+        vec![
+            na.clone(),
+            Value::String("SensorDropout".into()),
+            na.clone()
+        ]
+    );
+    assert_eq!(
+        vec_of(&interp, "outer_right_reasons"),
+        vec![Value::String("Timeout".into()), na.clone(), na.clone()]
+    );
 }
 
 #[test]
@@ -425,7 +491,10 @@ fn test_parquet_round_trip() {
 
     let roundtripped = interp.env.get("roundtripped").expect("roundtripped exists");
     assert_eq!(df_height(&roundtripped), 3);
-    assert_eq!(df_column(&roundtripped, "id"), vec![Value::I64(1), Value::I64(2), Value::I64(3)]);
+    assert_eq!(
+        df_column(&roundtripped, "id"),
+        vec![Value::I64(1), Value::I64(2), Value::I64(3)]
+    );
     assert_eq!(
         df_column(&roundtripped, "score"),
         vec![Value::F64(10.5), Value::F64(20.5), Value::NA(None)],
@@ -433,7 +502,11 @@ fn test_parquet_round_trip() {
     );
     assert_eq!(
         df_column(&roundtripped, "label"),
-        vec![Value::String("a".into()), Value::String("b".into()), Value::String("c".into())]
+        vec![
+            Value::String("a".into()),
+            Value::String("b".into()),
+            Value::String("c".into())
+        ]
     );
 }
 
@@ -459,11 +532,22 @@ fn test_na_reason_accessors_survive_filter() {
     interp.eval_program(&program).expect("evaluation ok");
 
     assert_eq!(interp.env.get("plain_reason"), Some(Value::NA(None)));
-    assert_eq!(interp.env.get("noted_reason"), Some(Value::String("NoResponse".into())));
+    assert_eq!(
+        interp.env.get("noted_reason"),
+        Some(Value::String("NoResponse".into()))
+    );
 
     let before = interp.env.get("reasons_before").expect("reasons_before");
     if let Value::Vector(vals) = before {
-        assert_eq!(*vals, vec![Value::NA(None), Value::String("SensorDropout".into()), Value::NA(None), Value::String("LowBattery".into())]);
+        assert_eq!(
+            *vals,
+            vec![
+                Value::NA(None),
+                Value::String("SensorDropout".into()),
+                Value::NA(None),
+                Value::String("LowBattery".into())
+            ]
+        );
     } else {
         panic!("Expected Vector for na_reasons()");
     }
@@ -472,7 +556,14 @@ fn test_na_reason_accessors_survive_filter() {
     // the LowBattery reason at the old row 3 must reindex to the new row 2.
     let after = interp.env.get("reasons_after").expect("reasons_after");
     if let Value::Vector(vals) = after {
-        assert_eq!(*vals, vec![Value::NA(None), Value::String("SensorDropout".into()), Value::String("LowBattery".into())]);
+        assert_eq!(
+            *vals,
+            vec![
+                Value::NA(None),
+                Value::String("SensorDropout".into()),
+                Value::String("LowBattery".into())
+            ]
+        );
     } else {
         panic!("Expected Vector for na_reasons()");
     }
@@ -493,7 +584,14 @@ fn test_is_na() {
     assert_eq!(interp.env.get("scalar_false"), Some(Value::Bool(false)));
     assert_eq!(
         interp.env.get("vectorized"),
-        Some(Value::Vector(ghl_runtime::vector_data::VectorData::from_values(vec![Value::Bool(false), Value::Bool(true), Value::Bool(true), Value::Bool(false)])))
+        Some(Value::Vector(
+            ghl_runtime::vector_data::VectorData::from_values(vec![
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(false)
+            ])
+        ))
     );
 }
 
@@ -515,8 +613,14 @@ fn test_math_and_string_helpers() {
     assert_eq!(interp.env.get("rounded"), Some(Value::F64(3.14)));
     assert_eq!(interp.env.get("clamped"), Some(Value::F64(10.0)));
     assert!(matches!(interp.env.get("root"), Some(Value::NA(_))));
-    assert_eq!(interp.env.get("shouted"), Some(Value::String("HELLO".into())));
-    assert_eq!(interp.env.get("padded"), Some(Value::String("00042".into())));
+    assert_eq!(
+        interp.env.get("shouted"),
+        Some(Value::String("HELLO".into()))
+    );
+    assert_eq!(
+        interp.env.get("padded"),
+        Some(Value::String("00042".into()))
+    );
     assert_eq!(interp.env.get("contains"), Some(Value::Bool(true)));
 }
 
@@ -574,11 +678,23 @@ fn test_vector_comparisons_elementwise() {
     }
 
     assert_eq!(bools_of(interp.env.get("eq_vec")), vec![false, true, false]);
-    assert_eq!(bools_of(interp.env.get("eq_scalar")), vec![false, true, false]);
-    assert_eq!(bools_of(interp.env.get("scalar_eq")), vec![false, true, false]);
+    assert_eq!(
+        bools_of(interp.env.get("eq_scalar")),
+        vec![false, true, false]
+    );
+    assert_eq!(
+        bools_of(interp.env.get("scalar_eq")),
+        vec![false, true, false]
+    );
     assert_eq!(bools_of(interp.env.get("lt_vec")), vec![true, false, false]);
-    assert_eq!(bools_of(interp.env.get("gt_scalar")), vec![false, true, true]);
-    assert_eq!(bools_of(interp.env.get("scalar_lt")), vec![false, false, true]);
+    assert_eq!(
+        bools_of(interp.env.get("gt_scalar")),
+        vec![false, true, true]
+    );
+    assert_eq!(
+        bools_of(interp.env.get("scalar_lt")),
+        vec![false, false, true]
+    );
 }
 
 #[test]
@@ -612,4 +728,3 @@ fn test_vector_filter_by_boolean_mask() {
     assert_eq!(interp.env.get("s0"), Some(Value::F64(40.0)));
     assert_eq!(interp.env.get("s1"), Some(Value::F64(60.0)));
 }
-

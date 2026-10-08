@@ -3,8 +3,8 @@
 //! Provides typed, lowered representations of GHL functions and expressions
 //! ready for JIT compilation via Cranelift or AOT codegen.
 
-use std::collections::HashMap;
 use ghl_diagnostics::Diagnostic;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HirType {
@@ -180,4 +180,3 @@ impl HirModule {
         self.functions.insert(func.name.clone(), func);
     }
 }
-

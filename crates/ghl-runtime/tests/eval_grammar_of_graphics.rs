@@ -4,7 +4,9 @@ use ghl_syntax::parse;
 fn eval_source(src: &str) -> Result<Value, String> {
     let program = parse(src).map_err(|e| format!("{:?}", e))?;
     let mut interp = Interpreter::new();
-    interp.eval_program(&program).map_err(|e| format!("{:?}", e))
+    interp
+        .eval_program(&program)
+        .map_err(|e| format!("{:?}", e))
 }
 
 #[test]
@@ -20,10 +22,20 @@ fn test_grammar_of_graphics_plus_operator_layers() {
     let res = eval_source(src).expect("Plot evaluation should succeed");
     match res {
         Value::Plot(p) => {
-            assert_eq!(p.layers.len(), 2, "Plot should have 2 layers (point + smooth)");
-            assert!(p.smooth_fit().is_some(), "Smooth fit should be automatically computed");
+            assert_eq!(
+                p.layers.len(),
+                2,
+                "Plot should have 2 layers (point + smooth)"
+            );
+            assert!(
+                p.smooth_fit().is_some(),
+                "Smooth fit should be automatically computed"
+            );
             let fit = p.smooth_fit().unwrap();
-            assert!((fit.slope - 2.0).abs() < 0.2, "Slope should be approximately 2.0");
+            assert!(
+                (fit.slope - 2.0).abs() < 0.2,
+                "Slope should be approximately 2.0"
+            );
             assert_eq!(p.theme, ghl_plot::PlotTheme::Dark);
         }
         other => panic!("Expected Value::Plot, got {:?}", other),
@@ -47,7 +59,11 @@ fn test_grammar_of_graphics_pipe_syntax() {
     let res = eval_source(src).expect("Pipe plot evaluation should succeed");
     match res {
         Value::Plot(p) => {
-            assert_eq!(p.layers.len(), 2, "Plot should have 2 layers (point + line)");
+            assert_eq!(
+                p.layers.len(),
+                2,
+                "Plot should have 2 layers (point + line)"
+            );
             assert_eq!(p.theme, ghl_plot::PlotTheme::Minimal);
         }
         other => panic!("Expected Value::Plot, got {:?}", other),
@@ -68,9 +84,17 @@ fn test_grammar_of_graphics_color_grouping() {
     let res = eval_source(src).expect("Color grouping plot should succeed");
     match res {
         Value::Plot(p) => {
-            assert_eq!(p.series.len(), 3, "Should create 3 series for 4cyl, 6cyl, 8cyl");
+            assert_eq!(
+                p.series.len(),
+                3,
+                "Should create 3 series for 4cyl, 6cyl, 8cyl"
+            );
             assert_eq!(p.labels.color_label.as_deref(), Some("cyl"));
-            let grp_names: Vec<_> = p.series.iter().filter_map(|s| s.group_name.as_deref()).collect();
+            let grp_names: Vec<_> = p
+                .series
+                .iter()
+                .filter_map(|s| s.group_name.as_deref())
+                .collect();
             assert!(grp_names.contains(&"4cyl"));
             assert!(grp_names.contains(&"6cyl"));
             assert!(grp_names.contains(&"8cyl"));
@@ -95,7 +119,10 @@ fn test_grammar_of_graphics_vega_export() {
     match res {
         Value::String(s) => {
             assert!(s.contains("https://vega.github.io/schema/vega-lite/v5.json"));
-            assert!(s.contains("\"type\": \"log\""), "Should contain log scale in Vega encoding");
+            assert!(
+                s.contains("\"type\": \"log\""),
+                "Should contain log scale in Vega encoding"
+            );
         }
         other => panic!("Expected Value::String, got {:?}", other),
     }
@@ -115,8 +142,14 @@ fn test_grammar_of_graphics_svg_export() {
     let res = eval_source(src).expect("SVG export should succeed");
     match res {
         Value::String(s) => {
-            assert!(s.starts_with("<svg") || s.contains("<svg"), "Should output valid SVG tag");
-            assert!(s.ends_with("</svg>") || s.contains("</svg>"), "Should close SVG tag");
+            assert!(
+                s.starts_with("<svg") || s.contains("<svg"),
+                "Should output valid SVG tag"
+            );
+            assert!(
+                s.ends_with("</svg>") || s.contains("</svg>"),
+                "Should close SVG tag"
+            );
         }
         other => panic!("Expected Value::String, got {:?}", other),
     }
@@ -137,12 +170,19 @@ fn test_grammar_of_graphics_histogram_and_boxplot() {
         Value::Vector(v) => {
             assert_eq!(v.len(), 2);
             if let Value::Plot(ref h) = v[0] {
-                assert!(h.layers.iter().any(|l| matches!(l.kind, ghl_plot::GeomKind::Histogram { bins: 5 })));
+                assert!(
+                    h.layers
+                        .iter()
+                        .any(|l| matches!(l.kind, ghl_plot::GeomKind::Histogram { bins: 5 }))
+                );
             } else {
                 panic!("Expected plot");
             }
             if let Value::Plot(ref b) = v[1] {
-                assert!(b.boxplot_stats().is_some(), "Boxplot stats should be automatically computed");
+                assert!(
+                    b.boxplot_stats().is_some(),
+                    "Boxplot stats should be automatically computed"
+                );
             } else {
                 panic!("Expected plot");
             }
@@ -165,7 +205,11 @@ fn test_grammar_of_graphics_comparative_boxplot() {
     match res {
         Value::Plot(p) => {
             let multi_stats = p.boxplot_multi_stats();
-            assert_eq!(multi_stats.len(), 2, "Should have stats for Adelie and Gentoo");
+            assert_eq!(
+                multi_stats.len(),
+                2,
+                "Should have stats for Adelie and Gentoo"
+            );
             assert_eq!(multi_stats[0].0, "Adelie");
             assert_eq!(multi_stats[1].0, "Gentoo");
             assert_eq!(multi_stats[0].1.median, 3700.0);
@@ -206,35 +250,73 @@ fn test_grammar_of_graphics_facet_wrap_composition() {
         Value::Plot(p) => {
             assert!(p.facet.is_some(), "Plot should contain FacetSpec");
             let (panels, rows, cols) = p.partition_facets();
-            assert_eq!(panels.len(), 2, "Should create 2 panels for Adelie and Chinstrap");
+            assert_eq!(
+                panels.len(),
+                2,
+                "Should create 2 panels for Adelie and Chinstrap"
+            );
             assert_eq!(cols, 2, "ncol requested was 2");
             assert_eq!(rows, 1);
 
             // First panel: Adelie (slope ~ 2.0)
-            let fit0 = panels[0].spec.smooth_fit().expect("Adelie panel must have local smooth fit");
-            assert!((fit0.slope - 2.0).abs() < 1e-4, "Adelie slope should be 2.0, got {}", fit0.slope);
+            let fit0 = panels[0]
+                .spec
+                .smooth_fit()
+                .expect("Adelie panel must have local smooth fit");
+            assert!(
+                (fit0.slope - 2.0).abs() < 1e-4,
+                "Adelie slope should be 2.0, got {}",
+                fit0.slope
+            );
 
             // Second panel: Chinstrap (slope ~ 10.0)
-            let fit1 = panels[1].spec.smooth_fit().expect("Chinstrap panel must have local smooth fit");
-            assert!((fit1.slope - 10.0).abs() < 1e-4, "Chinstrap slope should be 10.0, got {}", fit1.slope);
+            let fit1 = panels[1]
+                .spec
+                .smooth_fit()
+                .expect("Chinstrap panel must have local smooth fit");
+            assert!(
+                (fit1.slope - 10.0).abs() < 1e-4,
+                "Chinstrap slope should be 10.0, got {}",
+                fit1.slope
+            );
 
             // Native SVG rendering
             let svg = p.to_svg(800, 600).expect("Faceted SVG should render");
             assert!(svg.contains("<svg"), "Must produce valid SVG XML");
-            assert!(svg.contains("Adelie"), "SVG must include Adelie strip title");
-            assert!(svg.contains("Chinstrap"), "SVG must include Chinstrap strip title");
+            assert!(
+                svg.contains("Adelie"),
+                "SVG must include Adelie strip title"
+            );
+            assert!(
+                svg.contains("Chinstrap"),
+                "SVG must include Chinstrap strip title"
+            );
 
             // Terminal ASCII rendering
             let caps = ghl_diagnostics::RenderCaps::rich_terminal(80);
             let term = p.render(&caps);
-            assert!(term.contains("[ Adelie ]"), "Terminal output must render Adelie facet card");
-            assert!(term.contains("[ Chinstrap ]"), "Terminal output must render Chinstrap facet card");
+            assert!(
+                term.contains("[ Adelie ]"),
+                "Terminal output must render Adelie facet card"
+            );
+            assert!(
+                term.contains("[ Chinstrap ]"),
+                "Terminal output must render Chinstrap facet card"
+            );
 
             // Vega-Lite JSON export
-            let vega = p.to_vega_json().expect("Faceted Vega-Lite JSON export should succeed");
+            let vega = p
+                .to_vega_json()
+                .expect("Faceted Vega-Lite JSON export should succeed");
             assert!(vega.contains("\"facet\""), "Vega output must declare facet");
-            assert!(vega.contains("\"field\": \"species\""), "Vega output must facet on species");
-            assert!(vega.contains("\"columns\": 2"), "Vega output must specify 2 columns");
+            assert!(
+                vega.contains("\"field\": \"species\""),
+                "Vega output must facet on species"
+            );
+            assert!(
+                vega.contains("\"columns\": 2"),
+                "Vega output must specify 2 columns"
+            );
         }
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
@@ -264,8 +346,14 @@ fn test_grammar_of_graphics_facet_wrap_formula_and_free_scales() {
             assert!(panels[0].spec.y_limits.is_none());
 
             let vega = p.to_vega_json().expect("Vega-Lite should serialize");
-            assert!(vega.contains("\"resolve\""), "Free scales must specify resolve in Vega");
-            assert!(vega.contains("\"independent\""), "Free scales must be independent in Vega");
+            assert!(
+                vega.contains("\"resolve\""),
+                "Free scales must specify resolve in Vega"
+            );
+            assert!(
+                vega.contains("\"independent\""),
+                "Free scales must be independent in Vega"
+            );
         }
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
@@ -345,7 +433,10 @@ fn test_patchwork_horizontal_operator() {
     let res = eval_source(src).expect("Patchwork horizontal composition should succeed");
     match res {
         Value::Plot(p) => {
-            assert!(p.composite.is_some(), "Plot must contain a composite layout");
+            assert!(
+                p.composite.is_some(),
+                "Plot must contain a composite layout"
+            );
             match p.composite.as_deref().unwrap() {
                 ghl_plot::CompositePlot::Horizontal(left, right) => {
                     assert_eq!(left.labels.title.as_deref(), Some("Plot 1"));
@@ -359,7 +450,10 @@ fn test_patchwork_horizontal_operator() {
             assert!(svg.contains("<svg"), "SVG must have root element");
 
             let vega = p.to_vega_json().expect("Composite Vega-Lite should render");
-            assert!(vega.contains("\"hconcat\""), "Vega must contain hconcat operator");
+            assert!(
+                vega.contains("\"hconcat\""),
+                "Vega must contain hconcat operator"
+            );
 
             let caps = ghl_diagnostics::RenderCaps::ascii_plain(80);
             let deck = p.render(&caps);
@@ -390,11 +484,18 @@ fn test_patchwork_vertical_operator() {
                 _ => panic!("Expected Vertical composite"),
             }
 
-            let svg = p.to_svg(600, 800).expect("Vertical composite SVG should render");
+            let svg = p
+                .to_svg(600, 800)
+                .expect("Vertical composite SVG should render");
             assert!(svg.contains("<svg"));
 
-            let vega = p.to_vega_json().expect("Vertical composite Vega should render");
-            assert!(vega.contains("\"vconcat\""), "Vega must contain vconcat operator");
+            let vega = p
+                .to_vega_json()
+                .expect("Vertical composite Vega should render");
+            assert!(
+                vega.contains("\"vconcat\""),
+                "Vega must contain vconcat operator"
+            );
         }
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
@@ -425,7 +526,10 @@ fn test_patchwork_nested_layout_and_precedence() {
             assert!(p.composite.is_some());
             match p.composite.as_deref().unwrap() {
                 ghl_plot::CompositePlot::Vertical(top, bottom) => {
-                    assert!(top.composite.is_some(), "Top should be composite horizontal");
+                    assert!(
+                        top.composite.is_some(),
+                        "Top should be composite horizontal"
+                    );
                     assert_eq!(bottom.labels.title.as_deref(), Some("P3"));
                 }
                 _ => panic!("Expected outer Vertical composite"),
@@ -487,11 +591,17 @@ fn test_plot_theme_and_system_font() {
 
             // Verify SVG embeds the system font family name
             let svg = p.to_svg(800, 600).expect("SVG with font should render");
-            assert!(svg.contains("Fira Code"), "SVG output must include the custom font family");
+            assert!(
+                svg.contains("Fira Code"),
+                "SVG output must include the custom font family"
+            );
 
             // Verify Vega-Lite specification configures the font
             let vega = p.to_vega_json().expect("Vega with font should render");
-            assert!(vega.contains("\"font\": \"Fira Code\""), "Vega config must include font");
+            assert!(
+                vega.contains("\"font\": \"Fira Code\""),
+                "Vega config must include font"
+            );
         }
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
@@ -514,11 +624,21 @@ fn test_patchwork_inherited_font_on_composite() {
         Value::Plot(p) => {
             assert_eq!(p.font_family.as_deref(), Some("Inter"));
 
-            let svg = p.to_svg(800, 400).expect("Composite SVG with font should render");
-            assert!(svg.contains("Inter"), "Composite SVG must propagate inherited font");
+            let svg = p
+                .to_svg(800, 400)
+                .expect("Composite SVG with font should render");
+            assert!(
+                svg.contains("Inter"),
+                "Composite SVG must propagate inherited font"
+            );
 
-            let vega = p.to_vega_json().expect("Composite Vega with font should render");
-            assert!(vega.contains("\"font\": \"Inter\""), "Composite Vega must contain font config");
+            let vega = p
+                .to_vega_json()
+                .expect("Composite Vega with font should render");
+            assert!(
+                vega.contains("\"font\": \"Inter\""),
+                "Composite Vega must contain font config"
+            );
         }
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
@@ -542,7 +662,11 @@ fn test_continuous_size_and_discrete_shape_mapping() {
     let res = eval_source(src).expect("Plot with size and shape should evaluate");
     match res {
         Value::Plot(p) => {
-            assert_eq!(p.size_range, (3.0, 12.0), "scale_size should update size_range");
+            assert_eq!(
+                p.size_range,
+                (3.0, 12.0),
+                "scale_size should update size_range"
+            );
             assert_eq!(p.size_data.len(), 4);
             assert_eq!(p.shape_data.len(), 4);
             assert_eq!(p.labels.size_label.as_deref(), Some("Population"));
@@ -561,22 +685,47 @@ fn test_continuous_size_and_discrete_shape_mapping() {
             assert_eq!(sh_beta, ghl_plot::MarkerShape::Triangle);
 
             // Verify Vega-Lite v5 export
-            let vega_json = p.to_vega_json().expect("Vega-Lite v5 generation should succeed");
-            assert!(vega_json.contains("\"size\""), "Vega JSON should contain size encoding");
-            assert!(vega_json.contains("\"shape\""), "Vega JSON should contain shape encoding");
-            assert!(vega_json.contains("Population"), "Vega JSON should contain size title");
-            assert!(vega_json.contains("Type"), "Vega JSON should contain shape title");
+            let vega_json = p
+                .to_vega_json()
+                .expect("Vega-Lite v5 generation should succeed");
+            assert!(
+                vega_json.contains("\"size\""),
+                "Vega JSON should contain size encoding"
+            );
+            assert!(
+                vega_json.contains("\"shape\""),
+                "Vega JSON should contain shape encoding"
+            );
+            assert!(
+                vega_json.contains("Population"),
+                "Vega JSON should contain size title"
+            );
+            assert!(
+                vega_json.contains("Type"),
+                "Vega JSON should contain shape title"
+            );
 
             // Verify SVG export with geometric markers
-            let svg = p.to_svg(800, 600).expect("Native SVG rendering should succeed");
+            let svg = p
+                .to_svg(800, 600)
+                .expect("Native SVG rendering should succeed");
             assert!(svg.contains("<svg"), "Output must be valid SVG");
-            assert!(svg.contains("polygon") || svg.contains("circle") || svg.contains("path"), "SVG must render point shapes");
+            assert!(
+                svg.contains("polygon") || svg.contains("circle") || svg.contains("path"),
+                "SVG must render point shapes"
+            );
 
             // Verify Cockpit Deck terminal rendering
             let caps = ghl_diagnostics::RenderCaps::rich_terminal(80);
             let card = p.render(&caps);
-            assert!(card.contains("Size & Shape Mapping"), "Terminal card must display title");
-            assert!(card.contains('●') || card.contains('▲'), "Terminal card should display shape glyphs");
+            assert!(
+                card.contains("Size & Shape Mapping"),
+                "Terminal card must display title"
+            );
+            assert!(
+                card.contains('●') || card.contains('▲'),
+                "Terminal card should display shape glyphs"
+            );
         }
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
@@ -597,8 +746,16 @@ fn test_shape_mapping_groups_without_color() {
     match res {
         Value::Plot(p) => {
             // When shape is mapped without color, it automatically creates series for the legend
-            assert_eq!(p.series.len(), 2, "Should create 2 series for Ford and Chevy");
-            let grp_names: Vec<_> = p.series.iter().filter_map(|s| s.group_name.as_deref()).collect();
+            assert_eq!(
+                p.series.len(),
+                2,
+                "Should create 2 series for Ford and Chevy"
+            );
+            let grp_names: Vec<_> = p
+                .series
+                .iter()
+                .filter_map(|s| s.group_name.as_deref())
+                .collect();
             assert!(grp_names.contains(&"Ford"));
             assert!(grp_names.contains(&"Chevy"));
         }
@@ -625,7 +782,10 @@ fn test_grammar_of_graphics_layer_local_data() {
         Value::Plot(p) => {
             assert_eq!(p.layers.len(), 2, "Plot should contain 2 layers");
             // Layer 0 inherits global data
-            assert!(p.layers[0].data.is_none(), "Layer 0 should not have local data");
+            assert!(
+                p.layers[0].data.is_none(),
+                "Layer 0 should not have local data"
+            );
             // Layer 1 has local data
             assert!(p.layers[1].data.is_some(), "Layer 1 should have local data");
             let ld = p.layers[1].data.as_ref().unwrap();
@@ -633,12 +793,22 @@ fn test_grammar_of_graphics_layer_local_data() {
             assert_eq!(ld.y_values, vec![40.0, 50.0]);
 
             // Rendering tests (SVG, Vega JSON, terminal)
-            let svg = p.to_svg(800, 600).expect("SVG render with layer data should succeed");
+            let svg = p
+                .to_svg(800, 600)
+                .expect("SVG render with layer data should succeed");
             assert!(svg.contains("<svg"), "Valid SVG should be produced");
 
-            let vega = p.to_vega_json().expect("Vega-Lite v5 JSON with layer data should succeed");
-            assert!(vega.contains("\"values\": ["), "Vega should output layer data values");
-            assert!(vega.contains("40.0"), "Vega should include local data points");
+            let vega = p
+                .to_vega_json()
+                .expect("Vega-Lite v5 JSON with layer data should succeed");
+            assert!(
+                vega.contains("\"values\": ["),
+                "Vega should output layer data values"
+            );
+            assert!(
+                vega.contains("40.0"),
+                "Vega should include local data points"
+            );
 
             let caps = ghl_diagnostics::RenderCaps::rich_terminal(80);
             let card = p.render(&caps);
@@ -669,8 +839,16 @@ fn test_grammar_of_graphics_layer_local_data_inherit_mapping() {
             assert_eq!(p.layers.len(), 2);
             assert!(p.layers[1].data.is_some(), "Layer 1 should have local data");
             let ld = p.layers[1].data.as_ref().unwrap();
-            assert_eq!(ld.x_values, vec![10.0, 20.0], "Should resolve x from inherited mapping");
-            assert_eq!(ld.y_values, vec![100.0, 200.0], "Should resolve y from inherited mapping");
+            assert_eq!(
+                ld.x_values,
+                vec![10.0, 20.0],
+                "Should resolve x from inherited mapping"
+            );
+            assert_eq!(
+                ld.y_values,
+                vec![100.0, 200.0],
+                "Should resolve y from inherited mapping"
+            );
         }
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
@@ -692,10 +870,17 @@ fn test_grammar_of_graphics_layer_local_mapping_inherit_data() {
     match res {
         Value::Plot(p) => {
             assert_eq!(p.layers.len(), 2);
-            assert!(p.layers[1].data.is_some(), "Layer 1 should resolve its local mapping into data");
+            assert!(
+                p.layers[1].data.is_some(),
+                "Layer 1 should resolve its local mapping into data"
+            );
             let ld = p.layers[1].data.as_ref().unwrap();
             assert_eq!(ld.x_values, vec![1.0, 2.0, 3.0]);
-            assert_eq!(ld.y_values, vec![100.0, 200.0, 300.0], "Should resolve y2 values");
+            assert_eq!(
+                ld.y_values,
+                vec![100.0, 200.0, 300.0],
+                "Should resolve y2 values"
+            );
         }
         other => panic!("Expected Value::Plot, got {:?}", other),
     }
@@ -722,7 +907,10 @@ fn test_grammar_of_graphics_layer_local_data_pipe_syntax() {
     match res {
         Value::Plot(p) => {
             assert_eq!(p.layers.len(), 2);
-            assert!(p.layers[1].data.is_some(), "Layer 1 should have local data from pipeline");
+            assert!(
+                p.layers[1].data.is_some(),
+                "Layer 1 should have local data from pipeline"
+            );
             let ld = p.layers[1].data.as_ref().unwrap();
             assert_eq!(ld.x_values, vec![10.0, 20.0]);
             assert_eq!(ld.y_values, vec![50.0, 150.0]);

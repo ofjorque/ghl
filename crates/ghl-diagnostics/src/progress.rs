@@ -13,14 +13,15 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::caps::RenderCaps;
-use crate::panel::visual_width;
 #[cfg(test)]
 use crate::panel::strip_ansi;
+use crate::panel::visual_width;
 
 /// Curated color themes for progress indicators.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProgressTheme {
     /// Electric vibrant cyan (#00f5d4 / ANSI 51) - default modern look.
+    #[default]
     Cyan,
     /// Warm amber / sunset orange (#ff9f43 / ANSI 214) - GHL signature Haru theme.
     Haru,
@@ -30,12 +31,6 @@ pub enum ProgressTheme {
     Magenta,
     /// Dynamic color progression: Blue -> Violet -> Amber -> Emerald at 100%.
     Gradient,
-}
-
-impl Default for ProgressTheme {
-    fn default() -> Self {
-        Self::Cyan
-    }
 }
 
 impl ProgressTheme {
@@ -90,9 +85,10 @@ impl ProgressTheme {
 }
 
 /// Visual spinner animation styles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpinnerStyle {
     /// Braille dots: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+    #[default]
     Dots,
     /// Circle quadrants: ◐ ◓ ◑ ◒
     Circle,
@@ -104,12 +100,6 @@ pub enum SpinnerStyle {
     Haru,
     /// ASCII fallback: | / - \
     Ascii,
-}
-
-impl Default for SpinnerStyle {
-    fn default() -> Self {
-        Self::Dots
-    }
 }
 
 impl SpinnerStyle {
@@ -271,6 +261,7 @@ fn clamp_line_to_width(out: &str, max_width: usize, color_enabled: bool) -> Stri
 }
 
 /// Renders a single-line progress bar string with full telemetry and theme styling.
+#[allow(clippy::too_many_arguments)]
 pub fn render_progress_line(
     current: i64,
     total: i64,
@@ -330,7 +321,11 @@ pub fn render_progress_line(
     };
 
     let spinner_w = 2; // glyph + space
-    let label_w = if label_str.is_empty() { 0 } else { visual_width(&label_str) + 1 };
+    let label_w = if label_str.is_empty() {
+        0
+    } else {
+        visual_width(&label_str) + 1
+    };
     let pct_w = pct_str.len() + 1;
     let counter_w = counter_str.len() + 1;
 
@@ -348,10 +343,24 @@ pub fn render_progress_line(
         fixed_w = fixed_w.saturating_sub(counter_w);
     }
 
-    let time_str = if use_full_time { full_time_str } else { compact_time_str };
+    let time_str = if use_full_time {
+        full_time_str
+    } else {
+        compact_time_str
+    };
 
-    let available_for_bar = max_width.saturating_sub(fixed_w);
-    let bar_width = available_for_bar.clamp(6, 20);
+    let details_len = if !details.is_empty() {
+        visual_width(details) + 3 // accounts for " | "
+    } else {
+        0
+    };
+
+    let bar_space = max_width.saturating_sub(fixed_w + details_len);
+    let bar_width = if bar_space >= 6 {
+        bar_space.clamp(6, 20)
+    } else {
+        max_width.saturating_sub(fixed_w).clamp(6, 20)
+    };
     let bar_graphic = build_bar_graphic(fraction, bar_width, theme, caps);
 
     let current_used = fixed_w + bar_width;
@@ -396,7 +405,10 @@ pub fn render_progress_line(
     if !details.is_empty() && remaining_for_details >= 8 {
         let details_budget = remaining_for_details.saturating_sub(3); // account for " | "
         let details_clean = if visual_width(details) > details_budget {
-            let mut s: String = details.chars().take(details_budget.saturating_sub(1)).collect();
+            let mut s: String = details
+                .chars()
+                .take(details_budget.saturating_sub(1))
+                .collect();
             s.push(if caps.unicode_enabled { '…' } else { '.' });
             s
         } else {
@@ -549,16 +561,7 @@ pub fn update_progress_bar(
     let frame = st.frame;
     let elapsed = now.duration_since(start_time);
 
-    let line = render_progress_line(
-        current,
-        total,
-        label,
-        details,
-        theme,
-        frame,
-        elapsed,
-        caps,
-    );
+    let line = render_progress_line(current, total, label, details, theme, frame, elapsed, caps);
 
     if caps.is_tty {
         // In-place carriage return with line erase

@@ -57,10 +57,8 @@ impl RenderCaps {
         if env::var("GHL_FORCE_TTY").map(|v| v == "1").unwrap_or(false) {
             return true;
         }
-        if let Ok(term) = env::var("TERM") {
-            if term == "dumb" {
-                return false;
-            }
+        if env::var("TERM").map(|t| t == "dumb").unwrap_or(false) {
+            return false;
         }
         std::io::IsTerminal::is_terminal(&std::io::stdout())
     }
@@ -71,22 +69,25 @@ impl RenderCaps {
         }
 
         if env::var("FORCE_COLOR").map(|v| v != "0").unwrap_or(false)
-            || env::var("CLICOLOR_FORCE").map(|v| v == "1").unwrap_or(false)
+            || env::var("CLICOLOR_FORCE")
+                .map(|v| v == "1")
+                .unwrap_or(false)
         {
             return true;
         }
 
-        if let Ok(term) = env::var("TERM") {
-            if term == "dumb" {
-                return false;
-            }
+        if env::var("TERM").map(|t| t == "dumb").unwrap_or(false) {
+            return false;
         }
 
         is_tty
     }
 
     fn detect_unicode() -> bool {
-        if env::var("GHL_ASCII_ONLY").map(|v| v == "1").unwrap_or(false) {
+        if env::var("GHL_ASCII_ONLY")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+        {
             return false;
         }
 
@@ -110,16 +111,17 @@ impl RenderCaps {
     }
 
     fn detect_width() -> usize {
-        if let Ok(cols) = env::var("COLUMNS") {
-            if let Ok(w) = cols.parse::<usize>() {
-                if w >= 40 {
-                    return w;
-                }
-            }
+        if let Some(w) = env::var("COLUMNS")
+            .ok()
+            .and_then(|c| c.parse::<usize>().ok())
+            .filter(|&w| w >= 40)
+        {
+            return w;
         }
 
         #[cfg(windows)]
         {
+            #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
             #[repr(C)]
             struct COORD {
                 x: i16,
@@ -276,7 +278,6 @@ impl RenderCaps {
         }
     }
 }
-
 
 #[cfg(unix)]
 unsafe extern "C" {

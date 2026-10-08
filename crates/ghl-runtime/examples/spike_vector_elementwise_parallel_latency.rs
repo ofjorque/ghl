@@ -11,10 +11,10 @@
 //!
 //! Usage: `cargo run --release --example spike_vector_elementwise_parallel_latency -p ghl-runtime`
 
-use std::time::{Duration, Instant};
-use rayon::prelude::*;
 use ghl_runtime::value::Value;
 use ghl_runtime::vector_data::VectorData;
+use rayon::prelude::*;
+use std::time::{Duration, Instant};
 
 const REPEATS: u32 = 10;
 
@@ -34,7 +34,10 @@ fn seq_f64_add(a: &[f64], b: &[f64]) -> Vec<f64> {
 }
 
 fn par_f64_add(a: &[f64], b: &[f64]) -> Vec<f64> {
-    a.par_iter().zip(b.par_iter()).map(|(&x, &y)| x + y).collect()
+    a.par_iter()
+        .zip(b.par_iter())
+        .map(|(&x, &y)| x + y)
+        .collect()
 }
 
 #[allow(unused_assignments)]
@@ -93,9 +96,17 @@ fn main() {
     // Unlike `dot()` (input+input+scalar f64), an elementwise op produces a full O(n) output vector,
     // meaning the boxed path holds up to 3-4 simultaneous size N buffers (two inputs + result).
     // 5_000_000 provides clear benchmark measurements well within memory limits.
-    println!("size_of::<Value>() = {} bytes", std::mem::size_of::<Value>());
-    println!("Threads available for rayon: {}", rayon::current_num_threads());
-    for n in [1_000usize, 10_000, 20_000, 30_000, 50_000, 75_000, 100_000, 1_000_000, 5_000_000] {
+    println!(
+        "size_of::<Value>() = {} bytes",
+        std::mem::size_of::<Value>()
+    );
+    println!(
+        "Threads available for rayon: {}",
+        rayon::current_num_threads()
+    );
+    for n in [
+        1_000usize, 10_000, 20_000, 30_000, 50_000, 75_000, 100_000, 1_000_000, 5_000_000,
+    ] {
         run_size(n);
     }
 }

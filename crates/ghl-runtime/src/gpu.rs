@@ -3,13 +3,13 @@
 //! Provides cached WGSL compute shaders for GEMM, reductions, and Philox PRNG,
 //! with high-performance CPU fallback backed by `faer` and `rayon`.
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, RwLock};
-use faer::Mat;
-use rayon::prelude::*;
-use ghl_diagnostics::Diagnostic;
 use crate::value::Value;
 use crate::vector_data::VectorData;
+use faer::Mat;
+use ghl_diagnostics::Diagnostic;
+use rayon::prelude::*;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, RwLock};
 
 pub const GEMM_WGSL: &str = r#"
 @group(0) @binding(0) var<storage, read> A: array<f32>;
@@ -125,7 +125,9 @@ impl ComputePipelineCache {
 
     pub fn get_shader(&self, name: &str) -> Option<String> {
         let guard = self.cached_pipelines.read().ok()?;
-        guard.get(name).map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+        guard
+            .get(name)
+            .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
     }
 }
 
@@ -145,7 +147,12 @@ pub fn make_device_struct(name: &str, is_gpu: bool) -> Value {
 }
 
 /// Constructs a first-class `GpuMatrix` struct.
-pub fn make_gpu_matrix_struct(rows: usize, cols: usize, data: Arc<Vec<f64>>, device: Value) -> Value {
+pub fn make_gpu_matrix_struct(
+    rows: usize,
+    cols: usize,
+    data: Arc<Vec<f64>>,
+    device: Value,
+) -> Value {
     let mut fields = BTreeMap::new();
     fields.insert("rows".into(), Value::I64(rows as i64));
     fields.insert("cols".into(), Value::I64(cols as i64));
@@ -162,7 +169,10 @@ pub fn make_gpu_vector_struct(data: Arc<Vec<f64>>, device: Value) -> Value {
     let mut fields = BTreeMap::new();
     fields.insert("len".into(), Value::I64(data.len() as i64));
     fields.insert("device".into(), device);
-    fields.insert("__data".into(), Value::Vector(VectorData::from_f64((*data).clone())));
+    fields.insert(
+        "__data".into(),
+        Value::Vector(VectorData::from_f64((*data).clone())),
+    );
     Value::Struct {
         name: "GpuVector".into(),
         fields: Arc::new(fields),
@@ -199,21 +209,30 @@ pub fn native_device_cpu_fallback(_args: Vec<Value>) -> Result<Value, Diagnostic
 
 pub fn native_to_gpu(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Err(Diagnostic::compute_error("C0101", "to_gpu requires 1 argument"));
+        return Err(Diagnostic::compute_error(
+            "C0101",
+            "to_gpu requires 1 argument",
+        ));
     }
     match &args[0] {
         Value::Matrix { .. } => native_matrix_to_gpu(args),
         Value::Vector(_) => native_vector_to_gpu(args),
         other => Err(Diagnostic::compute_error(
             "C0102",
-            format!("to_gpu expects Matrix or Vector, found `{}`", other.type_name()),
+            format!(
+                "to_gpu expects Matrix or Vector, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
 
 pub fn native_to_cpu(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Err(Diagnostic::compute_error("C0101", "to_cpu requires 1 argument"));
+        return Err(Diagnostic::compute_error(
+            "C0101",
+            "to_cpu requires 1 argument",
+        ));
     }
     match &args[0] {
         Value::Struct { name, .. } if name == "GpuMatrix" => native_gpu_matrix_to_cpu(args),
@@ -224,11 +243,15 @@ pub fn native_to_cpu(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub fn native_matrix_to_gpu(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Err(Diagnostic::compute_error("C0101", "to_gpu requires matrix argument"));
+        return Err(Diagnostic::compute_error(
+            "C0101",
+            "to_gpu requires matrix argument",
+        ));
     }
-    let dev = args.get(1).cloned().unwrap_or_else(|| {
-        make_device_struct("CPU Fallback (faer/rayon)", false)
-    });
+    let dev = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| make_device_struct("CPU Fallback (faer/rayon)", false));
 
     match &args[0] {
         Value::Matrix { rows, cols, data } => {
@@ -250,7 +273,10 @@ pub fn native_gpu_matrix_to_cpu(args: Vec<Value>) -> Result<Value, Diagnostic> {
             if let Some(mat @ Value::Matrix { .. }) = fields.get("__data") {
                 Ok(mat.clone())
             } else {
-                Err(Diagnostic::compute_error("C0201", "Corrupted GpuMatrix struct"))
+                Err(Diagnostic::compute_error(
+                    "C0201",
+                    "Corrupted GpuMatrix struct",
+                ))
             }
         }
         Value::Matrix { .. } => Ok(target.clone()),
@@ -263,7 +289,10 @@ pub fn native_gpu_matrix_to_cpu(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub fn native_gpu_matmul(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 2 {
-        return Err(Diagnostic::compute_error("C0101", "matmul requires 2 matrix arguments"));
+        return Err(Diagnostic::compute_error(
+            "C0101",
+            "matmul requires 2 matrix arguments",
+        ));
     }
     let extract_mat = |v: &Value| -> Result<(usize, usize, Arc<Vec<f64>>, Value), Diagnostic> {
         match v {
@@ -281,7 +310,10 @@ pub fn native_gpu_matmul(args: Vec<Value>) -> Result<Value, Diagnostic> {
             }
             other => Err(Diagnostic::compute_error(
                 "C0102",
-                format!("matmul expects Matrix or GpuMatrix, found `{}`", other.type_name()),
+                format!(
+                    "matmul expects Matrix or GpuMatrix, found `{}`",
+                    other.type_name()
+                ),
             )),
         }
     };
@@ -292,7 +324,10 @@ pub fn native_gpu_matmul(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if c1 != r2 {
         return Err(Diagnostic::statistical_error(
             "S0412",
-            format!("Matrix dimension mismatch in matmul: ({}x{}) * ({}x{})", r1, c1, r2, c2),
+            format!(
+                "Matrix dimension mismatch in matmul: ({}x{}) * ({}x{})",
+                r1, c1, r2, c2
+            ),
         ));
     }
 
@@ -325,19 +360,30 @@ pub fn native_gpu_cholesky(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 return Err(Diagnostic::compute_error("C0201", "Corrupted GpuMatrix"));
             }
         }
-        Value::Matrix { rows, cols, data } => {
-            (*rows, *cols, Arc::clone(data), make_device_struct("CPU Fallback", false))
+        Value::Matrix { rows, cols, data } => (
+            *rows,
+            *cols,
+            Arc::clone(data),
+            make_device_struct("CPU Fallback", false),
+        ),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0102",
+                format!(
+                    "cholesky expects Matrix or GpuMatrix, found `{}`",
+                    other.type_name()
+                ),
+            ));
         }
-        other => return Err(Diagnostic::compute_error(
-            "C0102",
-            format!("cholesky expects Matrix or GpuMatrix, found `{}`", other.type_name()),
-        )),
     };
 
     if rows != cols {
         return Err(Diagnostic::statistical_error(
             "S0410",
-            format!("Cholesky decomposition requires a square matrix, got ({}x{})", rows, cols),
+            format!(
+                "Cholesky decomposition requires a square matrix, got ({}x{})",
+                rows, cols
+            ),
         ));
     }
 
@@ -351,11 +397,15 @@ pub fn native_gpu_cholesky(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub fn native_vector_to_gpu(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Err(Diagnostic::compute_error("C0101", "to_gpu requires vector argument"));
+        return Err(Diagnostic::compute_error(
+            "C0101",
+            "to_gpu requires vector argument",
+        ));
     }
-    let dev = args.get(1).cloned().unwrap_or_else(|| {
-        make_device_struct("CPU Fallback (faer/rayon)", false)
-    });
+    let dev = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| make_device_struct("CPU Fallback (faer/rayon)", false));
 
     match &args[0] {
         Value::Vector(vd) => {
@@ -378,7 +428,10 @@ pub fn native_gpu_vector_to_cpu(args: Vec<Value>) -> Result<Value, Diagnostic> {
             if let Some(vec @ Value::Vector(_)) = fields.get("__data") {
                 Ok(vec.clone())
             } else {
-                Err(Diagnostic::compute_error("C0201", "Corrupted GpuVector struct"))
+                Err(Diagnostic::compute_error(
+                    "C0201",
+                    "Corrupted GpuVector struct",
+                ))
             }
         }
         Value::Vector(_) => Ok(target.clone()),
@@ -390,9 +443,9 @@ pub fn native_gpu_vector_to_cpu(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub fn native_gpu_reduce_sum(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let target = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0101", "reduce_sum requires vector argument")
-    })?;
+    let target = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0101", "reduce_sum requires vector argument"))?;
 
     let floats: Vec<f64> = match target {
         Value::Struct { name, fields } if name == "GpuVector" => {
@@ -403,10 +456,15 @@ pub fn native_gpu_reduce_sum(args: Vec<Value>) -> Result<Value, Diagnostic> {
             }
         }
         Value::Vector(vd) => vd.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect(),
-        other => return Err(Diagnostic::compute_error(
-            "C0102",
-            format!("reduce_sum expects Vector or GpuVector, found `{}`", other.type_name()),
-        )),
+        other => {
+            return Err(Diagnostic::compute_error(
+                "C0102",
+                format!(
+                    "reduce_sum expects Vector or GpuVector, found `{}`",
+                    other.type_name()
+                ),
+            ));
+        }
     };
 
     let total: f64 = floats.par_iter().sum();
@@ -428,12 +486,7 @@ fn philox4x32_10(ctr: [u32; 4], key: [u32; 2]) -> [u32; 4] {
     for _ in 0..10 {
         let (hi0, lo0) = mulhilo(0xD2511F53, c[0]);
         let (hi1, lo1) = mulhilo(0xCD9E8D57, c[2]);
-        c = [
-            hi1 ^ c[1] ^ k[0],
-            lo1,
-            hi0 ^ c[3] ^ k[1],
-            lo0,
-        ];
+        c = [hi1 ^ c[1] ^ k[0], lo1, hi0 ^ c[3] ^ k[1], lo0];
         k[0] = k[0].wrapping_add(0x9E3779B9);
         k[1] = k[1].wrapping_add(0xBB67AE85);
     }
@@ -450,26 +503,40 @@ pub fn native_philox_seed(args: Vec<Value>) -> Result<Value, Diagnostic> {
 
 pub fn native_philox_sample_uniform(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Err(Diagnostic::compute_error("C0101", "sample_uniform requires PhiloxRng"));
+        return Err(Diagnostic::compute_error(
+            "C0101",
+            "sample_uniform requires PhiloxRng",
+        ));
     }
     let seed: u64 = match &args[0] {
-        Value::Struct { name, fields } if name == "PhiloxRng" => {
-            fields.get("seed").and_then(|v| match v { Value::I64(s) => Some(*s as u64), _ => None }).unwrap_or(42)
-        }
+        Value::Struct { name, fields } if name == "PhiloxRng" => fields
+            .get("seed")
+            .and_then(|v| match v {
+                Value::I64(s) => Some(*s as u64),
+                _ => None,
+            })
+            .unwrap_or(42),
         _ => 42,
     };
 
-    let dev = args.get(1).cloned().unwrap_or_else(|| {
-        make_device_struct("CPU Fallback", false)
-    });
-    let n = args.get(2).and_then(|v| match v { Value::I64(x) => Some(*x as usize), _ => None }).unwrap_or(100);
+    let dev = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| make_device_struct("CPU Fallback", false));
+    let n = args
+        .get(2)
+        .and_then(|v| match v {
+            Value::I64(x) => Some(*x as usize),
+            _ => None,
+        })
+        .unwrap_or(100);
     let min = args.get(3).and_then(|v| v.as_f64()).unwrap_or(0.0);
     let max = args.get(4).and_then(|v| v.as_f64()).unwrap_or(1.0);
 
     let key = [(seed & 0xFFFF_FFFF) as u32, (seed >> 32) as u32];
     let range = max - min;
 
-    let num_blocks = (n + 3) / 4;
+    let num_blocks = n.div_ceil(4);
     let mut numbers: Vec<f64> = (0..num_blocks)
         .into_par_iter()
         .flat_map(|block_idx| {
@@ -490,25 +557,39 @@ pub fn native_philox_sample_uniform(args: Vec<Value>) -> Result<Value, Diagnosti
 
 pub fn native_philox_sample_normal(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
-        return Err(Diagnostic::compute_error("C0101", "sample_normal requires PhiloxRng"));
+        return Err(Diagnostic::compute_error(
+            "C0101",
+            "sample_normal requires PhiloxRng",
+        ));
     }
     let seed: u64 = match &args[0] {
-        Value::Struct { name, fields } if name == "PhiloxRng" => {
-            fields.get("seed").and_then(|v| match v { Value::I64(s) => Some(*s as u64), _ => None }).unwrap_or(42)
-        }
+        Value::Struct { name, fields } if name == "PhiloxRng" => fields
+            .get("seed")
+            .and_then(|v| match v {
+                Value::I64(s) => Some(*s as u64),
+                _ => None,
+            })
+            .unwrap_or(42),
         _ => 42,
     };
 
-    let dev = args.get(1).cloned().unwrap_or_else(|| {
-        make_device_struct("CPU Fallback", false)
-    });
-    let n = args.get(2).and_then(|v| match v { Value::I64(x) => Some(*x as usize), _ => None }).unwrap_or(100);
+    let dev = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| make_device_struct("CPU Fallback", false));
+    let n = args
+        .get(2)
+        .and_then(|v| match v {
+            Value::I64(x) => Some(*x as usize),
+            _ => None,
+        })
+        .unwrap_or(100);
     let mean = args.get(3).and_then(|v| v.as_f64()).unwrap_or(0.0);
     let std_dev = args.get(4).and_then(|v| v.as_f64()).unwrap_or(1.0);
 
     let key = [(seed & 0xFFFF_FFFF) as u32, (seed >> 32) as u32];
 
-    let num_blocks = (n + 3) / 4;
+    let num_blocks = n.div_ceil(4);
     let mut normals: Vec<f64> = (0..num_blocks)
         .into_par_iter()
         .flat_map(|block_idx| {

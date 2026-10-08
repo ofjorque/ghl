@@ -59,14 +59,23 @@ fn test_anova_self_hosted() {
     let r2 = interp.env.get("r2").unwrap().as_f64().unwrap();
 
     assert!(f_stat > 0.0, "f_stat should be positive, got {f_stat}");
-    assert!(p_val >= 0.0 && p_val <= 1.0, "p_val should be in [0, 1], got {p_val}");
+    assert!(
+        p_val >= 0.0 && p_val <= 1.0,
+        "p_val should be in [0, 1], got {p_val}"
+    );
     assert!(r2 > 0.0 && r2 <= 1.0, "r2 should be in (0, 1], got {r2}");
 
     let td_val = interp.env.get("td").unwrap();
-    assert!(matches!(td_val, Value::DataFrame { .. }), "tidy(res) must return a DataFrame");
+    assert!(
+        matches!(td_val, Value::DataFrame { .. }),
+        "tidy(res) must return a DataFrame"
+    );
 
     let gl_val = interp.env.get("gl").unwrap();
-    assert!(matches!(gl_val, Value::DataFrame { .. }), "glance(res) must return a DataFrame");
+    assert!(
+        matches!(gl_val, Value::DataFrame { .. }),
+        "glance(res) must return a DataFrame"
+    );
 }
 
 #[test]
@@ -93,11 +102,20 @@ fn test_welch_t_test_self_hosted() {
     // Group 1 mean = 12, Group 2 mean = 22 => estimate = -10
     assert!((est - (-10.0)).abs() < 1e-6);
     // t_stat should be strongly negative (means are 12 vs 22, very separated)
-    assert!(t_stat < -5.0, "Expected strongly negative t-statistic, got {t_stat}");
-    assert!(p_val < 0.001, "Expected highly significant p-value, got {p_val}");
+    assert!(
+        t_stat < -5.0,
+        "Expected strongly negative t-statistic, got {t_stat}"
+    );
+    assert!(
+        p_val < 0.001,
+        "Expected highly significant p-value, got {p_val}"
+    );
 
     let td_val = interp.env.get("td").unwrap();
-    assert!(matches!(td_val, Value::DataFrame { .. }), "tidy(res) must return a DataFrame");
+    assert!(
+        matches!(td_val, Value::DataFrame { .. }),
+        "tidy(res) must return a DataFrame"
+    );
 }
 
 #[test]
@@ -160,5 +178,8 @@ fn test_chisq_test_self_hosted() {
     assert!(p_skewed < 1e-5);
 
     let td_val = interp.env.get("td").unwrap();
-    assert!(matches!(td_val, Value::DataFrame { .. }), "tidy(res) must return a DataFrame");
+    assert!(
+        matches!(td_val, Value::DataFrame { .. }),
+        "tidy(res) must return a DataFrame"
+    );
 }

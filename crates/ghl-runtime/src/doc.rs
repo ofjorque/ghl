@@ -70,7 +70,10 @@ static DOCS: [FunctionDoc; 43] = [
         formula: Some("x̄ = (1/n) Σ_{i=1}^n x_i"),
         summary: "Sample arithmetic mean with Kleene NA propagation",
         description: "Computes the sample mean of a numeric vector or in a dataframe summarize context. Propagates NA reasons under Kleene 3-valued logic.",
-        parameters: &[("x", "Numeric vector or column reference (in summarize/mutate)")],
+        parameters: &[(
+            "x",
+            "Numeric vector or column reference (in summarize/mutate)",
+        )],
         returns: "f64 scalar or NA with reason",
         example: "let v = [1.0, 2.0, 3.0, 4.0];\nmean(v); // => 2.5",
     },
@@ -134,7 +137,6 @@ static DOCS: [FunctionDoc; 43] = [
         returns: "Scalar value of same type",
         example: "max([3.2, 1.1, 5.9]); // => 5.9",
     },
-
     // 2. Statistical Modeling (NEKO Framework)
     FunctionDoc {
         name: "ols",
@@ -169,7 +171,10 @@ static DOCS: [FunctionDoc; 43] = [
         summary: "Binary Logistic Regression via IRLS (Iteratively Reweighted Least Squares)",
         description: "Fits a generalized linear model with binomial family and logit link function.",
         parameters: &[
-            ("formula", "Binary response formula (e.g. churn ~ age + tenure)"),
+            (
+                "formula",
+                "Binary response formula (e.g. churn ~ age + tenure)",
+            ),
             ("data", "Input DataFrame"),
         ],
         returns: "Fitted GLM ModelFit object",
@@ -194,7 +199,10 @@ static DOCS: [FunctionDoc; 43] = [
         formula: Some("t_j = β̂_j / SE(β̂_j),  p_j = 2 * (1 - Φ(|t_j|))"),
         summary: "Prints a rich Cockpit diagnostics panel for a fitted model",
         description: "Displays model coefficients, standard errors, test statistics, confidence intervals, and goodness-of-fit metrics (R², AIC, BIC, F-stat).",
-        parameters: &[("model", "Fitted model from ols(), fit_logistic(), or fit_gmm()")],
+        parameters: &[(
+            "model",
+            "Fitted model from ols(), fit_logistic(), or fit_gmm()",
+        )],
         returns: "Unit ()",
         example: "let fit = ols(y ~ x, df);\nsummary(fit);",
     },
@@ -241,7 +249,6 @@ static DOCS: [FunctionDoc; 43] = [
         returns: "p x p numeric Matrix",
         example: "let cov_matrix = vcov(fit);",
     },
-
     // 3. Linear Algebra & Vector Mathematics
     FunctionDoc {
         name: "dot",
@@ -322,11 +329,13 @@ static DOCS: [FunctionDoc; 43] = [
         formula: Some("diag(v)_{i,i} = v_i,  diag(M)_i = M_{i,i}"),
         summary: "Constructs diagonal matrix from vector, or extracts diagonal of matrix",
         description: "Dual-purpose diagonal operator matching standard mathematical notation.",
-        parameters: &[("x", "Numeric Vector to expand or Matrix to extract diagonal from")],
+        parameters: &[(
+            "x",
+            "Numeric Vector to expand or Matrix to extract diagonal from",
+        )],
         returns: "Matrix or Vector[f64]",
         example: "diag([1.0, 2.0, 3.0]);",
     },
-
     // 4. Data Wrangling (Tidyverse Verbs)
     FunctionDoc {
         name: "filter",
@@ -336,7 +345,10 @@ static DOCS: [FunctionDoc; 43] = [
         description: "Filters rows where the condition evaluates to true under Kleene logic.",
         parameters: &[
             ("df", "Input DataFrame"),
-            ("condition", "Boolean expression over column names (e.g. age > 30)"),
+            (
+                "condition",
+                "Boolean expression over column names (e.g. age > 30)",
+            ),
         ],
         returns: "Filtered DataFrame",
         example: "df |> filter(price > 100.0 && category == \"Tech\");",
@@ -406,7 +418,6 @@ static DOCS: [FunctionDoc; 43] = [
         returns: "Sorted DataFrame",
         example: "df |> arrange(desc(score));",
     },
-
     // 5. Grammar of Graphics
     FunctionDoc {
         name: "plot",
@@ -416,7 +427,10 @@ static DOCS: [FunctionDoc; 43] = [
         description: "Sets the baseline dataset and aesthetic mappings for visualization.",
         parameters: &[
             ("data", "DataFrame containing plotting variables"),
-            ("mapping", "Aesthetic mapping constructed with aes(x: ..., y: ...)"),
+            (
+                "mapping",
+                "Aesthetic mapping constructed with aes(x: ..., y: ...)",
+            ),
         ],
         returns: "PlotSpec pipeline object",
         example: "plot(df, aes(x: \"wt\", y: \"mpg\")) |> geom_point() |> show();",
@@ -435,7 +449,6 @@ static DOCS: [FunctionDoc; 43] = [
         returns: "Aesthetic mapping object",
         example: "aes(x: \"displacement\", y: \"horsepower\", color: \"cylinders\")",
     },
-
     // 6. Environment & Utility
     FunctionDoc {
         name: "rm",
@@ -443,7 +456,10 @@ static DOCS: [FunctionDoc; 43] = [
         formula: Some("env.remove(name)"),
         summary: "Remove variables from the active session environment",
         description: "Deletes one or more user variables, releasing their memory and unbinding their symbols. In REPL, you can also use `:rm <name>` or `:clear-vars`.",
-        parameters: &[("names", "Names of the variables to remove as strings or references")],
+        parameters: &[(
+            "names",
+            "Names of the variables to remove as strings or references",
+        )],
         returns: "Unit ()",
         example: "rm(\"temp_df\");\nrm(\"x\", \"y\", \"fit\");",
     },
@@ -476,9 +492,7 @@ static DOCS: [FunctionDoc; 43] = [
         formula: None,
         summary: "Export and open DataFrame in Positron Data Explorer (alias: View)",
         description: "Serializes the DataFrame to a zero-copy Parquet file and launches Positron's interactive data grid with sorting and filtering.",
-        parameters: &[
-            ("df", "Input DataFrame to inspect interactively"),
-        ],
+        parameters: &[("df", "Input DataFrame to inspect interactively")],
         returns: "Temporary file path string",
         example: "df |> view();",
     },
@@ -488,9 +502,7 @@ static DOCS: [FunctionDoc; 43] = [
         formula: None,
         summary: "Render plot or value to terminal Cockpit Deck and Positron Plots Pane",
         description: "Outputs an ASCII/Unicode visualization to stdout, and exports an SVG vector figure when running inside Positron IDE.",
-        parameters: &[
-            ("target", "PlotSpec or value to display"),
-        ],
+        parameters: &[("target", "PlotSpec or value to display")],
         returns: "Unit ()",
         example: "plot(df, aes(\"x\", \"y\")) |> geom_point() |> show();",
     },
@@ -533,7 +545,10 @@ static DOCS: [FunctionDoc; 43] = [
         parameters: &[
             ("x", "Input vector"),
             ("levels", "Optional explicit level ordering"),
-            ("contrast", "Contrast scheme: 'treatment', 'sum', 'helmert', or 'poly'"),
+            (
+                "contrast",
+                "Contrast scheme: 'treatment', 'sum', 'helmert', or 'poly'",
+            ),
         ],
         returns: "Factor",
         example: "let f = factor([\"ctrl\", \"trt1\", \"trt2\"]);",

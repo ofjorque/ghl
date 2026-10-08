@@ -7,8 +7,8 @@ use tower_lsp::{Client, LanguageServer};
 
 use ghl_diagnostics::DiagnosticSeverity as GhlSeverity;
 use ghl_syntax::ast::Program;
-use ghl_syntax::source::SourceIndex;
 use ghl_syntax::parser::parse_spanned;
+use ghl_syntax::source::SourceIndex;
 
 #[derive(Debug, Clone)]
 pub struct DocumentState {
@@ -38,7 +38,8 @@ impl Backend {
         match parse_spanned(text) {
             Err(syntax_errors) => {
                 for err in syntax_errors {
-                    let ((start_line, start_col), (end_line, end_col)) = index.span_to_range(&err.span);
+                    let ((start_line, start_col), (end_line, end_col)) =
+                        index.span_to_range(&err.span);
                     let range = Range {
                         start: Position::new(start_line, start_col),
                         end: Position::new(end_line, end_col.max(start_col + 1)),
@@ -50,7 +51,10 @@ impl Backend {
                         code: Some(NumberOrString::String("C0001".to_string())),
                         code_description: None,
                         source: Some("ghl".to_string()),
-                        message: format!("(ノ°□°)ノ [Compute Error C0001]: Syntax Error: {}", err.message),
+                        message: format!(
+                            "(ノ°□°)ノ [Compute Error C0001]: Syntax Error: {}",
+                            err.message
+                        ),
                         related_information: None,
                         tags: None,
                         data: None,
@@ -177,7 +181,10 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "GHL Language Server initialized ฅ(•⩊ •マ")
+            .log_message(
+                MessageType::INFO,
+                "GHL Language Server initialized ฅ(•⩊ •マ",
+            )
             .await;
     }
 
@@ -259,10 +266,7 @@ impl LanguageServer for Backend {
         Ok(loc.map(GotoDefinitionResponse::Scalar))
     }
 
-    async fn formatting(
-        &self,
-        params: DocumentFormattingParams,
-    ) -> Result<Option<Vec<TextEdit>>> {
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = &params.text_document.uri;
         let docs = self.documents.read().await;
         let doc = match docs.get(uri) {
@@ -307,8 +311,12 @@ impl LanguageServer for Backend {
             range.end.line as usize,
         ) {
             Ok(Some((text_range, formatted_text))) => {
-                let ((sl, sc), _) = doc.index.span_to_range(&(text_range.start_offset..text_range.start_offset));
-                let ((el, ec), _) = doc.index.span_to_range(&(text_range.end_offset..text_range.end_offset));
+                let ((sl, sc), _) = doc
+                    .index
+                    .span_to_range(&(text_range.start_offset..text_range.start_offset));
+                let ((el, ec), _) = doc
+                    .index
+                    .span_to_range(&(text_range.end_offset..text_range.end_offset));
                 Ok(Some(vec![TextEdit {
                     range: Range {
                         start: Position::new(sl, sc),
@@ -343,7 +351,10 @@ mod tests {
         let uri = Url::parse("file:///test.gh").unwrap();
         let code = "let x = ;";
         let (diags, prog) = Backend::compute_diagnostics(&uri, code);
-        assert!(prog.is_none(), "AST should not be generated for syntax error");
+        assert!(
+            prog.is_none(),
+            "AST should not be generated for syntax error"
+        );
         assert!(!diags.is_empty(), "Should produce syntax diagnostics");
         let diag = &diags[0];
         assert_eq!(diag.severity, Some(DiagnosticSeverity::ERROR));
@@ -356,7 +367,10 @@ mod tests {
         let uri = Url::parse("file:///test.gh").unwrap();
         let code = "let x: i64 = 3.14;";
         let (diags, prog) = Backend::compute_diagnostics(&uri, code);
-        assert!(prog.is_some(), "Syntax is valid, so AST should be generated");
+        assert!(
+            prog.is_some(),
+            "Syntax is valid, so AST should be generated"
+        );
         assert!(!diags.is_empty(), "Should produce type error diagnostic");
         let diag = &diags[0];
         assert_eq!(diag.severity, Some(DiagnosticSeverity::ERROR));
@@ -386,7 +400,10 @@ mod tests {
             .expect("has edits");
 
         assert_eq!(edits.len(), 1);
-        assert_eq!(edits[0].new_text, "// Module note\nlet x = 1 + 2 * 3; // inline\n");
+        assert_eq!(
+            edits[0].new_text,
+            "// Module note\nlet x = 1 + 2 * 3; // inline\n"
+        );
     }
 
     #[tokio::test]
@@ -419,4 +436,3 @@ mod tests {
         assert_eq!(edits[0].new_text, "let b = 2 + 3;\n");
     }
 }
-

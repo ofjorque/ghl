@@ -13,7 +13,12 @@ fn test_multipart_formula_eval_two_parts() {
 
     let val = interp.env.get("f").expect("f exists");
     match &val {
-        Value::Formula { op, response, terms, parts } => {
+        Value::Formula {
+            op,
+            response,
+            terms,
+            parts,
+        } => {
             assert_eq!(*op, FormulaOp::Regression);
             assert_eq!(response, "y");
             assert_eq!(terms, &vec!["x1".to_string(), "x2".to_string()]);
@@ -33,8 +38,14 @@ fn test_multipart_formula_eval_two_parts() {
     assert_eq!(fp.parts_count(), 2);
     assert!(fp.has_fixed_effects());
     assert!(!fp.has_instruments());
-    assert_eq!(fp.fixed_effects(), Some(&["entity".to_string(), "time".to_string()][..]));
-    assert_eq!(fp.instruments(), Some(&["entity".to_string(), "time".to_string()][..]));
+    assert_eq!(
+        fp.fixed_effects(),
+        Some(&["entity".to_string(), "time".to_string()][..])
+    );
+    assert_eq!(
+        fp.instruments(),
+        Some(&["entity".to_string(), "time".to_string()][..])
+    );
 }
 
 #[test]
@@ -48,7 +59,12 @@ fn test_multipart_formula_eval_three_parts() {
 
     let val = interp.env.get("f").expect("f exists");
     match &val {
-        Value::Formula { op, response, terms, parts } => {
+        Value::Formula {
+            op,
+            response,
+            terms,
+            parts,
+        } => {
             assert_eq!(*op, FormulaOp::Regression);
             assert_eq!(response, "y");
             assert_eq!(terms, &vec!["x_exog".to_string(), "x_endog".to_string()]);
@@ -64,8 +80,14 @@ fn test_multipart_formula_eval_three_parts() {
     assert_eq!(fp.parts_count(), 3);
     assert!(fp.has_fixed_effects());
     assert!(fp.has_instruments());
-    assert_eq!(fp.fixed_effects(), Some(&["entity".to_string(), "time".to_string()][..]));
-    assert_eq!(fp.instruments(), Some(&["z1".to_string(), "z2".to_string()][..]));
+    assert_eq!(
+        fp.fixed_effects(),
+        Some(&["entity".to_string(), "time".to_string()][..])
+    );
+    assert_eq!(
+        fp.instruments(),
+        Some(&["z1".to_string(), "z2".to_string()][..])
+    );
 }
 
 #[test]
@@ -125,7 +147,10 @@ fn test_formula_parts_native_verb() {
     let mut interp = Interpreter::new();
     interp.eval_program(&program).expect("eval ok");
 
-    assert_eq!(interp.env.get("resp").unwrap(), Value::String("log_wage".into()));
+    assert_eq!(
+        interp.env.get("resp").unwrap(),
+        Value::String("log_wage".into())
+    );
     assert_eq!(interp.env.get("cnt").unwrap(), Value::I64(3));
     if let Value::Vector(vd) = interp.env.get("fe").unwrap() {
         let items: Vec<String> = vd.iter().map(|v| v.as_str().unwrap().to_string()).collect();

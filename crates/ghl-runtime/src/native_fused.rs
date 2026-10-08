@@ -5,11 +5,11 @@
 //! `row_mins`, `col_mins`, `sigmoid`, `fused_mul_add`) executed in AVX2 CPU registers
 //! and parallelized with Rayon work-stealing.
 
-use rayon::prelude::*;
-use ghl_diagnostics::Diagnostic;
 use crate::matrix::MatrixOps;
 use crate::value::Value;
-use crate::vector_data::{VectorData, NumericView};
+use crate::vector_data::{NumericView, VectorData};
+use ghl_diagnostics::Diagnostic;
+use rayon::prelude::*;
 
 #[inline(always)]
 pub fn sigmoid_stable(x: f64) -> f64 {
@@ -55,7 +55,10 @@ pub(crate) fn extract_data<'a>(
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("Parameter `{param_name}` must be a Matrix or Vector, found `{}`", other.type_name()),
+            format!(
+                "Parameter `{param_name}` must be a Matrix or Vector, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -76,14 +79,23 @@ pub(crate) fn native_sigmoid_matmul(args: Vec<Value>) -> Result<Value, Diagnosti
 
     let (a_rows, a_cols, a_data) = extract_data(&args[0], "A")?;
     let (b_rows, b_cols, b_data) = extract_data(&args[1], "B")?;
-    let (m, n, mut c_data) = MatrixOps::mul(a_rows, a_cols, a_data.as_slice(), b_rows, b_cols, b_data.as_slice())?;
+    let (m, n, mut c_data) = MatrixOps::mul(
+        a_rows,
+        a_cols,
+        a_data.as_slice(),
+        b_rows,
+        b_cols,
+        b_data.as_slice(),
+    )?;
 
     if let Some(bias_val) = args.get(2) {
         match bias_val {
             Value::F64(b) => {
                 let b = *b;
                 if c_data.len() >= 1024 {
-                    c_data.par_iter_mut().for_each(|v| *v = sigmoid_stable(*v + b));
+                    c_data
+                        .par_iter_mut()
+                        .for_each(|v| *v = sigmoid_stable(*v + b));
                 } else {
                     c_data.iter_mut().for_each(|v| *v = sigmoid_stable(*v + b));
                 }
@@ -91,7 +103,9 @@ pub(crate) fn native_sigmoid_matmul(args: Vec<Value>) -> Result<Value, Diagnosti
             Value::I64(b) => {
                 let b = *b as f64;
                 if c_data.len() >= 1024 {
-                    c_data.par_iter_mut().for_each(|v| *v = sigmoid_stable(*v + b));
+                    c_data
+                        .par_iter_mut()
+                        .for_each(|v| *v = sigmoid_stable(*v + b));
                 } else {
                     c_data.iter_mut().for_each(|v| *v = sigmoid_stable(*v + b));
                 }
@@ -134,7 +148,9 @@ pub(crate) fn native_sigmoid_matmul(args: Vec<Value>) -> Result<Value, Diagnosti
                 } else {
                     return Err(Diagnostic::statistical_error(
                         "S0412",
-                        format!("bias length ({bias_len}) must match output columns ({n}) or rows ({m})"),
+                        format!(
+                            "bias length ({bias_len}) must match output columns ({n}) or rows ({m})"
+                        ),
                     ));
                 }
             }
@@ -154,9 +170,9 @@ pub(crate) fn native_sigmoid_matmul(args: Vec<Value>) -> Result<Value, Diagnosti
 ///
 /// Signature: `sigmoid(x) -> scalar | Vector | Matrix`
 pub(crate) fn native_sigmoid(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let val = args.first().ok_or_else(|| {
-        Diagnostic::compute_error("C0201", "`sigmoid()` requires 1 argument")
-    })?;
+    let val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`sigmoid()` requires 1 argument"))?;
 
     match val {
         Value::F64(x) => Ok(Value::F64(sigmoid_stable(*x))),
@@ -180,13 +196,19 @@ pub(crate) fn native_sigmoid(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 };
                 Ok(Value::Vector(VectorData::from_f64(out)))
             } else {
-                let out: Vec<f64> = vd.iter().map(|item| sigmoid_stable(item.as_f64().unwrap_or(0.0))).collect();
+                let out: Vec<f64> = vd
+                    .iter()
+                    .map(|item| sigmoid_stable(item.as_f64().unwrap_or(0.0)))
+                    .collect();
                 Ok(Value::Vector(VectorData::from_f64(out)))
             }
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`sigmoid()` requires numeric scalar, Vector, or Matrix, found `{}`", other.type_name()),
+            format!(
+                "`sigmoid()` requires numeric scalar, Vector, or Matrix, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -218,7 +240,9 @@ pub(crate) fn native_log_sum_exp(args: Vec<Value>) -> Result<Value, Diagnostic> 
                         let mut max_val = f64::NEG_INFINITY;
                         for i in 0..m {
                             let x = slice[i * n + j];
-                            if x > max_val { max_val = x; }
+                            if x > max_val {
+                                max_val = x;
+                            }
                         }
                         if max_val.is_infinite() {
                             out.push(-f64::INFINITY);
@@ -235,27 +259,32 @@ pub(crate) fn native_log_sum_exp(args: Vec<Value>) -> Result<Value, Diagnostic> 
                 _ => {
                     // Row-wise log-sum-exp (default axis = 1): returns Vector of length m
                     let out: Vec<f64> = if m >= 64 {
-                        (0..m).into_par_iter().map(|i| {
-                            let row = &slice[i * n..(i + 1) * n];
-                            let max_val = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-                            if max_val.is_infinite() {
-                                -f64::INFINITY
-                            } else {
-                                let sum: f64 = row.iter().map(|&x| (x - max_val).exp()).sum();
-                                max_val + sum.ln()
-                            }
-                        }).collect()
+                        (0..m)
+                            .into_par_iter()
+                            .map(|i| {
+                                let row = &slice[i * n..(i + 1) * n];
+                                let max_val = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                                if max_val.is_infinite() {
+                                    -f64::INFINITY
+                                } else {
+                                    let sum: f64 = row.iter().map(|&x| (x - max_val).exp()).sum();
+                                    max_val + sum.ln()
+                                }
+                            })
+                            .collect()
                     } else {
-                        (0..m).map(|i| {
-                            let row = &slice[i * n..(i + 1) * n];
-                            let max_val = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-                            if max_val.is_infinite() {
-                                -f64::INFINITY
-                            } else {
-                                let sum: f64 = row.iter().map(|&x| (x - max_val).exp()).sum();
-                                max_val + sum.ln()
-                            }
-                        }).collect()
+                        (0..m)
+                            .map(|i| {
+                                let row = &slice[i * n..(i + 1) * n];
+                                let max_val = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                                if max_val.is_infinite() {
+                                    -f64::INFINITY
+                                } else {
+                                    let sum: f64 = row.iter().map(|&x| (x - max_val).exp()).sum();
+                                    max_val + sum.ln()
+                                }
+                            })
+                            .collect()
                     };
                     Ok(Value::Vector(VectorData::from_f64(out)))
                 }
@@ -274,7 +303,10 @@ pub(crate) fn native_log_sum_exp(args: Vec<Value>) -> Result<Value, Diagnostic> 
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`log_sum_exp()` requires a Matrix or Vector, found `{}`", other.type_name()),
+            format!(
+                "`log_sum_exp()` requires a Matrix or Vector, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -305,7 +337,9 @@ pub(crate) fn native_softmax(args: Vec<Value>) -> Result<Value, Diagnostic> {
                     let mut max_val = f64::NEG_INFINITY;
                     for i in 0..m {
                         let x = slice[i * n + j];
-                        if x > max_val { max_val = x; }
+                        if x > max_val {
+                            max_val = x;
+                        }
                     }
                     let mut sum = 0.0f64;
                     for i in 0..m {
@@ -373,7 +407,10 @@ pub(crate) fn native_softmax(args: Vec<Value>) -> Result<Value, Diagnostic> {
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
-            format!("`softmax()` requires a Matrix or Vector, found `{}`", other.type_name()),
+            format!(
+                "`softmax()` requires a Matrix or Vector, found `{}`",
+                other.type_name()
+            ),
         )),
     }
 }
@@ -385,11 +422,21 @@ pub(crate) fn native_softmax(args: Vec<Value>) -> Result<Value, Diagnostic> {
 /// Signature: `fused_mul_add(A, B, C) -> Matrix`
 pub(crate) fn native_fused_mul_add(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.len() < 3 {
-        return Err(Diagnostic::compute_error("C0201", "`fused_mul_add(A, B, C)` requires 3 arguments"));
+        return Err(Diagnostic::compute_error(
+            "C0201",
+            "`fused_mul_add(A, B, C)` requires 3 arguments",
+        ));
     }
     let (a_rows, a_cols, a_data) = extract_data(&args[0], "A")?;
     let (b_rows, b_cols, b_data) = extract_data(&args[1], "B")?;
-    let (m, n, mut c_data) = MatrixOps::mul(a_rows, a_cols, a_data.as_slice(), b_rows, b_cols, b_data.as_slice())?;
+    let (m, n, mut c_data) = MatrixOps::mul(
+        a_rows,
+        a_cols,
+        a_data.as_slice(),
+        b_rows,
+        b_cols,
+        b_data.as_slice(),
+    )?;
 
     let c_val = &args[2];
     match c_val {
@@ -401,11 +448,17 @@ pub(crate) fn native_fused_mul_add(args: Vec<Value>) -> Result<Value, Diagnostic
             let s = *scalar as f64;
             c_data.iter_mut().for_each(|v| *v += s);
         }
-        Value::Matrix { rows: cr, cols: cc, data: c_mat } => {
+        Value::Matrix {
+            rows: cr,
+            cols: cc,
+            data: c_mat,
+        } => {
             if *cr != m || *cc != n {
                 return Err(Diagnostic::statistical_error(
                     "S0412",
-                    format!("Matrix C dimension ({cr}x{cc}) must match product dimension ({m}x{n})"),
+                    format!(
+                        "Matrix C dimension ({cr}x{cc}) must match product dimension ({m}x{n})"
+                    ),
                 ));
             }
             let c_slice = c_mat.as_slice();
@@ -431,14 +484,19 @@ pub(crate) fn native_fused_mul_add(args: Vec<Value>) -> Result<Value, Diagnostic
             } else {
                 return Err(Diagnostic::statistical_error(
                     "S0412",
-                    format!("Vector C length ({c_len}) must match product columns ({n}) or rows ({m})"),
+                    format!(
+                        "Vector C length ({c_len}) must match product columns ({n}) or rows ({m})"
+                    ),
                 ));
             }
         }
         other => {
             return Err(Diagnostic::statistical_error(
                 "S0200",
-                format!("`fused_mul_add()` requires C to be scalar, Vector, or Matrix, found `{}`", other.type_name()),
+                format!(
+                    "`fused_mul_add()` requires C to be scalar, Vector, or Matrix, found `{}`",
+                    other.type_name()
+                ),
             ));
         }
     }
@@ -450,28 +508,39 @@ pub(crate) fn native_fused_mul_add(args: Vec<Value>) -> Result<Value, Diagnostic
 // =========================================================================
 
 pub(crate) fn native_row_sums(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`row_sums()` requires a Matrix"))?;
+    let val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`row_sums()` requires a Matrix"))?;
     match val {
         Value::Matrix { rows, cols, data } => {
             let (m, n) = (*rows, *cols);
             let slice = data.as_slice();
             let out: Vec<f64> = if m >= 64 {
-                (0..m).into_par_iter().map(|i| {
-                    slice[i * n..(i + 1) * n].iter().sum()
-                }).collect()
+                (0..m)
+                    .into_par_iter()
+                    .map(|i| slice[i * n..(i + 1) * n].iter().sum())
+                    .collect()
             } else {
-                (0..m).map(|i| {
-                    slice[i * n..(i + 1) * n].iter().sum()
-                }).collect()
+                (0..m)
+                    .map(|i| slice[i * n..(i + 1) * n].iter().sum())
+                    .collect()
             };
             Ok(Value::Vector(VectorData::from_f64(out)))
         }
-        other => Err(Diagnostic::statistical_error("S0200", format!("`row_sums()` requires a Matrix, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::statistical_error(
+            "S0200",
+            format!(
+                "`row_sums()` requires a Matrix, found `{}`",
+                other.type_name()
+            ),
+        )),
     }
 }
 
 pub(crate) fn native_col_sums(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`col_sums()` requires a Matrix"))?;
+    let val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`col_sums()` requires a Matrix"))?;
     match val {
         Value::Matrix { rows, cols, data } => {
             let (m, n) = (*rows, *cols);
@@ -485,34 +554,51 @@ pub(crate) fn native_col_sums(args: Vec<Value>) -> Result<Value, Diagnostic> {
             }
             Ok(Value::Vector(VectorData::from_f64(out)))
         }
-        other => Err(Diagnostic::statistical_error("S0200", format!("`col_sums()` requires a Matrix, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::statistical_error(
+            "S0200",
+            format!(
+                "`col_sums()` requires a Matrix, found `{}`",
+                other.type_name()
+            ),
+        )),
     }
 }
 
 pub(crate) fn native_row_means(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`row_means()` requires a Matrix"))?;
+    let val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`row_means()` requires a Matrix"))?;
     match val {
         Value::Matrix { rows, cols, data } => {
             let (m, n) = (*rows, *cols);
             let inv_n = if n > 0 { 1.0 / (n as f64) } else { 0.0 };
             let slice = data.as_slice();
             let out: Vec<f64> = if m >= 64 {
-                (0..m).into_par_iter().map(|i| {
-                    slice[i * n..(i + 1) * n].iter().sum::<f64>() * inv_n
-                }).collect()
+                (0..m)
+                    .into_par_iter()
+                    .map(|i| slice[i * n..(i + 1) * n].iter().sum::<f64>() * inv_n)
+                    .collect()
             } else {
-                (0..m).map(|i| {
-                    slice[i * n..(i + 1) * n].iter().sum::<f64>() * inv_n
-                }).collect()
+                (0..m)
+                    .map(|i| slice[i * n..(i + 1) * n].iter().sum::<f64>() * inv_n)
+                    .collect()
             };
             Ok(Value::Vector(VectorData::from_f64(out)))
         }
-        other => Err(Diagnostic::statistical_error("S0200", format!("`row_means()` requires a Matrix, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::statistical_error(
+            "S0200",
+            format!(
+                "`row_means()` requires a Matrix, found `{}`",
+                other.type_name()
+            ),
+        )),
     }
 }
 
 pub(crate) fn native_col_means(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`col_means()` requires a Matrix"))?;
+    let val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`col_means()` requires a Matrix"))?;
     match val {
         Value::Matrix { rows, cols, data } => {
             let (m, n) = (*rows, *cols);
@@ -530,33 +616,60 @@ pub(crate) fn native_col_means(args: Vec<Value>) -> Result<Value, Diagnostic> {
             }
             Ok(Value::Vector(VectorData::from_f64(out)))
         }
-        other => Err(Diagnostic::statistical_error("S0200", format!("`col_means()` requires a Matrix, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::statistical_error(
+            "S0200",
+            format!(
+                "`col_means()` requires a Matrix, found `{}`",
+                other.type_name()
+            ),
+        )),
     }
 }
 
 pub(crate) fn native_row_maxs(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`row_maxs()` requires a Matrix"))?;
+    let val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`row_maxs()` requires a Matrix"))?;
     match val {
         Value::Matrix { rows, cols, data } => {
             let (m, n) = (*rows, *cols);
             let slice = data.as_slice();
             let out: Vec<f64> = if m >= 64 {
-                (0..m).into_par_iter().map(|i| {
-                    slice[i * n..(i + 1) * n].iter().copied().fold(f64::NEG_INFINITY, f64::max)
-                }).collect()
+                (0..m)
+                    .into_par_iter()
+                    .map(|i| {
+                        slice[i * n..(i + 1) * n]
+                            .iter()
+                            .copied()
+                            .fold(f64::NEG_INFINITY, f64::max)
+                    })
+                    .collect()
             } else {
-                (0..m).map(|i| {
-                    slice[i * n..(i + 1) * n].iter().copied().fold(f64::NEG_INFINITY, f64::max)
-                }).collect()
+                (0..m)
+                    .map(|i| {
+                        slice[i * n..(i + 1) * n]
+                            .iter()
+                            .copied()
+                            .fold(f64::NEG_INFINITY, f64::max)
+                    })
+                    .collect()
             };
             Ok(Value::Vector(VectorData::from_f64(out)))
         }
-        other => Err(Diagnostic::statistical_error("S0200", format!("`row_maxs()` requires a Matrix, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::statistical_error(
+            "S0200",
+            format!(
+                "`row_maxs()` requires a Matrix, found `{}`",
+                other.type_name()
+            ),
+        )),
     }
 }
 
 pub(crate) fn native_col_maxs(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`col_maxs()` requires a Matrix"))?;
+    let val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`col_maxs()` requires a Matrix"))?;
     match val {
         Value::Matrix { rows, cols, data } => {
             let (m, n) = (*rows, *cols);
@@ -565,38 +678,67 @@ pub(crate) fn native_col_maxs(args: Vec<Value>) -> Result<Value, Diagnostic> {
             for i in 0..m {
                 let row = &slice[i * n..(i + 1) * n];
                 for j in 0..n {
-                    if row[j] > out[j] { out[j] = row[j]; }
+                    if row[j] > out[j] {
+                        out[j] = row[j];
+                    }
                 }
             }
             Ok(Value::Vector(VectorData::from_f64(out)))
         }
-        other => Err(Diagnostic::statistical_error("S0200", format!("`col_maxs()` requires a Matrix, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::statistical_error(
+            "S0200",
+            format!(
+                "`col_maxs()` requires a Matrix, found `{}`",
+                other.type_name()
+            ),
+        )),
     }
 }
 
 pub(crate) fn native_row_mins(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`row_mins()` requires a Matrix"))?;
+    let val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`row_mins()` requires a Matrix"))?;
     match val {
         Value::Matrix { rows, cols, data } => {
             let (m, n) = (*rows, *cols);
             let slice = data.as_slice();
             let out: Vec<f64> = if m >= 64 {
-                (0..m).into_par_iter().map(|i| {
-                    slice[i * n..(i + 1) * n].iter().copied().fold(f64::INFINITY, f64::min)
-                }).collect()
+                (0..m)
+                    .into_par_iter()
+                    .map(|i| {
+                        slice[i * n..(i + 1) * n]
+                            .iter()
+                            .copied()
+                            .fold(f64::INFINITY, f64::min)
+                    })
+                    .collect()
             } else {
-                (0..m).map(|i| {
-                    slice[i * n..(i + 1) * n].iter().copied().fold(f64::INFINITY, f64::min)
-                }).collect()
+                (0..m)
+                    .map(|i| {
+                        slice[i * n..(i + 1) * n]
+                            .iter()
+                            .copied()
+                            .fold(f64::INFINITY, f64::min)
+                    })
+                    .collect()
             };
             Ok(Value::Vector(VectorData::from_f64(out)))
         }
-        other => Err(Diagnostic::statistical_error("S0200", format!("`row_mins()` requires a Matrix, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::statistical_error(
+            "S0200",
+            format!(
+                "`row_mins()` requires a Matrix, found `{}`",
+                other.type_name()
+            ),
+        )),
     }
 }
 
 pub(crate) fn native_col_mins(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let val = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`col_mins()` requires a Matrix"))?;
+    let val = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`col_mins()` requires a Matrix"))?;
     match val {
         Value::Matrix { rows, cols, data } => {
             let (m, n) = (*rows, *cols);
@@ -605,12 +747,20 @@ pub(crate) fn native_col_mins(args: Vec<Value>) -> Result<Value, Diagnostic> {
             for i in 0..m {
                 let row = &slice[i * n..(i + 1) * n];
                 for j in 0..n {
-                    if row[j] < out[j] { out[j] = row[j]; }
+                    if row[j] < out[j] {
+                        out[j] = row[j];
+                    }
                 }
             }
             Ok(Value::Vector(VectorData::from_f64(out)))
         }
-        other => Err(Diagnostic::statistical_error("S0200", format!("`col_mins()` requires a Matrix, found `{}`", other.type_name()))),
+        other => Err(Diagnostic::statistical_error(
+            "S0200",
+            format!(
+                "`col_mins()` requires a Matrix, found `{}`",
+                other.type_name()
+            ),
+        )),
     }
 }
 
@@ -727,10 +877,7 @@ mod tests {
 
     #[test]
     fn test_axis_reductions() {
-        let m = Value::matrix(2, 3, vec![
-            1.0, 2.0, 3.0,
-            4.0, 5.0, 6.0,
-        ]);
+        let m = Value::matrix(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
         // row_sums: [6, 15]
         if let Value::Vector(vd) = native_row_sums(vec![m.clone()]).unwrap() {
             assert_eq!(vd.as_f64_view().unwrap().as_slice(), &[6.0, 15.0]);

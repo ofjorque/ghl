@@ -1,24 +1,21 @@
-use std::collections::{BTreeSet, HashMap};
-use std::fmt;
-use std::sync::Arc;
+use crate::matrix::MatrixOps;
+use crate::na_reasons::NaReasonTable;
+use crate::value::Value;
+use crate::vector_data::{VectorData, column_as_f64_view};
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps, Sparkline};
 use ghl_types::ContrastScheme;
 use polars_core::prelude::*;
 use rayon::prelude::*;
-use crate::matrix::MatrixOps;
-use crate::na_reasons::NaReasonTable;
-use crate::value::Value;
-use crate::vector_data::{column_as_f64_view, VectorData};
+use std::collections::{BTreeSet, HashMap};
+use std::fmt;
+use std::sync::Arc;
 
 /// Positional row disposition tracking complete cases analysis.
 /// Distinguishes between included rows and the exact cause of omission.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RowDisposition {
     Included,
-    DroppedNA {
-        col: String,
-        reason: Option<String>,
-    },
+    DroppedNA { col: String, reason: Option<String> },
 }
 
 /// Heteroskedasticity-consistent variance-covariance estimator kinds.
@@ -151,11 +148,25 @@ impl Blueprint {
         &self,
         frame: &DataFrame,
         na_reasons: &NaReasonTable,
-    ) -> Result<(Vec<f64>, Vec<f64>, Vec<RowDisposition>, usize, usize, Vec<String>, HashMap<String, Vec<String>>), Diagnostic> {
+    ) -> Result<
+        (
+            Vec<f64>,
+            Vec<f64>,
+            Vec<RowDisposition>,
+            usize,
+            usize,
+            Vec<String>,
+            HashMap<String, Vec<String>>,
+        ),
+        Diagnostic,
+    > {
         let resp_col = frame.column(&self.response).map_err(|_| {
             Diagnostic::statistical_error(
                 "S0202",
-                format!("Response variable `{}` not found in DataFrame", self.response),
+                format!(
+                    "Response variable `{}` not found in DataFrame",
+                    self.response
+                ),
             )
         })?;
         let term_cols: Vec<&Column> = self
@@ -195,8 +206,12 @@ impl Blueprint {
                     for r in 0..total_rows {
                         if let Ok(av) = col.get(r) {
                             match av {
-                                AnyValue::String(s) => { levels_set.insert(s.to_string()); }
-                                AnyValue::StringOwned(s) => { levels_set.insert(s.to_string()); }
+                                AnyValue::String(s) => {
+                                    levels_set.insert(s.to_string());
+                                }
+                                AnyValue::StringOwned(s) => {
+                                    levels_set.insert(s.to_string());
+                                }
                                 _ => {}
                             }
                         }
@@ -207,7 +222,11 @@ impl Blueprint {
                 if levels.len() < 2 {
                     return Err(Diagnostic::statistical_error(
                         "S0206",
-                        format!("Categorical predictor `{}` must have at least 2 distinct levels, found {}", term, levels.len()),
+                        format!(
+                            "Categorical predictor `{}` must have at least 2 distinct levels, found {}",
+                            term,
+                            levels.len()
+                        ),
                     ));
                 }
 
@@ -216,7 +235,9 @@ impl Blueprint {
                 for j in 0..k - 1 {
                     let col_name = match self.contrast {
                         ContrastScheme::Treatment => format!("{}{}", term, levels[j + 1]),
-                        ContrastScheme::Sum | ContrastScheme::Helmert => format!("{}{}", term, j + 1),
+                        ContrastScheme::Sum | ContrastScheme::Helmert => {
+                            format!("{}{}", term, j + 1)
+                        }
                         ContrastScheme::Polynomial => {
                             let suffix = match j + 1 {
                                 1 => ".L",
@@ -265,7 +286,15 @@ impl Blueprint {
                     x_rows.push(view.as_slice()[i]);
                 }
             }
-            return Ok((x_rows, y_data, vec![RowDisposition::Included; total_rows], total_rows, p, baked_term_names, baked_term_levels));
+            return Ok((
+                x_rows,
+                y_data,
+                vec![RowDisposition::Included; total_rows],
+                total_rows,
+                p,
+                baked_term_names,
+                baked_term_levels,
+            ));
         }
 
         let mut dispositions = Vec::with_capacity(total_rows);
@@ -292,7 +321,11 @@ impl Blueprint {
                             col: term_info.term.clone(),
                             reason: term_reason,
                         };
-                    } else if let RowDisposition::DroppedNA { reason: ref curr_reason, .. } = row_disp {
+                    } else if let RowDisposition::DroppedNA {
+                        reason: ref curr_reason,
+                        ..
+                    } = row_disp
+                    {
                         if curr_reason.is_none() && term_reason.is_some() {
                             row_disp = RowDisposition::DroppedNA {
                                 col: term_info.term.clone(),
@@ -318,7 +351,10 @@ impl Blueprint {
                         if !term_info.levels.iter().any(|l| l == s) {
                             row_disp = RowDisposition::DroppedNA {
                                 col: term_info.term.clone(),
-                                reason: Some(format!("Unseen category `{}` for predictor `{}`", s, term_info.term)),
+                                reason: Some(format!(
+                                    "Unseen category `{}` for predictor `{}`",
+                                    s, term_info.term
+                                )),
                             };
                         }
                     }
@@ -353,7 +389,15 @@ impl Blueprint {
         }
 
         let n = y_vals.len();
-        Ok((x_rows, y_vals, dispositions, n, p, baked_term_names, baked_term_levels))
+        Ok((
+            x_rows,
+            y_vals,
+            dispositions,
+            n,
+            p,
+            baked_term_names,
+            baked_term_levels,
+        ))
     }
 }
 
@@ -416,7 +460,8 @@ impl FittedModel {
         frame: &DataFrame,
         na_reasons: &NaReasonTable,
     ) -> Result<Self, Diagnostic> {
-        let (x_data, y_data, dispositions, n, p, baked_term_names, baked_term_levels) = blueprint.bake(frame, na_reasons)?;
+        let (x_data, y_data, dispositions, n, p, baked_term_names, baked_term_levels) =
+            blueprint.bake(frame, na_reasons)?;
         let mut blueprint = blueprint;
         blueprint.term_names = baked_term_names;
         blueprint.term_levels = baked_term_levels;
@@ -607,7 +652,15 @@ impl FittedModel {
             }
             VcovKind::HC0 | VcovKind::HC1 | VcovKind::HC2 | VcovKind::HC3 => {
                 let sq_resid: Vec<f64> = self.residuals.iter().map(|e| e * e).collect();
-                sandwich_vcov(p, self.n_obs, self.df_resid, &self.x_data, &sq_resid, &self.inv_xtx, kind)
+                sandwich_vcov(
+                    p,
+                    self.n_obs,
+                    self.df_resid,
+                    &self.x_data,
+                    &sq_resid,
+                    &self.inv_xtx,
+                    kind,
+                )
             }
         }
     }
@@ -645,13 +698,22 @@ impl FittedModel {
     pub fn glance(&self) -> Value {
         let cols = vec![
             ("r_squared".to_string(), vec![Value::F64(self.r_squared)]),
-            ("adj_r_squared".to_string(), vec![Value::F64(self.adj_r_squared)]),
-            ("residual_se".to_string(), vec![Value::F64(self.residual_se)]),
+            (
+                "adj_r_squared".to_string(),
+                vec![Value::F64(self.adj_r_squared)],
+            ),
+            (
+                "residual_se".to_string(),
+                vec![Value::F64(self.residual_se)],
+            ),
             ("f_statistic".to_string(), vec![Value::F64(self.f_stat)]),
             ("aic".to_string(), vec![Value::F64(self.aic)]),
             ("bic".to_string(), vec![Value::F64(self.bic)]),
             ("n_obs".to_string(), vec![Value::I64(self.n_obs as i64)]),
-            ("dropped_n".to_string(), vec![Value::I64(self.dropped_n as i64)]),
+            (
+                "dropped_n".to_string(),
+                vec![Value::I64(self.dropped_n as i64)],
+            ),
         ];
 
         let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&cols)
@@ -687,29 +749,44 @@ impl FittedModel {
                             fitted_col.push(None);
                             res_col.push(None);
                             used_col.push(false);
-                            reason_col.push(reason.clone().unwrap_or_else(|| "unspecified".to_string()));
+                            reason_col
+                                .push(reason.clone().unwrap_or_else(|| "unspecified".to_string()));
                         }
                     }
                 }
 
                 let mut new_frame = frame.clone();
-                new_frame.with_column(crate::polars_bridge::f64_opt_column(".fitted", fitted_col)).map_err(|e| {
-                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
-                })?;
-                new_frame.with_column(crate::polars_bridge::f64_opt_column(".residual", res_col)).map_err(|e| {
-                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
-                })?;
-                new_frame.with_column(crate::polars_bridge::bool_column(".used_in_fit", used_col)).map_err(|e| {
-                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
-                })?;
-                new_frame.with_column(crate::polars_bridge::string_column(".na_reason", reason_col)).map_err(|e| {
-                    Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
-                })?;
+                new_frame
+                    .with_column(crate::polars_bridge::f64_opt_column(".fitted", fitted_col))
+                    .map_err(|e| {
+                        Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                    })?;
+                new_frame
+                    .with_column(crate::polars_bridge::f64_opt_column(".residual", res_col))
+                    .map_err(|e| {
+                        Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                    })?;
+                new_frame
+                    .with_column(crate::polars_bridge::bool_column(".used_in_fit", used_col))
+                    .map_err(|e| {
+                        Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                    })?;
+                new_frame
+                    .with_column(crate::polars_bridge::string_column(
+                        ".na_reason",
+                        reason_col,
+                    ))
+                    .map_err(|e| {
+                        Diagnostic::compute_error("C0210", format!("`augment()` failed: {e}"))
+                    })?;
 
                 // The 4 new columns never carry a real NA reason (`.fitted`/`.residual`
                 // are `NA(None)` when dropped, `.used_in_fit`/`.na_reason` are never NA
                 // themselves) -- the original table's entries are still valid as-is.
-                Ok(Value::DataFrame { frame: new_frame, na_reasons: Arc::clone(na_reasons) })
+                Ok(Value::DataFrame {
+                    frame: new_frame,
+                    na_reasons: Arc::clone(na_reasons),
+                })
             }
             _ => Err(Diagnostic::compute_error(
                 "C0201",
@@ -748,7 +825,8 @@ impl FittedModel {
                 } else {
                     frame
                 };
-                let (x_data, _, dispositions, _, p, _, _) = self.blueprint.bake(frame_ref, na_reasons)?;
+                let (x_data, _, dispositions, _, p, _, _) =
+                    self.blueprint.bake(frame_ref, na_reasons)?;
                 let mut predictions = Vec::with_capacity(dispositions.len());
                 let mut included_idx = 0;
 
@@ -780,14 +858,27 @@ impl FittedModel {
     /// Renders the model fit as a structured Cockpit Deck terminal card.
     pub fn render_cockpit(&self, caps: &RenderCaps) -> String {
         let mut panel = CockpitPanel::new("NEKO Model Fit");
-        let badge = if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧ CONVERGED" } else { "[CONVERGED]" };
+        let badge = if caps.unicode_enabled {
+            "/ᐠ˵- ⩊ -˵マ ✧ CONVERGED"
+        } else {
+            "[CONVERGED]"
+        };
         panel.with_badge(badge);
 
-
-        panel.add_kv("Formula", format!("{} ~ {}", self.blueprint.response, self.blueprint.terms.join(" + ")));
+        panel.add_kv(
+            "Formula",
+            format!(
+                "{} ~ {}",
+                self.blueprint.response,
+                self.blueprint.terms.join(" + ")
+            ),
+        );
 
         let obs_text = if self.dropped_n > 0 {
-            format!("{} valid ({} dropped due to NA)", self.n_obs, self.dropped_n)
+            format!(
+                "{} valid ({} dropped due to NA)",
+                self.n_obs, self.dropped_n
+            )
         } else {
             format!("{} valid", self.n_obs)
         };
@@ -795,16 +886,41 @@ impl FittedModel {
 
         let spark = Sparkline::render(&self.residuals, Some(16), caps);
         let min_res = self.residuals.iter().copied().fold(f64::INFINITY, f64::min);
-        let max_res = self.residuals.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        panel.add_kv("Residuals", format!("{spark}  (min: {:.3}, max: +{:.3})", min_res, max_res));
+        let max_res = self
+            .residuals
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        panel.add_kv(
+            "Residuals",
+            format!("{spark}  (min: {:.3}, max: +{:.3})", min_res, max_res),
+        );
 
-        panel.add_kv("Goodness of Fit", format!("R² = {:.4} | Adj R² = {:.4} | F = {:.2}", self.r_squared, self.adj_r_squared, self.f_stat));
-        panel.add_kv("Criteria", format!("AIC = {:.2} | BIC = {:.2} | Res SE = {:.4} on {} DF", self.aic, self.bic, self.residual_se, self.df_resid));
+        panel.add_kv(
+            "Goodness of Fit",
+            format!(
+                "R² = {:.4} | Adj R² = {:.4} | F = {:.2}",
+                self.r_squared, self.adj_r_squared, self.f_stat
+            ),
+        );
+        panel.add_kv(
+            "Criteria",
+            format!(
+                "AIC = {:.2} | BIC = {:.2} | Res SE = {:.4} on {} DF",
+                self.aic, self.bic, self.residual_se, self.df_resid
+            ),
+        );
 
         panel.add_divider();
 
-        panel.add_line(format!("{:<16} {:>10} {:>10} {:>9} {:>9}  {:^6}", "Term", "Estimate", "Std.Err", "t-stat", "p-val", "Signif"));
-        panel.add_line(format!("{:<16} {:>10} {:>10} {:>9} {:>9}  {:^6}", "----------------", "----------", "----------", "---------", "---------", "------"));
+        panel.add_line(format!(
+            "{:<16} {:>10} {:>10} {:>9} {:>9}  {:^6}",
+            "Term", "Estimate", "Std.Err", "t-stat", "p-val", "Signif"
+        ));
+        panel.add_line(format!(
+            "{:<16} {:>10} {:>10} {:>9} {:>9}  {:^6}",
+            "----------------", "----------", "----------", "---------", "---------", "------"
+        ));
 
         for i in 0..self.blueprint.term_names.len() {
             let term = &self.blueprint.term_names[i];
@@ -841,10 +957,16 @@ impl FittedModel {
             }
         } else {
             panel.add_divider();
-            let glyph = if caps.unicode_enabled { "/ᐠ˵- ⩊ -˵マ ✧" } else { "✔" };
-            panel.add_line(format!("{} All assumptions verified. No severe multicollinearity.", caps.green(glyph)));
+            let glyph = if caps.unicode_enabled {
+                "/ᐠ˵- ⩊ -˵マ ✧"
+            } else {
+                "✔"
+            };
+            panel.add_line(format!(
+                "{} All assumptions verified. No severe multicollinearity.",
+                caps.green(glyph)
+            ));
         }
-
 
         panel.render(caps)
     }
@@ -987,7 +1109,9 @@ pub(crate) fn sandwich_vcov(
                     _ => unreachable!(),
                 }
             }
-            VcovKind::Classical => unreachable!("Classical is handled by the caller directly, never reaches sandwich_vcov"),
+            VcovKind::Classical => unreachable!(
+                "Classical is handled by the caller directly, never reaches sandwich_vcov"
+            ),
         };
         for a in 0..p {
             for b in 0..p {

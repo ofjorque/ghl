@@ -3,8 +3,8 @@
 mod common;
 use common::*;
 
-use ghl_runtime::value::Value;
 use ghl_runtime::eval::Interpreter;
+use ghl_runtime::value::Value;
 use ghl_runtime::vector_data::VectorData;
 use ghl_syntax::parser::parse;
 use rand::{RngExt, SeedableRng};
@@ -54,7 +54,10 @@ fn test_neko_ols_fit_and_projections() {
 
     // Verify tidy table
     let tidy_val = interp.env.get("tidied").expect("tidy exists");
-    assert_eq!(df_columns(&tidy_val), vec!["term", "estimate", "std_error", "statistic", "p_value"]);
+    assert_eq!(
+        df_columns(&tidy_val),
+        vec!["term", "estimate", "std_error", "statistic", "p_value"]
+    );
     let terms = df_column(&tidy_val, "term");
     assert_eq!(terms.len(), 3);
     assert_eq!(terms[0], Value::String("(Intercept)".into()));
@@ -65,7 +68,10 @@ fn test_neko_ols_fit_and_projections() {
     let glance_val = interp.env.get("glanced").expect("glance exists");
     assert!(df_columns(&glance_val).contains(&"r_squared".to_string()));
     let r2 = df_column(&glance_val, "r_squared")[0].as_f64().unwrap();
-    assert!((r2 - 1.0).abs() < 1e-6, "R2 must be 1.0 for perfect linear fit");
+    assert!(
+        (r2 - 1.0).abs() < 1e-6,
+        "R2 must be 1.0 for perfect linear fit"
+    );
 
     // Verify predictions
     let pred_val = interp.env.get("pred").expect("pred exists");
@@ -102,9 +108,17 @@ fn test_predict_unseen_categorical_level_is_na_not_baseline() {
     let preds = interp.env.get("preds").expect("preds exists");
     if let Value::Vector(preds) = preds {
         assert_eq!(preds.len(), 2, "output must have one entry per input row");
-        let known = preds[0].as_f64().expect("known level `B` must predict a real number");
-        assert!((known - 20.0).abs() < 1e-6, "region=B must predict ~20.0, got {known}");
-        assert!(preds[1].is_na(), "region=C (never seen while fitting) must be NA, not a fabricated prediction");
+        let known = preds[0]
+            .as_f64()
+            .expect("known level `B` must predict a real number");
+        assert!(
+            (known - 20.0).abs() < 1e-6,
+            "region=B must predict ~20.0, got {known}"
+        );
+        assert!(
+            preds[1].is_na(),
+            "region=C (never seen while fitting) must be NA, not a fabricated prediction"
+        );
     } else {
         panic!("Expected Vector for predict");
     }
@@ -132,9 +146,16 @@ fn test_predict_preserves_row_alignment_with_na_input() {
 
     let preds = interp.env.get("preds").expect("preds exists");
     if let Value::Vector(preds) = preds {
-        assert_eq!(preds.len(), 3, "output must stay aligned with the 3 input rows");
+        assert_eq!(
+            preds.len(),
+            3,
+            "output must stay aligned with the 3 input rows"
+        );
         assert!((preds[0].as_f64().unwrap() - 2.0).abs() < 1e-6);
-        assert!(preds[1].is_na(), "the row with missing `x` must be NA, not silently omitted");
+        assert!(
+            preds[1].is_na(),
+            "the row with missing `x` must be NA, not silently omitted"
+        );
         assert!((preds[2].as_f64().unwrap() - 6.0).abs() < 1e-6);
     } else {
         panic!("Expected Vector for predict");
@@ -165,9 +186,21 @@ fn test_fit_ols_with_integer_predictor_column() {
 
     let coefs = vector_f64(&interp.env.get("coefficients").unwrap());
     assert_eq!(coefs.len(), 3);
-    assert!((coefs[0] - 5.0).abs() < 1e-6, "b0 should be 5.0, got {}", coefs[0]);
-    assert!((coefs[1] - 2.0).abs() < 1e-6, "b1 should be 2.0, got {}", coefs[1]);
-    assert!((coefs[2] - -1.0).abs() < 1e-6, "b2 should be -1.0, got {}", coefs[2]);
+    assert!(
+        (coefs[0] - 5.0).abs() < 1e-6,
+        "b0 should be 5.0, got {}",
+        coefs[0]
+    );
+    assert!(
+        (coefs[1] - 2.0).abs() < 1e-6,
+        "b1 should be 2.0, got {}",
+        coefs[1]
+    );
+    assert!(
+        (coefs[2] - -1.0).abs() < 1e-6,
+        "b2 should be -1.0, got {}",
+        coefs[2]
+    );
 }
 
 #[test]
@@ -299,8 +332,14 @@ fn test_vcov_hc2_hc3_differ_via_leverage() {
     let var_x_hc0 = matrix_data(&interp.env.get("v_hc0").unwrap())[3];
     let var_x_hc2 = matrix_data(&interp.env.get("v_hc2").unwrap())[3];
     let var_x_hc3 = matrix_data(&interp.env.get("v_hc3").unwrap())[3];
-    assert!((var_x_hc0 - var_x_hc2).abs() > 1e-6 * var_x_hc0.max(1.0), "HC2 must differ from HC0 via leverage");
-    assert!((var_x_hc2 - var_x_hc3).abs() > 1e-6 * var_x_hc2.max(1.0), "HC3 must differ from HC2");
+    assert!(
+        (var_x_hc0 - var_x_hc2).abs() > 1e-6 * var_x_hc0.max(1.0),
+        "HC2 must differ from HC0 via leverage"
+    );
+    assert!(
+        (var_x_hc2 - var_x_hc3).abs() > 1e-6 * var_x_hc2.max(1.0),
+        "HC3 must differ from HC2"
+    );
 }
 
 #[test]
@@ -325,9 +364,21 @@ fn test_fit_ols_parallel_assembly_matches_sequential_reference() {
 
     let coefs = vector_f64(&interp.env.get("coefficients").unwrap());
     assert_eq!(coefs.len(), 3);
-    assert!((coefs[0] - 5.0).abs() < 1e-6, "b0 should be 5.0, got {}", coefs[0]);
-    assert!((coefs[1] - 2.0).abs() < 1e-6, "b1 should be 2.0, got {}", coefs[1]);
-    assert!((coefs[2] - -1.0).abs() < 1e-6, "b2 should be -1.0, got {}", coefs[2]);
+    assert!(
+        (coefs[0] - 5.0).abs() < 1e-6,
+        "b0 should be 5.0, got {}",
+        coefs[0]
+    );
+    assert!(
+        (coefs[1] - 2.0).abs() < 1e-6,
+        "b1 should be 2.0, got {}",
+        coefs[1]
+    );
+    assert!(
+        (coefs[2] - -1.0).abs() < 1e-6,
+        "b2 should be -1.0, got {}",
+        coefs[2]
+    );
 }
 
 #[test]
@@ -367,7 +418,9 @@ fn test_fit_logistic_recovers_known_coefficients() {
             if rng.random::<f64>() < p { 1.0 } else { 0.0 }
         })
         .collect();
-    interp.env.set("y".to_string(), Value::Vector(VectorData::from_f64(y)));
+    interp
+        .env
+        .set("y".to_string(), Value::Vector(VectorData::from_f64(y)));
 
     let fit_code = r#"
         let df = dataframe { x1: x1, x2: x2, y: y };
@@ -380,9 +433,24 @@ fn test_fit_logistic_recovers_known_coefficients() {
 
     let coefs = vector_f64(&interp.env.get("coefficients").unwrap());
     assert_eq!(coefs.len(), 3);
-    assert!((coefs[0] - true_b0).abs() < 0.15, "b0 {} too far from {}", coefs[0], true_b0);
-    assert!((coefs[1] - true_b1).abs() < 0.15, "b1 {} too far from {}", coefs[1], true_b1);
-    assert!((coefs[2] - true_b2).abs() < 0.15, "b2 {} too far from {}", coefs[2], true_b2);
+    assert!(
+        (coefs[0] - true_b0).abs() < 0.15,
+        "b0 {} too far from {}",
+        coefs[0],
+        true_b0
+    );
+    assert!(
+        (coefs[1] - true_b1).abs() < 0.15,
+        "b1 {} too far from {}",
+        coefs[1],
+        true_b1
+    );
+    assert!(
+        (coefs[2] - true_b2).abs() < 0.15,
+        "b2 {} too far from {}",
+        coefs[2],
+        true_b2
+    );
 }
 
 #[test]
@@ -396,7 +464,9 @@ fn test_fit_logistic_rejects_non_binary_response() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("non-binary response must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("non-binary response must fail");
     assert_eq!(err.code, "S0204");
 }
 
@@ -412,7 +482,9 @@ fn test_fit_logistic_rejects_insufficient_df() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("insufficient df must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("insufficient df must fail");
     assert_eq!(err.code, "S0201");
 }
 
@@ -436,7 +508,11 @@ fn test_fit_logistic_na_disposition_matches_ols_pattern() {
 
     let aug = interp.env.get("aug").expect("aug exists");
     let used = df_column(&aug, ".used_in_fit");
-    assert_eq!(used[2], Value::Bool(false), "the NA row must be marked unused");
+    assert_eq!(
+        used[2],
+        Value::Bool(false),
+        "the NA row must be marked unused"
+    );
     assert_eq!(used[0], Value::Bool(true));
 }
 
@@ -512,7 +588,11 @@ fn test_fit_poisson_recovers_trend_and_verbs() {
     let coefs = vector_f64(&interp.env.get("coefs").unwrap());
     assert_eq!(coefs.len(), 2);
     // Intercept b0 ~ 0, slope b1 ~ 0.55 (since y grows exponentially with x)
-    assert!(coefs[1] > 0.4 && coefs[1] < 0.7, "Expected positive slope for Poisson growth, got {}", coefs[1]);
+    assert!(
+        coefs[1] > 0.4 && coefs[1] < 0.7,
+        "Expected positive slope for Poisson growth, got {}",
+        coefs[1]
+    );
 
     let td_val = interp.env.get("td").unwrap();
     assert!(matches!(td_val, Value::DataFrame { .. }));
@@ -523,7 +603,10 @@ fn test_fit_poisson_recovers_trend_and_verbs() {
 
     let preds = vector_f64(&interp.env.get("preds").unwrap());
     assert_eq!(preds.len(), 2);
-    assert!(preds[1] > preds[0], "Predictions must be monotonically increasing");
+    assert!(
+        preds[1] > preds[0],
+        "Predictions must be monotonically increasing"
+    );
 }
 
 #[test]
@@ -537,8 +620,8 @@ fn test_fit_poisson_rejects_negative_response() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("should reject negative count");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("should reject negative count");
     assert_eq!(err.code, "S0204");
 }
-
-

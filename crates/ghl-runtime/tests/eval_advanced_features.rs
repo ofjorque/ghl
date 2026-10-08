@@ -2,8 +2,8 @@
 
 mod common;
 
-use ghl_runtime::value::Value;
 use ghl_runtime::eval::Interpreter;
+use ghl_runtime::value::Value;
 use ghl_syntax::parser::parse;
 
 #[test]
@@ -103,7 +103,10 @@ fn test_bracket_indexing_and_slicing() {
     }
 
     assert_eq!(interp.env.get("s_ch").unwrap(), Value::String("h".into()));
-    assert_eq!(interp.env.get("s_sub").unwrap(), Value::String("hello".into()));
+    assert_eq!(
+        interp.env.get("s_sub").unwrap(),
+        Value::String("hello".into())
+    );
 }
 
 #[test]
@@ -180,7 +183,10 @@ fn test_autodiff_scalar_and_vector_gradients() {
     interp.eval_program(&program).expect("evaluation ok");
 
     let d_scalar = interp.env.get("d_scalar").unwrap().as_f64().unwrap();
-    assert!((d_scalar - 25.0).abs() < 1e-6, "Expected 25.0, got {d_scalar}");
+    assert!(
+        (d_scalar - 25.0).abs() < 1e-6,
+        "Expected 25.0, got {d_scalar}"
+    );
 
     let g0 = interp.env.get("g0").unwrap().as_f64().unwrap();
     let g1 = interp.env.get("g1").unwrap().as_f64().unwrap();
@@ -261,7 +267,10 @@ fn test_http_microservice_server_and_client() {
     interp.eval_program(&program).expect("evaluation ok");
 
     assert_eq!(interp.env.get("ok_status").unwrap(), Value::I64(200));
-    assert_eq!(interp.env.get("ok_body").unwrap(), Value::String("{\"prediction\": 42.0}".into()));
+    assert_eq!(
+        interp.env.get("ok_body").unwrap(),
+        Value::String("{\"prediction\": 42.0}".into())
+    );
     assert_eq!(interp.env.get("ok_flag").unwrap(), Value::Bool(true));
     assert_eq!(interp.env.get("not_found_status").unwrap(), Value::I64(404));
     assert_eq!(interp.env.get("post_status").unwrap(), Value::I64(200));
@@ -282,7 +291,16 @@ fn test_rfc05_parallel_iterators() {
 
     let mapped = interp.env.get("mapped").unwrap();
     if let Value::Vector(vd) = mapped {
-        assert_eq!(vd.to_vec(), vec![Value::I64(0), Value::I64(2), Value::I64(4), Value::I64(6), Value::I64(8)]);
+        assert_eq!(
+            vd.to_vec(),
+            vec![
+                Value::I64(0),
+                Value::I64(2),
+                Value::I64(4),
+                Value::I64(6),
+                Value::I64(8)
+            ]
+        );
     } else {
         panic!("Expected Vector for mapped, got {:?}", mapped);
     }
@@ -425,7 +443,10 @@ fn test_show_plot_svg_export() {
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("svg"))
         .collect();
-    assert!(!files.is_empty(), "Expected SVG plot to be saved to GHL_PLOTS_DIR");
+    assert!(
+        !files.is_empty(),
+        "Expected SVG plot to be saved to GHL_PLOTS_DIR"
+    );
 
     // Clean up
     let _ = std::fs::remove_dir_all(&temp_dir);
@@ -447,7 +468,10 @@ fn test_factor_creation_and_levels() {
 
     let lvls = interp.env.get("lvls").expect("lvls exists");
     if let Value::Vector(vec) = lvls {
-        let str_lvls: Vec<String> = vec.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+        let str_lvls: Vec<String> = vec
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect();
         assert_eq!(str_lvls, vec!["high", "low", "med"]);
     } else {
         panic!("Expected Vector for levels");

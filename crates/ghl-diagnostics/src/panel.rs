@@ -4,12 +4,15 @@
 //! or plain ASCII boxes (`+-+`, `| |`, `+-+`), title headers, badges, and strict width clipping.
 
 use crate::caps::RenderCaps;
-use crate::progress::{build_bar_graphic, circle_disc_glyph, ProgressTheme};
+use crate::progress::{ProgressTheme, build_bar_graphic, circle_disc_glyph};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PanelItem {
     Line(String),
-    KeyValue { key: String, val: String },
+    KeyValue {
+        key: String,
+        val: String,
+    },
     Divider,
     ProgressBar {
         label: String,
@@ -64,7 +67,13 @@ impl CockpitPanel {
         self
     }
 
-    pub fn add_progress(&mut self, label: impl Into<String>, current: i64, total: i64, theme: impl Into<String>) -> &mut Self {
+    pub fn add_progress(
+        &mut self,
+        label: impl Into<String>,
+        current: i64,
+        total: i64,
+        theme: impl Into<String>,
+    ) -> &mut Self {
         self.items.push(PanelItem::ProgressBar {
             label: label.into(),
             current,
@@ -74,7 +83,13 @@ impl CockpitPanel {
         self
     }
 
-    pub fn add_circle(&mut self, label: impl Into<String>, current: i64, total: i64, theme: impl Into<String>) -> &mut Self {
+    pub fn add_circle(
+        &mut self,
+        label: impl Into<String>,
+        current: i64,
+        total: i64,
+        theme: impl Into<String>,
+    ) -> &mut Self {
         self.items.push(PanelItem::CircleProgress {
             label: label.into(),
             current,
@@ -85,7 +100,12 @@ impl CockpitPanel {
     }
 
     /// Construct a structured operation telemetry card for high-volume tabular verbs.
-    pub fn operation_telemetry(op_name: &str, row_count: usize, elapsed_secs: f64, details: Option<&str>) -> Self {
+    pub fn operation_telemetry(
+        op_name: &str,
+        row_count: usize,
+        elapsed_secs: f64,
+        details: Option<&str>,
+    ) -> Self {
         let mut panel = Self::new(format!("Cockpit Telemetry: {op_name}"));
         panel.with_badge("ฅ(•⩊ •マ PROCESSED");
         let throughput = if elapsed_secs > 0.0 {
@@ -144,7 +164,10 @@ impl CockpitPanel {
         for item in &self.items {
             match item {
                 PanelItem::Divider => {
-                    let div_line = format!("{sep_l}{}{sep_r}", hz.to_string().repeat(width.saturating_sub(2)));
+                    let div_line = format!(
+                        "{sep_l}{}{sep_r}",
+                        hz.to_string().repeat(width.saturating_sub(2))
+                    );
                     out.push_str(&caps.dim(&div_line));
                     out.push('\n');
                 }
@@ -156,7 +179,12 @@ impl CockpitPanel {
                         let pad = " ".repeat(inner_width - vlen);
                         format!("{line}{pad}")
                     };
-                    out.push_str(&format!("{} {} {}\n", caps.dim(&vt.to_string()), padded_line, caps.dim(&vt.to_string())));
+                    out.push_str(&format!(
+                        "{} {} {}\n",
+                        caps.dim(&vt.to_string()),
+                        padded_line,
+                        caps.dim(&vt.to_string())
+                    ));
                 }
                 PanelItem::KeyValue { key, val } => {
                     let k_len = visual_width(key);
@@ -171,9 +199,19 @@ impl CockpitPanel {
                         let pad = " ".repeat(inner_width - total);
                         format!("{}: {}{pad}", caps.bold(key), val)
                     };
-                    out.push_str(&format!("{} {} {}\n", caps.dim(&vt.to_string()), content, caps.dim(&vt.to_string())));
+                    out.push_str(&format!(
+                        "{} {} {}\n",
+                        caps.dim(&vt.to_string()),
+                        content,
+                        caps.dim(&vt.to_string())
+                    ));
                 }
-                PanelItem::ProgressBar { label, current, total, theme } => {
+                PanelItem::ProgressBar {
+                    label,
+                    current,
+                    total,
+                    theme,
+                } => {
                     let tot = (*total).max(1);
                     let cur = (*current).clamp(0, tot);
                     let fraction = (cur as f64 / tot as f64).clamp(0.0, 1.0);
@@ -181,7 +219,11 @@ impl CockpitPanel {
                     let ratio_str = format!("({cur}/{tot})");
                     let theme_parsed = ProgressTheme::parse(theme);
 
-                    let l_len = if label.is_empty() { 0 } else { visual_width(label) + 1 };
+                    let l_len = if label.is_empty() {
+                        0
+                    } else {
+                        visual_width(label) + 1
+                    };
                     let meta_len = pct_str.len() + 1 + ratio_str.len() + 2;
                     let available = inner_width.saturating_sub(l_len + meta_len + 2);
                     let bar_w = available.clamp(6, 24);
@@ -198,7 +240,11 @@ impl CockpitPanel {
                     content.push(']');
                     content.push(' ');
                     if caps.color_enabled {
-                        let pct_color = if fraction >= 1.0 { "\x1b[1;32m" } else { "\x1b[1;33m" };
+                        let pct_color = if fraction >= 1.0 {
+                            "\x1b[1;32m"
+                        } else {
+                            "\x1b[1;33m"
+                        };
                         content.push_str(&format!("{pct_color}{pct_str}\x1b[0m"));
                     } else {
                         content.push_str(&pct_str);
@@ -213,9 +259,19 @@ impl CockpitPanel {
                         let pad = " ".repeat(inner_width - vlen);
                         format!("{content}{pad}")
                     };
-                    out.push_str(&format!("{} {} {}\n", caps.dim(&vt.to_string()), padded_line, caps.dim(&vt.to_string())));
+                    out.push_str(&format!(
+                        "{} {} {}\n",
+                        caps.dim(&vt.to_string()),
+                        padded_line,
+                        caps.dim(&vt.to_string())
+                    ));
                 }
-                PanelItem::CircleProgress { label, current, total, theme } => {
+                PanelItem::CircleProgress {
+                    label,
+                    current,
+                    total,
+                    theme,
+                } => {
                     let tot = (*total).max(1);
                     let cur = (*current).clamp(0, tot);
                     let fraction = (cur as f64 / tot as f64).clamp(0.0, 1.0);
@@ -234,7 +290,11 @@ impl CockpitPanel {
                     content.push_str(&colored_glyph);
                     content.push(' ');
                     if caps.color_enabled {
-                        let pct_color = if fraction >= 1.0 { "\x1b[1;32m" } else { "\x1b[1;33m" };
+                        let pct_color = if fraction >= 1.0 {
+                            "\x1b[1;32m"
+                        } else {
+                            "\x1b[1;33m"
+                        };
                         content.push_str(&format!("{pct_color}{pct_str}\x1b[0m"));
                     } else {
                         content.push_str(&pct_str);
@@ -249,7 +309,12 @@ impl CockpitPanel {
                         let pad = " ".repeat(inner_width - vlen);
                         format!("{content}{pad}")
                     };
-                    out.push_str(&format!("{} {} {}\n", caps.dim(&vt.to_string()), padded_line, caps.dim(&vt.to_string())));
+                    out.push_str(&format!(
+                        "{} {} {}\n",
+                        caps.dim(&vt.to_string()),
+                        padded_line,
+                        caps.dim(&vt.to_string())
+                    ));
                 }
             }
         }

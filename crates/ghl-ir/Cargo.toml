@@ -11,3 +11,7 @@ ghl-syntax = { path = "../ghl-syntax" }
 ghl-types = { path = "../ghl-types" }
 ghl-diagnostics = { path = "../ghl-diagnostics" }
 
+[lints]
+workspace = true
+
+

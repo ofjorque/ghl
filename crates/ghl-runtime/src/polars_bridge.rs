@@ -26,7 +26,9 @@ use crate::value::Value;
 /// (`Vec<Value>`, all of equal length). Infers the dtype of each column by widening
 /// to the most permissive type present: `String` > `f64` > `i64` > `bool`.
 /// Returns reasons wrapped in an `Arc` for Copy-on-Write sharing across `Value::DataFrame`.
-pub fn build_dataframe(cols: &[(String, Vec<Value>)]) -> Result<(DataFrame, Arc<NaReasonTable>), Diagnostic> {
+pub fn build_dataframe(
+    cols: &[(String, Vec<Value>)],
+) -> Result<(DataFrame, Arc<NaReasonTable>), Diagnostic> {
     let mut na_reasons = NaReasonTable::new();
     let mut columns = Vec::with_capacity(cols.len());
 
@@ -65,20 +67,35 @@ pub(crate) fn value_column_to_polars(name: &str, values: &[Value]) -> Column {
                 other => Some(other.to_string()),
             })
             .collect();
-        data.into_iter().collect::<StringChunked>().with_name(name.into()).into_series()
+        data.into_iter()
+            .collect::<StringChunked>()
+            .with_name(name.into())
+            .into_series()
     } else if has_f64 {
         let data: Vec<Option<f64>> = values.iter().map(|v| v.as_f64()).collect();
-        data.into_iter().collect::<Float64Chunked>().with_name(name.into()).into_series()
+        data.into_iter()
+            .collect::<Float64Chunked>()
+            .with_name(name.into())
+            .into_series()
     } else if has_i64 {
         let data: Vec<Option<i64>> = values.iter().map(|v| v.as_i64()).collect();
-        data.into_iter().collect::<Int64Chunked>().with_name(name.into()).into_series()
+        data.into_iter()
+            .collect::<Int64Chunked>()
+            .with_name(name.into())
+            .into_series()
     } else if has_bool {
         let data: Vec<Option<bool>> = values.iter().map(|v| v.as_bool()).collect();
-        data.into_iter().collect::<BooleanChunked>().with_name(name.into()).into_series()
+        data.into_iter()
+            .collect::<BooleanChunked>()
+            .with_name(name.into())
+            .into_series()
     } else {
         // Empty column or entirely NA: default to null Float64 series.
         let data: Vec<Option<f64>> = vec![None; values.len()];
-        data.into_iter().collect::<Float64Chunked>().with_name(name.into()).into_series()
+        data.into_iter()
+            .collect::<Float64Chunked>()
+            .with_name(name.into())
+            .into_series()
     };
 
     series.into()
@@ -89,23 +106,42 @@ pub(crate) fn value_column_to_polars(name: &str, values: &[Value]) -> Column {
 /// for a single fixed name without inferring dtype from `Vec<Value>`. Used by
 /// `FittedModel::augment`/`FittedGlm::augment` to append `.fitted`/`.residual`.
 pub(crate) fn f64_opt_column(name: &str, data: Vec<Option<f64>>) -> Column {
-    data.into_iter().collect::<Float64Chunked>().with_name(name.into()).into_series().into()
+    data.into_iter()
+        .collect::<Float64Chunked>()
+        .with_name(name.into())
+        .into_series()
+        .into()
 }
 
 /// Like [`f64_opt_column`] but for non-nullable `bool` (`.used_in_fit` is never NA).
 pub(crate) fn bool_column(name: &str, data: Vec<bool>) -> Column {
-    data.into_iter().map(Some).collect::<BooleanChunked>().with_name(name.into()).into_series().into()
+    data.into_iter()
+        .map(Some)
+        .collect::<BooleanChunked>()
+        .with_name(name.into())
+        .into_series()
+        .into()
 }
 
 /// Like [`f64_opt_column`] but for non-nullable `String` (`.na_reason` is always text
 /// -- `"none"`, `"unspecified"`, or the actual reason -- never `NA`).
 pub(crate) fn string_column(name: &str, data: Vec<String>) -> Column {
-    data.into_iter().map(Some).collect::<StringChunked>().with_name(name.into()).into_series().into()
+    data.into_iter()
+        .map(Some)
+        .collect::<StringChunked>()
+        .with_name(name.into())
+        .into_series()
+        .into()
 }
 
 /// Like [`f64_opt_column`] but for non-nullable `i64` (e.g. `.cluster`).
 pub(crate) fn i64_column(name: &str, data: Vec<i64>) -> Column {
-    data.into_iter().map(Some).collect::<Int64Chunked>().with_name(name.into()).into_series().into()
+    data.into_iter()
+        .map(Some)
+        .collect::<Int64Chunked>()
+        .with_name(name.into())
+        .into_series()
+        .into()
 }
 
 /// Extracts a column from a Polars `DataFrame` back to a GHL `Vec<Value>`,
@@ -158,7 +194,12 @@ pub(crate) fn get_cell_as_value(
     Ok(any_value_to_value(&av, col, row, na_reasons))
 }
 
-pub(crate) fn any_value_to_value(av: &AnyValue, col: &str, row: usize, na_reasons: &NaReasonTable) -> Value {
+pub(crate) fn any_value_to_value(
+    av: &AnyValue,
+    col: &str,
+    row: usize,
+    na_reasons: &NaReasonTable,
+) -> Value {
     match av {
         AnyValue::Null => match na_reasons.get(col, row) {
             Some(reason) => Value::NA(Some(reason.to_string())),
@@ -207,7 +248,10 @@ mod tests {
     #[test]
     fn round_trip_preserves_values_and_na_reasons_per_type() {
         let cols = vec![
-            ("id".to_string(), vec![Value::I64(1), Value::I64(2), Value::NA(None), Value::I64(4)]),
+            (
+                "id".to_string(),
+                vec![Value::I64(1), Value::I64(2), Value::NA(None), Value::I64(4)],
+            ),
             (
                 "score".to_string(),
                 vec![
@@ -219,36 +263,62 @@ mod tests {
             ),
             (
                 "label".to_string(),
-                vec![Value::String("a".into()), Value::String("b".into()), Value::NA(None), Value::String("d".into())],
+                vec![
+                    Value::String("a".into()),
+                    Value::String("b".into()),
+                    Value::NA(None),
+                    Value::String("d".into()),
+                ],
             ),
-            ("active".to_string(), vec![Value::Bool(true), Value::Bool(false), Value::NA(None), Value::Bool(true)]),
+            (
+                "active".to_string(),
+                vec![
+                    Value::Bool(true),
+                    Value::Bool(false),
+                    Value::NA(None),
+                    Value::Bool(true),
+                ],
+            ),
         ];
 
         let (frame, na_reasons) = build_dataframe(&cols).expect("build_dataframe should succeed");
         assert_eq!(frame.height(), 4);
 
         for (name, original) in &cols {
-            let pulled = pull_column_as_values(&frame, &na_reasons, name).expect("pull should succeed");
+            let pulled =
+                pull_column_as_values(&frame, &na_reasons, name).expect("pull should succeed");
             assert_eq!(&pulled, original, "round-trip mismatch on column `{name}`");
         }
     }
 
     #[test]
     fn mixed_int_and_float_column_widens_to_f64() {
-        let cols = vec![("x".to_string(), vec![Value::I64(1), Value::F64(2.5), Value::NA(None)])];
+        let cols = vec![(
+            "x".to_string(),
+            vec![Value::I64(1), Value::F64(2.5), Value::NA(None)],
+        )];
         let (frame, na_reasons) = build_dataframe(&cols).unwrap();
 
         let pulled = pull_column_as_values(&frame, &na_reasons, "x").unwrap();
-        assert_eq!(pulled, vec![Value::F64(1.0), Value::F64(2.5), Value::NA(None)]);
+        assert_eq!(
+            pulled,
+            vec![Value::F64(1.0), Value::F64(2.5), Value::NA(None)]
+        );
     }
 
     #[test]
     fn all_na_column_defaults_to_null_without_panicking() {
-        let cols = vec![("gap".to_string(), vec![Value::NA(None), Value::NA(Some("NoResponse".into()))])];
+        let cols = vec![(
+            "gap".to_string(),
+            vec![Value::NA(None), Value::NA(Some("NoResponse".into()))],
+        )];
         let (frame, na_reasons) = build_dataframe(&cols).unwrap();
 
         let pulled = pull_column_as_values(&frame, &na_reasons, "gap").unwrap();
-        assert_eq!(pulled, vec![Value::NA(None), Value::NA(Some("NoResponse".into()))]);
+        assert_eq!(
+            pulled,
+            vec![Value::NA(None), Value::NA(Some("NoResponse".into()))]
+        );
     }
 
     #[test]
@@ -258,12 +328,25 @@ mod tests {
         // happens on every plain variable lookup/binding -- must not re-clone the whole
         // reasons table), not just "still correct after wrapping in Arc" (the other tests
         // already cover correctness and wouldn't fail even without the Arc).
-        let cols = vec![("score".to_string(), vec![Value::NA(Some("SensorDropout".into())), Value::F64(1.0)])];
+        let cols = vec![(
+            "score".to_string(),
+            vec![Value::NA(Some("SensorDropout".into())), Value::F64(1.0)],
+        )];
         let (frame, na_reasons) = build_dataframe(&cols).unwrap();
         let df = Value::DataFrame { frame, na_reasons };
 
         let cloned = df.clone();
-        let (Value::DataFrame { na_reasons: original, .. }, Value::DataFrame { na_reasons: from_clone, .. }) = (&df, &cloned) else {
+        let (
+            Value::DataFrame {
+                na_reasons: original,
+                ..
+            },
+            Value::DataFrame {
+                na_reasons: from_clone,
+                ..
+            },
+        ) = (&df, &cloned)
+        else {
             panic!("expected both to be DataFrame");
         };
         assert!(

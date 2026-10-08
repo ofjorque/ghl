@@ -4,7 +4,9 @@ use ghl_syntax::parse;
 fn eval_source(src: &str) -> Result<Value, String> {
     let program = parse(src).map_err(|e| format!("{:?}", e))?;
     let mut interp = Interpreter::new();
-    interp.eval_program(&program).map_err(|e| format!("{:?}", e))
+    interp
+        .eval_program(&program)
+        .map_err(|e| format!("{:?}", e))
 }
 
 #[test]
@@ -21,10 +23,26 @@ fn test_cockpit_creation_and_formatting() {
     "#;
     let res = eval_source(src).expect("evaluation should succeed");
     if let Value::String(s) = res {
-        assert!(s.contains("Test Diagnostics"), "rendered text should contain title: {}", s);
-        assert!(s.contains("Metric A"), "rendered text should contain Metric A: {}", s);
-        assert!(s.contains("123.45"), "rendered text should contain value: {}", s);
-        assert!(s.contains("All assumptions verified."), "rendered text should contain line: {}", s);
+        assert!(
+            s.contains("Test Diagnostics"),
+            "rendered text should contain title: {}",
+            s
+        );
+        assert!(
+            s.contains("Metric A"),
+            "rendered text should contain Metric A: {}",
+            s
+        );
+        assert!(
+            s.contains("123.45"),
+            "rendered text should contain value: {}",
+            s
+        );
+        assert!(
+            s.contains("All assumptions verified."),
+            "rendered text should contain line: {}",
+            s
+        );
     } else {
         panic!("expected string, got {:?}", res);
     }
@@ -72,11 +90,23 @@ fn test_cockpit_panel_progress_and_circle() {
     "#;
     let res = eval_source(src).expect("evaluation should succeed");
     if let Value::String(s) = res {
-        assert!(s.contains("Solver Diagnostics"), "text should have title: {}", s);
-        assert!(s.contains("Budget"), "text should contain Budget progress label: {}", s);
+        assert!(
+            s.contains("Solver Diagnostics"),
+            "text should have title: {}",
+            s
+        );
+        assert!(
+            s.contains("Budget"),
+            "text should contain Budget progress label: {}",
+            s
+        );
         assert!(s.contains("75.0%"), "text should contain 75.0%: {}", s);
         assert!(s.contains("Warmup"), "text should contain Warmup: {}", s);
-        assert!(s.contains("Sampling"), "text should contain Sampling: {}", s);
+        assert!(
+            s.contains("Sampling"),
+            "text should contain Sampling: {}",
+            s
+        );
     } else {
         panic!("expected string, got {:?}", res);
     }

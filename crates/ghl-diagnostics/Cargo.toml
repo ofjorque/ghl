@@ -8,3 +8,7 @@ description = "Diagnostic formatting and Kaomoji error reporting engine for GHL"
 
 [dependencies]
 
+[lints]
+workspace = true
+
+

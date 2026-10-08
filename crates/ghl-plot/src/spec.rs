@@ -112,7 +112,12 @@ pub struct FacetSpec {
 }
 
 impl FacetSpec {
-    pub fn wrap(variable: impl Into<String>, ncol: Option<usize>, nrow: Option<usize>, scales: FacetScales) -> Self {
+    pub fn wrap(
+        variable: impl Into<String>,
+        ncol: Option<usize>,
+        nrow: Option<usize>,
+        scales: FacetScales,
+    ) -> Self {
         Self {
             layout: FacetLayout::Wrap {
                 variable: variable.into(),
@@ -195,16 +200,28 @@ pub struct FiveNumberSummary {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GeomKind {
-    Point { size: Option<f64>, glyph: Option<char> },
-    Line { width: Option<u32> },
-    Smooth { fit: Option<LinearFit>, se: bool },
-    Histogram { bins: usize },
+    Point {
+        size: Option<f64>,
+        glyph: Option<char>,
+    },
+    Line {
+        width: Option<u32>,
+    },
+    Smooth {
+        fit: Option<LinearFit>,
+        se: bool,
+    },
+    Histogram {
+        bins: usize,
+    },
     Boxplot {
         stats: Option<FiveNumberSummary>,
         multi_stats: Vec<(String, FiveNumberSummary)>,
     },
     Bar,
-    Area { alpha: Option<f64> },
+    Area {
+        alpha: Option<f64>,
+    },
     Rug,
 }
 
@@ -288,7 +305,10 @@ pub struct GeomLayer {
 impl GeomLayer {
     pub fn point() -> Self {
         Self {
-            kind: GeomKind::Point { size: None, glyph: None },
+            kind: GeomKind::Point {
+                size: None,
+                glyph: None,
+            },
             mapping: None,
             data: None,
         }
@@ -296,7 +316,10 @@ impl GeomLayer {
 
     pub fn point_with_glyph(glyph: char) -> Self {
         Self {
-            kind: GeomKind::Point { size: None, glyph: Some(glyph) },
+            kind: GeomKind::Point {
+                size: None,
+                glyph: Some(glyph),
+            },
             mapping: None,
             data: None,
         }
@@ -312,7 +335,10 @@ impl GeomLayer {
 
     pub fn smooth() -> Self {
         Self {
-            kind: GeomKind::Smooth { fit: None, se: false },
+            kind: GeomKind::Smooth {
+                fit: None,
+                se: false,
+            },
             mapping: None,
             data: None,
         }
@@ -320,7 +346,10 @@ impl GeomLayer {
 
     pub fn smooth_with_fit(fit: LinearFit) -> Self {
         Self {
-            kind: GeomKind::Smooth { fit: Some(fit), se: false },
+            kind: GeomKind::Smooth {
+                fit: Some(fit),
+                se: false,
+            },
             mapping: None,
             data: None,
         }
@@ -336,7 +365,10 @@ impl GeomLayer {
 
     pub fn boxplot() -> Self {
         Self {
-            kind: GeomKind::Boxplot { stats: None, multi_stats: Vec::new() },
+            kind: GeomKind::Boxplot {
+                stats: None,
+                multi_stats: Vec::new(),
+            },
             mapping: None,
             data: None,
         }
@@ -344,7 +376,10 @@ impl GeomLayer {
 
     pub fn boxplot_with_stats(stats: FiveNumberSummary) -> Self {
         Self {
-            kind: GeomKind::Boxplot { stats: Some(stats), multi_stats: Vec::new() },
+            kind: GeomKind::Boxplot {
+                stats: Some(stats),
+                multi_stats: Vec::new(),
+            },
             mapping: None,
             data: None,
         }
@@ -352,7 +387,10 @@ impl GeomLayer {
 
     pub fn boxplot_with_multi_stats(multi_stats: Vec<(String, FiveNumberSummary)>) -> Self {
         Self {
-            kind: GeomKind::Boxplot { stats: None, multi_stats },
+            kind: GeomKind::Boxplot {
+                stats: None,
+                multi_stats,
+            },
             mapping: None,
             data: None,
         }
@@ -490,7 +528,9 @@ impl ScaleModifier {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 pub enum MarkerShape {
     #[default]
     Circle,
@@ -641,14 +681,20 @@ impl PlotSpec {
     /// Compose two plots horizontally side-by-side (`p1 | p2`).
     pub fn beside(self, other: PlotSpec) -> Self {
         let mut parent = PlotSpec::new();
-        parent.composite = Some(Box::new(CompositePlot::Horizontal(Box::new(self), Box::new(other))));
+        parent.composite = Some(Box::new(CompositePlot::Horizontal(
+            Box::new(self),
+            Box::new(other),
+        )));
         parent
     }
 
     /// Compose two plots vertically stacked (`p1 / p2`).
     pub fn stack(self, other: PlotSpec) -> Self {
         let mut parent = PlotSpec::new();
-        parent.composite = Some(Box::new(CompositePlot::Vertical(Box::new(self), Box::new(other))));
+        parent.composite = Some(Box::new(CompositePlot::Vertical(
+            Box::new(self),
+            Box::new(other),
+        )));
         parent
     }
 
@@ -682,8 +728,12 @@ impl PlotSpec {
         let mut min_val = f64::INFINITY;
         let mut max_val = f64::NEG_INFINITY;
         for &v in &self.size_data {
-            if v < min_val { min_val = v; }
-            if v > max_val { max_val = v; }
+            if v < min_val {
+                min_val = v;
+            }
+            if v > max_val {
+                max_val = v;
+            }
         }
         if (max_val - min_val).abs() < 1e-9 {
             return (min_r + max_r) / 2.0;
@@ -734,7 +784,11 @@ impl PlotSpec {
         self
     }
 
-    pub fn with_limits(mut self, x_limits: Option<(f64, f64)>, y_limits: Option<(f64, f64)>) -> Self {
+    pub fn with_limits(
+        mut self,
+        x_limits: Option<(f64, f64)>,
+        y_limits: Option<(f64, f64)>,
+    ) -> Self {
         self.x_limits = x_limits;
         self.y_limits = y_limits;
         self
@@ -770,7 +824,12 @@ impl PlotSpec {
         self
     }
 
-    pub fn with_labels(mut self, title: Option<String>, x: Option<String>, y: Option<String>) -> Self {
+    pub fn with_labels(
+        mut self,
+        title: Option<String>,
+        x: Option<String>,
+        y: Option<String>,
+    ) -> Self {
         self.labels.title = title;
         self.labels.x_label = x;
         self.labels.y_label = y;
@@ -861,18 +920,26 @@ impl PlotSpec {
 
     /// Look up multi-category boxplot statistics, if any.
     pub fn boxplot_multi_stats(&self) -> Vec<(String, FiveNumberSummary)> {
-        self.layers.iter().find_map(|l| match &l.kind {
-            GeomKind::Boxplot { multi_stats, .. } if !multi_stats.is_empty() => Some(multi_stats.clone()),
-            _ => None,
-        }).unwrap_or_default()
+        self.layers
+            .iter()
+            .find_map(|l| match &l.kind {
+                GeomKind::Boxplot { multi_stats, .. } if !multi_stats.is_empty() => {
+                    Some(multi_stats.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     /// Number of histogram bins requested via the `Histogram` layer, or 8 by default.
     pub fn requested_bins(&self) -> usize {
-        self.layers.iter().find_map(|l| match l.kind {
-            GeomKind::Histogram { bins } => Some(bins),
-            _ => None,
-        }).unwrap_or(8)
+        self.layers
+            .iter()
+            .find_map(|l| match l.kind {
+                GeomKind::Histogram { bins } => Some(bins),
+                _ => None,
+            })
+            .unwrap_or(8)
     }
 
     /// Bin `self.x_data` into `bins_count` equal-width buckets.
@@ -882,8 +949,16 @@ impl PlotSpec {
         }
 
         let min_x = self.x_data.iter().copied().fold(f64::INFINITY, f64::min);
-        let max_x = self.x_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        let span = if (max_x - min_x).abs() < 1e-9 { 1.0 } else { max_x - min_x };
+        let max_x = self
+            .x_data
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let span = if (max_x - min_x).abs() < 1e-9 {
+            1.0
+        } else {
+            max_x - min_x
+        };
         let bin_width = span / bins_count as f64;
 
         let mut counts = vec![0u32; bins_count];
@@ -894,7 +969,13 @@ impl PlotSpec {
         }
         let max_count = *counts.iter().max().unwrap_or(&1);
 
-        Some(HistogramBins { min_x, max_x, bin_width, counts, max_count })
+        Some(HistogramBins {
+            min_x,
+            max_x,
+            bin_width,
+            counts,
+            max_count,
+        })
     }
 
     /// Category -> frequency counts for a bar chart.
@@ -937,9 +1018,17 @@ impl PlotSpec {
 
         // Compute global data limits for fixed scale sharing across all panels
         let global_min_x = self.x_data.iter().copied().fold(f64::INFINITY, f64::min);
-        let global_max_x = self.x_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let global_max_x = self
+            .x_data
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
         let global_min_y = self.y_data.iter().copied().fold(f64::INFINITY, f64::min);
-        let global_max_y = self.y_data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let global_max_y = self
+            .y_data
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
 
         let global_x_limits = if global_min_x.is_finite() && global_max_x.is_finite() {
             Some((global_min_x, global_max_x))
@@ -952,10 +1041,19 @@ impl PlotSpec {
             None
         };
 
-        let n_data = self.x_data.len().max(self.y_data.len()).max(self.categories.len());
+        let n_data = self
+            .x_data
+            .len()
+            .max(self.y_data.len())
+            .max(self.categories.len());
 
         match &facet.layout {
-            FacetLayout::Wrap { variable, ncol, nrow, scales } => {
+            FacetLayout::Wrap {
+                variable,
+                ncol,
+                nrow,
+                scales,
+            } => {
                 let facet_vals: &[String] = if !self.facet_data.is_empty() {
                     &self.facet_data
                 } else if let Some(vals) = self.columns_cache.get(variable) {
@@ -990,11 +1088,12 @@ impl PlotSpec {
                 let cols = match ncol {
                     Some(c) if *c > 0 => *c,
                     _ => match nrow {
-                        Some(r) if *r > 0 => (total_panels + r - 1) / r,
+                        Some(r) if *r > 0 => total_panels.div_ceil(*r),
                         _ => (total_panels as f64).sqrt().ceil() as usize,
                     },
-                }.max(1);
-                let rows = (total_panels + cols - 1) / cols;
+                }
+                .max(1);
+                let rows = total_panels.div_ceil(cols);
 
                 let mut panels = Vec::new();
                 for (panel_idx, level) in unique_levels.into_iter().enumerate() {
@@ -1005,24 +1104,52 @@ impl PlotSpec {
                         .filter(|&i| facet_vals.get(i) == Some(&level))
                         .collect();
 
-                    let sub_x: Vec<f64> = indices.iter().filter_map(|&i| self.x_data.get(i).copied()).collect();
-                    let sub_y: Vec<f64> = indices.iter().filter_map(|&i| self.y_data.get(i).copied()).collect();
-                    let sub_cats: Vec<String> = indices.iter().filter_map(|&i| self.categories.get(i).cloned()).collect();
-                    let sub_sizes: Vec<f64> = indices.iter().filter_map(|&i| self.size_data.get(i).copied()).collect();
-                    let sub_shapes: Vec<String> = indices.iter().filter_map(|&i| self.shape_data.get(i).cloned()).collect();
+                    let sub_x: Vec<f64> = indices
+                        .iter()
+                        .filter_map(|&i| self.x_data.get(i).copied())
+                        .collect();
+                    let sub_y: Vec<f64> = indices
+                        .iter()
+                        .filter_map(|&i| self.y_data.get(i).copied())
+                        .collect();
+                    let sub_cats: Vec<String> = indices
+                        .iter()
+                        .filter_map(|&i| self.categories.get(i).cloned())
+                        .collect();
+                    let sub_sizes: Vec<f64> = indices
+                        .iter()
+                        .filter_map(|&i| self.size_data.get(i).copied())
+                        .collect();
+                    let sub_shapes: Vec<String> = indices
+                        .iter()
+                        .filter_map(|&i| self.shape_data.get(i).cloned())
+                        .collect();
 
                     // Reconstruct series if color aesthetic is present
                     let mut sub_series = Vec::new();
-                    if let Some(color_col_name) = self.mapping.as_ref().and_then(|m| m.color.as_ref()) {
+                    if let Some(color_col_name) =
+                        self.mapping.as_ref().and_then(|m| m.color.as_ref())
+                    {
                         if let Some(color_vals) = self.columns_cache.get(color_col_name) {
-                            let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>)> = BTreeMap::new();
+                            let mut groups: BTreeMap<
+                                String,
+                                (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>),
+                            > = BTreeMap::new();
                             for &i in &indices {
-                                if let (Some(&x), Some(&y), Some(g_key)) = (self.x_data.get(i), self.y_data.get(i), color_vals.get(i)) {
-                                    let entry = groups.entry(g_key.clone()).or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                                if let (Some(&x), Some(&y), Some(g_key)) =
+                                    (self.x_data.get(i), self.y_data.get(i), color_vals.get(i))
+                                {
+                                    let entry = groups.entry(g_key.clone()).or_insert_with(|| {
+                                        (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+                                    });
                                     entry.0.push(x);
                                     entry.1.push(y);
-                                    if let Some(&sz) = self.size_data.get(i) { entry.2.push(sz); }
-                                    if let Some(sh) = self.shape_data.get(i) { entry.3.push(sh.clone()); }
+                                    if let Some(&sz) = self.size_data.get(i) {
+                                        entry.2.push(sz);
+                                    }
+                                    if let Some(sh) = self.shape_data.get(i) {
+                                        entry.3.push(sh.clone());
+                                    }
                                 }
                             }
                             for (g_name, (g_xs, g_ys, g_sizes, g_shapes)) in groups {
@@ -1083,11 +1210,18 @@ impl PlotSpec {
 
                 (panels, rows, cols)
             }
-            FacetLayout::Grid { row_var, col_var, scales } => {
+            FacetLayout::Grid {
+                row_var,
+                col_var,
+                scales,
+            } => {
                 let row_vals_source: &[String] = if !self.facet_row_data.is_empty() {
                     &self.facet_row_data
                 } else if let Some(var) = row_var {
-                    self.columns_cache.get(var).map(|v| v.as_slice()).unwrap_or(&[])
+                    self.columns_cache
+                        .get(var)
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[])
                 } else {
                     &[]
                 };
@@ -1095,7 +1229,10 @@ impl PlotSpec {
                 let col_vals_source: &[String] = if !self.facet_data.is_empty() {
                     &self.facet_data
                 } else if let Some(var) = col_var {
-                    self.columns_cache.get(var).map(|v| v.as_slice()).unwrap_or(&[])
+                    self.columns_cache
+                        .get(var)
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[])
                 } else {
                     &[]
                 };
@@ -1147,19 +1284,44 @@ impl PlotSpec {
                             }
                         }
 
-                        let sub_x: Vec<f64> = indices.iter().filter_map(|&i| self.x_data.get(i).copied()).collect();
-                        let sub_y: Vec<f64> = indices.iter().filter_map(|&i| self.y_data.get(i).copied()).collect();
-                        let sub_cats: Vec<String> = indices.iter().filter_map(|&i| self.categories.get(i).cloned()).collect();
-                        let sub_sizes: Vec<f64> = indices.iter().filter_map(|&i| self.size_data.get(i).copied()).collect();
-                        let sub_shapes: Vec<String> = indices.iter().filter_map(|&i| self.shape_data.get(i).cloned()).collect();
+                        let sub_x: Vec<f64> = indices
+                            .iter()
+                            .filter_map(|&i| self.x_data.get(i).copied())
+                            .collect();
+                        let sub_y: Vec<f64> = indices
+                            .iter()
+                            .filter_map(|&i| self.y_data.get(i).copied())
+                            .collect();
+                        let sub_cats: Vec<String> = indices
+                            .iter()
+                            .filter_map(|&i| self.categories.get(i).cloned())
+                            .collect();
+                        let sub_sizes: Vec<f64> = indices
+                            .iter()
+                            .filter_map(|&i| self.size_data.get(i).copied())
+                            .collect();
+                        let sub_shapes: Vec<String> = indices
+                            .iter()
+                            .filter_map(|&i| self.shape_data.get(i).cloned())
+                            .collect();
 
                         let mut sub_series = Vec::new();
-                        if let Some(color_col_name) = self.mapping.as_ref().and_then(|m| m.color.as_ref()) {
+                        if let Some(color_col_name) =
+                            self.mapping.as_ref().and_then(|m| m.color.as_ref())
+                        {
                             if let Some(color_vals) = self.columns_cache.get(color_col_name) {
-                                let mut groups: BTreeMap<String, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>)> = BTreeMap::new();
+                                let mut groups: BTreeMap<
+                                    String,
+                                    (Vec<f64>, Vec<f64>, Vec<f64>, Vec<String>),
+                                > = BTreeMap::new();
                                 for &i in &indices {
-                                    if let (Some(&x), Some(&y), Some(g_key)) = (self.x_data.get(i), self.y_data.get(i), color_vals.get(i)) {
-                                        let entry = groups.entry(g_key.clone()).or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+                                    if let (Some(&x), Some(&y), Some(g_key)) =
+                                        (self.x_data.get(i), self.y_data.get(i), color_vals.get(i))
+                                    {
+                                        let entry =
+                                            groups.entry(g_key.clone()).or_insert_with(|| {
+                                                (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+                                            });
                                         entry.0.push(x);
                                         entry.1.push(y);
                                         if let Some(&sz) = self.size_data.get(i) {
@@ -1225,8 +1387,16 @@ impl PlotSpec {
 
                         panels.push(FacetPanel {
                             label,
-                            row_label: if row_var.is_some() { Some(r_val.clone()) } else { None },
-                            col_label: if col_var.is_some() { Some(c_val.clone()) } else { None },
+                            row_label: if row_var.is_some() {
+                                Some(r_val.clone())
+                            } else {
+                                None
+                            },
+                            col_label: if col_var.is_some() {
+                                Some(c_val.clone())
+                            } else {
+                                None
+                            },
                             row_idx: r_idx,
                             col_idx: c_idx,
                             spec: sub_spec,
@@ -1251,7 +1421,10 @@ impl PlotSpec {
                         let n = self.categories.len().min(self.y_data.len());
                         let mut grouped: BTreeMap<String, Vec<f64>> = BTreeMap::new();
                         for i in 0..n {
-                            grouped.entry(self.categories[i].clone()).or_default().push(self.y_data[i]);
+                            grouped
+                                .entry(self.categories[i].clone())
+                                .or_default()
+                                .push(self.y_data[i]);
                         }
                         let mut new_multi = Vec::new();
                         for (cat, vals) in grouped {
@@ -1329,13 +1502,13 @@ pub fn compute_five_number_summary(vals: &[f64]) -> Option<FiveNumberSummary> {
         (clean[n / 2 - 1] + clean[n / 2]) / 2.0
     };
 
-    let q1 = if n % 4 == 0 {
+    let q1 = if n.is_multiple_of(4) {
         (clean[n / 4 - 1] + clean[n / 4]) / 2.0
     } else {
         clean[n / 4]
     };
 
-    let q3 = if (3 * n) % 4 == 0 {
+    let q3 = if (3 * n).is_multiple_of(4) {
         (clean[3 * n / 4 - 1] + clean[3 * n / 4]) / 2.0
     } else {
         clean[3 * n / 4]
@@ -1344,7 +1517,11 @@ pub fn compute_five_number_summary(vals: &[f64]) -> Option<FiveNumberSummary> {
     let iqr = q3 - q1;
     let lower_fence = q1 - 1.5 * iqr;
     let upper_fence = q3 + 1.5 * iqr;
-    let outliers: Vec<f64> = clean.iter().copied().filter(|&x| x < lower_fence || x > upper_fence).collect();
+    let outliers: Vec<f64> = clean
+        .iter()
+        .copied()
+        .filter(|&x| x < lower_fence || x > upper_fence)
+        .collect();
 
     Some(FiveNumberSummary {
         min,

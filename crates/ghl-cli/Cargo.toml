@@ -22,4 +22,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 rustyline = "18.0.1"
 sha2 = "0.10"
 
+[lints]
+workspace = true
+
+
 

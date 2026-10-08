@@ -2,9 +2,9 @@
 //! binary or shared library (`--shared`), with auto-generated Python/R/Julia FFI bridges
 //! for exported functions and structs (RFC 06 §3).
 
-use std::time::Instant;
 use ghl_diagnostics::{CockpitPanel, Diagnostic, RenderCaps};
 use ghl_syntax::SourceIndex;
+use std::time::Instant;
 
 pub fn cmd_build(args: &[String], caps: &RenderCaps) {
     let mut file_opt: Option<String> = None;
@@ -37,8 +37,11 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
                 if i < args.len() {
                     bridges_filter = args[i].to_lowercase();
                 } else {
-                    let err = Diagnostic::compute_error("C0008", "Missing argument after `--bridges`")
-                        .with_help("Provide bridges list: `--bridges=py,r,jl` or `--bridges=all`");
+                    let err =
+                        Diagnostic::compute_error("C0008", "Missing argument after `--bridges`")
+                            .with_help(
+                                "Provide bridges list: `--bridges=py,r,jl` or `--bridges=all`",
+                            );
                     eprintln!("{}", err.render_with_caps(caps));
                     std::process::exit(1);
                 }
@@ -86,8 +89,11 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
             let index = SourceIndex::new(&content);
             for syntax_err in errors {
                 let (line, col) = index.offset_to_position(syntax_err.span.start);
-                let err = Diagnostic::compute_error("C0100", syntax_err.message)
-                    .with_location(&file, line as usize + 1, col as usize + 1);
+                let err = Diagnostic::compute_error("C0100", syntax_err.message).with_location(
+                    &file,
+                    line as usize + 1,
+                    col as usize + 1,
+                );
                 eprintln!("{}", err.render_with_caps(caps));
             }
             std::process::exit(1);
@@ -95,18 +101,30 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
     };
 
     // 1b. Module & Package Resolution Phase (RFC 06)
-    if let Err(diag) = crate::package::resolve_package_imports(&mut program, std::path::Path::new(&file)) {
+    if let Err(diag) =
+        crate::package::resolve_package_imports(&mut program, std::path::Path::new(&file))
+    {
         eprintln!("{}", diag.render_with_caps(caps));
         std::process::exit(1);
     }
 
     // 2. Collect exported FFI functions and structs
-    let mut exported_fns: Vec<(String, Vec<ghl_syntax::FnParam>, Option<ghl_syntax::TypeAnnotation>)> = Vec::new();
+    let mut exported_fns: Vec<(
+        String,
+        Vec<ghl_syntax::FnParam>,
+        Option<ghl_syntax::TypeAnnotation>,
+    )> = Vec::new();
     let mut exported_structs: Vec<ghl_syntax::StructDecl> = Vec::new();
 
     for stmt in &program.statements {
         match &stmt.kind {
-            ghl_syntax::StmtKind::Fn { name, params, ret_ty, export_ffi, .. } => {
+            ghl_syntax::StmtKind::Fn {
+                name,
+                params,
+                ret_ty,
+                export_ffi,
+                ..
+            } => {
                 if *export_ffi {
                     exported_fns.push((name.clone(), params.clone(), ret_ty.clone()));
                 }
@@ -118,20 +136,31 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
         }
     }
 
-    let is_shared = shared || !exported_fns.is_empty() || out_opt.as_ref().map_or(false, |o| {
-        o.ends_with(".so") || o.ends_with(".dylib") || o.ends_with(".dll")
-    });
+    let is_shared = shared
+        || !exported_fns.is_empty()
+        || out_opt
+            .as_ref()
+            .is_some_and(|o| o.ends_with(".so") || o.ends_with(".dylib") || o.ends_with(".dll"));
 
     if is_shared && exported_fns.is_empty() {
         for stmt in &program.statements {
-            if let ghl_syntax::StmtKind::Fn { name, params, ret_ty, .. } = &stmt.kind {
+            if let ghl_syntax::StmtKind::Fn {
+                name,
+                params,
+                ret_ty,
+                ..
+            } = &stmt.kind
+            {
                 exported_fns.push((name.clone(), params.clone(), ret_ty.clone()));
             }
         }
     }
 
     let input_path = std::path::Path::new(&file);
-    let stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+    let stem = input_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
 
     let default_ext = if cfg!(windows) {
         if is_shared { ".dll" } else { ".exe" }
@@ -184,7 +213,8 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
         let err = Diagnostic::compute_error(
             "C0500",
             "Source file contains no compilable functions or expressions for AOT",
-        ).with_help("Provide functions or top-level expressions to compile");
+        )
+        .with_help("Provide functions or top-level expressions to compile");
         eprintln!("{}", err.render_with_caps(caps));
         std::process::exit(1);
     }
@@ -219,15 +249,18 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
         let mut r_adapters = String::new();
 
         for (fn_name, params, ret_ty) in &exported_fns {
-            let rust_params: Vec<String> = params.iter().map(|p| {
-                let ty_str = match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
-                    Some("int") | Some("Int") | Some("i64") => "i64",
-                    Some("float") | Some("Float") | Some("f64") => "f64",
-                    Some("bool") | Some("Bool") => "bool",
-                    _ => "i64",
-                };
-                format!("{}: {}", p.name, ty_str)
-            }).collect();
+            let rust_params: Vec<String> = params
+                .iter()
+                .map(|p| {
+                    let ty_str = match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                        Some("int") | Some("Int") | Some("i64") => "i64",
+                        Some("float") | Some("Float") | Some("f64") => "f64",
+                        Some("bool") | Some("Bool") => "bool",
+                        _ => "i64",
+                    };
+                    format!("{}: {}", p.name, ty_str)
+                })
+                .collect();
 
             let rust_ret = match ret_ty.as_ref().map(|t| format!("{t}")).as_deref() {
                 Some("int") | Some("Int") | Some("i64") => "i64",
@@ -236,13 +269,25 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
                 _ => "i64",
             };
 
-            ffi_decls.push_str(&format!("    fn {fn_name}({}) -> {rust_ret};\n", rust_params.join(", ")));
+            ffi_decls.push_str(&format!(
+                "    fn {fn_name}({}) -> {rust_ret};\n",
+                rust_params.join(", ")
+            ));
 
             // R adapter: all numeric/bool arguments passed as *const f64 pointers
-            let mut r_params: Vec<String> = params.iter().map(|p| format!("{}: *const f64", p.name)).collect();
-            let mut null_checks: Vec<String> = params.iter().map(|p| format!("!{}.is_null()", p.name)).collect();
+            let mut r_params: Vec<String> = params
+                .iter()
+                .map(|p| format!("{}: *const f64", p.name))
+                .collect();
+            let mut null_checks: Vec<String> = params
+                .iter()
+                .map(|p| format!("!{}.is_null()", p.name))
+                .collect();
 
-            let is_unit_ret = matches!(ret_ty.as_ref().map(|t| format!("{t}")).as_deref(), None | Some("unit") | Some("()"));
+            let is_unit_ret = matches!(
+                ret_ty.as_ref().map(|t| format!("{t}")).as_deref(),
+                None | Some("unit") | Some("()")
+            );
 
             if !is_unit_ret {
                 r_params.push("out: *mut f64".to_string());
@@ -255,35 +300,43 @@ pub fn cmd_build(args: &[String], caps: &RenderCaps) {
                 null_checks.join(" && ")
             };
 
-            let call_args: Vec<String> = params.iter().map(|p| {
-                match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
+            let call_args: Vec<String> = params
+                .iter()
+                .map(|p| match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
                     Some("int") | Some("Int") | Some("i64") => format!("*{} as i64", p.name),
                     Some("float") | Some("Float") | Some("f64") => format!("*{}", p.name),
                     Some("bool") | Some("Bool") => format!("*{} != 0.0", p.name),
                     _ => format!("*{} as i64", p.name),
-                }
-            }).collect();
+                })
+                .collect();
 
             let invocation = if is_unit_ret {
                 format!("let _ = {fn_name}({});", call_args.join(", "))
             } else {
                 match ret_ty.as_ref().map(|t| format!("{t}")).as_deref() {
-                    Some("bool") | Some("Bool") => format!("*out = if {fn_name}({}) {{ 1.0 }} else {{ 0.0 }};", call_args.join(", ")),
+                    Some("bool") | Some("Bool") => format!(
+                        "*out = if {fn_name}({}) {{ 1.0 }} else {{ 0.0 }};",
+                        call_args.join(", ")
+                    ),
                     _ => format!("*out = {fn_name}({}) as f64;", call_args.join(", ")),
                 }
             };
 
-            r_adapters.push_str(&format!(r#"
+            r_adapters.push_str(&format!(
+                r#"
 #[no_mangle]
 pub unsafe extern "C" fn {fn_name}_r({}) {{
     if {null_check_str} {{
         {invocation}
     }}
 }}
-"#, r_params.join(", ")));
+"#,
+                r_params.join(", ")
+            ));
         }
 
-        format!(r#"
+        format!(
+            r#"
 #![no_main]
 #![allow(non_snake_case)]
 {host_stub}
@@ -293,7 +346,8 @@ extern "C" {{
 }}
 
 {r_adapters}
-"#)
+"#
+        )
     } else {
         let has_ghl_main = hir_module.functions.contains_key("__ghl_main");
         let has_main = hir_module.functions.contains_key("main");
@@ -322,14 +376,16 @@ extern "C" {{
             main_body.push_str("println!(\"GHL native binary initialized.\");\n");
         }
 
-        format!(r#"
+        format!(
+            r#"
 #![allow(non_snake_case)]
 {extern_decls}
 {host_stub}
 fn main() {{
     {main_body}
 }}
-"#)
+"#
+        )
     };
 
     // 7. Write temporary files and link with rustc
@@ -369,7 +425,9 @@ fn main() {{
     match link_output {
         Ok(out) if out.status.success() => {
             let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
-            let file_size = std::fs::metadata(&output_path).map(|m| m.len()).unwrap_or(0);
+            let file_size = std::fs::metadata(&output_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
             let size_str = if file_size >= 1024 * 1024 {
                 format!("{:.2} MB", file_size as f64 / (1024.0 * 1024.0))
             } else {
@@ -378,8 +436,13 @@ fn main() {{
 
             if is_shared {
                 let out_file_path = std::path::Path::new(&output_path);
-                let out_dir = out_file_path.parent().unwrap_or_else(|| std::path::Path::new("."));
-                let out_filename = out_file_path.file_name().and_then(|n| n.to_str()).unwrap_or(&output_path);
+                let out_dir = out_file_path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let out_filename = out_file_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&output_path);
 
                 let py_bridge_path = out_dir.join(format!("{stem}_bridge.py"));
                 let r_bridge_path = out_dir.join(format!("{stem}_bridge.R"));
@@ -387,7 +450,8 @@ fn main() {{
 
                 // 1. Python ctypes bridge
                 if bridges_filter == "all" || bridges_filter.contains("py") {
-                    let mut py_content = format!(r#""""
+                    let mut py_content = format!(
+                        r#""""
 Auto-generated Python ctypes FFI bridge for {stem}
 Generated by Gojo & Haru High-Performance Statistical System (GHL) - RFC 06 §3
 """
@@ -403,7 +467,8 @@ try:
 except OSError:
     lib = ctypes.CDLL(_lib_name)
 
-"#);
+"#
+                    );
 
                     // Emit Struct classes in Python
                     for s in &exported_structs {
@@ -428,15 +493,17 @@ except OSError:
                     let mut all_exports: Vec<String> = Vec::new();
                     for (fn_name, params, ret_ty) in &exported_fns {
                         all_exports.push(format!("\"{fn_name}\""));
-                        let py_param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
-                        let py_arg_types: Vec<&'static str> = params.iter().map(|p| {
-                            match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                        let py_param_names: Vec<String> =
+                            params.iter().map(|p| p.name.clone()).collect();
+                        let py_arg_types: Vec<&'static str> = params
+                            .iter()
+                            .map(|p| match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
                                 Some("int") | Some("Int") | Some("i64") => "ctypes.c_int64",
                                 Some("float") | Some("Float") | Some("f64") => "ctypes.c_double",
                                 Some("bool") | Some("Bool") => "ctypes.c_bool",
                                 _ => "ctypes.c_int64",
-                            }
-                        }).collect();
+                            })
+                            .collect();
 
                         let py_ret = match ret_ty.as_ref().map(|t| format!("{t}")).as_deref() {
                             Some("int") | Some("Int") | Some("i64") => "ctypes.c_int64",
@@ -466,7 +533,8 @@ except OSError:
 
                 // 2. R FFI bridge
                 if bridges_filter == "all" || bridges_filter.contains("r") {
-                    let mut r_content = format!(r#"# Auto-generated R FFI bridge for {stem}
+                    let mut r_content = format!(
+                        r#"# Auto-generated R FFI bridge for {stem}
 # Generated by Gojo & Haru High-Performance Statistical System (GHL) - RFC 06 §3
 
 .ghl_lib_name <- "{out_filename}"
@@ -481,7 +549,8 @@ except OSError:
 }}
 .ghl_load_lib()
 
-"#);
+"#
+                    );
 
                     // Emit Struct constructors in R
                     for s in &exported_structs {
@@ -493,15 +562,18 @@ except OSError:
                             match ty_str.as_str() {
                                 "int" | "Int" | "i64" => {
                                     param_defaults.push(format!("{} = 0L", f.name));
-                                    field_assigns.push(format!("      {} = as.integer({})", f.name, f.name));
+                                    field_assigns
+                                        .push(format!("      {} = as.integer({})", f.name, f.name));
                                 }
                                 "float" | "Float" | "f64" => {
                                     param_defaults.push(format!("{} = 0.0", f.name));
-                                    field_assigns.push(format!("      {} = as.double({})", f.name, f.name));
+                                    field_assigns
+                                        .push(format!("      {} = as.double({})", f.name, f.name));
                                 }
                                 "bool" | "Bool" => {
                                     param_defaults.push(format!("{} = FALSE", f.name));
-                                    field_assigns.push(format!("      {} = as.logical({})", f.name, f.name));
+                                    field_assigns
+                                        .push(format!("      {} = as.logical({})", f.name, f.name));
                                 }
                                 _ => {
                                     param_defaults.push(format!("{} = NULL", f.name));
@@ -521,9 +593,15 @@ except OSError:
                     // Emit functions in R
                     for (fn_name, params, ret_ty) in &exported_fns {
                         let r_params: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
-                        let mut dot_c_args: Vec<String> = params.iter().map(|p| format!("as.double({})", p.name)).collect();
+                        let mut dot_c_args: Vec<String> = params
+                            .iter()
+                            .map(|p| format!("as.double({})", p.name))
+                            .collect();
 
-                        let is_unit_ret = matches!(ret_ty.as_ref().map(|t| format!("{t}")).as_deref(), None | Some("unit") | Some("()"));
+                        let is_unit_ret = matches!(
+                            ret_ty.as_ref().map(|t| format!("{t}")).as_deref(),
+                            None | Some("unit") | Some("()")
+                        );
 
                         if !is_unit_ret {
                             dot_c_args.push("out = double(1)".to_string());
@@ -558,7 +636,8 @@ except OSError:
                 // 3. Julia FFI bridge
                 if bridges_filter == "all" || bridges_filter.contains("jl") {
                     let jl_module_name = to_pascal_case_module(stem);
-                    let mut jl_content = format!(r#""""
+                    let mut jl_content = format!(
+                        r#""""
 Auto-generated Julia FFI bridge for {stem}
 Generated by Gojo & Haru High-Performance Statistical System (GHL) - RFC 06 §3
 """
@@ -572,7 +651,8 @@ else
     joinpath(@__DIR__, "{out_filename}")
 end
 
-"#);
+"#
+                    );
 
                     // Emit Structs in Julia
                     for s in &exported_structs {
@@ -587,10 +667,7 @@ end
                             };
                             fields_str.push_str(&format!("    {}::{}\n", f.name, jl_ty));
                         }
-                        jl_content.push_str(&format!(
-                            "struct {}\n{}end\n\n",
-                            s.name, fields_str
-                        ));
+                        jl_content.push_str(&format!("struct {}\n{}end\n\n", s.name, fields_str));
                     }
 
                     // Emit functions in Julia
@@ -598,26 +675,32 @@ end
                     for (fn_name, params, ret_ty) in &exported_fns {
                         jl_exports.push(fn_name.clone());
 
-                        let typed_params: Vec<String> = params.iter().map(|p| {
-                            let ty_str = match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
+                        let typed_params: Vec<String> = params
+                            .iter()
+                            .map(|p| {
+                                let ty_str = match p.ty.as_ref().map(|t| format!("{t}")).as_deref()
+                                {
+                                    Some("int") | Some("Int") | Some("i64") => "Int64",
+                                    Some("float") | Some("Float") | Some("f64") => "Float64",
+                                    Some("bool") | Some("Bool") => "Bool",
+                                    _ => "Int64",
+                                };
+                                format!("{}::{}", p.name, ty_str)
+                            })
+                            .collect();
+
+                        let ccall_arg_types: Vec<&'static str> = params
+                            .iter()
+                            .map(|p| match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
                                 Some("int") | Some("Int") | Some("i64") => "Int64",
                                 Some("float") | Some("Float") | Some("f64") => "Float64",
                                 Some("bool") | Some("Bool") => "Bool",
                                 _ => "Int64",
-                            };
-                            format!("{}::{}", p.name, ty_str)
-                        }).collect();
+                            })
+                            .collect();
 
-                        let ccall_arg_types: Vec<&'static str> = params.iter().map(|p| {
-                            match p.ty.as_ref().map(|t| format!("{t}")).as_deref() {
-                                Some("int") | Some("Int") | Some("i64") => "Int64",
-                                Some("float") | Some("Float") | Some("f64") => "Float64",
-                                Some("bool") | Some("Bool") => "Bool",
-                                _ => "Int64",
-                            }
-                        }).collect();
-
-                        let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                        let param_names: Vec<String> =
+                            params.iter().map(|p| p.name.clone()).collect();
 
                         let jl_ret = match ret_ty.as_ref().map(|t| format!("{t}")).as_deref() {
                             Some("int") | Some("Int") | Some("i64") => "Int64",
@@ -667,15 +750,29 @@ end
                 }
 
                 let mut panel = CockpitPanel::new("GHL FFI Shared Library (RFC 06 §3)");
-                panel.with_badge(caps.green(if caps.unicode_enabled { "≽(• ̀⩊ •́マ≼ CDYLIB SUCCESS" } else { "[CDYLIB SUCCESS]" }));
+                panel.with_badge(caps.green(if caps.unicode_enabled {
+                    "≽(• ̀⩊ •́マ≼ CDYLIB SUCCESS"
+                } else {
+                    "[CDYLIB SUCCESS]"
+                }));
                 panel.add_kv("Target File", &file);
                 panel.add_kv("Output Library", &output_path);
-                panel.add_kv("Mode", if release { "Release (opt-level=3, LTO)" } else { "Debug / Standard" });
+                panel.add_kv(
+                    "Mode",
+                    if release {
+                        "Release (opt-level=3, LTO)"
+                    } else {
+                        "Debug / Standard"
+                    },
+                );
                 panel.add_kv("Library Size", size_str);
                 panel.add_kv("Compilation Time", format!("{:.2} ms", elapsed_ms));
                 panel.add_kv("FFI Functions", format!("{} exported", exported_fns.len()));
                 if !exported_structs.is_empty() {
-                    panel.add_kv("FFI Structs", format!("{} declared", exported_structs.len()));
+                    panel.add_kv(
+                        "FFI Structs",
+                        format!("{} declared", exported_structs.len()),
+                    );
                 }
                 if bridges_filter == "all" || bridges_filter.contains("py") {
                     panel.add_kv("Python Bridge", py_bridge_path.display().to_string());
@@ -690,14 +787,28 @@ end
                 println!("{}", panel.render(caps));
             } else {
                 let mut panel = CockpitPanel::new("GHL AOT Native Binary");
-                panel.with_badge(caps.green(if caps.unicode_enabled { "≽(• ̀⩊ •́マ≼ AOT SUCCESS" } else { "[AOT SUCCESS]" }));
+                panel.with_badge(caps.green(if caps.unicode_enabled {
+                    "≽(• ̀⩊ •́マ≼ AOT SUCCESS"
+                } else {
+                    "[AOT SUCCESS]"
+                }));
 
                 panel.add_kv("Target File", &file);
                 panel.add_kv("Output Binary", &output_path);
-                panel.add_kv("Mode", if release { "Release (opt-level=3, LTO)" } else { "Debug / Standard" });
+                panel.add_kv(
+                    "Mode",
+                    if release {
+                        "Release (opt-level=3, LTO)"
+                    } else {
+                        "Debug / Standard"
+                    },
+                );
                 panel.add_kv("Binary Size", size_str);
                 panel.add_kv("Compilation Time", format!("{:.2} ms", elapsed_ms));
-                panel.add_kv("Symbols Exported", format!("{} functions", hir_module.functions.len()));
+                panel.add_kv(
+                    "Symbols Exported",
+                    format!("{} functions", hir_module.functions.len()),
+                );
 
                 println!("{}", panel.render(caps));
             }
@@ -709,8 +820,9 @@ end
             std::process::exit(1);
         }
         Err(e) => {
-            let err = Diagnostic::compute_error("C0504", format!("Failed to invoke linker `rustc`: {e}"))
-                .with_help("Ensure `rustc` is installed and available in PATH");
+            let err =
+                Diagnostic::compute_error("C0504", format!("Failed to invoke linker `rustc`: {e}"))
+                    .with_help("Ensure `rustc` is installed and available in PATH");
             eprintln!("{}", err.render_with_caps(caps));
             std::process::exit(1);
         }
@@ -765,14 +877,16 @@ mod tests {
 
         std::fs::write(&obj_path, &obj_bytes).expect("write obj");
         let host_stub = ghl_codegen::host::runner_source_stub();
-        let runner_src = format!(r#"
+        let runner_src = format!(
+            r#"
             extern "C" {{ fn __ghl_main() -> i64; }}
             {host_stub}
             fn main() {{
                 let res = unsafe {{ __ghl_main() }};
                 println!("{{}}", res);
             }}
-        "#);
+        "#
+        );
         std::fs::write(&runner_path, runner_src).expect("write runner");
 
         let mut cmd = std::process::Command::new("rustc");
@@ -824,14 +938,16 @@ mod tests {
 
         std::fs::write(&obj_path, &obj_bytes).expect("write obj");
         let host_stub = ghl_codegen::host::runner_source_stub();
-        let runner_src = format!(r#"
+        let runner_src = format!(
+            r#"
             extern "C" {{ fn calc_hypot(a: f64, b: f64) -> f64; }}
             {host_stub}
             fn main() {{
                 let res = unsafe {{ calc_hypot(3.0, 4.0) }};
                 println!("{{}}", res);
             }}
-        "#);
+        "#
+        );
         std::fs::write(&runner_path, runner_src).expect("write runner");
 
         let mut cmd = std::process::Command::new("rustc");
@@ -841,14 +957,21 @@ mod tests {
         cmd.arg("-o").arg(&exe_path);
 
         let status = cmd.status().expect("rustc run");
-        assert!(status.success(), "rustc compilation with host math stub must succeed");
+        assert!(
+            status.success(),
+            "rustc compilation with host math stub must succeed"
+        );
 
         let run_out = std::process::Command::new(&exe_path)
             .output()
             .expect("execute standalone binary");
         assert!(run_out.status.success());
         let stdout = String::from_utf8_lossy(&run_out.stdout);
-        assert_eq!(stdout.trim(), "5", "sqrt(3^2 + 4^2) must equal 5.0 via AOT-linked host stub");
+        assert_eq!(
+            stdout.trim(),
+            "5",
+            "sqrt(3^2 + 4^2) must equal 5.0 via AOT-linked host stub"
+        );
 
         // Clean up
         let _ = std::fs::remove_file(obj_path);
@@ -880,13 +1003,20 @@ mod tests {
 
         let obj_path = temp_dir.join(format!("{stem}.obj"));
         let runner_path = temp_dir.join(format!("{stem}_runner.rs"));
-        let so_ext = if cfg!(windows) { "dll" } else if cfg!(target_os = "macos") { "dylib" } else { "so" };
+        let so_ext = if cfg!(windows) {
+            "dll"
+        } else if cfg!(target_os = "macos") {
+            "dylib"
+        } else {
+            "so"
+        };
         let prefix = if cfg!(windows) { "" } else { "lib" };
         let so_path = temp_dir.join(format!("{prefix}{stem}.{so_ext}"));
 
         std::fs::write(&obj_path, &obj_bytes).expect("write obj");
         let host_stub = ghl_codegen::host::runner_source_stub();
-        let runner_src = format!(r#"
+        let runner_src = format!(
+            r#"
 #![no_main]
 #![allow(non_snake_case)]
 {host_stub}
@@ -901,7 +1031,8 @@ pub unsafe extern "C" fn calc_stat_r(x: *const f64, y: *const f64, out: *mut f64
         *out = calc_stat(*x as i64, *y as i64) as f64;
     }}
 }}
-"#);
+"#
+        );
         std::fs::write(&runner_path, runner_src).expect("write runner");
 
         let mut cmd = std::process::Command::new("rustc");
@@ -916,7 +1047,8 @@ pub unsafe extern "C" fn calc_stat_r(x: *const f64, y: *const f64, out: *mut f64
 
         // 1. Verify with Python ctypes
         let py_bridge_path = temp_dir.join(format!("{stem}_bridge.py"));
-        let py_script = format!(r#"
+        let py_script = format!(
+            r#"
 import ctypes
 import os
 
@@ -936,24 +1068,34 @@ assert res == 25, f'Expected 25, got {{res}}'
 s = Summary(mean=3.14, count=42)
 assert s.mean == 3.14 and s.count == 42, 'Summary struct validation failed'
 print('PYTHON_FFI_OK')
-"#, so_path.display());
+"#,
+            so_path.display()
+        );
         std::fs::write(&py_bridge_path, &py_script).expect("write py bridge");
 
         let py_res = std::process::Command::new("python")
             .arg(&py_bridge_path)
             .output()
-            .or_else(|_| std::process::Command::new("python3").arg(&py_bridge_path).output());
+            .or_else(|_| {
+                std::process::Command::new("python3")
+                    .arg(&py_bridge_path)
+                    .output()
+            });
 
         if let Ok(out) = py_res {
             if out.status.success() {
                 let stdout = String::from_utf8_lossy(&out.stdout);
-                assert!(stdout.contains("PYTHON_FFI_OK"), "Python ctypes invocation succeeded");
+                assert!(
+                    stdout.contains("PYTHON_FFI_OK"),
+                    "Python ctypes invocation succeeded"
+                );
             }
         }
 
         // 2. Verify with R FFI (.C adapter and S3 struct constructor)
         let r_bridge_path = temp_dir.join(format!("{stem}_bridge.R"));
-        let r_script = format!(r#"
+        let r_script = format!(
+            r#"
 dyn.load(r'{}')
 
 new_Summary <- function(mean = 0.0, count = 0L) {{
@@ -978,7 +1120,9 @@ s <- new_Summary(3.14, 42)
 stopifnot(s$mean == 3.14, s$count == 42)
 
 cat('R_FFI_OK\n')
-"#, so_path.display());
+"#,
+            so_path.display()
+        );
         std::fs::write(&r_bridge_path, &r_script).expect("write r bridge");
 
         let r_res = std::process::Command::new("Rscript")
@@ -994,7 +1138,8 @@ cat('R_FFI_OK\n')
 
         // 3. Verify with Julia FFI (ccall and struct)
         let jl_bridge_path = temp_dir.join(format!("{stem}_bridge.jl"));
-        let jl_script = format!(r#"
+        let jl_script = format!(
+            r#"
 const LIB_PATH = raw"{}"
 
 struct Summary
@@ -1013,7 +1158,9 @@ s = Summary(3.14, 42)
 @assert s.mean == 3.14 && s.count == 42 "Summary struct validation failed"
 
 println("JULIA_FFI_OK")
-"#, so_path.display());
+"#,
+            so_path.display()
+        );
         std::fs::write(&jl_bridge_path, &jl_script).expect("write jl bridge");
 
         let jl_res = std::process::Command::new("julia")
@@ -1023,7 +1170,10 @@ println("JULIA_FFI_OK")
         if let Ok(out) = jl_res {
             if out.status.success() {
                 let stdout = String::from_utf8_lossy(&out.stdout);
-                assert!(stdout.contains("JULIA_FFI_OK"), "Julia ccall invocation succeeded");
+                assert!(
+                    stdout.contains("JULIA_FFI_OK"),
+                    "Julia ccall invocation succeeded"
+                );
             }
         }
 

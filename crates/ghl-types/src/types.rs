@@ -1,6 +1,6 @@
-use std::fmt;
-use ghl_syntax::ast::TypeAnnotation;
 use crate::ContrastScheme;
+use ghl_syntax::ast::TypeAnnotation;
+use std::fmt;
 
 /// Matrix dimension in static type checking (RFC 02 §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,10 +72,7 @@ pub enum Type {
     /// Grammar of Graphics statistical plot.
     Plot,
     /// First-class function type.
-    Function {
-        params: Vec<Type>,
-        ret: Box<Type>,
-    },
+    Function { params: Vec<Type>, ret: Box<Type> },
     /// Standalone missing value literal (NA or NA:Reason).
     /// Unifies with any type without contaminating integers into floats.
     NA,
@@ -158,8 +155,16 @@ impl Type {
 
             // Matrix unification
             (
-                Type::Matrix { elem: a, rows: r1, cols: c1 },
-                Type::Matrix { elem: b, rows: r2, cols: c2 },
+                Type::Matrix {
+                    elem: a,
+                    rows: r1,
+                    cols: c1,
+                },
+                Type::Matrix {
+                    elem: b,
+                    rows: r2,
+                    cols: c2,
+                },
             ) => {
                 let inner = a.unify(b)?;
                 if !r1.is_compatible_with(r2) || !c1.is_compatible_with(c2) {
@@ -182,8 +187,14 @@ impl Type {
 
             // Functions
             (
-                Type::Function { params: p1, ret: r1 },
-                Type::Function { params: p2, ret: r2 },
+                Type::Function {
+                    params: p1,
+                    ret: r1,
+                },
+                Type::Function {
+                    params: p2,
+                    ret: r2,
+                },
             ) => {
                 if p1.len() != p2.len() {
                     return None;
@@ -236,7 +247,16 @@ impl Type {
                 }
                 Some(Type::DataFrame(unified))
             }
-            (Type::Struct { name: n1, fields: f1 }, Type::Struct { name: n2, fields: f2 }) => {
+            (
+                Type::Struct {
+                    name: n1,
+                    fields: f1,
+                },
+                Type::Struct {
+                    name: n2,
+                    fields: f2,
+                },
+            ) => {
                 if n1 != n2 || f1.len() != f2.len() {
                     return None;
                 }
@@ -253,7 +273,10 @@ impl Type {
                 })
             }
             (Type::Custom(n1), Type::Custom(n2)) if n1 == n2 => Some(Type::Custom(n1.clone())),
-            (s @ Type::Struct { name, .. }, Type::Custom(c)) | (Type::Custom(c), s @ Type::Struct { name, .. }) if name == c => {
+            (s @ Type::Struct { name, .. }, Type::Custom(c))
+            | (Type::Custom(c), s @ Type::Struct { name, .. })
+                if name == c =>
+            {
                 Some(s.clone())
             }
 
@@ -287,17 +310,11 @@ impl Type {
             },
             TypeAnnotation::Generic(name, args) => match name.as_str() {
                 "Vector" | "vector" => {
-                    let inner = args
-                        .first()
-                        .map(Self::from_annotation)
-                        .unwrap_or(Type::Any);
+                    let inner = args.first().map(Self::from_annotation).unwrap_or(Type::Any);
                     Type::Vector(Box::new(inner))
                 }
                 "Matrix" | "matrix" => {
-                    let inner = args
-                        .first()
-                        .map(Self::from_annotation)
-                        .unwrap_or(Type::F64);
+                    let inner = args.first().map(Self::from_annotation).unwrap_or(Type::F64);
                     let parse_dim = |ann: Option<&TypeAnnotation>| -> Dim {
                         match ann {
                             Some(TypeAnnotation::Simple(s)) => {

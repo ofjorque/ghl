@@ -3,11 +3,10 @@
 //! Split out of `env.rs` for maintainability; native fn names are still
 //! referenced unqualified from `RuntimeEnv::with_prelude()` via glob imports.
 
-use ghl_diagnostics::Diagnostic;
-use rayon::prelude::*;
 use crate::value::Value;
 use crate::vector_data::VectorData;
-
+use ghl_diagnostics::Diagnostic;
+use rayon::prelude::*;
 
 // =========================================================================
 // Math helpers — scalar + `Vector[f64]`, NaN-safe (never panics; NaN -> NA)
@@ -39,10 +38,14 @@ pub(crate) fn map_numeric_fn(v: &Value, f: impl Fn(f64) -> f64 + Clone + Sync) -
                 // Not actually numeric (e.g. Vector[String]) -- fall through to the
                 // generic boxed path below, which already reports `NotNumeric` per
                 // element rather than failing the whole call.
-                Err(_) => Value::Vector(VectorData::from_values(vd.iter().map(|it| map_numeric_fn(it, f.clone())).collect())),
+                Err(_) => Value::Vector(VectorData::from_values(
+                    vd.iter().map(|it| map_numeric_fn(it, f.clone())).collect(),
+                )),
             }
         }
-        Value::Vector(vd) => Value::Vector(VectorData::from_values(vd.iter().map(|it| map_numeric_fn(it, f.clone())).collect())),
+        Value::Vector(vd) => Value::Vector(VectorData::from_values(
+            vd.iter().map(|it| map_numeric_fn(it, f.clone())).collect(),
+        )),
         Value::Matrix { rows, cols, data } => {
             let slice = data.as_slice();
             let compute = |&x: &f64| -> f64 {
@@ -59,7 +62,11 @@ pub(crate) fn map_numeric_fn(v: &Value, f: impl Fn(f64) -> f64 + Clone + Sync) -
         other => match other.as_f64() {
             Some(x) => {
                 let y = f(x);
-                if y.is_nan() { Value::NA(Some("NaN".into())) } else { Value::F64(y) }
+                if y.is_nan() {
+                    Value::NA(Some("NaN".into()))
+                } else {
+                    Value::F64(y)
+                }
             }
             None => Value::NA(Some(format!("NotNumeric:{}", other.type_name()))),
         },
@@ -70,7 +77,10 @@ macro_rules! native_math_fn {
     ($name:ident, $f:expr) => {
         pub(crate) fn $name(args: Vec<Value>) -> Result<Value, Diagnostic> {
             let v = args.first().ok_or_else(|| {
-                Diagnostic::compute_error("C0201", concat!("`", stringify!($name), "()` requires 1 argument"))
+                Diagnostic::compute_error(
+                    "C0201",
+                    concat!("`", stringify!($name), "()` requires 1 argument"),
+                )
             })?;
             Ok(map_numeric_fn(v, $f))
         }
@@ -92,7 +102,9 @@ native_math_fn!(native_sin, f64::sin);
 native_math_fn!(native_cos, f64::cos);
 
 pub(crate) fn native_pow(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let base = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`pow()` requires 2 arguments"))?;
+    let base = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`pow()` requires 2 arguments"))?;
     let exp = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`pow()` second argument must be numeric")
     })?;
@@ -100,14 +112,18 @@ pub(crate) fn native_pow(args: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 
 pub(crate) fn native_round(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`round()` requires at least 1 argument"))?;
+    let v = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`round()` requires at least 1 argument")
+    })?;
     let digits = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0);
     let factor = 10f64.powi(digits as i32);
     Ok(map_numeric_fn(v, move |x| (x * factor).round() / factor))
 }
 
 pub(crate) fn native_clamp(args: Vec<Value>) -> Result<Value, Diagnostic> {
-    let v = args.first().ok_or_else(|| Diagnostic::compute_error("C0201", "`clamp()` requires 3 arguments"))?;
+    let v = args
+        .first()
+        .ok_or_else(|| Diagnostic::compute_error("C0201", "`clamp()` requires 3 arguments"))?;
     let lo = args.get(1).and_then(|v| v.as_f64()).ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`clamp()` second argument (lo) must be numeric")
     })?;

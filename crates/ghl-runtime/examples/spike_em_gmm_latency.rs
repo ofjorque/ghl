@@ -13,10 +13,10 @@
 //! Usage:
 //!   cargo run --release --example spike_em_gmm_latency -p ghl-runtime -- [iterations] [n_obs]
 
-use std::time::Instant;
 use rand::SeedableRng;
 use rand_distr::{Distribution, Normal as RNormal};
 use rand_xoshiro::Xoshiro256PlusPlus;
+use std::time::Instant;
 
 use ghl_runtime::eval::Interpreter;
 use ghl_runtime::value::Value;
@@ -46,7 +46,11 @@ fn main() {
     for k in 0..k_clusters {
         let center = (k as f64 - 4.5) * 3.0;
         let dist = RNormal::new(center, 1.0).unwrap();
-        let count = if k == k_clusters - 1 { n_obs - (n_per_k * (k_clusters - 1)) } else { n_per_k };
+        let count = if k == k_clusters - 1 {
+            n_obs - (n_per_k * (k_clusters - 1))
+        } else {
+            n_per_k
+        };
         for _ in 0..count {
             for _ in 0..d_dim {
                 x_data.push(dist.sample(&mut rng));
@@ -186,16 +190,24 @@ fn main() {
             data: std::sync::Arc::new(x_data.clone()),
         },
     );
-    interp.env.set("iterations".to_string(), Value::I64(num_iterations));
+    interp
+        .env
+        .set("iterations".to_string(), Value::I64(num_iterations));
 
     println!("\nStarting EM fit in GHL...");
     let start = Instant::now();
-    interp.eval_program(&program).expect("GHL evaluation successful");
+    interp
+        .eval_program(&program)
+        .expect("GHL evaluation successful");
     let elapsed = start.elapsed();
 
     let per_iter = elapsed.as_secs_f64() / (num_iterations as f64);
     let iter_per_sec = (num_iterations as f64) / elapsed.as_secs_f64();
-    let mean_d0 = interp.env.get("mean_dim0").and_then(|v| v.as_f64()).unwrap_or(f64::NAN);
+    let mean_d0 = interp
+        .env
+        .get("mean_dim0")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::NAN);
 
     println!("\nEM Fit Results:");
     println!("  - Dimension 0 of Cluster 0: {:>8.4}", mean_d0);
@@ -204,7 +216,10 @@ fn main() {
     println!("\nPerformance (GHL Script):");
     println!("  - Total time:          {elapsed:?}");
     println!("  - Time per iteration:  {:>8.3} ms", per_iter * 1000.0);
-    println!("  - Throughput:          {:>8.1} iterations/second", iter_per_sec);
+    println!(
+        "  - Throughput:          {:>8.1} iterations/second",
+        iter_per_sec
+    );
     if num_iterations < 500 {
         let est_500 = per_iter * 500.0;
         println!("  - Estimated 500 iter:  {:>8.2} s", est_500);
@@ -229,17 +244,25 @@ fn main() {
             data: std::sync::Arc::new(x_data),
         },
     );
-    interp_neko.env.set("iterations".to_string(), Value::I64(num_iterations));
+    interp_neko
+        .env
+        .set("iterations".to_string(), Value::I64(num_iterations));
 
     let start_neko = Instant::now();
-    interp_neko.eval_program(&neko_prog).expect("NEKO evaluation successful");
+    interp_neko
+        .eval_program(&neko_prog)
+        .expect("NEKO evaluation successful");
     let elapsed_neko = start_neko.elapsed();
     let per_iter_neko = elapsed_neko.as_secs_f64() / (num_iterations as f64);
     let speedup = per_iter / per_iter_neko;
 
     println!("\nComparative Performance (NEKO Native vs GHL Script):");
     println!("  - Total NEKO time:        {elapsed_neko:?}");
-    println!("  - Time per iteration:     {:>8.3} ms ({:>8.1} µs)", per_iter_neko * 1000.0, per_iter_neko * 1_000_000.0);
+    println!(
+        "  - Time per iteration:     {:>8.3} ms ({:>8.1} µs)",
+        per_iter_neko * 1000.0,
+        per_iter_neko * 1_000_000.0
+    );
     println!("  - Speedup NEKO vs Script: {:>8.1}x faster", speedup);
     println!("================================================================================");
 }

@@ -3,8 +3,8 @@
 mod common;
 use common::*;
 
-use ghl_runtime::value::Value;
 use ghl_runtime::eval::Interpreter;
+use ghl_runtime::value::Value;
 use ghl_syntax::parser::parse;
 
 #[test]
@@ -20,7 +20,10 @@ fn test_random_uniform_produces_vector_of_requested_length_in_unit_interval() {
 
     let v = vector_f64(&interp.env.get("v").unwrap());
     assert_eq!(v.len(), 1000);
-    assert!(v.iter().all(|&x| (0.0..1.0).contains(&x)), "all values must be in [0, 1): {v:?}");
+    assert!(
+        v.iter().all(|&x| (0.0..1.0).contains(&x)),
+        "all values must be in [0, 1): {v:?}"
+    );
     // Not all-identical -- a real generator, not a stub returning a constant.
     assert!(v.windows(2).any(|w| w[0] != w[1]));
 }
@@ -32,7 +35,9 @@ fn test_random_uniform_rejects_negative_length() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("negative length must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("negative length must fail");
     assert_eq!(err.code, "C0201");
 }
 
@@ -102,10 +107,15 @@ fn test_bootstrap_mean_seeded_independent_of_thread_count() {
     let program = parse(code).expect("syntax ok");
 
     let mut interp_default = Interpreter::new();
-    interp_default.eval_program(&program).expect("evaluation ok");
+    interp_default
+        .eval_program(&program)
+        .expect("evaluation ok");
     let default_pool_result = vector_f64(&interp_default.env.get("means").unwrap());
 
-    let single_thread_pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+    let single_thread_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
     let single_thread_result = single_thread_pool.install(|| {
         let mut interp_single = Interpreter::new();
         interp_single.eval_program(&program).expect("evaluation ok");
@@ -164,8 +174,15 @@ fn test_random_normal_matches_expected_mean_and_sd() {
     let n = v.len() as f64;
     let mean: f64 = v.iter().sum::<f64>() / n;
     let var: f64 = v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
-    assert!((mean - 5.0).abs() < 0.05, "sample mean {mean} too far from 5.0");
-    assert!((var.sqrt() - 2.0).abs() < 0.05, "sample sd {} too far from 2.0", var.sqrt());
+    assert!(
+        (mean - 5.0).abs() < 0.05,
+        "sample mean {mean} too far from 5.0"
+    );
+    assert!(
+        (var.sqrt() - 2.0).abs() < 0.05,
+        "sample sd {} too far from 2.0",
+        var.sqrt()
+    );
 }
 
 #[test]
@@ -182,7 +199,10 @@ fn test_random_gamma_matches_expected_mean() {
 
     let v = vector_f64(&interp.env.get("v").unwrap());
     let mean: f64 = v.iter().sum::<f64>() / v.len() as f64;
-    assert!((mean - 1.5).abs() < 0.05, "sample mean {mean} too far from shape/rate = 1.5");
+    assert!(
+        (mean - 1.5).abs() < 0.05,
+        "sample mean {mean} too far from shape/rate = 1.5"
+    );
 }
 
 #[test]
@@ -192,7 +212,9 @@ fn test_random_normal_rejects_non_positive_sd() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("non-positive sd must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("non-positive sd must fail");
     assert_eq!(err.code, "C0201");
 }
 
@@ -203,7 +225,9 @@ fn test_random_gamma_rejects_non_positive_shape() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("non-positive shape must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("non-positive shape must fail");
     assert_eq!(err.code, "C0201");
 }
 
@@ -231,7 +255,9 @@ fn test_gamma_pdf_cdf_match_known_values() {
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
     interp.eval_program(&program).expect("evaluation ok");
-    assert!((interp.env.get("p").unwrap().as_f64().unwrap() - std::f64::consts::E.recip()).abs() < 1e-6);
+    assert!(
+        (interp.env.get("p").unwrap().as_f64().unwrap() - std::f64::consts::E.recip()).abs() < 1e-6
+    );
     assert!((interp.env.get("c").unwrap().as_f64().unwrap() - 0.5).abs() < 1e-6);
 }
 
@@ -260,10 +286,15 @@ fn test_random_normal_seeded_independent_of_thread_count() {
     let program = parse(code).expect("syntax ok");
 
     let mut interp_default = Interpreter::new();
-    interp_default.eval_program(&program).expect("evaluation ok");
+    interp_default
+        .eval_program(&program)
+        .expect("evaluation ok");
     let default_pool_result = vector_f64(&interp_default.env.get("v").unwrap());
 
-    let single_thread_pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+    let single_thread_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
     let single_thread_result = single_thread_pool.install(|| {
         let mut interp_single = Interpreter::new();
         interp_single.eval_program(&program).expect("evaluation ok");
@@ -294,10 +325,16 @@ fn test_bootstrap_mean_produces_requested_number_of_replicas() {
     let reps = vector_f64(&interp.env.get("reps").unwrap());
     assert_eq!(reps.len(), 500);
     for r in &reps {
-        assert!((1.0..=5.0).contains(r), "replica mean {r} outside base sample range");
+        assert!(
+            (1.0..=5.0).contains(r),
+            "replica mean {r} outside base sample range"
+        );
     }
     let grand_mean: f64 = reps.iter().sum::<f64>() / reps.len() as f64;
-    assert!((grand_mean - 3.0).abs() < 0.5, "grand mean {grand_mean} too far from true mean 3.0");
+    assert!(
+        (grand_mean - 3.0).abs() < 0.5,
+        "grand mean {grand_mean} too far from true mean 3.0"
+    );
 }
 
 #[test]
@@ -320,7 +357,9 @@ fn test_bootstrap_mean_rejects_non_vector_first_argument() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("non-Vector first argument must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("non-Vector first argument must fail");
     assert_eq!(err.code, "C0202");
 }
 
@@ -332,7 +371,8 @@ fn test_bootstrap_mean_rejects_empty_vector() {
     "#;
     let program = parse(code).expect("syntax ok");
     let mut interp = Interpreter::new();
-    let err = interp.eval_program(&program).expect_err("empty base sample must fail");
+    let err = interp
+        .eval_program(&program)
+        .expect_err("empty base sample must fail");
     assert_eq!(err.code, "S0412");
 }
-

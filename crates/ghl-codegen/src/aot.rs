@@ -3,14 +3,14 @@
 //! Emits raw machine-code object files (`.obj` on Windows, `.o` on Unix)
 //! using `cranelift-object` and the shared generic [`FunctionCompiler`].
 
-use std::collections::HashMap;
+use crate::compiler::FunctionCompiler;
+use crate::host;
 use cranelift::prelude::*;
 use cranelift_module::{Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use ghl_diagnostics::Diagnostic;
 use ghl_ir::HirModule;
-use crate::compiler::FunctionCompiler;
-use crate::host;
+use std::collections::HashMap;
 
 pub struct AotEngine {
     pub module: ObjectModule,
@@ -24,21 +24,31 @@ impl AotEngine {
         let mut flag_builder = settings::builder();
         flag_builder
             .set("use_colocated_libcalls", "false")
-            .map_err(|e| Diagnostic::compute_error("C0420", format!("Cranelift flag error: {e}")))?;
-        flag_builder
-            .set("is_pic", "true")
-            .map_err(|e| Diagnostic::compute_error("C0420", format!("Cranelift flag error: {e}")))?;
+            .map_err(|e| {
+                Diagnostic::compute_error("C0420", format!("Cranelift flag error: {e}"))
+            })?;
+        flag_builder.set("is_pic", "true").map_err(|e| {
+            Diagnostic::compute_error("C0420", format!("Cranelift flag error: {e}"))
+        })?;
 
         let isa_builder = cranelift_native::builder().map_err(|e| {
             Diagnostic::compute_error("C0421", format!("Host ISA unsupported by Cranelift: {e}"))
         })?;
 
-        let isa = isa_builder.finish(settings::Flags::new(flag_builder)).map_err(|e| {
-            Diagnostic::compute_error("C0422", format!("Failed to configure native ISA: {e}"))
-        })?;
+        let isa = isa_builder
+            .finish(settings::Flags::new(flag_builder))
+            .map_err(|e| {
+                Diagnostic::compute_error("C0422", format!("Failed to configure native ISA: {e}"))
+            })?;
 
-        let builder = ObjectBuilder::new(isa, module_name, cranelift_module::default_libcall_names())
-            .map_err(|e| Diagnostic::compute_error("C0423", format!("Failed to create ObjectBuilder: {e}")))?;
+        let builder =
+            ObjectBuilder::new(isa, module_name, cranelift_module::default_libcall_names())
+                .map_err(|e| {
+                    Diagnostic::compute_error(
+                        "C0423",
+                        format!("Failed to create ObjectBuilder: {e}"),
+                    )
+                })?;
 
         let module = ObjectModule::new(builder);
         let ctx = module.make_context();
@@ -63,15 +73,24 @@ impl AotEngine {
         for (name, func) in &hir.functions {
             let mut sig = self.module.make_signature();
             for param in &func.params {
-                sig.params.push(AbiParam::new(FunctionCompiler::<ObjectModule>::to_clif_type(param.ty)));
+                sig.params.push(AbiParam::new(
+                    FunctionCompiler::<ObjectModule>::to_clif_type(param.ty),
+                ));
             }
 
-            sig.returns
-                .push(AbiParam::new(FunctionCompiler::<ObjectModule>::to_clif_type(func.return_ty)));
+            sig.returns.push(AbiParam::new(
+                FunctionCompiler::<ObjectModule>::to_clif_type(func.return_ty),
+            ));
 
-            let func_id = self.module.declare_function(name, Linkage::Export, &sig).map_err(|e| {
-                Diagnostic::compute_error("C0424", format!("Failed to declare AOT function `{name}`: {e}"))
-            })?;
+            let func_id = self
+                .module
+                .declare_function(name, Linkage::Export, &sig)
+                .map_err(|e| {
+                    Diagnostic::compute_error(
+                        "C0424",
+                        format!("Failed to declare AOT function `{name}`: {e}"),
+                    )
+                })?;
 
             signatures.insert(name.clone(), sig);
             func_ids.insert(name.clone(), func_id);
@@ -89,9 +108,14 @@ impl AotEngine {
                 compiler.compile_function(func)?;
             }
 
-            self.module.define_function(func_id, &mut self.ctx).map_err(|e| {
-                Diagnostic::compute_error("C0425", format!("Failed to define AOT function `{name}`: {e}"))
-            })?;
+            self.module
+                .define_function(func_id, &mut self.ctx)
+                .map_err(|e| {
+                    Diagnostic::compute_error(
+                        "C0425",
+                        format!("Failed to define AOT function `{name}`: {e}"),
+                    )
+                })?;
 
             self.module.clear_context(&mut self.ctx);
         }

@@ -1,6 +1,6 @@
-use ghl_syntax::parser::parse;
 use ghl_runtime::eval::Interpreter;
 use ghl_runtime::value::Value;
+use ghl_syntax::parser::parse;
 
 #[test]
 fn test_vector_boolean_mask_filter() {
@@ -151,5 +151,8 @@ fn test_matrix_mask_length_mismatch_error() {
     assert!(res.is_err());
     let err = res.unwrap_err();
     assert_eq!(err.code, "C0202");
-    assert!(err.message.contains("Boolean mask length (2) must match matrix row count (3)"));
+    assert!(
+        err.message
+            .contains("Boolean mask length (2) must match matrix row count (3)")
+    );
 }
