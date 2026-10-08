@@ -173,18 +173,24 @@ impl ItemDoc {
     /// Renders this item as an HTML card.
     pub fn to_html(&self) -> String {
         let mut html = String::new();
+        let code_id = format!("sig-{}", escape_html(&self.name));
         html.push_str(&format!(
-            r#"<article class="doc-item" id="item-{}">
+            r#"<article class="doc-item" id="item-{}" data-name="{}" data-kind="{}">
   <div class="item-header">
     <span class="badge badge-{}">{}</span>
     <h3><code>{}</code></h3>
   </div>
-  <pre class="signature"><code>{}</code></pre>
+  <div class="sig-container">
+    <pre class="signature"><code id="{code_id}">{}</code></pre>
+    <button class="copy-btn" onclick="copySig('{code_id}', this)" title="Copiar firma">Copiar</button>
+  </div>
 "#,
-            self.name,
+            escape_html(&self.name),
+            escape_html(&self.name),
             self.kind,
             self.kind,
-            self.name,
+            self.kind,
+            escape_html(&self.name),
             escape_html(&self.signature)
         ));
 
@@ -538,18 +544,86 @@ pub fn generate_project_docs_markdown(title: &str, items: &[ItemDoc]) -> String 
         documented_count, total_count, pct
     ));
 
+    let mut funcs: Vec<&ItemDoc> = items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Function)
+        .collect();
+    let mut structs: Vec<&ItemDoc> = items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Struct)
+        .collect();
+    let mut traits: Vec<&ItemDoc> = items.iter().filter(|i| i.kind == ItemKind::Trait).collect();
+
+    funcs.sort_by_key(|i| &i.name);
+    structs.sort_by_key(|i| &i.name);
+    traits.sort_by_key(|i| &i.name);
+
     md.push_str("## Índice de Símbolos\n\n");
-    for item in items {
-        md.push_str(&format!(
-            "- [`{}()`](#{}) ({})\n",
-            item.name, item.name, item.kind
-        ));
+    if !funcs.is_empty() {
+        md.push_str(&format!("### Funciones ({})\n\n", funcs.len()));
+        for item in &funcs {
+            let summary_suffix = if item.summary.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", item.summary)
+            };
+            md.push_str(&format!(
+                "- [`{}()`](#item-{}){}\n",
+                item.name, item.name, summary_suffix
+            ));
+        }
+        md.push('\n');
     }
-    md.push_str("\n---\n\n");
+    if !structs.is_empty() {
+        md.push_str(&format!("### Estructuras ({})\n\n", structs.len()));
+        for item in &structs {
+            let summary_suffix = if item.summary.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", item.summary)
+            };
+            md.push_str(&format!(
+                "- [`{}`](#item-{}){}\n",
+                item.name, item.name, summary_suffix
+            ));
+        }
+        md.push('\n');
+    }
+    if !traits.is_empty() {
+        md.push_str(&format!("### Traits ({})\n\n", traits.len()));
+        for item in &traits {
+            let summary_suffix = if item.summary.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", item.summary)
+            };
+            md.push_str(&format!(
+                "- [`{}`](#item-{}){}\n",
+                item.name, item.name, summary_suffix
+            ));
+        }
+        md.push('\n');
+    }
+    md.push_str("---\n\n");
 
     md.push_str("## Declaraciones\n\n");
-    for item in items {
-        md.push_str(&item.to_markdown());
+    if !funcs.is_empty() {
+        md.push_str("### Funciones\n\n");
+        for item in &funcs {
+            md.push_str(&item.to_markdown());
+        }
+    }
+    if !structs.is_empty() {
+        md.push_str("### Estructuras\n\n");
+        for item in &structs {
+            md.push_str(&item.to_markdown());
+        }
+    }
+    if !traits.is_empty() {
+        md.push_str("### Traits\n\n");
+        for item in &traits {
+            md.push_str(&item.to_markdown());
+        }
     }
 
     md
@@ -565,40 +639,118 @@ pub fn generate_project_docs_html(title: &str, items: &[ItemDoc]) -> String {
         100.0
     };
 
-    let mut cards = String::new();
-    for item in items {
-        cards.push_str(&item.to_html());
+    let mut funcs: Vec<&ItemDoc> = items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Function)
+        .collect();
+    let mut structs: Vec<&ItemDoc> = items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Struct)
+        .collect();
+    let mut traits: Vec<&ItemDoc> = items.iter().filter(|i| i.kind == ItemKind::Trait).collect();
+
+    funcs.sort_by_key(|i| &i.name);
+    structs.sort_by_key(|i| &i.name);
+    traits.sort_by_key(|i| &i.name);
+
+    let render_sidebar_group = |group_title: &str,
+                                group: &[&ItemDoc],
+                                badge_class: &str,
+                                badge_lbl: &str|
+     -> String {
+        if group.is_empty() {
+            return String::new();
+        }
+        let mut s = format!(
+            r##"      <div class="sidebar-group">
+        <div class="sidebar-group-header">
+          <span>{group_title}</span>
+          <span class="group-count">{}</span>
+        </div>
+        <ul class="sidebar-list">
+"##,
+            group.len()
+        );
+        for item in group {
+            s.push_str(&format!(
+                    r##"          <li class="nav-item" data-name="{}"><a href="#item-{}"><code>{}</code> <span class="badge-sm badge-{badge_class}">{badge_lbl}</span></a></li>
+"##,
+                    escape_html(&item.name),
+                    escape_html(&item.name),
+                    escape_html(&item.name),
+                ));
+        }
+        s.push_str("        </ul>\n      </div>\n");
+        s
+    };
+
+    let mut sidebar_groups = String::new();
+    sidebar_groups.push_str(&render_sidebar_group("Funciones", &funcs, "function", "fn"));
+    sidebar_groups.push_str(&render_sidebar_group(
+        "Estructuras",
+        &structs,
+        "struct",
+        "struct",
+    ));
+    sidebar_groups.push_str(&render_sidebar_group("Traits", &traits, "trait", "trait"));
+
+    let render_category_section = |section_title: &str, group: &[&ItemDoc]| -> String {
+        if group.is_empty() {
+            return String::new();
+        }
+        let mut s = format!(
+            r#"    <section class="category-section">
+      <h2 class="category-title">{section_title} <span class="cat-count">({})</span></h2>
+"#,
+            group.len()
+        );
+        for item in group {
+            s.push_str(&item.to_html());
+        }
+        s.push_str("    </section>\n");
+        s
+    };
+
+    let mut doc_cards = String::new();
+    if items.is_empty() {
+        doc_cards.push_str(
+            r#"      <div class="empty-state"><p>No se encontraron símbolos para documentar.</p></div>"#,
+        );
+    } else {
+        doc_cards.push_str(&render_category_section("Funciones", &funcs));
+        doc_cards.push_str(&render_category_section("Estructuras", &structs));
+        doc_cards.push_str(&render_category_section("Traits", &traits));
     }
 
-    let mut sidebar_items = String::new();
-    for item in items {
-        sidebar_items.push_str(&format!(
-            "        <li><a href=\"#item-{}\"><code>{}</code> <span class=\"badge-sm badge-{}\">{}</span></a></li>\n",
-            item.name, item.name, item.kind, item.kind
-        ));
-    }
+    let escaped_title = escape_html(title);
 
     format!(
-        r#"<!DOCTYPE html>
+        r##"<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{title} — GHL Documentation</title>
+  <title>{escaped_title} — GHL Documentation</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Cpath d='M7 6L14 15L5 17Z' fill='%2300f5d4'/%3E%3Cpath d='M29 6L22 15L31 17Z' fill='%2300f5d4'/%3E%3Crect x='4' y='12' width='28' height='20' rx='8' fill='%23131b2e' stroke='%2300f5d4' stroke-width='2'/%3E%3Ccircle cx='12' cy='21' r='3' fill='%2300f5d4'/%3E%3Ccircle cx='24' cy='21' r='3' fill='%23ff9f43'/%3E%3Cpath d='M16 24Q18 26 20 24' stroke='%23f1f5f9' stroke-width='2' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$$', right: '$$', display: true}}, {{left: '$', right: '$', display: false}}]}});"></script>
   <style>
     :root {{
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --border: #334155;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --primary: #38bdf8;
-      --primary-dim: #0284c7;
-      --accent: #a855f7;
-      --badge-fn: #38bdf8;
-      --badge-struct: #34d399;
-      --badge-trait: #f59e0b;
-      --code-bg: #090d16;
+      --bg: #0b0f19;
+      --sidebar-bg: #070a12;
+      --card-bg: #131b2e;
+      --border: #1e293b;
+      --border-hover: #334155;
+      --text: #f1f5f9;
+      --text-muted: #8b9bb4;
+      --primary: #00f5d4;
+      --primary-dim: #059669;
+      --accent: #ff9f43;
+      --badge-fn: #00f5d4;
+      --badge-struct: #38bdf8;
+      --badge-trait: #ff9f43;
+      --code-bg: #080d1a;
     }}
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
@@ -610,40 +762,98 @@ pub fn generate_project_docs_html(title: &str, items: &[ItemDoc]) -> String {
       min-height: 100vh;
     }}
     nav.sidebar {{
-      width: 280px;
-      background: #090d16;
+      width: 300px;
+      background: var(--sidebar-bg);
       border-right: 1px solid var(--border);
       padding: 1.5rem 1rem;
       position: sticky;
       top: 0;
       height: 100vh;
       overflow-y: auto;
+      display: flex;
+      flex-direction: column;
     }}
-    nav.sidebar h2 {{
-      font-size: 1.1rem;
-      color: var(--primary);
-      margin-bottom: 0.5rem;
+    .brand-box {{
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
     }}
-    nav.sidebar ul {{ list-style: none; margin-top: 1rem; }}
-    nav.sidebar li {{ margin-bottom: 0.4rem; }}
-    nav.sidebar a {{
+    .mascot-logo {{
+      flex-shrink: 0;
+      filter: drop-shadow(0 0 6px rgba(0, 245, 212, 0.3));
+    }}
+    .brand-text h2 {{
+      font-size: 1.15rem;
+      color: var(--primary);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }}
+    .brand-text .brand-sub {{
+      font-size: 0.75rem;
       color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.9rem;
+    }}
+    .search-box {{
+      margin-bottom: 1.2rem;
+    }}
+    .search-input {{
+      width: 100%;
+      background: #101626;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.45rem 0.75rem;
+      color: var(--text);
+      font-size: 0.85rem;
+      outline: none;
+      transition: all 0.2s ease;
+    }}
+    .search-input:focus {{
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(0, 245, 212, 0.15);
+    }}
+    .sidebar-group {{
+      margin-bottom: 1.25rem;
+    }}
+    .sidebar-group-header {{
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 0.3rem 0.5rem;
-      border-radius: 4px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      font-weight: 700;
+      margin-bottom: 0.4rem;
+      padding: 0 0.4rem;
     }}
-    nav.sidebar a:hover {{ background: var(--border); color: var(--text); }}
+    .group-count {{
+      background: #1e293b;
+      padding: 0.1rem 0.4rem;
+      border-radius: 9999px;
+      font-size: 0.65rem;
+      color: var(--primary);
+    }}
+    .sidebar-list {{ list-style: none; }}
+    .sidebar-list li {{ margin-bottom: 0.25rem; }}
+    .sidebar-list a {{
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.88rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.35rem 0.5rem;
+      border-radius: 5px;
+      transition: background 0.15s ease, color 0.15s ease;
+    }}
+    .sidebar-list a:hover {{ background: #131b2e; color: #fff; }}
     main.content {{
       flex: 1;
       padding: 2.5rem 3.5rem;
-      max-width: 1000px;
+      max-width: 1050px;
       overflow-y: auto;
     }}
     header.doc-header {{
@@ -651,22 +861,47 @@ pub fn generate_project_docs_html(title: &str, items: &[ItemDoc]) -> String {
       border-bottom: 1px solid var(--border);
       padding-bottom: 1.5rem;
     }}
-    header.doc-header h1 {{ font-size: 2.2rem; color: #fff; margin-bottom: 0.5rem; }}
+    header.doc-header h1 {{ font-size: 2.2rem; color: #fff; margin-bottom: 0.6rem; letter-spacing: -0.02em; }}
     .stats-bar {{
-      display: inline-block;
-      background: #1e293b;
-      padding: 0.4rem 0.8rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: #131b2e;
+      padding: 0.4rem 0.85rem;
       border-radius: 6px;
       border: 1px solid var(--border);
       font-size: 0.85rem;
       color: var(--primary);
+    }}
+    .category-section {{
+      margin-bottom: 3rem;
+    }}
+    .category-title {{
+      font-size: 1.4rem;
+      color: #fff;
+      margin-bottom: 1.2rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }}
+    .cat-count {{
+      font-size: 1rem;
+      color: var(--text-muted);
+      font-weight: 400;
     }}
     article.doc-item {{
       background: var(--card-bg);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 1.5rem;
-      margin-bottom: 2rem;
+      margin-bottom: 1.5rem;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }}
+    article.doc-item:hover {{
+      border-color: var(--border-hover);
+      box-shadow: 0 4px 20px rgba(0, 245, 212, 0.04);
     }}
     .item-header {{
       display: flex;
@@ -677,35 +912,66 @@ pub fn generate_project_docs_html(title: &str, items: &[ItemDoc]) -> String {
     .badge {{
       text-transform: uppercase;
       font-size: 0.7rem;
-      font-weight: bold;
+      font-weight: 700;
       padding: 0.2rem 0.5rem;
       border-radius: 4px;
     }}
-    .badge-sm {{ font-size: 0.65rem; padding: 0.1rem 0.3rem; border-radius: 3px; }}
-    .badge-function {{ background: rgba(56, 189, 248, 0.2); color: var(--badge-fn); }}
-    .badge-struct {{ background: rgba(52, 211, 153, 0.2); color: var(--badge-struct); }}
-    .badge-trait {{ background: rgba(245, 158, 11, 0.2); color: var(--badge-trait); }}
+    .badge-sm {{ font-size: 0.65rem; padding: 0.1rem 0.3rem; border-radius: 3px; font-weight: 600; }}
+    .badge-function {{ background: rgba(0, 245, 212, 0.15); color: var(--badge-fn); }}
+    .badge-struct {{ background: rgba(56, 189, 248, 0.15); color: var(--badge-struct); }}
+    .badge-trait {{ background: rgba(255, 159, 67, 0.15); color: var(--badge-trait); }}
+    .sig-container {{
+      position: relative;
+      margin-bottom: 1rem;
+    }}
     pre.signature {{
       background: var(--code-bg);
-      padding: 0.8rem 1rem;
+      padding: 0.8rem 4.5rem 0.8rem 1rem;
       border-radius: 6px;
       border: 1px solid var(--border);
-      color: #38bdf8;
+      color: var(--primary);
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 0.95rem;
-      margin-bottom: 1rem;
+      font-size: 0.92rem;
+      margin-bottom: 0;
       overflow-x: auto;
     }}
-    .summary {{ font-size: 1.05rem; margin-bottom: 0.8rem; }}
-    .formula-box {{
-      background: rgba(168, 85, 247, 0.1);
-      border-left: 3px solid var(--accent);
-      padding: 0.6rem 1rem;
-      margin-bottom: 1rem;
-      font-family: monospace;
+    .copy-btn {{
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: var(--text-muted);
+      border-radius: 4px;
+      padding: 0.2rem 0.55rem;
+      font-size: 0.72rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
     }}
-    ul.params-list {{ margin: 0.5rem 0 1rem 1.5rem; }}
+    .copy-btn:hover {{
+      background: #334155;
+      color: #fff;
+      border-color: var(--primary);
+    }}
+    .copy-btn.copied {{
+      background: rgba(0, 245, 212, 0.2);
+      color: var(--primary);
+      border-color: var(--primary);
+    }}
+    .summary {{ font-size: 1.05rem; margin-bottom: 0.8rem; color: #fff; }}
+    .formula-box {{
+      background: rgba(255, 159, 67, 0.08);
+      border-left: 3px solid var(--accent);
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+      border-radius: 0 4px 4px 0;
+      color: #f8fafc;
+      overflow-x: auto;
+    }}
+    .description {{ margin-bottom: 0.8rem; color: #cbd5e1; }}
+    ul.params-list {{ margin: 0.5rem 0 1rem 1.5rem; color: #cbd5e1; }}
     ul.params-list li {{ margin-bottom: 0.3rem; }}
+    p.returns {{ margin-bottom: 0.8rem; color: #cbd5e1; }}
     pre.example {{
       background: var(--code-bg);
       padding: 0.8rem 1rem;
@@ -713,33 +979,89 @@ pub fn generate_project_docs_html(title: &str, items: &[ItemDoc]) -> String {
       border: 1px solid var(--border);
       color: #e2e8f0;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       margin-top: 0.5rem;
       overflow-x: auto;
     }}
-    h4 {{ font-size: 0.95rem; color: var(--text-muted); margin-top: 1rem; text-transform: uppercase; letter-spacing: 0.05em; }}
+    h4 {{ font-size: 0.85rem; color: var(--text-muted); margin-top: 1rem; text-transform: uppercase; letter-spacing: 0.05em; }}
+    .empty-state {{ padding: 2rem; text-align: center; color: var(--text-muted); }}
   </style>
 </head>
 <body>
   <nav class="sidebar">
-    <h2>ฅ(•⩊ •マ Haru Docs</h2>
-    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">GHL Documentation Deck</p>
-    <ul>
-{sidebar_items}    </ul>
-  </nav>
+    <div class="brand-box">
+      <svg class="mascot-logo" viewBox="0 0 36 36" width="36" height="36" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M7 6L14 15L5 17Z" fill="#00f5d4"/>
+        <path d="M29 6L22 15L31 17Z" fill="#00f5d4"/>
+        <rect x="4" y="12" width="28" height="20" rx="8" fill="#131b2e" stroke="#00f5d4" stroke-width="2"/>
+        <circle cx="12" cy="21" r="3" fill="#00f5d4"/>
+        <circle cx="24" cy="21" r="3" fill="#ff9f43"/>
+        <path d="M16 24Q18 26 20 24" stroke="#f1f5f9" stroke-width="2" stroke-linecap="round"/>
+        <path d="M4 21L1 20M4 23L1 24" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M32 21L35 20M32 23L35 24" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <div class="brand-text">
+        <h2>Haru Docs</h2>
+        <span class="brand-sub">GHL Documentation Deck</span>
+      </div>
+    </div>
+    <div class="search-box">
+      <input type="text" class="search-input" id="doc-search" placeholder="Buscar símbolos... (Ctrl+K)" autocomplete="off" spellcheck="false">
+    </div>
+{sidebar_groups}  </nav>
   <main class="content">
     <header class="doc-header">
-      <h1>{title}</h1>
+      <h1>{escaped_title}</h1>
       <div class="stats-bar">
-        Coverage: {documented_count}/{total_count} items documented ({pct:.1}%)
+        <span>Coverage: {documented_count}/{total_count} items ({pct:.1}%)</span>
       </div>
     </header>
-    <section class="doc-list">
-{cards}    </section>
+    <div class="doc-list">
+{doc_cards}    </div>
   </main>
+  <script>
+    function copySig(id, btn) {{
+      const code = document.getElementById(id);
+      if (!code) return;
+      navigator.clipboard.writeText(code.innerText).then(() => {{
+        const orig = btn.innerText;
+        btn.innerText = "¡Copiado!";
+        btn.classList.add("copied");
+        setTimeout(() => {{
+          btn.innerText = orig;
+          btn.classList.remove("copied");
+        }}, 1500);
+      }}).catch(() => {{}});
+    }}
+
+    const searchInput = document.getElementById("doc-search");
+    if (searchInput) {{
+      searchInput.addEventListener("input", (e) => {{
+        const q = e.target.value.toLowerCase().trim();
+        const items = document.querySelectorAll(".doc-item");
+        const navItems = document.querySelectorAll(".nav-item");
+        items.forEach(el => {{
+          const name = (el.dataset.name || "").toLowerCase();
+          el.style.display = (!q || name.includes(q)) ? "" : "none";
+        }});
+        navItems.forEach(el => {{
+          const name = (el.dataset.name || "").toLowerCase();
+          el.style.display = (!q || name.includes(q)) ? "" : "none";
+        }});
+      }});
+
+      document.addEventListener("keydown", (e) => {{
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {{
+          e.preventDefault();
+          searchInput.focus();
+          searchInput.select();
+        }}
+      }});
+    }}
+  </script>
 </body>
 </html>
-"#
+"##
     )
 }
 
@@ -849,10 +1171,15 @@ fn distance(p1: Point, p2: Point) -> f64 {
         assert!(md.contains("# Referencia de API — Geometry Package"));
         assert!(md.contains("`distance`"));
         assert!(md.contains("d = √((x2-x1)² + (y2-y1)²)"));
+        assert!(md.contains("### Funciones"));
 
         let html = generate_project_docs_html("Geometry Package", &docs);
         assert!(html.contains("Geometry Package — GHL Documentation"));
         assert!(html.contains("Haru Docs"));
         assert!(html.contains("item-distance"));
+        assert!(html.contains("id=\"doc-search\""));
+        assert!(html.contains("katex.min.js"));
+        assert!(html.contains("copySig"));
+        assert!(html.contains("mascot-logo"));
     }
 }

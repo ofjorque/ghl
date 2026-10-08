@@ -567,6 +567,7 @@ pub fn cmd_doc(
     generate_html: bool,
     generate_md: bool,
     custom_title: Option<&str>,
+    serve: bool,
     caps: &RenderCaps,
 ) -> Result<(), Diagnostic> {
     // 1. Determine title
@@ -730,6 +731,102 @@ pub fn cmd_doc(
     ));
 
     println!("{}\n", panel.render(caps));
+
+    if serve {
+        serve_docs(out_dir, caps)?;
+    }
+
+    Ok(())
+}
+
+fn serve_docs(out_dir: &Path, caps: &RenderCaps) -> Result<(), Diagnostic> {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let mut listener = None;
+    let mut bound_port = 3000;
+    for port in 3000..3020 {
+        if let Ok(l) = TcpListener::bind(format!("127.0.0.1:{}", port)) {
+            listener = Some(l);
+            bound_port = port;
+            break;
+        }
+    }
+
+    let listener = match listener {
+        Some(l) => l,
+        None => {
+            return Err(Diagnostic::compute_error(
+                "C0615",
+                "Failed to bind local server on ports 3000-3020",
+            ));
+        }
+    };
+
+    let url = format!("http://127.0.0.1:{}/", bound_port);
+    println!(
+        "  {} Servidor de documentación activo en: {}",
+        caps.green("▶"),
+        caps.cyan(&url)
+    );
+    println!(
+        "  Presiona {} para detener el servidor.\n",
+        caps.yellow("Ctrl+C")
+    );
+
+    for stream in listener.incoming() {
+        let mut stream = match stream {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        let mut buffer = [0u8; 2048];
+        let bytes_read = stream.read(&mut buffer).unwrap_or(0);
+        if bytes_read == 0 {
+            continue;
+        }
+
+        let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+        let first_line = request.lines().next().unwrap_or("");
+        let mut parts = first_line.split_whitespace();
+        let _method = parts.next().unwrap_or("GET");
+        let path = parts.next().unwrap_or("/");
+
+        let clean_path = path.trim_start_matches('/').split('?').next().unwrap_or("");
+        let file_to_serve = if clean_path.is_empty() || clean_path == "index.html" {
+            out_dir.join("index.html")
+        } else {
+            out_dir.join(clean_path)
+        };
+
+        if file_to_serve.exists() && file_to_serve.is_file() {
+            if let Ok(content) = fs::read(&file_to_serve) {
+                let mime = match file_to_serve.extension().and_then(|s| s.to_str()) {
+                    Some("html") => "text/html; charset=utf-8",
+                    Some("css") => "text/css; charset=utf-8",
+                    Some("js") => "application/javascript; charset=utf-8",
+                    Some("svg") => "image/svg+xml",
+                    Some("png") => "image/png",
+                    Some("jpg") | Some("jpeg") => "image/jpeg",
+                    Some("json") => "application/json",
+                    Some("md") => "text/markdown; charset=utf-8",
+                    _ => "application/octet-stream",
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    mime,
+                    content.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(&content);
+                continue;
+            }
+        }
+
+        let not_found = "HTTP/1.1 404 NOT FOUND\r\nContent-Length: 13\r\nConnection: close\r\n\r\n404 Not Found";
+        let _ = stream.write_all(not_found.as_bytes());
+    }
+
     Ok(())
 }
 
@@ -1056,6 +1153,7 @@ struct WeightedModel {
             true,
             true,
             Some("TestDocProject"),
+            false,
             &caps,
         );
         assert!(res.is_ok(), "cmd_doc must succeed: {:?}", res.err());

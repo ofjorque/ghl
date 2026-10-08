@@ -2,6 +2,7 @@
   "name": "ghl-lang",
   "displayName": "GHL (Generalized Hypothesis Language)",
   "description": "Rich language support, syntax highlighting, snippets, and Language Server Protocol for GHL",
+  "icon": "icon.png",
   "version": "0.1.0",
   "publisher": "ghl-lang",
   "license": "MIT",

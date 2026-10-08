@@ -39,7 +39,7 @@ Commands:
     new <name>                 Create a new structured GHL project (RFC 06 §4)
     fetch                      Resolve dependencies and generate reproducible ghl.lock (RFC 06 §4)
     test [dir]                 Run unit and statistical tests
-    doc [path] [options]       Generate documentation from /// comments (--html, --md, -o <dir>)
+    doc [path] [options]       Generate documentation from /// comments (--html, --md, --serve, -o <dir>)
     fmt [options] [path]       Format GHL source files to canonical style (--check)
     build <file.gh|file.ghl>   Compile standalone binary or shared library (--release, --shared, -o)
     lsp                        Start the Language Server Protocol (stdio)
@@ -161,6 +161,7 @@ fn real_main() {
             let mut out_dir = std::path::PathBuf::from("docs/api");
             let mut html = true;
             let mut md = true;
+            let mut serve = false;
             let mut custom_title = None;
 
             let mut idx = 2;
@@ -173,6 +174,9 @@ fn real_main() {
                     "--markdown" | "--md" => {
                         md = true;
                         html = false;
+                    }
+                    "--serve" | "-s" => {
+                        serve = true;
                     }
                     "-o" | "--out" => {
                         if idx + 1 < args.len() {
@@ -200,6 +204,7 @@ fn real_main() {
                 html,
                 md,
                 custom_title.as_deref(),
+                serve,
                 &caps,
             ) {
                 eprintln!("{}", e.render_with_caps(&caps));

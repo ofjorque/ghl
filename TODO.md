@@ -174,6 +174,11 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
   - Compilación optimizada en perfil release (LTO thin, codegen-units 1, strip de símbolos) para 5 plataformas: `x86_64-linux`, `aarch64-linux`, `aarch64-darwin`, `x86_64-darwin`, `x86_64-windows`.
   - Empaquetado automático de la extensión para VS Code / Positron (`ghl-lang.vsix`) usando `@vscode/vsce`.
   - Generación de sumas de verificación criptográficas `SHA256SUMS.txt` y publicación automática del Release oficial en GitHub.
-- [ ] **Generador de Documentación HTML Estática (`ghl doc`) — [#13](https://github.com/ofjorque/ghl/issues/13):**
-  - Extracción de comentarios `///` y renderizado de sitio web estático moderno con fórmulas KaTeX y buscador en cliente.
+- [x] **Generador de Documentación HTML Estática (`ghl doc`) — [#13](https://github.com/ofjorque/ghl/issues/13):**
+  - Extracción completa de comentarios `///` y metadatos (`@param`, `@return`, `@example`, `@formula`).
+  - Orden y agrupación limpia por categorías (`Funciones`, `Estructuras`, `Traits`) con conteo de elementos y ordenamiento alfabético.
+  - Búsqueda instantánea en cliente (`Ctrl+K`) en el sidebar y copiado al portapapeles de firmas de código.
+  - Renderizado de fórmulas matemáticas mediante KaTeX (`$$...$$` y `$...$`).
+  - Identidad de marca de Haru: ícono SVG embebido en cabecera, favicon SVG embebido, y logo oficial para la extensión de VS Code / Positron (`icon.png`).
+  - Servidor local sin sobreingeniería `ghl doc --serve` (`-s`) basado en `std::net::TcpListener` para previsualización en vivo sin dependencias pesadas.
 
