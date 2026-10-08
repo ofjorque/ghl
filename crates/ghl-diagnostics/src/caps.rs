@@ -279,7 +279,6 @@ impl RenderCaps {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
