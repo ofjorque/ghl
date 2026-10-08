@@ -83,7 +83,9 @@ pub fn cmd_fmt(args: &[String], caps: &RenderCaps) {
                 total_lines += content.lines().count();
                 match ghl_syntax::format_source(&content) {
                     Ok(formatted) => {
-                        if content == formatted {
+                        let content_norm = content.replace("\r\n", "\n");
+                        let formatted_norm = formatted.replace("\r\n", "\n");
+                        if content_norm == formatted_norm {
                             files_clean += 1;
                         } else {
                             files_formatted += 1;

@@ -1,120 +1,143 @@
-﻿<svg xmlns=http://www.w3.org/2000/svg viewBox=0 0 512 512 width=100% height=100%>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
   <defs>
-    <linearGradient id=appBg x1=0% y1=0% x2=100% y2=100%>
-      <stop offset=0% stop-color=#e0f7fa/>
-      <stop offset=50% stop-color=#f0fdf4/>
-      <stop offset=100% stop-color=#ffedd5/>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#bce8fd"/>
+      <stop offset="50%" stop-color="#d9dbfa"/>
+      <stop offset="100%" stop-color="#fbd6ea"/>
     </linearGradient>
-    <filter id=softShadow x=-10% y=-10% width=120% height=120%>
-      <feDropShadow dx=0 dy=8 stdDeviation=12 flood-color=#0f172a flood-opacity=0.08/>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c9ecfd"/>
+      <stop offset="50%" stop-color="#e4e3fb"/>
+      <stop offset="100%" stop-color="#fbd9eb"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#7a7099" flood-opacity="0.22"/>
     </filter>
+
+    <clipPath id="gojoClip">
+      <path d="M126 190 C124 170 128 152 132 140 Q132 126 140 117 Q157 123 172 137 Q190 131 208 135 Q223 120 238 113 Q245 128 242 150 C248 166 250 188 244 206 C240 220 232 230 228 236 C242 258 250 290 248 320 C246 350 228 365 196 365 L150 365 C110 365 94 342 96 310 C98 274 118 248 134 236 C128 228 125 210 126 190 Z"/>
+    </clipPath>
+
+    <clipPath id="haruClip">
+      <path d="M386 190 C388 170 384 152 380 140 Q380 126 372 117 Q355 123 340 137 Q322 131 304 135 Q289 120 274 113 Q267 128 270 150 C264 166 262 188 268 206 C272 220 280 230 284 236 C270 258 262 290 264 320 C266 350 284 365 316 365 L362 365 C402 365 418 342 416 310 C414 274 394 248 378 236 C384 228 387 210 386 190 Z"/>
+    </clipPath>
   </defs>
 
-  <!-- App Icon Rounded Background -->
-  <rect width=512 height=512 rx=116 fill=url(#appBg)/>
-  <rect width=504 height=504 x=4 y=4 rx=112 fill=none stroke=#ffffff stroke-width=4 stroke-opacity=0.6/>
+  <!-- Fondo y tarjeta tipo icono de app -->
+  <rect width="512" height="512" fill="url(#bgGrad)"/>
+  <rect x="58" y="58" width="396" height="396" rx="92" fill="url(#cardGrad)" filter="url(#cardShadow)"/>
+  <rect x="58" y="58" width="396" height="396" rx="92" fill="#ffffff" opacity="0.25"/>
 
-  <!-- Shadow under cats -->
-  <ellipse cx=256 cy=420 rx=190 ry=22 fill=#0f172a opacity=0.06/>
+  <!-- Sombra suave en el suelo -->
+  <ellipse cx="256" cy="372" rx="168" ry="14" fill="#9a8fbf" opacity="0.30"/>
 
-  <!-- === GOJO (Left Cat - Silver Grey Tabby) === -->
-  <g id=gojo filter=url(#softShadow)>
-    <!-- Ears -->
-    <path d=M140 180 L120 110 L195 145 Z fill=#94a3b8 stroke=#64748b stroke-width=4 stroke-linejoin=round/>
-    <path d=M140 172 L128 122 L185 148 Z fill=#fbcfe8/>
-    <path d=M225 145 L260 115 L250 180 Z fill=#94a3b8 stroke=#64748b stroke-width=4 stroke-linejoin=round/>
-    <path d=M230 148 L252 125 L246 172 Z fill=#fbcfe8/>
+  <g stroke="#3c2c2f" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
 
-    <!-- Body -->
-    <path d=M135 270 C110 320 115 410 160 415 C210 420 235 415 250 380 C240 330 220 280 200 270 Z fill=#cbd5e1/>
+    <!-- ==================== GOJO (Gris Atigrado) ==================== -->
+    <g id="gojo">
+      <!-- Cuerpo base -->
+      <path d="M126 190 C124 170 128 152 132 140 Q132 126 140 117 Q157 123 172 137 Q190 131 208 135 Q223 120 238 113 Q245 128 242 150 C248 166 250 188 244 206 C240 220 232 230 228 236 C242 258 250 290 248 320 C246 350 228 365 196 365 L150 365 C110 365 94 342 96 310 C98 274 118 248 134 236 C128 228 125 210 126 190 Z" fill="#b7bac0"/>
 
-    <!-- White Chest/Bib -->
-    <path d=M175 270 C165 310 165 370 195 400 C220 370 220 310 205 270 Z fill=#ffffff/>
+      <g clip-path="url(#gojoClip)" stroke="none">
+        <!-- Pecho claro -->
+        <ellipse cx="196" cy="290" rx="22" ry="38" fill="#e6e7ea"/>
+        <!-- Rayas del costado -->
+        <path d="M90 258 Q114 252 136 264 Q114 272 90 272 Z" fill="#999da5"/>
+        <path d="M90 286 Q118 280 140 294 Q118 302 90 300 Z" fill="#999da5"/>
+        <path d="M90 316 Q116 310 136 324 Q116 330 90 330 Z" fill="#999da5"/>
+        <path d="M252 252 Q236 254 228 264 Q240 266 252 264 Z" fill="#999da5"/>
+        <path d="M252 280 Q236 282 230 292 Q242 294 252 292 Z" fill="#999da5"/>
+        <!-- Rayas de la frente -->
+        <path d="M166 136 Q172 154 170 168 Q164 154 160 136 Z" fill="#999da5"/>
+        <path d="M186 132 Q189 156 186 172 Q180 156 179 132 Z" fill="#999da5"/>
+        <path d="M206 134 Q203 152 202 166 Q210 152 213 134 Z" fill="#999da5"/>
+        <!-- Rayas de las mejillas -->
+        <path d="M120 188 Q136 190 146 196 Q134 200 120 198 Z" fill="#999da5"/>
+        <path d="M120 206 Q134 206 144 210 Q132 216 120 214 Z" fill="#999da5"/>
+      </g>
 
-    <!-- Head -->
-    <ellipse cx=185 cy=210 rx=68 ry=60 fill=#94a3b8/>
+      <!-- Contorno de Gojo -->
+      <path d="M126 190 C124 170 128 152 132 140 Q132 126 140 117 Q157 123 172 137 Q190 131 208 135 Q223 120 238 113 Q245 128 242 150 C248 166 250 188 244 206 C240 220 232 230 228 236 C242 258 250 290 248 320 C246 350 228 365 196 365 L150 365 C110 365 94 342 96 310 C98 274 118 248 134 236 C128 228 125 210 126 190 Z" fill="none"/>
 
-    <!-- Tabby Stripes -->
-    <path d=M185 155 L185 175 stroke=#64748b stroke-width=5 stroke-linecap=round/>
-    <path d=M170 160 L174 176 stroke=#64748b stroke-width=4 stroke-linecap=round/>
-    <path d=M200 160 L196 176 stroke=#64748b stroke-width=4 stroke-linecap=round/>
-    <!-- Cheek Stripes -->
-    <path d=M125 210 L140 212 stroke=#64748b stroke-width=4 stroke-linecap=round/>
-    <path d=M127 220 L142 220 stroke=#64748b stroke-width=4 stroke-linecap=round/>
+      <!-- Interior de las orejas -->
+      <path d="M141 128 Q152 132 161 139 Q150 142 138 148 Q137 136 141 128 Z" fill="#f5b3c0" stroke="none"/>
+      <path d="M234 123 Q223 129 217 137 Q228 140 238 147 Q238 134 234 123 Z" fill="#f5b3c0" stroke="none"/>
 
-    <!-- Eyes -->
-    <circle cx=160 cy=212 r=11 fill=#1e293b/>
-    <circle cx=157 cy=208 r=4 fill=#ffffff/>
-    <circle cx=210 cy=212 r=11 fill=#1e293b/>
-    <circle cx=207 cy=208 r=4 fill=#ffffff/>
+      <!-- Hocico -->
+      <ellipse cx="182" cy="206" rx="16" ry="11" fill="#e6e7ea" stroke="none"/>
+      <!-- Ojos -->
+      <ellipse cx="156" cy="188" rx="8" ry="9.5" fill="#322225" stroke="none"/>
+      <circle cx="159" cy="184.5" r="3" fill="#ffffff" stroke="none"/>
+      <ellipse cx="208" cy="188" rx="8" ry="9.5" fill="#322225" stroke="none"/>
+      <circle cx="211" cy="184.5" r="3" fill="#ffffff" stroke="none"/>
+      <!-- Rubor -->
+      <ellipse cx="142" cy="210" rx="8" ry="5" fill="#f5a3b4" opacity="0.55" stroke="none"/>
+      <ellipse cx="222" cy="210" rx="8" ry="5" fill="#f5a3b4" opacity="0.55" stroke="none"/>
+      <!-- Nariz y boca -->
+      <path d="M177 199 Q182 197 187 199 Q184 204 182 204 Q180 204 177 199 Z" fill="#3c2c2f" stroke="none"/>
+      <path d="M173 208 Q178 214 182 208 Q186 214 191 208" fill="none" stroke-width="2.6"/>
 
-    <!-- Nose & Mouth -->
-    <polygon points=182,224 188,224 185,228 fill=#f472b6/>
-    <path d=M180 230 Q185 235 185 228 Q185 235 190 230 fill=none stroke=#334155 stroke-width=3 stroke-linecap=round/>
+      <!-- Patas delanteras -->
+      <path d="M160 308 L162 362" fill="none"/>
+      <path d="M194 312 L194 362" fill="none"/>
+    </g>
 
-    <!-- Whiskers -->
-    <path d=M135 225 L105 222 M135 230 L108 234 stroke=#64748b stroke-width=2.5 stroke-linecap=round/>
-    <path d=M235 225 L255 223 M235 230 L255 233 stroke=#64748b stroke-width=2.5 stroke-linecap=round/>
+    <!-- ==================== HARU (Blanco y Durazno) ==================== -->
+    <g id="haru">
+      <!-- Cuerpo base -->
+      <path d="M386 190 C388 170 384 152 380 140 Q380 126 372 117 Q355 123 340 137 Q322 131 304 135 Q289 120 274 113 Q267 128 270 150 C264 166 262 188 268 206 C272 220 280 230 284 236 C270 258 262 290 264 320 C266 350 284 365 316 365 L362 365 C402 365 418 342 416 310 C414 274 394 248 378 236 C384 228 387 210 386 190 Z" fill="#ffffff"/>
 
-    <!-- Paws -->
-    <ellipse cx=170 cy=412 rx=14 ry=9 fill=#ffffff stroke=#cbd5e1 stroke-width=3/>
-    <ellipse cx=205 cy=412 rx=14 ry=9 fill=#ffffff stroke=#cbd5e1 stroke-width=3/>
-  </g>
+      <g clip-path="url(#haruClip)" stroke="none" fill="#f4b58c">
+        <!-- Gorrito durazno en la cabeza -->
+        <path d="M250 100 L410 100 L410 186 Q394 192 382 182 Q370 168 354 170 Q336 174 328 158 Q316 146 300 152 Q286 158 276 150 Q262 142 250 146 Z"/>
+        <!-- Mancha grande del lomo -->
+        <path d="M420 240 Q386 238 376 262 Q364 292 382 316 Q398 334 420 326 Z"/>
+        <!-- Manchitas de las patas -->
+        <ellipse cx="300" cy="362" rx="16" ry="8"/>
+        <ellipse cx="360" cy="364" rx="12" ry="6"/>
+      </g>
 
-  <!-- === HARU (Right Cat - White & Peach/Amber) === -->
-  <g id=haru filter=url(#softShadow)>
-    <!-- Ears -->
-    <path d=M270 180 L260 115 L295 145 Z fill=#ffffff stroke=#fed7aa stroke-width=4 stroke-linejoin=round/>
-    <path d=M272 172 L266 125 L290 148 Z fill=#fed7aa/>
-    <path d=M355 145 L390 110 L370 180 Z fill=#fb923c stroke=#f97316 stroke-width=4 stroke-linejoin=round/>
-    <path d=M358 148 L382 122 L370 172 Z fill=#fbcfe8/>
+      <!-- Contorno de Haru -->
+      <path d="M386 190 C388 170 384 152 380 140 Q380 126 372 117 Q355 123 340 137 Q322 131 304 135 Q289 120 274 113 Q267 128 270 150 C264 166 262 188 268 206 C272 220 280 230 284 236 C270 258 262 290 264 320 C266 350 284 365 316 365 L362 365 C402 365 418 342 416 310 C414 274 394 248 378 236 C384 228 387 210 386 190 Z" fill="none"/>
 
-    <!-- Body (White base) -->
-    <path d=M275 270 C260 320 270 415 320 415 C370 415 395 380 375 270 Z fill=#ffffff/>
-    <!-- Peach Patch on Side -->
-    <path d=M355 290 C375 320 375 370 350 400 C370 380 375 330 365 295 Z fill=#fed7aa/>
+      <!-- Interior de las orejas -->
+      <path d="M371 128 Q360 132 351 139 Q362 142 374 148 Q375 136 371 128 Z" fill="#f5b3c0" stroke="none"/>
+      <path d="M278 123 Q289 129 295 137 Q284 140 274 147 Q274 134 278 123 Z" fill="#f5b3c0" stroke="none"/>
 
-    <!-- Head (White with Peach patch on right side) -->
-    <ellipse cx=325 cy=210 rx=68 ry=60 fill=#ffffff/>
-    <path d=M325 152 C355 152 393 175 393 210 C393 235 380 255 365 260 C360 220 345 170 325 152 Z fill=#fb923c opacity=0.9/>
+      <!-- Ojos -->
+      <ellipse cx="304" cy="190" rx="8" ry="9.5" fill="#322225" stroke="none"/>
+      <circle cx="307" cy="186.5" r="3" fill="#ffffff" stroke="none"/>
+      <ellipse cx="356" cy="190" rx="8" ry="9.5" fill="#322225" stroke="none"/>
+      <circle cx="359" cy="186.5" r="3" fill="#ffffff" stroke="none"/>
+      <!-- Rubor -->
+      <ellipse cx="290" cy="212" rx="8" ry="5" fill="#f5a3b4" opacity="0.55" stroke="none"/>
+      <ellipse cx="370" cy="212" rx="8" ry="5" fill="#f5a3b4" opacity="0.55" stroke="none"/>
+      <!-- Nariz y boca -->
+      <path d="M325 201 Q330 199 335 201 Q332 206 330 206 Q328 206 325 201 Z" fill="#f29ea7" stroke="none"/>
+      <path d="M321 210 Q326 216 330 210 Q334 216 339 210" fill="none" stroke-width="2.6"/>
 
-    <!-- Eyes -->
-    <circle cx=300 cy=212 r=11 fill=#1e293b/>
-    <circle cx=297 cy=208 r=4 fill=#ffffff/>
-    <circle cx=350 cy=212 r=11 fill=#1e293b/>
-    <circle cx=347 cy=208 r=4 fill=#ffffff/>
+      <!-- Patas delanteras -->
+      <path d="M318 312 L318 362" fill="none"/>
+      <path d="M352 308 L350 362" fill="none"/>
+    </g>
 
-    <!-- Cheeks (Blush) -->
-    <circle cx=286 cy=225 r=8 fill=#fda4af opacity=0.4/>
-    <circle cx=364 cy=225 r=8 fill=#fda4af opacity=0.4/>
+    <!-- ==================== COLAS FORMANDO CORAZÓN LIMPIO ==================== -->
+    <g id="heartTails">
+      <!-- Cola de Gojo (Mitad izquierda del corazón) -->
+      <!-- Borde oscuro -->
+      <path d="M140 355 C120 405 185 435 225 395 C245 375 256 340 256 325" fill="none" stroke="#3c2c2f" stroke-width="18" stroke-linecap="round"/>
+      <!-- Relleno gris atigrado -->
+      <path d="M140 355 C120 405 185 435 225 395 C245 375 256 340 256 325" fill="none" stroke="#b7bac0" stroke-width="11" stroke-linecap="round"/>
+      <!-- Rayitas en la cola -->
+      <path d="M152 385 L158 395 M180 415 L188 423 M215 410 L223 416" fill="none" stroke="#999da5" stroke-width="3" stroke-linecap="round"/>
 
-    <!-- Nose & Mouth -->
-    <polygon points=322,224 328,224 325,228 fill=#f472b6/>
-    <path d=M320 230 Q325 235 325 228 Q325 235 330 230 fill=none stroke=#334155 stroke-width=3 stroke-linecap=round/>
-
-    <!-- Whiskers -->
-    <path d=M275 225 L255 223 M275 230 L255 233 stroke=#cbd5e1 stroke-width=2.5 stroke-linecap=round/>
-    <path d=M375 225 L405 222 M375 230 L402 234 stroke=#fb923c stroke-width=2.5 stroke-linecap=round/>
-
-    <!-- Paws -->
-    <ellipse cx=305 cy=412 rx=14 ry=9 fill=#ffffff stroke=#fed7aa stroke-width=3/>
-    <ellipse cx=340 cy=412 rx=14 ry=9 fill=#ffffff stroke=#fed7aa stroke-width=3/>
-  </g>
-
-  <!-- === HEART-SHAPED TAILS === -->
-  <g id=tails filter=url(#softShadow)>
-    <!-- Gojo Tail (Left half of heart, silver tabby) -->
-    <path d=M150 395 C140 435 190 465 230 425 C250 405 256 360 256 350 
-          fill=none stroke=#94a3b8 stroke-width=18 stroke-linecap=round/>
-    <!-- Tail Stripes -->
-    <path d=M168 420 L174 430 M195 438 L203 446 M230 422 L238 426 
-          stroke=#64748b stroke-width=4 stroke-linecap=round/>
-
-    <!-- Haru Tail (Right half of heart, white & peach tip) -->
-    <path d=M360 395 C370 435 320 465 280 425 C260 405 256 360 256 350 
-          fill=none stroke=#ffffff stroke-width=18 stroke-linecap=round/>
-    <!-- Peach tail tip -->
-    <path d=M266 370 C260 360 256 350 256 350 
-          fill=none stroke=#fb923c stroke-width=18 stroke-linecap=round/>
+      <!-- Cola de Haru (Mitad derecha del corazón) -->
+      <!-- Borde oscuro -->
+      <path d="M372 355 C392 405 327 435 287 395 C267 375 256 340 256 325" fill="none" stroke="#3c2c2f" stroke-width="18" stroke-linecap="round"/>
+      <!-- Relleno blanco -->
+      <path d="M372 355 C392 405 327 435 287 395 C267 375 256 340 256 325" fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round"/>
+      <!-- Punta durazno -->
+      <path d="M266 342 C260 332 256 325 256 325" fill="none" stroke="#f4b58c" stroke-width="11" stroke-linecap="round"/>
+    </g>
   </g>
 </svg>
