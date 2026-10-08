@@ -279,11 +279,6 @@ impl RenderCaps {
     }
 }
 
-#[cfg(unix)]
-unsafe extern "C" {
-    #[link_name = "isatty"]
-    fn libc_isatty(fd: i32) -> i32;
-}
 
 #[cfg(test)]
 mod tests {

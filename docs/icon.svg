@@ -1,0 +1,120 @@
+﻿<svg xmlns=http://www.w3.org/2000/svg viewBox=0 0 512 512 width=100% height=100%>
+  <defs>
+    <linearGradient id=appBg x1=0% y1=0% x2=100% y2=100%>
+      <stop offset=0% stop-color=#e0f7fa/>
+      <stop offset=50% stop-color=#f0fdf4/>
+      <stop offset=100% stop-color=#ffedd5/>
+    </linearGradient>
+    <filter id=softShadow x=-10% y=-10% width=120% height=120%>
+      <feDropShadow dx=0 dy=8 stdDeviation=12 flood-color=#0f172a flood-opacity=0.08/>
+    </filter>
+  </defs>
+
+  <!-- App Icon Rounded Background -->
+  <rect width=512 height=512 rx=116 fill=url(#appBg)/>
+  <rect width=504 height=504 x=4 y=4 rx=112 fill=none stroke=#ffffff stroke-width=4 stroke-opacity=0.6/>
+
+  <!-- Shadow under cats -->
+  <ellipse cx=256 cy=420 rx=190 ry=22 fill=#0f172a opacity=0.06/>
+
+  <!-- === GOJO (Left Cat - Silver Grey Tabby) === -->
+  <g id=gojo filter=url(#softShadow)>
+    <!-- Ears -->
+    <path d=M140 180 L120 110 L195 145 Z fill=#94a3b8 stroke=#64748b stroke-width=4 stroke-linejoin=round/>
+    <path d=M140 172 L128 122 L185 148 Z fill=#fbcfe8/>
+    <path d=M225 145 L260 115 L250 180 Z fill=#94a3b8 stroke=#64748b stroke-width=4 stroke-linejoin=round/>
+    <path d=M230 148 L252 125 L246 172 Z fill=#fbcfe8/>
+
+    <!-- Body -->
+    <path d=M135 270 C110 320 115 410 160 415 C210 420 235 415 250 380 C240 330 220 280 200 270 Z fill=#cbd5e1/>
+
+    <!-- White Chest/Bib -->
+    <path d=M175 270 C165 310 165 370 195 400 C220 370 220 310 205 270 Z fill=#ffffff/>
+
+    <!-- Head -->
+    <ellipse cx=185 cy=210 rx=68 ry=60 fill=#94a3b8/>
+
+    <!-- Tabby Stripes -->
+    <path d=M185 155 L185 175 stroke=#64748b stroke-width=5 stroke-linecap=round/>
+    <path d=M170 160 L174 176 stroke=#64748b stroke-width=4 stroke-linecap=round/>
+    <path d=M200 160 L196 176 stroke=#64748b stroke-width=4 stroke-linecap=round/>
+    <!-- Cheek Stripes -->
+    <path d=M125 210 L140 212 stroke=#64748b stroke-width=4 stroke-linecap=round/>
+    <path d=M127 220 L142 220 stroke=#64748b stroke-width=4 stroke-linecap=round/>
+
+    <!-- Eyes -->
+    <circle cx=160 cy=212 r=11 fill=#1e293b/>
+    <circle cx=157 cy=208 r=4 fill=#ffffff/>
+    <circle cx=210 cy=212 r=11 fill=#1e293b/>
+    <circle cx=207 cy=208 r=4 fill=#ffffff/>
+
+    <!-- Nose & Mouth -->
+    <polygon points=182,224 188,224 185,228 fill=#f472b6/>
+    <path d=M180 230 Q185 235 185 228 Q185 235 190 230 fill=none stroke=#334155 stroke-width=3 stroke-linecap=round/>
+
+    <!-- Whiskers -->
+    <path d=M135 225 L105 222 M135 230 L108 234 stroke=#64748b stroke-width=2.5 stroke-linecap=round/>
+    <path d=M235 225 L255 223 M235 230 L255 233 stroke=#64748b stroke-width=2.5 stroke-linecap=round/>
+
+    <!-- Paws -->
+    <ellipse cx=170 cy=412 rx=14 ry=9 fill=#ffffff stroke=#cbd5e1 stroke-width=3/>
+    <ellipse cx=205 cy=412 rx=14 ry=9 fill=#ffffff stroke=#cbd5e1 stroke-width=3/>
+  </g>
+
+  <!-- === HARU (Right Cat - White & Peach/Amber) === -->
+  <g id=haru filter=url(#softShadow)>
+    <!-- Ears -->
+    <path d=M270 180 L260 115 L295 145 Z fill=#ffffff stroke=#fed7aa stroke-width=4 stroke-linejoin=round/>
+    <path d=M272 172 L266 125 L290 148 Z fill=#fed7aa/>
+    <path d=M355 145 L390 110 L370 180 Z fill=#fb923c stroke=#f97316 stroke-width=4 stroke-linejoin=round/>
+    <path d=M358 148 L382 122 L370 172 Z fill=#fbcfe8/>
+
+    <!-- Body (White base) -->
+    <path d=M275 270 C260 320 270 415 320 415 C370 415 395 380 375 270 Z fill=#ffffff/>
+    <!-- Peach Patch on Side -->
+    <path d=M355 290 C375 320 375 370 350 400 C370 380 375 330 365 295 Z fill=#fed7aa/>
+
+    <!-- Head (White with Peach patch on right side) -->
+    <ellipse cx=325 cy=210 rx=68 ry=60 fill=#ffffff/>
+    <path d=M325 152 C355 152 393 175 393 210 C393 235 380 255 365 260 C360 220 345 170 325 152 Z fill=#fb923c opacity=0.9/>
+
+    <!-- Eyes -->
+    <circle cx=300 cy=212 r=11 fill=#1e293b/>
+    <circle cx=297 cy=208 r=4 fill=#ffffff/>
+    <circle cx=350 cy=212 r=11 fill=#1e293b/>
+    <circle cx=347 cy=208 r=4 fill=#ffffff/>
+
+    <!-- Cheeks (Blush) -->
+    <circle cx=286 cy=225 r=8 fill=#fda4af opacity=0.4/>
+    <circle cx=364 cy=225 r=8 fill=#fda4af opacity=0.4/>
+
+    <!-- Nose & Mouth -->
+    <polygon points=322,224 328,224 325,228 fill=#f472b6/>
+    <path d=M320 230 Q325 235 325 228 Q325 235 330 230 fill=none stroke=#334155 stroke-width=3 stroke-linecap=round/>
+
+    <!-- Whiskers -->
+    <path d=M275 225 L255 223 M275 230 L255 233 stroke=#cbd5e1 stroke-width=2.5 stroke-linecap=round/>
+    <path d=M375 225 L405 222 M375 230 L402 234 stroke=#fb923c stroke-width=2.5 stroke-linecap=round/>
+
+    <!-- Paws -->
+    <ellipse cx=305 cy=412 rx=14 ry=9 fill=#ffffff stroke=#fed7aa stroke-width=3/>
+    <ellipse cx=340 cy=412 rx=14 ry=9 fill=#ffffff stroke=#fed7aa stroke-width=3/>
+  </g>
+
+  <!-- === HEART-SHAPED TAILS === -->
+  <g id=tails filter=url(#softShadow)>
+    <!-- Gojo Tail (Left half of heart, silver tabby) -->
+    <path d=M150 395 C140 435 190 465 230 425 C250 405 256 360 256 350 
+          fill=none stroke=#94a3b8 stroke-width=18 stroke-linecap=round/>
+    <!-- Tail Stripes -->
+    <path d=M168 420 L174 430 M195 438 L203 446 M230 422 L238 426 
+          stroke=#64748b stroke-width=4 stroke-linecap=round/>
+
+    <!-- Haru Tail (Right half of heart, white & peach tip) -->
+    <path d=M360 395 C370 435 320 465 280 425 C260 405 256 360 256 350 
+          fill=none stroke=#ffffff stroke-width=18 stroke-linecap=round/>
+    <!-- Peach tail tip -->
+    <path d=M266 370 C260 360 256 350 256 350 
+          fill=none stroke=#fb923c stroke-width=18 stroke-linecap=round/>
+  </g>
+</svg>

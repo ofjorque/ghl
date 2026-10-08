@@ -26,27 +26,22 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact_name: ghl-x86_64-unknown-linux-gnu.tar.gz
             binary_name: ghl
-            use_cross: false
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact_name: ghl-aarch64-unknown-linux-gnu.tar.gz
             binary_name: ghl
-            use_cross: true
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: ghl-aarch64-apple-darwin.tar.gz
             binary_name: ghl
-            use_cross: false
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: ghl-x86_64-apple-darwin.tar.gz
             binary_name: ghl
-            use_cross: false
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: ghl-x86_64-pc-windows-msvc.zip
             binary_name: ghl.exe
-            use_cross: false
 
     steps:
       - name: Free Disk Space (Linux)
@@ -60,20 +55,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install System Dependencies (Linux Native)
-        if: runner.os == 'Linux' && !matrix.use_cross
+      - name: Install System Dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libfontconfig1-dev
-
-      - name: Install ARM64 Cross Toolchain & Dependencies (Linux)
-        if: runner.os == 'Linux' && matrix.use_cross
-        run: |
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu pkg-config libfontconfig1-dev:arm64
-          echo "PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig" >> $GITHUB_ENV
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
