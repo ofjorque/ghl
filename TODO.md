@@ -188,10 +188,13 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
 
 Backlog técnico para consolidar la ergonomía de modelado estadístico, extracción de parámetros en DataFrames (`broom` para GHL) y visualización científica estándar APA:
 
-- [ ] **Motor del Protocolo Tidy Universal y Funciones de Preludio — [#15](https://github.com/ofjorque/ghl/issues/15):**
-  - Inyección en el preludio estándar de `tidy(m, conf_int = true, conf_level = 0.95)`, `glance(m)`, `augment(m, data = None)` y `plot(m, ...)`.
-  - Despacho polimórfico a métodos `.tidy()`, `.glance()`, `.augment()` y `.plot()` de los structs de modelos (Opción B del RFC 17).
-  - Diagnóstico ergonómico de compilación y runtime `E0501` si un tipo no soporta el protocolo Tidy.
+- [ ] **Motor del Protocolo Tidy Universal y Capacidades NEKO — [#15](https://github.com/ofjorque/ghl/issues/15):**
+  - Inyección en el preludio estándar de funciones accesoras directas de métricas: `aic(m)`, `bic(m)`, `r_squared(m)`, `adj_r_squared(m)`, `log_lik(m)`, `nobs(m)` y `fitted(m)`.
+  - Inyección en el preludio de verbos de proyección: `tidy(m, conf_int = true, conf_level = 0.95)`, `glance(m)`, `augment(m, data = None)` y `plot(m, ...)`.
+  - Despacho polimórfico por introspección dinámica de capacidades en structs de paquetes: detección automática de campos (ej. `.aic`, `.r_squared`) o métodos asociados sin acoplamiento hardcodeado.
+  - `glance(m)` genera dinámicamente un DataFrame de 1 fila agregando las métricas disponibles del modelo.
+  - `tidy(m)` proyecta parámetros a DataFrame canónico (`term`, `estimate`, `std_error`, `statistic`, `p_value`, `conf_low`, `conf_high`).
+  - Diagnósticos ergonómicos `E0501` (tipo no soporta Tidy) y `E0502` (capacidad no disponible).
   - Soporte canónico para tuberías composicionales `fit |> tidy() |> filter(p_value < 0.05)`.
   - Suite de pruebas de integración en `crates/ghl-runtime/tests/eval_tidy_protocol.rs`.
 
