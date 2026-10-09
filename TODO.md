@@ -182,3 +182,36 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
   - Identidad de marca de Haru: ícono SVG embebido en cabecera, favicon SVG embebido, y logo oficial para la extensión de VS Code / Positron (`icon.png`).
   - Servidor local sin sobreingeniería `ghl doc --serve` (`-s`) basado en `std::net::TcpListener` para previsualización en vivo sin dependencias pesadas.
 
+---
+
+## En Trabajo Activo: Milestone v0.5.0 — Ecosistema Tidy y Visualización Analítica (RFC 17)
+
+Backlog técnico para consolidar la ergonomía de modelado estadístico, extracción de parámetros en DataFrames (`broom` para GHL) y visualización científica estándar APA:
+
+- [ ] **Motor del Protocolo Tidy Universal y Funciones de Preludio — [#15](https://github.com/ofjorque/ghl/issues/15):**
+  - Inyección en el preludio estándar de `tidy(m, conf_int = true, conf_level = 0.95)`, `glance(m)`, `augment(m, data = None)` y `plot(m, ...)`.
+  - Despacho polimórfico a métodos `.tidy()`, `.glance()`, `.augment()` y `.plot()` de los structs de modelos (Opción B del RFC 17).
+  - Diagnóstico ergonómico de compilación y runtime `E0501` si un tipo no soporta el protocolo Tidy.
+  - Soporte canónico para tuberías composicionales `fit |> tidy() |> filter(p_value < 0.05)`.
+  - Suite de pruebas de integración en `crates/ghl-runtime/tests/eval_tidy_protocol.rs`.
+
+- [ ] **Tema Gráfico APA y Visualización en Paquetes Ancla (`ghl_survival`, `ghl_causal`) — [#16](https://github.com/ofjorque/ghl/issues/16):**
+  - Implementación formal de `theme_apa()` en `crates/ghl-plot`: fondo neutro blanco, sin rejillas menores, ejes limpios y paleta accesible Okabe-Ito.
+  - Separación entre interactivo (adaptable al IDE para no fatigar la vista) y exportación estricta a blanco/neutro APA en `.to_svg()`, `.to_png()` y Quarto.
+  - Implementación de `.plot()` en `ghl_survival` para curvas Kaplan-Meier escalonadas con bandas de confianza Greenwood del 95% y censuras.
+  - Implementación de `.plot()` en `ghl_causal` para gráficos dinámicos de Event Studies respecto a $t = -1$.
+  - Estandarización de `.tidy()` y `.glance()` retornando DataFrames canónicos en inglés en ambos paquetes.
+
+- [ ] **Despliegue Universal Tidy y Plot en Paquetes Restantes — [#17](https://github.com/ofjorque/ghl/issues/17):**
+  - `ghl_timeseries`: Tidy de coeficientes ARIMA/GARCH y `plot()` con abanicos de incertidumbre (*fan charts*).
+  - `ghl_irt`: Tidy de parámetros psicométricos y `plot()` con curvas características de ítems (ICC) y función de información (TIF).
+  - `ghl_panel` y `ghl_multilevel`: Tidy de modelos de panel y lineales mixtos con forest plots de coeficientes.
+  - `ghl_impute` y `ghl_optim`: Tidy de combinaciones Rubin MICE y trazas de convergencia de optimización.
+  - `spring_pact`: Tidy de contratos de datos estadísticos.
+
+- [ ] **Validación de Reportes Científicos Reproducibles en Quarto y Positron — [#18](https://github.com/ofjorque/ghl/issues/18):**
+  - Actualización de los cuadernos Quarto oficiales (`examples/*.qmd`) demostrando el flujo composicional `fit |> tidy() |> plot()`.
+  - Verificación de que la compilación de Quarto (`quarto render`) produzca gráficos claros en estándar APA de publicación.
+  - Documentación de la guía del usuario en `packages/README.md`.
+
+
