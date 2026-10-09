@@ -361,8 +361,22 @@ impl RuntimeEnv {
         env.set("glance".into(), Value::NativeFnCtx(native_glance));
         env.set("augment".into(), Value::NativeFnCtx(native_augment));
         env.set("predict".into(), Value::NativeFnCtx(native_predict));
-        env.set("residuals".into(), Value::NativeFn(native_residuals));
-        env.set("coef".into(), Value::NativeFn(native_coef));
+        env.set("residuals".into(), Value::NativeFnCtx(native_residuals));
+        env.set("resid".into(), Value::NativeFnCtx(native_residuals));
+        env.set("coef".into(), Value::NativeFnCtx(native_coef));
+        env.set("coefficients".into(), Value::NativeFnCtx(native_coef));
+        env.set("aic".into(), Value::NativeFnCtx(native_aic));
+        env.set("bic".into(), Value::NativeFnCtx(native_bic));
+        env.set("r_squared".into(), Value::NativeFnCtx(native_r_squared));
+        env.set("r2".into(), Value::NativeFnCtx(native_r_squared));
+        env.set("adj_r_squared".into(), Value::NativeFnCtx(native_adj_r_squared));
+        env.set("adj_r2".into(), Value::NativeFnCtx(native_adj_r_squared));
+        env.set("log_lik".into(), Value::NativeFnCtx(native_log_lik));
+        env.set("log_likelihood".into(), Value::NativeFnCtx(native_log_lik));
+        env.set("nobs".into(), Value::NativeFnCtx(native_nobs));
+        env.set("n_obs".into(), Value::NativeFnCtx(native_nobs));
+        env.set("fitted".into(), Value::NativeFnCtx(native_fitted));
+        env.set("fitted_values".into(), Value::NativeFnCtx(native_fitted));
         env.set("vcov".into(), Value::NativeFnCtx(native_vcov));
         env.set(
             "optim".into(),
@@ -472,8 +486,8 @@ impl RuntimeEnv {
         );
 
         // Grammar of Graphics (RFC 16) Verbs
-        env.set("plot".into(), Value::NativeFn(native_plot));
-        env.set("ggplot".into(), Value::NativeFn(native_plot));
+        env.set("plot".into(), Value::NativeFnCtx(native_plot_dispatch));
+        env.set("ggplot".into(), Value::NativeFnCtx(native_plot_dispatch));
         env.set("aes".into(), Value::NativeFn(native_aes));
         env.set("geom_point".into(), Value::NativeFn(native_geom_point));
         env.set("geom_line".into(), Value::NativeFn(native_geom_line));

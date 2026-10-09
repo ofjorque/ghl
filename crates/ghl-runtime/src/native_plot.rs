@@ -94,6 +94,56 @@ pub(crate) fn native_aes(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }))
 }
 
+pub(crate) fn native_plot_dispatch(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
+    if let Some(first) = args.first() {
+        match first {
+            Value::Struct { name, fields } => {
+                let method_key = format!("{}::plot", name);
+                if let Some(fn_val) = interp.env.get(&method_key) {
+                    return interp.call_value(fn_val, args);
+                }
+                if let Some(p) = fields.get("plot") {
+                    if matches!(p, Value::Plot(_)) {
+                        return Ok(p.clone());
+                    }
+                }
+                return Err(Diagnostic::statistical_error(
+                    "E0501",
+                    format!("Model or struct `{name}` does not implement `plot()`"),
+                ));
+            }
+            Value::ModelFit(m) => {
+                let mut spec = PlotSpec::new();
+                spec = spec.with_x_data(m.fitted_values.clone());
+                spec.y_data = m.residuals.clone();
+                spec.labels.title = Some(format!("Residuals vs Fitted: {}", m.blueprint.response));
+                spec.labels.x_label = Some("Fitted values".to_string());
+                spec.labels.y_label = Some("Residuals".to_string());
+                spec.layers.push(GeomLayer::point());
+                return Ok(Value::Plot(Box::new(spec)));
+            }
+            Value::GlmFit(m) => {
+                let mut spec = PlotSpec::new();
+                spec = spec.with_x_data(m.fitted_values.clone());
+                spec.y_data = m.residuals.clone();
+                spec.labels.title = Some(format!(
+                    "Deviance Residuals vs Fitted: {}",
+                    m.blueprint.response
+                ));
+                spec.labels.x_label = Some("Predicted probabilities".to_string());
+                spec.labels.y_label = Some("Deviance residuals".to_string());
+                spec.layers.push(GeomLayer::point());
+                return Ok(Value::Plot(Box::new(spec)));
+            }
+            _ => {}
+        }
+    }
+    native_plot(args)
+}
+
 pub(crate) fn native_plot(args: Vec<Value>) -> Result<Value, Diagnostic> {
     if args.is_empty() {
         return Ok(Value::Plot(Box::new(PlotSpec::new())));

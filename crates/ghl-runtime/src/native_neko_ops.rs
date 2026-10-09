@@ -443,6 +443,233 @@ pub(crate) fn native_summary(
     }
 }
 
+fn is_scalar_value(v: &Value) -> bool {
+    matches!(
+        v,
+        Value::F64(_) | Value::I64(_) | Value::Bool(_) | Value::String(_) | Value::NA(_)
+    )
+}
+
+fn extract_scalar_metric(
+    interp: &mut crate::eval::Interpreter,
+    model_val: &Value,
+    fn_name: &str,
+    capability_name: &str,
+    field_aliases: &[&str],
+) -> Result<Value, Diagnostic> {
+    match model_val {
+        Value::ModelFit(m) => match capability_name {
+            "aic" => Ok(Value::F64(m.aic)),
+            "bic" => Ok(Value::F64(m.bic)),
+            "r_squared" => Ok(Value::F64(m.r_squared)),
+            "adj_r_squared" => Ok(Value::F64(m.adj_r_squared)),
+            "log_lik" => Ok(Value::F64(m.log_likelihood)),
+            "nobs" => Ok(Value::I64(m.n_obs as i64)),
+            _ => Err(Diagnostic::statistical_error(
+                "E0502",
+                format!("ModelFit does not have capability `{capability_name}`"),
+            )),
+        },
+        Value::GlmFit(m) => match capability_name {
+            "aic" => Ok(Value::F64(m.aic)),
+            "bic" => Ok(Value::F64(m.bic)),
+            "r_squared" => Ok(Value::F64(m.pseudo_r_squared)),
+            "log_lik" => Ok(Value::F64(-0.5 * m.deviance)),
+            "nobs" => Ok(Value::I64(m.n_obs as i64)),
+            "deviance" => Ok(Value::F64(m.deviance)),
+            _ => Err(Diagnostic::statistical_error(
+                "E0502",
+                format!("GlmFit does not have capability `{capability_name}`"),
+            )),
+        },
+        Value::GmmFit(m) => match capability_name {
+            "aic" => Ok(Value::F64(m.aic)),
+            "bic" => Ok(Value::F64(m.bic)),
+            "log_lik" => Ok(Value::F64(m.log_likelihood)),
+            "nobs" => Ok(Value::I64(m.n_obs as i64)),
+            _ => Err(Diagnostic::statistical_error(
+                "E0502",
+                format!("GmmFit does not have capability `{capability_name}`"),
+            )),
+        },
+        Value::Struct { name, fields } => {
+            for alias in field_aliases {
+                if let Some(val) = fields.get(*alias) {
+                    return Ok(val.clone());
+                }
+            }
+            let method_key = format!("{}::{}", name, capability_name);
+            if let Some(fn_val) = interp.env.get(&method_key) {
+                return interp.call_value(fn_val, vec![model_val.clone()]);
+            }
+            for alias in field_aliases {
+                let alias_key = format!("{}::{}", name, alias);
+                if let Some(fn_val) = interp.env.get(&alias_key) {
+                    return interp.call_value(fn_val, vec![model_val.clone()]);
+                }
+            }
+            Err(Diagnostic::statistical_error(
+                "E0502",
+                format!("Model or struct `{name}` does not have capability `{capability_name}`"),
+            ))
+        }
+        other => Err(Diagnostic::statistical_error(
+            "S0200",
+            format!(
+                "`{}()` requires a ModelFit or Struct, found `{}`",
+                fn_name,
+                other.type_name()
+            ),
+        )),
+    }
+}
+
+pub(crate) fn native_aic(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
+    let model_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`aic()` requires a model or struct: `aic(m)`")
+    })?;
+    extract_scalar_metric(interp, model_val, "aic", "aic", &["aic", "AIC"])
+}
+
+pub(crate) fn native_bic(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
+    let model_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`bic()` requires a model or struct: `bic(m)`")
+    })?;
+    extract_scalar_metric(interp, model_val, "bic", "bic", &["bic", "BIC"])
+}
+
+pub(crate) fn native_r_squared(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
+    let model_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error(
+            "C0201",
+            "`r_squared()` requires a model or struct: `r_squared(m)`",
+        )
+    })?;
+    extract_scalar_metric(
+        interp,
+        model_val,
+        "r_squared",
+        "r_squared",
+        &[
+            "r_squared",
+            "r2",
+            "pseudo_r_squared",
+            "pseudo_r2",
+            "r_sq",
+            "r2_within",
+        ],
+    )
+}
+
+pub(crate) fn native_adj_r_squared(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
+    let model_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error(
+            "C0201",
+            "`adj_r_squared()` requires a model or struct: `adj_r_squared(m)`",
+        )
+    })?;
+    extract_scalar_metric(
+        interp,
+        model_val,
+        "adj_r_squared",
+        "adj_r_squared",
+        &["adj_r_squared", "adj_r2", "r2_adj", "adjusted_r_squared"],
+    )
+}
+
+pub(crate) fn native_log_lik(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
+    let model_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error(
+            "C0201",
+            "`log_lik()` requires a model or struct: `log_lik(m)`",
+        )
+    })?;
+    extract_scalar_metric(
+        interp,
+        model_val,
+        "log_lik",
+        "log_lik",
+        &["log_lik", "log_likelihood", "log_partial_lik", "loglik"],
+    )
+}
+
+pub(crate) fn native_nobs(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
+    let model_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error("C0201", "`nobs()` requires a model or struct: `nobs(m)`")
+    })?;
+    extract_scalar_metric(
+        interp,
+        model_val,
+        "nobs",
+        "nobs",
+        &["nobs", "n_obs", "n", "sample_size", "n_observations"],
+    )
+}
+
+pub(crate) fn native_fitted(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
+    let model_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error(
+            "C0201",
+            "`fitted()` requires a model or struct: `fitted(m)`",
+        )
+    })?;
+    match model_val {
+        Value::ModelFit(m) => Ok(Value::Vector(VectorData::from_f64(
+            m.fitted_values.clone(),
+        ))),
+        Value::GlmFit(m) => Ok(Value::Vector(VectorData::from_f64(
+            m.fitted_values.clone(),
+        ))),
+        Value::Struct { name, fields } => {
+            for alias in &["fitted", "fitted_values", "y_hat", "mu"] {
+                if let Some(val) = fields.get(*alias) {
+                    return Ok(val.clone());
+                }
+            }
+            let method_key = format!("{}::fitted", name);
+            if let Some(fn_val) = interp.env.get(&method_key) {
+                return interp.call_value(fn_val, vec![model_val.clone()]);
+            }
+            let method_key2 = format!("{}::fitted_values", name);
+            if let Some(fn_val) = interp.env.get(&method_key2) {
+                return interp.call_value(fn_val, vec![model_val.clone()]);
+            }
+            Err(Diagnostic::statistical_error(
+                "E0502",
+                format!("Model or struct `{name}` does not have capability `fitted`"),
+            ))
+        }
+        other => Err(Diagnostic::statistical_error(
+            "S0200",
+            format!(
+                "`fitted()` requires a ModelFit or Struct, found `{}`",
+                other.type_name()
+            ),
+        )),
+    }
+}
+
 pub(crate) fn native_tidy(
     interp: &mut crate::eval::Interpreter,
     args: Vec<Value>,
@@ -456,6 +683,13 @@ pub(crate) fn native_tidy(
         Value::GlmFit(m) => Ok(m.tidy()),
         Value::GmmFit(m) => Ok(m.tidy()),
         Value::Struct { name, fields } => {
+            // 1. Explicit method {name}::tidy
+            let method_key = format!("{}::tidy", name);
+            if let Some(fn_val) = interp.env.get(&method_key) {
+                return interp.call_value(fn_val, vec![model_val.clone()]);
+            }
+
+            // 2. Existing built-in results with pre-baked parameter tables
             if name == "SemResult"
                 || name == "FeolsResult"
                 || name == "IvResult"
@@ -465,14 +699,131 @@ pub(crate) fn native_tidy(
                     return Ok(params.clone());
                 }
             }
-            let method_key = format!("{}::tidy", name);
-            let fn_val = interp.env.get(&method_key).ok_or_else(|| {
-                Diagnostic::statistical_error(
-                    "S0200",
-                    format!("Method `tidy()` is not implemented for struct `{}`", name),
-                )
-            })?;
-            interp.call_value(fn_val, vec![model_val.clone()])
+            if let Some(tidy_df) = fields.get("tidy").or_else(|| fields.get("parameters")) {
+                if matches!(tidy_df, Value::DataFrame { .. }) {
+                    return Ok(tidy_df.clone());
+                }
+            }
+
+            // 3. Dynamic harvest of vector parameter estimates
+            let coefs_opt = fields
+                .get("coefficients")
+                .or_else(|| fields.get("estimates"))
+                .or_else(|| fields.get("betas"))
+                .or_else(|| fields.get("ar_coeffs"));
+            if let Some(Value::Vector(coef_vec)) = coefs_opt {
+                let n_terms = coef_vec.len();
+                let terms_vec: Vec<Value> = if let Some(Value::Vector(terms)) =
+                    fields.get("covariates").or_else(|| fields.get("terms"))
+                {
+                    terms.iter().cloned().collect()
+                } else {
+                    (0..n_terms)
+                        .map(|i| Value::String(format!("x{i}")))
+                        .collect()
+                };
+
+                let estimates_vec: Vec<Value> = coef_vec.iter().cloned().collect();
+                let se_vec: Vec<Value> = if let Some(Value::Vector(ses)) =
+                    fields.get("std_errors").or_else(|| fields.get("std_err"))
+                {
+                    ses.iter().cloned().collect()
+                } else {
+                    vec![Value::NA(None); n_terms]
+                };
+                let stat_vec: Vec<Value> = if let Some(Value::Vector(stats)) = fields
+                    .get("z_stats")
+                    .or_else(|| fields.get("t_stats"))
+                    .or_else(|| fields.get("statistics"))
+                {
+                    stats.iter().cloned().collect()
+                } else {
+                    vec![Value::NA(None); n_terms]
+                };
+                let p_vec: Vec<Value> = if let Some(Value::Vector(ps)) =
+                    fields.get("p_values").or_else(|| fields.get("p_value"))
+                {
+                    ps.iter().cloned().collect()
+                } else {
+                    vec![Value::NA(None); n_terms]
+                };
+
+                let mut cols = vec![
+                    ("term".to_string(), terms_vec),
+                    ("estimate".to_string(), estimates_vec),
+                    ("std_error".to_string(), se_vec),
+                    ("statistic".to_string(), stat_vec),
+                    ("p_value".to_string(), p_vec),
+                ];
+                if let Some(Value::Vector(lows)) =
+                    fields.get("conf_low").or_else(|| fields.get("hr_ci_lower"))
+                {
+                    cols.push(("conf_low".to_string(), lows.iter().cloned().collect()));
+                }
+                if let Some(Value::Vector(highs)) =
+                    fields.get("conf_high").or_else(|| fields.get("hr_ci_upper"))
+                {
+                    cols.push(("conf_high".to_string(), highs.iter().cloned().collect()));
+                }
+
+                let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&cols)?;
+                return Ok(Value::DataFrame { frame, na_reasons });
+            }
+
+            // 4. Dynamic harvest of single scalar focal estimate (e.g. DiD, Univariate Cox)
+            let single_est_opt = fields
+                .get("att")
+                .or_else(|| fields.get("beta"))
+                .or_else(|| fields.get("estimate"));
+            if let Some(est_val) = single_est_opt {
+                if est_val.as_f64().is_some() {
+                    let term_name = fields
+                        .get("term")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| name.clone());
+                    let se_val = fields
+                        .get("std_error")
+                        .or_else(|| fields.get("std_err"))
+                        .cloned()
+                        .unwrap_or(Value::NA(None));
+                    let stat_val = fields
+                        .get("t_stat")
+                        .or_else(|| fields.get("z_stat"))
+                        .or_else(|| fields.get("statistic"))
+                        .cloned()
+                        .unwrap_or(Value::NA(None));
+                    let p_val = fields.get("p_value").cloned().unwrap_or(Value::NA(None));
+
+                    let mut cols = vec![
+                        ("term".to_string(), vec![Value::String(term_name)]),
+                        ("estimate".to_string(), vec![est_val.clone()]),
+                        ("std_error".to_string(), vec![se_val]),
+                        ("statistic".to_string(), vec![stat_val]),
+                        ("p_value".to_string(), vec![p_val]),
+                    ];
+                    if let Some(low) = fields
+                        .get("conf_low")
+                        .or_else(|| fields.get("hr_ci_lower"))
+                    {
+                        cols.push(("conf_low".to_string(), vec![low.clone()]));
+                    }
+                    if let Some(high) = fields
+                        .get("conf_high")
+                        .or_else(|| fields.get("hr_ci_upper"))
+                    {
+                        cols.push(("conf_high".to_string(), vec![high.clone()]));
+                    }
+
+                    let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&cols)?;
+                    return Ok(Value::DataFrame { frame, na_reasons });
+                }
+            }
+
+            Err(Diagnostic::statistical_error(
+                "E0501",
+                format!("Model or struct `{name}` does not implement or provide parameter estimates for `tidy()`"),
+            ))
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
@@ -497,6 +848,13 @@ pub(crate) fn native_glance(
         Value::GlmFit(m) => Ok(m.glance()),
         Value::GmmFit(m) => Ok(m.glance()),
         Value::Struct { name, fields } => {
+            // 1. Explicit method on struct: {name}::glance
+            let method_key = format!("{}::glance", name);
+            if let Some(fn_val) = interp.env.get(&method_key) {
+                return interp.call_value(fn_val, vec![model_val.clone()]);
+            }
+
+            // 2. Builtin special cases for known internal structs
             if name == "SemResult" {
                 let columns: Vec<(String, Vec<Value>)> = vec![
                     (
@@ -528,6 +886,10 @@ pub(crate) fn native_glance(
                         vec![fields.get("srmr").cloned().unwrap_or(Value::F64(0.0))],
                     ),
                     (
+                        "nobs".to_string(),
+                        vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
                         "n_obs".to_string(),
                         vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))],
                     ),
@@ -538,12 +900,20 @@ pub(crate) fn native_glance(
             if name == "FeolsResult" {
                 let columns: Vec<(String, Vec<Value>)> = vec![
                     (
+                        "r_squared".to_string(),
+                        vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
                         "r2".to_string(),
                         vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))],
                     ),
                     (
                         "r2_within".to_string(),
                         vec![fields.get("r2_within").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
+                        "nobs".to_string(),
+                        vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))],
                     ),
                     (
                         "n_obs".to_string(),
@@ -573,8 +943,16 @@ pub(crate) fn native_glance(
             if name == "IvResult" {
                 let columns: Vec<(String, Vec<Value>)> = vec![
                     (
+                        "r_squared".to_string(),
+                        vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
                         "r2".to_string(),
                         vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))],
+                    ),
+                    (
+                        "nobs".to_string(),
+                        vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))],
                     ),
                     (
                         "n_obs".to_string(),
@@ -639,6 +1017,10 @@ pub(crate) fn native_glance(
                         vec![fields.get("lambda").cloned().unwrap_or(Value::F64(0.0))],
                     ),
                     (
+                        "nobs".to_string(),
+                        vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
                         "n_obs".to_string(),
                         vec![fields.get("n_obs").cloned().unwrap_or(Value::I64(0))],
                     ),
@@ -649,6 +1031,10 @@ pub(crate) fn native_glance(
                     (
                         "n_selected".to_string(),
                         vec![fields.get("n_selected").cloned().unwrap_or(Value::I64(0))],
+                    ),
+                    (
+                        "r_squared".to_string(),
+                        vec![fields.get("r2").cloned().unwrap_or(Value::F64(0.0))],
                     ),
                     (
                         "r2".to_string(),
@@ -662,14 +1048,74 @@ pub(crate) fn native_glance(
                 let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&columns)?;
                 return Ok(Value::DataFrame { frame, na_reasons });
             }
-            let method_key = format!("{}::glance", name);
-            let fn_val = interp.env.get(&method_key).ok_or_else(|| {
-                Diagnostic::statistical_error(
-                    "S0200",
-                    format!("Method `glance()` is not implemented for struct `{}`", name),
-                )
-            })?;
-            interp.call_value(fn_val, vec![model_val.clone()])
+
+            // 3. Dynamic harvest of scalar metrics across any model/struct
+            let mut cols: Vec<(String, Vec<Value>)> = Vec::new();
+            let mut extracted = std::collections::BTreeSet::new();
+
+            let priority_candidates = [
+                ("nobs", &["nobs", "n_obs", "n", "sample_size"][..]),
+                (
+                    "r_squared",
+                    &[
+                        "r_squared",
+                        "r2",
+                        "pseudo_r_squared",
+                        "pseudo_r2",
+                        "r_sq",
+                    ][..],
+                ),
+                (
+                    "adj_r_squared",
+                    &["adj_r_squared", "adj_r2", "r2_adj"][..],
+                ),
+                (
+                    "log_lik",
+                    &["log_lik", "log_likelihood", "log_partial_lik", "loglik"][..],
+                ),
+                ("aic", &["aic", "AIC"][..]),
+                ("bic", &["bic", "BIC"][..]),
+                ("sigma", &["sigma", "sigma2", "residual_se"][..]),
+                ("deviance", &["deviance"][..]),
+                ("null_deviance", &["null_deviance"][..]),
+                ("chisq", &["chisq"][..]),
+                ("df", &["df"][..]),
+                ("p_value", &["p_value"][..]),
+                ("statistic", &["statistic", "f_stat", "f_statistic"][..]),
+                ("converged", &["converged"][..]),
+                ("iterations", &["iterations"][..]),
+            ];
+
+            for (canonical_name, aliases) in &priority_candidates {
+                for alias in *aliases {
+                    if let Some(val) = fields.get(*alias) {
+                        if is_scalar_value(val) && !extracted.contains(*canonical_name) {
+                            cols.push((canonical_name.to_string(), vec![val.clone()]));
+                            extracted.insert(canonical_name.to_string());
+                            extracted.insert(alias.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Also harvest remaining scalar fields in struct
+            for (field_name, field_val) in fields.iter() {
+                if !extracted.contains(field_name) && is_scalar_value(field_val) {
+                    cols.push((field_name.clone(), vec![field_val.clone()]));
+                    extracted.insert(field_name.clone());
+                }
+            }
+
+            if cols.is_empty() {
+                return Err(Diagnostic::statistical_error(
+                    "E0501",
+                    format!("Model or struct `{name}` does not implement or provide metrics for `glance()`"),
+                ));
+            }
+
+            let (frame, na_reasons) = crate::polars_bridge::build_dataframe(&cols)?;
+            Ok(Value::DataFrame { frame, na_reasons })
         }
         other => Err(Diagnostic::statistical_error(
             "S0200",
@@ -685,10 +1131,26 @@ pub(crate) fn native_augment(
     interp: &mut crate::eval::Interpreter,
     args: Vec<Value>,
 ) -> Result<Value, Diagnostic> {
-    if args.len() < 2 {
+    let model_val = args.first().ok_or_else(|| {
+        Diagnostic::compute_error(
+            "C0201",
+            "`augment()` requires a ModelFit or Struct: `augment(model, df)`",
+        )
+    })?;
+
+    if args.len() == 1 {
+        if let Value::Struct { name, fields } = model_val {
+            if let Some(aug) = fields.get("augmented") {
+                return Ok(aug.clone());
+            }
+            let method_key = format!("{}::augment", name);
+            if let Some(fn_val) = interp.env.get(&method_key) {
+                return interp.call_value(fn_val, args);
+            }
+        }
         return Err(Diagnostic::compute_error(
             "C0201",
-            "`augment()` requires ModelFit and DataFrame arguments: `augment(model, df)`",
+            "`augment()` requires a DataFrame argument: `augment(model, df)`",
         ));
     }
 
@@ -704,9 +1166,41 @@ pub(crate) fn native_augment(
             if let Some(fn_val) = interp.env.get(&method_key) {
                 return interp.call_value(fn_val, args);
             }
+            if let Value::DataFrame { frame, na_reasons } = &args[1] {
+                let mut new_frame = frame.clone();
+                let mut augmented_any = false;
+                if let Some(Value::Vector(vec_data)) =
+                    fields.get("fitted").or_else(|| fields.get("fitted_values"))
+                {
+                    let f64s: Vec<Option<f64>> = vec_data.iter().map(|v| v.as_f64()).collect();
+                    if f64s.len() == frame.height() {
+                        new_frame
+                            .with_column(crate::polars_bridge::f64_opt_column(".fitted", f64s))
+                            .map_err(|e| Diagnostic::compute_error("C0210", format!("{e}")))?;
+                        augmented_any = true;
+                    }
+                }
+                if let Some(Value::Vector(vec_data)) =
+                    fields.get("residuals").or_else(|| fields.get("resid"))
+                {
+                    let f64s: Vec<Option<f64>> = vec_data.iter().map(|v| v.as_f64()).collect();
+                    if f64s.len() == frame.height() {
+                        new_frame
+                            .with_column(crate::polars_bridge::f64_opt_column(".resid", f64s))
+                            .map_err(|e| Diagnostic::compute_error("C0210", format!("{e}")))?;
+                        augmented_any = true;
+                    }
+                }
+                if augmented_any {
+                    return Ok(Value::DataFrame {
+                        frame: new_frame,
+                        na_reasons: std::sync::Arc::clone(na_reasons),
+                    });
+                }
+            }
             Err(Diagnostic::statistical_error(
-                "S0200",
-                format!("`augment()` is not implemented for struct `{}`", name),
+                "E0501",
+                format!("Model or struct `{name}` does not implement or provide data for `augment()`"),
             ))
         }
         other => Err(Diagnostic::statistical_error(
@@ -770,7 +1264,10 @@ pub(crate) fn native_predict(
     }
 }
 
-pub(crate) fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_residuals(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`residuals()` requires a ModelFit or Struct")
     })?;
@@ -779,12 +1276,26 @@ pub(crate) fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
         Value::ModelFit(m) => Ok(Value::Vector(VectorData::from_f64(m.residuals.clone()))),
         Value::GlmFit(m) => Ok(Value::Vector(VectorData::from_f64(m.residuals.clone()))),
         Value::Struct { name, fields } => {
-            if let Some(res) = fields.get("residuals") {
-                return Ok(res.clone());
+            for alias in &["residuals", "resid", "resids", "errors"] {
+                if let Some(val) = fields.get(*alias) {
+                    match val {
+                        Value::Vector(_) => return Ok(val.clone()),
+                        Value::F64(f) => return Ok(Value::Vector(VectorData::from_f64(vec![*f]))),
+                        _ => return Ok(val.clone()),
+                    }
+                }
+            }
+            let method_key = format!("{}::residuals", name);
+            if let Some(fn_val) = interp.env.get(&method_key) {
+                return interp.call_value(fn_val, vec![model_val.clone()]);
+            }
+            let method_key2 = format!("{}::resid", name);
+            if let Some(fn_val) = interp.env.get(&method_key2) {
+                return interp.call_value(fn_val, vec![model_val.clone()]);
             }
             Err(Diagnostic::statistical_error(
-                "S0200",
-                format!("`residuals()` is not supported for struct `{}`", name),
+                "E0502",
+                format!("Model or struct `{name}` does not have capability `residuals`"),
             ))
         }
         other => Err(Diagnostic::statistical_error(
@@ -797,26 +1308,56 @@ pub(crate) fn native_residuals(args: Vec<Value>) -> Result<Value, Diagnostic> {
     }
 }
 
-pub(crate) fn native_coef(args: Vec<Value>) -> Result<Value, Diagnostic> {
+pub(crate) fn native_coef(
+    interp: &mut crate::eval::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, Diagnostic> {
     let model_val = args.first().ok_or_else(|| {
         Diagnostic::compute_error("C0201", "`coef()` requires a ModelFit or Struct")
     })?;
 
     match model_val {
-        Value::ModelFit(m) => Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone()))),
-        Value::GlmFit(m) => Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone()))),
+        Value::ModelFit(m) => Ok(Value::Vector(VectorData::from_f64(
+            m.coefficients.clone(),
+        ))),
+        Value::GlmFit(m) => Ok(Value::Vector(VectorData::from_f64(
+            m.coefficients.clone(),
+        ))),
         Value::GmmFit(m) => Ok(Value::Matrix {
             rows: m.k,
             cols: m.dim,
             data: std::sync::Arc::new(m.means.clone()),
         }),
         Value::Struct { name, fields } => {
-            if let Some(c) = fields.get("coefficients") {
-                return Ok(c.clone());
+            for alias in &["coefficients", "betas", "ar_coeffs", "coefs", "coef"] {
+                if let Some(val) = fields.get(*alias) {
+                    match val {
+                        Value::Vector(_) | Value::Matrix { .. } => return Ok(val.clone()),
+                        Value::F64(f) => return Ok(Value::Vector(VectorData::from_f64(vec![*f]))),
+                        _ => return Ok(val.clone()),
+                    }
+                }
+            }
+            for alias in &["beta", "att", "estimate"] {
+                if let Some(val) = fields.get(*alias) {
+                    match val {
+                        Value::Vector(_) | Value::Matrix { .. } => return Ok(val.clone()),
+                        Value::F64(f) => return Ok(Value::Vector(VectorData::from_f64(vec![*f]))),
+                        _ => return Ok(val.clone()),
+                    }
+                }
+            }
+            let method_key = format!("{}::coef", name);
+            if let Some(fn_val) = interp.env.get(&method_key) {
+                return interp.call_value(fn_val, vec![model_val.clone()]);
+            }
+            let method_key2 = format!("{}::coefficients", name);
+            if let Some(fn_val) = interp.env.get(&method_key2) {
+                return interp.call_value(fn_val, vec![model_val.clone()]);
             }
             Err(Diagnostic::statistical_error(
-                "S0200",
-                format!("`coef()` is not supported for struct `{}`", name),
+                "E0502",
+                format!("Model or struct `{name}` does not have capability `coef`"),
             ))
         }
         other => Err(Diagnostic::statistical_error(

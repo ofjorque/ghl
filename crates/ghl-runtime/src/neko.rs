@@ -706,9 +706,12 @@ impl FittedModel {
                 "residual_se".to_string(),
                 vec![Value::F64(self.residual_se)],
             ),
+            ("sigma".to_string(), vec![Value::F64(self.residual_se)]),
             ("f_statistic".to_string(), vec![Value::F64(self.f_stat)]),
+            ("log_lik".to_string(), vec![Value::F64(self.log_likelihood)]),
             ("aic".to_string(), vec![Value::F64(self.aic)]),
             ("bic".to_string(), vec![Value::F64(self.bic)]),
+            ("nobs".to_string(), vec![Value::I64(self.n_obs as i64)]),
             ("n_obs".to_string(), vec![Value::I64(self.n_obs as i64)]),
             (
                 "dropped_n".to_string(),

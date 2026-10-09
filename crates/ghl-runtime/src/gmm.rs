@@ -381,10 +381,12 @@ impl FittedGmm {
                 "log_likelihood".to_string(),
                 vec![Value::F64(self.log_likelihood)],
             ),
+            ("log_lik".to_string(), vec![Value::F64(self.log_likelihood)]),
             ("aic".to_string(), vec![Value::F64(self.aic)]),
             ("bic".to_string(), vec![Value::F64(self.bic)]),
             ("k".to_string(), vec![Value::I64(self.k as i64)]),
             ("dim".to_string(), vec![Value::I64(self.dim as i64)]),
+            ("nobs".to_string(), vec![Value::I64(self.n_obs as i64)]),
             ("n_obs".to_string(), vec![Value::I64(self.n_obs as i64)]),
             (
                 "iterations".to_string(),

@@ -558,6 +558,9 @@ impl FittedGlm {
 
     pub fn glance(&self) -> Value {
         let cols = vec![
+            ("nobs".to_string(), vec![Value::I64(self.n_obs as i64)]),
+            ("n_obs".to_string(), vec![Value::I64(self.n_obs as i64)]),
+            ("log_lik".to_string(), vec![Value::F64(-0.5 * self.deviance)]),
             ("deviance".to_string(), vec![Value::F64(self.deviance)]),
             (
                 "null_deviance".to_string(),
@@ -567,9 +570,12 @@ impl FittedGlm {
                 "pseudo_r_squared".to_string(),
                 vec![Value::F64(self.pseudo_r_squared)],
             ),
+            (
+                "r_squared".to_string(),
+                vec![Value::F64(self.pseudo_r_squared)],
+            ),
             ("aic".to_string(), vec![Value::F64(self.aic)]),
             ("bic".to_string(), vec![Value::F64(self.bic)]),
-            ("n_obs".to_string(), vec![Value::I64(self.n_obs as i64)]),
             (
                 "dropped_n".to_string(),
                 vec![Value::I64(self.dropped_n as i64)],

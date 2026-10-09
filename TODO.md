@@ -188,7 +188,7 @@ Puntos detectados durante el uso interactivo del REPL para pulir:
 
 Backlog técnico para consolidar la ergonomía de modelado estadístico, extracción de parámetros en DataFrames (`broom` para GHL) y visualización científica estándar APA:
 
-- [ ] **Motor del Protocolo Tidy Universal y Capacidades NEKO — [#15](https://github.com/ofjorque/ghl/issues/15):**
+- [x] **Motor del Protocolo Tidy Universal y Capacidades NEKO — [#15](https://github.com/ofjorque/ghl/issues/15):**
   - Inyección en el preludio estándar de funciones accesoras directas de métricas: `aic(m)`, `bic(m)`, `r_squared(m)`, `adj_r_squared(m)`, `log_lik(m)`, `nobs(m)` y `fitted(m)`.
   - Inyección en el preludio de verbos de proyección: `tidy(m, conf_int = true, conf_level = 0.95)`, `glance(m)`, `augment(m, data = None)` y `plot(m, ...)`.
   - Despacho polimórfico por introspección dinámica de capacidades en structs de paquetes: detección automática de campos (ej. `.aic`, `.r_squared`) o métodos asociados sin acoplamiento hardcodeado.
