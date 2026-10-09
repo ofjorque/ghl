@@ -290,5 +290,31 @@ if !sens_res.placebo_passed {
 println("Testing Grammar of Graphics Plotting Generators...");
 let p_es = plot_event_study_trajectory(es_res);
 let p_scm = plot_synthetic_trajectory(scm_res);
+let p_did = plot_did_2x2(did_res);
+
+// =========================================================================
+// 9. Universal Tidy Ecosystem & APA Visualization (Issue #16)
+// =========================================================================
+println("Testing Universal Tidy and APA plotting for ghl_causal...");
+let df_es_tidy = es_res |> tidy();
+if length(df_es_tidy.period) != length(es_res.estimates) {
+    panic("EventStudy tidy must match estimates count");
+}
+let df_es_glance = es_res |> glance();
+if length(df_es_glance.nobs) != 1 {
+    panic("EventStudy glance must have 1 row");
+}
+let p_es_method = es_res |> plot();
+
+let df_did_tidy = did_res |> tidy();
+if length(df_did_tidy.term) != 1 {
+    panic("DiD tidy must have 1 row");
+}
+let df_did_glance = did_res |> glance();
+if length(df_did_glance.nobs) != 1 {
+    panic("DiD glance must have 1 row");
+}
+let p_did_method = did_res |> plot();
 
 println("All comprehensive ghl_causal tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
+

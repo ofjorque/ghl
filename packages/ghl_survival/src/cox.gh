@@ -191,3 +191,40 @@ fn render_cox_cockpit(cox: CoxResult) {
     let p = cox_cockpit(cox);
     show_cockpit(p);
 }
+
+impl CoxResult {
+    fn tidy(self) -> DataFrame {
+        dataframe {
+            term: ["x"],
+            estimate: [self.beta],
+            hazard_ratio: [self.hazard_ratio],
+            std_error: [self.std_err],
+            statistic: [self.z_stat],
+            p_value: [self.p_value],
+            conf_low: [self.hr_ci_lower],
+            conf_high: [self.hr_ci_upper]
+        }
+    }
+
+    fn glance(self) -> DataFrame {
+        dataframe {
+            log_lik: [self.log_partial_lik],
+            iterations: [self.iterations],
+            converged: [self.converged]
+        }
+    }
+
+    fn plot(self) -> Plot {
+        let df_hr = dataframe {
+            covariate: ["x"],
+            hazard_ratio: [self.hazard_ratio],
+            ci_lower: [self.hr_ci_lower],
+            ci_upper: [self.hr_ci_upper]
+        };
+        df_hr |> plot(aes(col("covariate"), col("hazard_ratio")))
+              |> geom_point()
+              |> labs("Cox Proportional Hazards: Hazard Ratio (95% CI)")
+              |> theme_apa()
+    }
+}
+

@@ -369,7 +369,10 @@ impl RuntimeEnv {
         env.set("bic".into(), Value::NativeFnCtx(native_bic));
         env.set("r_squared".into(), Value::NativeFnCtx(native_r_squared));
         env.set("r2".into(), Value::NativeFnCtx(native_r_squared));
-        env.set("adj_r_squared".into(), Value::NativeFnCtx(native_adj_r_squared));
+        env.set(
+            "adj_r_squared".into(),
+            Value::NativeFnCtx(native_adj_r_squared),
+        );
         env.set("adj_r2".into(), Value::NativeFnCtx(native_adj_r_squared));
         env.set("log_lik".into(), Value::NativeFnCtx(native_log_lik));
         env.set("log_likelihood".into(), Value::NativeFnCtx(native_log_lik));
@@ -535,6 +538,7 @@ impl RuntimeEnv {
             Value::NativeFn(native_theme_classic),
         );
         env.set("theme_dark".into(), Value::NativeFn(native_theme_dark));
+        env.set("theme_apa".into(), Value::NativeFn(native_theme_apa));
         env.set("beside".into(), Value::NativeFn(native_beside));
         env.set("stack".into(), Value::NativeFn(native_stack));
 

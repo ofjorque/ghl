@@ -262,6 +262,7 @@ impl NativeRenderer {
                 RGBColor(50, 50, 60),
             ),
             PlotTheme::Minimal => (WHITE, RGBColor(35, 35, 40), RGBColor(230, 230, 235)),
+            PlotTheme::Apa => (WHITE, RGBColor(20, 20, 20), RGBColor(20, 20, 20)),
             _ => (WHITE, BLACK, RGBColor(210, 210, 215)),
         };
 
@@ -376,16 +377,21 @@ impl NativeRenderer {
             .build_cartesian_2d(x_range, y_range)
             .map_err(|e| format!("Chart build error: {e}"))?;
 
-        chart
-            .configure_mesh()
-            .x_desc(x_label)
+        let mut mesh = chart.configure_mesh();
+        mesh.x_desc(x_label)
             .y_desc(y_label)
             .axis_desc_style((font_name, 15).into_font().color(&text_color))
-            .label_style((font_name, 12).into_font().color(&text_color))
-            .light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
-            .bold_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
-            .draw()
-            .map_err(|e| format!("Mesh draw error: {e}"))?;
+            .label_style((font_name, 12).into_font().color(&text_color));
+
+        if spec.theme == PlotTheme::Apa {
+            mesh.axis_style(ShapeStyle::from(&text_color).stroke_width(1))
+                .light_line_style(ShapeStyle::from(&plotters::style::colors::TRANSPARENT))
+                .bold_line_style(ShapeStyle::from(&plotters::style::colors::TRANSPARENT));
+        } else {
+            mesh.light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
+                .bold_line_style(ShapeStyle::from(&grid_color).stroke_width(1));
+        }
+        mesh.draw().map_err(|e| format!("Mesh draw error: {e}"))?;
 
         let global_has_points = spec.layers.is_empty()
             || spec
@@ -733,14 +739,16 @@ impl NativeRenderer {
                 .iter()
                 .any(|l| matches!(l.kind, GeomKind::Smooth { .. }) && l.data.is_some());
         if has_groups {
-            chart
-                .configure_series_labels()
-                .background_style(ShapeStyle::from(&bg_color).filled())
-                .border_style(ShapeStyle::from(&grid_color).stroke_width(1))
+            let mut leg = chart.configure_series_labels();
+            leg.background_style(ShapeStyle::from(&bg_color).filled())
                 .label_font((font_name, 12).into_font().color(&text_color))
-                .position(SeriesLabelPosition::UpperRight)
-                .draw()
-                .map_err(|e| format!("Legend draw error: {e}"))?;
+                .position(SeriesLabelPosition::UpperRight);
+            if spec.theme == PlotTheme::Apa {
+                leg.border_style(ShapeStyle::from(&plotters::style::colors::TRANSPARENT));
+            } else {
+                leg.border_style(ShapeStyle::from(&grid_color).stroke_width(1));
+            }
+            leg.draw().map_err(|e| format!("Legend draw error: {e}"))?;
         }
 
         Ok(())
@@ -763,6 +771,7 @@ impl NativeRenderer {
 
         let (text_color, grid_color) = match spec.theme {
             PlotTheme::Dark => (RGBColor(240, 240, 245), RGBColor(50, 50, 60)),
+            PlotTheme::Apa => (RGBColor(20, 20, 20), RGBColor(20, 20, 20)),
             _ => (BLACK, RGBColor(210, 210, 215)),
         };
 
@@ -779,15 +788,19 @@ impl NativeRenderer {
             .build_cartesian_2d(min_x..(max_x + bin_width * 0.05), 0u32..(max_count + 1))
             .map_err(|e| format!("Chart build error: {e}"))?;
 
-        chart
-            .configure_mesh()
-            .x_desc(x_label)
+        let mut mesh = chart.configure_mesh();
+        mesh.x_desc(x_label)
             .y_desc(y_label)
             .axis_desc_style((font_name, 15).into_font().color(&text_color))
-            .label_style((font_name, 12).into_font().color(&text_color))
-            .light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
-            .draw()
-            .map_err(|e| format!("Mesh draw error: {e}"))?;
+            .label_style((font_name, 12).into_font().color(&text_color));
+        if spec.theme == PlotTheme::Apa {
+            mesh.axis_style(ShapeStyle::from(&text_color).stroke_width(1))
+                .light_line_style(ShapeStyle::from(&plotters::style::colors::TRANSPARENT))
+                .bold_line_style(ShapeStyle::from(&plotters::style::colors::TRANSPARENT));
+        } else {
+            mesh.light_line_style(ShapeStyle::from(&grid_color).stroke_width(1));
+        }
+        mesh.draw().map_err(|e| format!("Mesh draw error: {e}"))?;
 
         let bar_fill = RGBColor(79, 110, 242);
         let bar_stroke = RGBColor(30, 60, 180);
@@ -825,6 +838,7 @@ impl NativeRenderer {
                     RGBColor(240, 240, 245),
                     RGBColor(50, 50, 60),
                 ),
+                PlotTheme::Apa => (WHITE, RGBColor(20, 20, 20), RGBColor(20, 20, 20)),
                 _ => (WHITE, BLACK, RGBColor(210, 210, 215)),
             };
 
@@ -861,15 +875,19 @@ impl NativeRenderer {
                 .build_cartesian_2d(0.0..(k as f64 + 1.0), y_min..y_max)
                 .map_err(|e| format!("Chart build error: {e}"))?;
 
-            chart
-                .configure_mesh()
-                .x_desc(x_label)
+            let mut mesh = chart.configure_mesh();
+            mesh.x_desc(x_label)
                 .y_desc(y_label)
                 .axis_desc_style((font_name, 15).into_font().color(&text_color))
-                .label_style((font_name, 12).into_font().color(&text_color))
-                .light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
-                .draw()
-                .map_err(|e| format!("Mesh draw error: {e}"))?;
+                .label_style((font_name, 12).into_font().color(&text_color));
+            if spec.theme == PlotTheme::Apa {
+                mesh.axis_style(ShapeStyle::from(&text_color).stroke_width(1))
+                    .light_line_style(ShapeStyle::from(&plotters::style::colors::TRANSPARENT))
+                    .bold_line_style(ShapeStyle::from(&plotters::style::colors::TRANSPARENT));
+            } else {
+                mesh.light_line_style(ShapeStyle::from(&grid_color).stroke_width(1));
+            }
+            mesh.draw().map_err(|e| format!("Mesh draw error: {e}"))?;
 
             for (idx, (cat_name, stats)) in multi_stats.iter().enumerate() {
                 let center_x = (idx + 1) as f64;
@@ -987,6 +1005,7 @@ impl NativeRenderer {
 
         let (text_color, grid_color) = match spec.theme {
             PlotTheme::Dark => (RGBColor(240, 240, 245), RGBColor(50, 50, 60)),
+            PlotTheme::Apa => (RGBColor(20, 20, 20), RGBColor(20, 20, 20)),
             _ => (BLACK, RGBColor(210, 210, 215)),
         };
 
@@ -1007,14 +1026,18 @@ impl NativeRenderer {
             .build_cartesian_2d(0.0..2.0, y_min..y_max)
             .map_err(|e| format!("Chart build error: {e}"))?;
 
-        chart
-            .configure_mesh()
-            .y_desc(y_label)
+        let mut mesh = chart.configure_mesh();
+        mesh.y_desc(y_label)
             .axis_desc_style((font_name, 15).into_font().color(&text_color))
-            .label_style((font_name, 12).into_font().color(&text_color))
-            .light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
-            .draw()
-            .map_err(|e| format!("Mesh draw error: {e}"))?;
+            .label_style((font_name, 12).into_font().color(&text_color));
+        if spec.theme == PlotTheme::Apa {
+            mesh.axis_style(ShapeStyle::from(&text_color).stroke_width(1))
+                .light_line_style(ShapeStyle::from(&plotters::style::colors::TRANSPARENT))
+                .bold_line_style(ShapeStyle::from(&plotters::style::colors::TRANSPARENT));
+        } else {
+            mesh.light_line_style(ShapeStyle::from(&grid_color).stroke_width(1));
+        }
+        mesh.draw().map_err(|e| format!("Mesh draw error: {e}"))?;
 
         let center_x = 1.0;
         let half_w = 0.25;
@@ -1112,6 +1135,7 @@ impl NativeRenderer {
 
         let (text_color, grid_color) = match spec.theme {
             PlotTheme::Dark => (RGBColor(240, 240, 245), RGBColor(50, 50, 60)),
+            PlotTheme::Apa => (RGBColor(20, 20, 20), RGBColor(20, 20, 20)),
             _ => (BLACK, RGBColor(210, 210, 215)),
         };
 
@@ -1131,15 +1155,19 @@ impl NativeRenderer {
             .build_cartesian_2d(0.0..(n_cats as f64 + 1.0), 0u32..(max_count as u32 + 1))
             .map_err(|e| format!("Chart build error: {e}"))?;
 
-        chart
-            .configure_mesh()
-            .x_desc(x_label)
+        let mut mesh = chart.configure_mesh();
+        mesh.x_desc(x_label)
             .y_desc(y_label)
             .axis_desc_style((font_name, 15).into_font().color(&text_color))
-            .label_style((font_name, 12).into_font().color(&text_color))
-            .light_line_style(ShapeStyle::from(&grid_color).stroke_width(1))
-            .draw()
-            .map_err(|e| format!("Mesh draw error: {e}"))?;
+            .label_style((font_name, 12).into_font().color(&text_color));
+        if spec.theme == PlotTheme::Apa {
+            mesh.axis_style(ShapeStyle::from(&text_color).stroke_width(1))
+                .light_line_style(ShapeStyle::from(&plotters::style::colors::TRANSPARENT))
+                .bold_line_style(ShapeStyle::from(&plotters::style::colors::TRANSPARENT));
+        } else {
+            mesh.light_line_style(ShapeStyle::from(&grid_color).stroke_width(1));
+        }
+        mesh.draw().map_err(|e| format!("Mesh draw error: {e}"))?;
 
         let bar_half_w = 0.35;
         for (i, (_cat, &count)) in counts_map.iter().enumerate() {

@@ -198,7 +198,7 @@ Backlog técnico para consolidar la ergonomía de modelado estadístico, extracc
   - Soporte canónico para tuberías composicionales `fit |> tidy() |> filter(p_value < 0.05)`.
   - Suite de pruebas de integración en `crates/ghl-runtime/tests/eval_tidy_protocol.rs`.
 
-- [ ] **Tema Gráfico APA y Visualización en Paquetes Ancla (`ghl_survival`, `ghl_causal`) — [#16](https://github.com/ofjorque/ghl/issues/16):**
+- [x] **Tema Gráfico APA y Visualización en Paquetes Ancla (`ghl_survival`, `ghl_causal`) — [#16](https://github.com/ofjorque/ghl/issues/16):**
   - Implementación formal de `theme_apa()` en `crates/ghl-plot`: fondo neutro blanco, sin rejillas menores, ejes limpios y paleta accesible Okabe-Ito.
   - Separación entre interactivo (adaptable al IDE para no fatigar la vista) y exportación estricta a blanco/neutro APA en `.to_svg()`, `.to_png()` y Quarto.
   - Implementación de `.plot()` en `ghl_survival` para curvas Kaplan-Meier escalonadas con bandas de confianza Greenwood del 95% y censuras.

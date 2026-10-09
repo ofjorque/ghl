@@ -324,6 +324,7 @@ pub fn get_module_items(path: &[String]) -> Option<Vec<(String, Type)>> {
             ("theme_minimal".into(), any_fn()),
             ("theme_classic".into(), any_fn()),
             ("theme_dark".into(), any_fn()),
+            ("theme_apa".into(), any_fn()),
             ("beside".into(), any_fn_multi(2)),
             ("stack".into(), any_fn_multi(2)),
             ("labs".into(), any_fn()),

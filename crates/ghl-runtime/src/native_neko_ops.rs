@@ -635,12 +635,8 @@ pub(crate) fn native_fitted(
         )
     })?;
     match model_val {
-        Value::ModelFit(m) => Ok(Value::Vector(VectorData::from_f64(
-            m.fitted_values.clone(),
-        ))),
-        Value::GlmFit(m) => Ok(Value::Vector(VectorData::from_f64(
-            m.fitted_values.clone(),
-        ))),
+        Value::ModelFit(m) => Ok(Value::Vector(VectorData::from_f64(m.fitted_values.clone()))),
+        Value::GlmFit(m) => Ok(Value::Vector(VectorData::from_f64(m.fitted_values.clone()))),
         Value::Struct { name, fields } => {
             for alias in &["fitted", "fitted_values", "y_hat", "mu"] {
                 if let Some(val) = fields.get(*alias) {
@@ -760,8 +756,9 @@ pub(crate) fn native_tidy(
                 {
                     cols.push(("conf_low".to_string(), lows.iter().cloned().collect()));
                 }
-                if let Some(Value::Vector(highs)) =
-                    fields.get("conf_high").or_else(|| fields.get("hr_ci_upper"))
+                if let Some(Value::Vector(highs)) = fields
+                    .get("conf_high")
+                    .or_else(|| fields.get("hr_ci_upper"))
                 {
                     cols.push(("conf_high".to_string(), highs.iter().cloned().collect()));
                 }
@@ -802,9 +799,7 @@ pub(crate) fn native_tidy(
                         ("statistic".to_string(), vec![stat_val]),
                         ("p_value".to_string(), vec![p_val]),
                     ];
-                    if let Some(low) = fields
-                        .get("conf_low")
-                        .or_else(|| fields.get("hr_ci_lower"))
+                    if let Some(low) = fields.get("conf_low").or_else(|| fields.get("hr_ci_lower"))
                     {
                         cols.push(("conf_low".to_string(), vec![low.clone()]));
                     }
@@ -822,7 +817,9 @@ pub(crate) fn native_tidy(
 
             Err(Diagnostic::statistical_error(
                 "E0501",
-                format!("Model or struct `{name}` does not implement or provide parameter estimates for `tidy()`"),
+                format!(
+                    "Model or struct `{name}` does not implement or provide parameter estimates for `tidy()`"
+                ),
             ))
         }
         other => Err(Diagnostic::statistical_error(
@@ -1057,18 +1054,9 @@ pub(crate) fn native_glance(
                 ("nobs", &["nobs", "n_obs", "n", "sample_size"][..]),
                 (
                     "r_squared",
-                    &[
-                        "r_squared",
-                        "r2",
-                        "pseudo_r_squared",
-                        "pseudo_r2",
-                        "r_sq",
-                    ][..],
+                    &["r_squared", "r2", "pseudo_r_squared", "pseudo_r2", "r_sq"][..],
                 ),
-                (
-                    "adj_r_squared",
-                    &["adj_r_squared", "adj_r2", "r2_adj"][..],
-                ),
+                ("adj_r_squared", &["adj_r_squared", "adj_r2", "r2_adj"][..]),
                 (
                     "log_lik",
                     &["log_lik", "log_likelihood", "log_partial_lik", "loglik"][..],
@@ -1110,7 +1098,9 @@ pub(crate) fn native_glance(
             if cols.is_empty() {
                 return Err(Diagnostic::statistical_error(
                     "E0501",
-                    format!("Model or struct `{name}` does not implement or provide metrics for `glance()`"),
+                    format!(
+                        "Model or struct `{name}` does not implement or provide metrics for `glance()`"
+                    ),
                 ));
             }
 
@@ -1200,7 +1190,9 @@ pub(crate) fn native_augment(
             }
             Err(Diagnostic::statistical_error(
                 "E0501",
-                format!("Model or struct `{name}` does not implement or provide data for `augment()`"),
+                format!(
+                    "Model or struct `{name}` does not implement or provide data for `augment()`"
+                ),
             ))
         }
         other => Err(Diagnostic::statistical_error(
@@ -1317,12 +1309,8 @@ pub(crate) fn native_coef(
     })?;
 
     match model_val {
-        Value::ModelFit(m) => Ok(Value::Vector(VectorData::from_f64(
-            m.coefficients.clone(),
-        ))),
-        Value::GlmFit(m) => Ok(Value::Vector(VectorData::from_f64(
-            m.coefficients.clone(),
-        ))),
+        Value::ModelFit(m) => Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone()))),
+        Value::GlmFit(m) => Ok(Value::Vector(VectorData::from_f64(m.coefficients.clone()))),
         Value::GmmFit(m) => Ok(Value::Matrix {
             rows: m.k,
             cols: m.dim,

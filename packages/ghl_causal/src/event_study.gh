@@ -189,3 +189,53 @@ fn render_event_study_cockpit(res: EventStudyResult) {
     show_cockpit(p);
 }
 
+impl EventStudyResult {
+    fn tidy(self) -> DataFrame {
+        let mut periods = [];
+        let mut estimates = [];
+        let mut s_errors = [];
+        let mut t_stats = [];
+        let mut p_vals = [];
+        let mut c_lows = [];
+        let mut c_highs = [];
+        let mut leads = [];
+
+        for pt in self.estimates {
+            periods = append(periods, pt.period);
+            estimates = append(estimates, pt.estimate);
+            s_errors = append(s_errors, pt.std_error);
+            t_stats = append(t_stats, pt.t_stat);
+            p_vals = append(p_vals, pt.p_value);
+            c_lows = append(c_lows, pt.conf_low);
+            c_highs = append(c_highs, pt.conf_high);
+            leads = append(leads, pt.is_lead);
+        }
+
+        dataframe {
+            period: periods,
+            estimate: estimates,
+            std_error: s_errors,
+            statistic: t_stats,
+            p_value: p_vals,
+            conf_low: c_lows,
+            conf_high: c_highs,
+            is_lead: leads
+        }
+    }
+
+    fn glance(self) -> DataFrame {
+        let n_pts = length(self.estimates);
+        dataframe {
+            nobs: [self.n_obs],
+            baseline_period: [self.baseline_period],
+            pre_trends_pass: [self.pre_trends_pass],
+            n_periods: [n_pts]
+        }
+    }
+
+    fn plot(self) -> Plot {
+        plot_event_study_trajectory(self)
+    }
+}
+
+

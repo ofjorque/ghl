@@ -463,6 +463,7 @@ pub enum PlotTheme {
     Minimal,
     Classic,
     Dark,
+    Apa,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -806,6 +807,11 @@ impl PlotSpec {
 
     pub fn theme_dark(mut self) -> Self {
         self.theme = PlotTheme::Dark;
+        self
+    }
+
+    pub fn theme_apa(mut self) -> Self {
+        self.theme = PlotTheme::Apa;
         self
     }
 

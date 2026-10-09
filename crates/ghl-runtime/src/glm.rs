@@ -560,7 +560,10 @@ impl FittedGlm {
         let cols = vec![
             ("nobs".to_string(), vec![Value::I64(self.n_obs as i64)]),
             ("n_obs".to_string(), vec![Value::I64(self.n_obs as i64)]),
-            ("log_lik".to_string(), vec![Value::F64(-0.5 * self.deviance)]),
+            (
+                "log_lik".to_string(),
+                vec![Value::F64(-0.5 * self.deviance)],
+            ),
             ("deviance".to_string(), vec![Value::F64(self.deviance)]),
             (
                 "null_deviance".to_string(),

@@ -744,6 +744,14 @@ impl TypeEnv {
             false,
         );
         env.insert(
+            "theme_apa".into(),
+            Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Plot),
+            },
+            false,
+        );
+        env.insert(
             "beside".into(),
             Type::Function {
                 params: vec![Type::Any],

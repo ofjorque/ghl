@@ -169,4 +169,30 @@ println("Testing Complete Survival Pipeline Executive Audit...");
 let audit = audit_survival_pipeline(test_times, test_events, test_groups);
 render_survival_report(audit);
 
+// =========================================================================
+// 10. Universal Tidy Ecosystem & APA Visualization (Issue #16)
+// =========================================================================
+println("Testing Universal Tidy and APA plotting for ghl_survival...");
+let df_km_tidy = km |> tidy();
+if length(df_km_tidy.time) != length(km.timeline) {
+    panic("KM tidy must preserve timeline length");
+}
+let df_km_glance = km |> glance();
+if length(df_km_glance.nobs) != 1 {
+    panic("KM glance must have 1 row");
+}
+
+let p_km_default = km |> plot();
+let p_km_no_ci = km.plot_without_ci();
+let p_km_disp_false = plot(km, false);
+
+let df_cox_tidy = cox_uni |> tidy();
+let df_cox_glance = cox_uni |> glance();
+let p_cox = cox_uni |> plot();
+
+let df_cm_tidy = cox_multi |> tidy();
+let df_cm_glance = cox_multi |> glance();
+let p_cm = cox_multi |> plot();
+
 println("All ghl_survival tests passed successfully! /ᐠ˵- ⩊ -˵マ ✧");
+

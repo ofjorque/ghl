@@ -114,6 +114,24 @@ impl VegaRenderer {
                 "labelColor": "#e4e4e7",
                 "titleColor": "#f4f4f5"
             });
+        } else if spec.theme == PlotTheme::Apa {
+            config["background"] = json!("#ffffff");
+            config["axis"] = json!({
+                "grid": false,
+                "domainColor": "#141414",
+                "domainWidth": 1.0,
+                "tickColor": "#141414",
+                "labelColor": "#141414",
+                "titleColor": "#141414"
+            });
+            config["title"] = json!({
+                "color": "#141414",
+                "anchor": "start"
+            });
+            config["legend"] = json!({
+                "labelColor": "#141414",
+                "titleColor": "#141414"
+            });
         }
 
         if is_hist {

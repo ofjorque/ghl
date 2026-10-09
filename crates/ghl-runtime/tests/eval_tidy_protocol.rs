@@ -11,9 +11,11 @@ fn eval_expr(code: &str) -> (Value, Interpreter) {
 
 fn df_column_names(df_val: &Value) -> Vec<String> {
     match df_val {
-        Value::DataFrame { frame, .. } => {
-            frame.get_column_names().into_iter().map(|s| s.to_string()).collect()
-        }
+        Value::DataFrame { frame, .. } => frame
+            .get_column_names()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect(),
         _ => panic!("Expected DataFrame, got {:?}", df_val),
     }
 }
@@ -401,4 +403,130 @@ fn test_error_diagnostics_e0501_and_e0502() {
     let err4 = interp4.eval_program(&program4).unwrap_err();
     assert_eq!(err4.code, "E0501");
     assert!(err4.message.contains("EmptyModel"));
+}
+
+#[test]
+fn test_theme_apa_evaluation() {
+    let code = r#"
+        let df = dataframe {
+            x: [1.0, 2.0, 3.0],
+            y: [4.0, 5.0, 6.0]
+        };
+        let p1 = plot(df, aes(col("x"), col("y"))) |> geom_point() |> theme_apa();
+        let p2 = ggplot(df, aes("x", "y")) + geom_line() + theme_apa();
+    "#;
+    let (_, interp) = eval_expr(code);
+    let p1_val = interp.env.get("p1").expect("p1 plot");
+    if let Value::Plot(spec) = p1_val {
+        assert_eq!(spec.theme, ghl_plot::PlotTheme::Apa);
+    } else {
+        panic!("Expected Plot, got {:?}", p1_val);
+    }
+    let p2_val = interp.env.get("p2").expect("p2 plot");
+    if let Value::Plot(spec) = p2_val {
+        assert_eq!(spec.theme, ghl_plot::PlotTheme::Apa);
+    } else {
+        panic!("Expected Plot, got {:?}", p2_val);
+    }
+}
+
+#[test]
+fn test_survival_and_causal_tidy_and_plot_protocol() {
+    let code = r#"
+        struct MockKMResult {
+            timeline: Vector,
+            survival: Vector,
+            ci_lower: Vector,
+            ci_upper: Vector
+        }
+
+        impl MockKMResult {
+            fn tidy(self) -> DataFrame {
+                dataframe {
+                    time: self.timeline,
+                    survival: self.survival,
+                    conf_low: self.ci_lower,
+                    conf_high: self.ci_upper
+                }
+            }
+
+            fn glance(self) -> DataFrame {
+                dataframe {
+                    nobs: [100.0],
+                    terminal_survival: [0.75]
+                }
+            }
+
+            fn plot(self) -> Plot {
+                dataframe { time: self.timeline, survival: self.survival }
+                    |> plot(aes(col("time"), col("survival")))
+                    |> geom_line()
+                    |> labs("Kaplan-Meier with 95% Greenwood CI")
+                    |> theme_apa()
+            }
+
+            fn plot_without_ci(self) -> Plot {
+                dataframe { time: self.timeline, survival: self.survival }
+                    |> plot(aes(col("time"), col("survival")))
+                    |> geom_line()
+                    |> labs("Kaplan-Meier without CI")
+                    |> theme_apa()
+            }
+        }
+
+        let km = MockKMResult {
+            timeline: [0.0, 5.0, 10.0],
+            survival: [1.0, 0.9, 0.75],
+            ci_lower: [1.0, 0.8, 0.65],
+            ci_upper: [1.0, 0.98, 0.85]
+        };
+
+        let t_km = tidy(km);
+        let g_km = glance(km);
+        let p_km1 = plot(km);
+        let p_km2 = plot(km, ci = false);
+        let p_km3 = plot(km, false);
+    "#;
+    let (_, interp) = eval_expr(code);
+
+    let t = interp.env.get("t_km").expect("tidy km");
+    assert_eq!(df_row_count(&t), 3);
+    let cols_t = df_column_names(&t);
+    assert_eq!(cols_t, vec!["time", "survival", "conf_low", "conf_high"]);
+
+    let g = interp.env.get("g_km").expect("glance km");
+    assert_eq!(df_row_count(&g), 1);
+
+    let p1 = interp.env.get("p_km1").expect("p_km1");
+    if let Value::Plot(spec) = p1 {
+        assert_eq!(spec.theme, ghl_plot::PlotTheme::Apa);
+        assert_eq!(
+            spec.labels.title.as_deref(),
+            Some("Kaplan-Meier with 95% Greenwood CI")
+        );
+    } else {
+        panic!("Expected Plot, got {:?}", p1);
+    }
+
+    let p2 = interp.env.get("p_km2").expect("p_km2");
+    if let Value::Plot(spec) = p2 {
+        assert_eq!(spec.theme, ghl_plot::PlotTheme::Apa);
+        assert_eq!(
+            spec.labels.title.as_deref(),
+            Some("Kaplan-Meier without CI")
+        );
+    } else {
+        panic!("Expected Plot, got {:?}", p2);
+    }
+
+    let p3 = interp.env.get("p_km3").expect("p_km3");
+    if let Value::Plot(spec) = p3 {
+        assert_eq!(spec.theme, ghl_plot::PlotTheme::Apa);
+        assert_eq!(
+            spec.labels.title.as_deref(),
+            Some("Kaplan-Meier without CI")
+        );
+    } else {
+        panic!("Expected Plot, got {:?}", p3);
+    }
 }

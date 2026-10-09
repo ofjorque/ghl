@@ -101,6 +101,19 @@ pub(crate) fn native_plot_dispatch(
     if let Some(first) = args.first() {
         match first {
             Value::Struct { name, fields } => {
+                let disable_ci = args.iter().skip(1).any(|arg| match arg {
+                    Value::Bool(b) => !*b,
+                    Value::NamedArg(k, v) if k == "ci" || k == "show_ci" || k == "conf_int" => {
+                        matches!(**v, Value::Bool(false))
+                    }
+                    _ => false,
+                });
+                if disable_ci {
+                    let without_ci_key = format!("{}::plot_without_ci", name);
+                    if let Some(fn_val) = interp.env.get(&without_ci_key) {
+                        return interp.call_value(fn_val, vec![args[0].clone()]);
+                    }
+                }
                 let method_key = format!("{}::plot", name);
                 if let Some(fn_val) = interp.env.get(&method_key) {
                     return interp.call_value(fn_val, args);
@@ -882,6 +895,7 @@ pub(crate) fn native_theme(args: Vec<Value>) -> Result<Value, Diagnostic> {
                         "minimal" => theme_style = Some(ghl_plot::PlotTheme::Minimal),
                         "classic" => theme_style = Some(ghl_plot::PlotTheme::Classic),
                         "dark" => theme_style = Some(ghl_plot::PlotTheme::Dark),
+                        "apa" => theme_style = Some(ghl_plot::PlotTheme::Apa),
                         "default" => theme_style = Some(ghl_plot::PlotTheme::Default),
                         _ => {}
                     }
@@ -899,6 +913,7 @@ pub(crate) fn native_theme(args: Vec<Value>) -> Result<Value, Diagnostic> {
                 "minimal" => theme_style = Some(ghl_plot::PlotTheme::Minimal),
                 "classic" => theme_style = Some(ghl_plot::PlotTheme::Classic),
                 "dark" => theme_style = Some(ghl_plot::PlotTheme::Dark),
+                "apa" => theme_style = Some(ghl_plot::PlotTheme::Apa),
                 "default" => theme_style = Some(ghl_plot::PlotTheme::Default),
                 _ => font_family = Some(s),
             }
@@ -955,6 +970,19 @@ pub(crate) fn native_theme_dark(args: Vec<Value>) -> Result<Value, Diagnostic> {
     } else {
         Ok(Value::Theme(ghl_plot::ThemeModifier {
             theme: Some(ghl_plot::PlotTheme::Dark),
+            font_family: None,
+        }))
+    }
+}
+
+pub(crate) fn native_theme_apa(args: Vec<Value>) -> Result<Value, Diagnostic> {
+    if let Some(Value::Plot(plot)) = args.first() {
+        let mut p = (**plot).clone();
+        p = p.theme_apa();
+        Ok(Value::Plot(Box::new(p)))
+    } else {
+        Ok(Value::Theme(ghl_plot::ThemeModifier {
+            theme: Some(ghl_plot::PlotTheme::Apa),
             font_family: None,
         }))
     }

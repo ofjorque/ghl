@@ -1,15 +1,31 @@
 // packages/ghl_causal/src/plots.gh
-// Publication-Quality Grammar of Graphics Visualizations for Causal Inference
+// Publication-Quality Grammar of Graphics Visualizations for Causal Inference (APA Standard)
 
 /// Generates an Event Study Plot with point estimates and confidence intervals.
-/// Uses GHL's native grammar of graphics (plot |> geom_line |> labs).
+/// Anchored at baseline period t = -1 with APA theme.
 fn plot_event_study_trajectory(res: EventStudyResult) -> Plot {
     let mut periods = [];
     let mut estimates = [];
     let mut lows = [];
     let mut highs = [];
 
+    // Check if reference period k = -1 is already present
+    let mut has_minus_one = false;
     for pt in res.estimates {
+        if pt.period == -1.0 {
+            has_minus_one = true;
+        }
+    }
+
+    for pt in res.estimates {
+        if !has_minus_one && pt.period > -1.0 {
+            // Anchor reference baseline at t = -1
+            periods = append(periods, -1.0);
+            estimates = append(estimates, 0.0);
+            lows = append(lows, 0.0);
+            highs = append(highs, 0.0);
+            has_minus_one = true;
+        }
         periods = append(periods, pt.period);
         estimates = append(estimates, pt.estimate);
         lows = append(lows, pt.conf_low);
@@ -27,6 +43,28 @@ fn plot_event_study_trajectory(res: EventStudyResult) -> Plot {
             |> geom_line()
             |> geom_point()
             |> labs("Dynamic Event Study: Treatment Effect Trajectory & Pre-Trends")
+            |> theme_apa()
+}
+
+/// Generates a Publication-Quality 2x2 Difference-in-Differences Trajectory Plot.
+fn plot_did_2x2(res: DidResult) -> Plot {
+    let df_did = dataframe {
+        period: [0.0, 1.0, 0.0, 1.0, 1.0],
+        outcome: [
+            res.mean_control_pre,
+            res.mean_control_post,
+            res.mean_treated_pre,
+            res.mean_treated_post,
+            res.counterfactual
+        ],
+        group: ["Control", "Control", "Treated", "Treated", "Counterfactual"]
+    };
+
+    df_did |> plot(aes(col("period"), col("outcome")))
+           |> geom_point()
+           |> geom_line()
+           |> labs("Difference-in-Differences (2x2 DiD): Treatment vs Control Trajectories")
+           |> theme_apa()
 }
 
 /// Generates a Synthetic Control Trajectory Plot comparing Actual vs Synthetic Counterfactual.
@@ -50,4 +88,5 @@ fn plot_synthetic_trajectory(res: SyntheticControlResult) -> Plot {
     df_plot |> plot(aes(col("time"), col("actual_y")))
             |> geom_line()
             |> labs("Synthetic Control Method: Actual vs Counterfactual Trajectory")
+            |> theme_apa()
 }

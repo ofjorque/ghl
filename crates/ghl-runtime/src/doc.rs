@@ -62,7 +62,7 @@ pub fn all_docs() -> &'static [FunctionDoc] {
     &DOCS
 }
 
-static DOCS: [FunctionDoc; 43] = [
+static DOCS: [FunctionDoc; 44] = [
     // 1. Descriptive Statistics
     FunctionDoc {
         name: "mean",
@@ -535,6 +535,16 @@ static DOCS: [FunctionDoc; 43] = [
         parameters: &[("plot", "Plot pipeline object")],
         returns: "Plot",
         example: "plot(df, aes(\"x\", \"y\")) |> geom_point() |> theme_dark();",
+    },
+    FunctionDoc {
+        name: "theme_apa",
+        signature: "theme_apa([plot: Plot]) -> Plot",
+        formula: None,
+        summary: "Apply APA 7th edition publication-quality plot aesthetic theme",
+        description: "Sets pure white background, crisp solid axes, borderless legend, and eliminates minor gridlines.",
+        parameters: &[("plot", "Plot pipeline object")],
+        returns: "Plot",
+        example: "plot(df, aes(\"x\", \"y\")) |> geom_point() |> theme_apa();",
     },
     FunctionDoc {
         name: "factor",

@@ -166,3 +166,36 @@ fn render_km_cockpit(km: KMResult) {
     let p = km_cockpit(km);
     show_cockpit(p);
 }
+
+impl KMResult {
+    fn tidy(self) -> DataFrame {
+        dataframe {
+            time: self.timeline,
+            survival: self.survival,
+            std_error: self.std_err,
+            conf_low: self.ci_lower,
+            conf_high: self.ci_upper
+        }
+    }
+
+    fn glance(self) -> DataFrame {
+        let n_steps = length(self.survival);
+        let final_surv = if n_steps > 0 { self.survival[n_steps - 1] } else { 1.0 };
+        dataframe {
+            nobs: [self.n_total],
+            n_events: [self.n_events],
+            n_censored: [self.n_censored],
+            median_survival: [self.median_survival],
+            terminal_survival: [final_surv]
+        }
+    }
+
+    fn plot(self) -> Plot {
+        plot_km_with_ci(self, true)
+    }
+
+    fn plot_without_ci(self) -> Plot {
+        plot_km_with_ci(self, false)
+    }
+}
+

@@ -210,3 +210,31 @@ fn glance_did(res: DidResult) -> DataFrame {
         conf_high: [res.conf_high]
     }
 }
+
+impl DidResult {
+    fn tidy(self) -> DataFrame {
+        dataframe {
+            term: ["ATT"],
+            estimate: [self.att],
+            std_error: [self.std_error],
+            statistic: [self.t_stat],
+            p_value: [self.p_value],
+            conf_low: [self.conf_low],
+            conf_high: [self.conf_high]
+        }
+    }
+
+    fn glance(self) -> DataFrame {
+        let tot_obs = self.n_treated_post + self.n_treated_pre + self.n_control_post + self.n_control_pre;
+        dataframe {
+            nobs: [tot_obs],
+            counterfactual: [self.counterfactual],
+            is_significant: [self.is_significant]
+        }
+    }
+
+    fn plot(self) -> Plot {
+        plot_did_2x2(self)
+    }
+}
+

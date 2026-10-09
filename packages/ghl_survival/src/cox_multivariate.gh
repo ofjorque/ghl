@@ -290,3 +290,36 @@ fn cox_multivariate_cockpit(res: MultivariateCoxResult) {
     p = cockpit_add_divider(p);
     show_cockpit(p);
 }
+
+impl MultivariateCoxResult {
+    fn tidy(self) -> DataFrame {
+        dataframe {
+            term: self.covariates,
+            estimate: self.coefficients,
+            hazard_ratio: self.hazard_ratios,
+            std_error: self.std_errors,
+            statistic: self.z_stats,
+            p_value: self.p_values,
+            conf_low: self.hr_ci_lower,
+            conf_high: self.hr_ci_upper
+        }
+    }
+
+    fn glance(self) -> DataFrame {
+        dataframe {
+            nobs: [self.n_obs],
+            n_events: [self.n_events],
+            c_index: [self.c_index],
+            log_lik: [self.log_partial_lik],
+            null_log_lik: [self.null_log_lik],
+            lrt_stat: [self.lrt_statistic],
+            p_value: [self.lrt_p_value],
+            converged: [self.converged]
+        }
+    }
+
+    fn plot(self) -> Plot {
+        plot_hazard_ratios(self)
+    }
+}
+
