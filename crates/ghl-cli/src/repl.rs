@@ -614,11 +614,8 @@ impl ReplSession {
         // 3. Typecheck
         let mut checker = ghl_types::TypeChecker::new("<repl>".to_string(), effective_code);
         checker.env = self.type_env.clone();
-        for stmt in &program.statements {
-            checker.check_stmt(stmt);
-        }
-        if !checker.diagnostics.is_empty() {
-            for diag in checker.diagnostics {
+        if let Err(diags) = checker.check_program(&program) {
+            for diag in diags {
                 eprintln!("{}", diag.render_with_caps(&self.caps));
             }
             return;
